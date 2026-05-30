@@ -1,0 +1,24 @@
+{
+  // ─── Terminal: default to PowerShell with coca-toolchain-p2996 env ───
+  "terminal.integrated.defaultProfile.windows": "coca-p2996",
+  "terminal.integrated.profiles.windows": {
+    "coca-p2996": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-File", "${workspaceFolder}/scripts/coca-env.ps1"],
+      "icon": "terminal-powershell",
+      "overrideName": true
+    }
+  },
+
+  // ─── CMake ───
+  "cmake.generator": "Ninja",
+  "cmake.cmakePath": "T:/toolchains/coca-toolchain-p2996/tools/cmake/bin/cmake.exe",
+  "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}",
+
+  // ─── IntelliSense (clangd) ───
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build/x64-debug",
+    "--background-index",
+    "--clang-tidy"
+  ]
+}

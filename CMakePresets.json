@@ -1,0 +1,126 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "toolset": { "value": "host=x64", "strategy": "external" },
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "T:/toolchains/coca-toolchain-p2996/cmake/toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "T:/toolchains/coca-toolchain-p2996/tools/ninja/ninja.exe",
+        "COCA_TARGET_PROFILE": "win-x64-clang",
+        "Vulkan_INCLUDE_DIR": {
+          "type": "PATH",
+          "value": "$env{VULKAN_SDK}/Include"
+        },
+        "Vulkan_LIBRARY": {
+          "type": "FILEPATH",
+          "value": "$env{VULKAN_SDK}/Lib/vulkan-1.lib"
+        }
+      },
+      "environment": {
+        "COCA_ROOT": "T:/toolchains/coca-toolchain-p2996",
+        "PATH": "T:/toolchains/coca-toolchain-p2996/bin;T:/toolchains/coca-toolchain-p2996/tools/ninja;T:/toolchains/coca-toolchain-p2996/tools/cmake/bin;T:/toolchains/coca-toolchain-p2996/tools/git/cmd;T:/toolchains/coca-toolchain-p2996/tools/python;$penv{PATH}",
+        "INCLUDE": "",
+        "LIB": "",
+        "LIBPATH": ""
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [ "Windows" ],
+          "intelliSenseMode": "windows-clang-x64"
+        }
+      }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug (clang-p2996 / win-x64-clang)",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release (clang-p2996 / win-x64-clang)",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "x64-asan",
+      "displayName": "x64 ASan+UBSan (clang-p2996)",
+      "description": "AddressSanitizer + UndefinedBehaviorSanitizer on a Debug base. Flags go through the per-config CMAKE_*_FLAGS_DEBUG vars so the toolchain's sysroot/-freflection base flags are preserved. The clang_rt.asan_dynamic DLL dir is prepended to PATH for runtime + try_run.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined",
+        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined",
+        "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined"
+      },
+      "environment": {
+        "PATH": "T:\\toolchains\\coca-toolchain-p2996\\lib\\clang\\21\\lib\\windows;$penv{PATH}"
+      }
+    },
+    {
+      "name": "x64-ubsan",
+      "displayName": "x64 UBSan (clang-p2996)",
+      "description": "UndefinedBehaviorSanitizer only (static runtime, no DLL) on a Debug base. Lighter than ASan; use when ASan's memory cost is prohibitive.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined",
+        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fsanitize=undefined",
+        "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined"
+      }
+    },
+    {
+      "name": "x64-profile",
+      "displayName": "x64 Profile (clang-p2996)",
+      "description": "Optimized RelWithDebInfo with frame pointers + no tail-call merging, for sampling profilers (VTune/Superluminal/perf) and as the base for coca_pgo()/coca_vtune() target-level workflows.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG -fno-omit-frame-pointer -fno-optimize-sibling-calls",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG -fno-omit-frame-pointer -fno-optimize-sibling-calls"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-debug",
+      "configurePreset": "x64-debug"
+    },
+    {
+      "name": "x64-release",
+      "configurePreset": "x64-release"
+    },
+    {
+      "name": "x64-asan",
+      "configurePreset": "x64-asan"
+    },
+    {
+      "name": "x64-ubsan",
+      "configurePreset": "x64-ubsan"
+    },
+    {
+      "name": "x64-profile",
+      "configurePreset": "x64-profile"
+    }
+  ]
+}

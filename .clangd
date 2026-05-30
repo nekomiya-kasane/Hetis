@@ -1,0 +1,51 @@
+# clangd configuration for G:\Teaching\Vulkan
+# Read by the VS Code clangd extension, Visual Studio's bundled clangd, and any
+# other clangd-based editor. Paths are relative to this file (the repo root).
+#
+# The compilation database is produced by the "x64-debug" CMake preset; run
+#   cmake --preset x64-debug
+# once (from an MSVC developer environment) to populate it.
+
+CompileFlags:
+  CompilationDatabase: build/x64-debug
+  # clang doesn't recognise a few MSVC switches that appear in the DB; drop the
+  # noisiest rather than emit "unknown argument" diagnostics.
+  Add: [-Wno-unknown-warning-option, -Wno-unknown-attributes]
+  Remove: [/Zc:preprocessor, /external:*, -external:*]
+
+Index:
+  Background: Build
+  StandardLibrary: Yes
+
+Diagnostics:
+  # Vendored libraries trip include-cleaner constantly; keep it quiet.
+  UnusedIncludes: None
+  MissingIncludes: None
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - performance-*
+      - modernize-use-override
+      - modernize-use-nullptr
+      - modernize-use-using
+    Remove:
+      - modernize-use-trailing-return-type
+      - bugprone-easily-swappable-parameters
+      - performance-avoid-endl
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Hover:
+  ShowAKA: Yes
+
+---
+# thirdparty/ is read-only vendor code — silence clang-tidy entirely there so
+# diagnostics only fire on first-party files.
+If:
+  PathMatch: .*/thirdparty/.*
+Diagnostics:
+  ClangTidy:
+    Remove: ['*']

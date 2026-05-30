@@ -1,0 +1,36 @@
+# Build artifacts
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+!.vs/VSWorkspaceSettings.json
+.idea/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.cachefile
+
+# Compiled shaders
+*.spv
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Dependency manager
+vcpkg_installed/
+
+# Precompiled headers
+CMakeFiles/
+
+# Logs
+*.log
+
+# Third-party dependencies — managed externally, not tracked in this repo.
+# Only thirdparty/CMakeLists.txt (the integration wrapper) is committed.
+/thirdparty/*/

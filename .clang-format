@@ -1,0 +1,30 @@
+# Shared C/C++ formatting — honoured by clangd (VS Code), Visual Studio 2022,
+# and ReSharper C++ (Options > Code Editing > C++ > Formatting Style >
+# "Use ClangFormat"). Keeps one style across both IDEs.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+AccessModifierOffset: -4
+NamespaceIndentation: None
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+Cpp11BracedListStyle: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AlwaysBreakTemplateDeclarations: Yes
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: NextLine
+SpaceAfterTemplateKeyword: false
+FixNamespaceComments: true
+
+# Do NOT reorder includes: this tree relies on deliberate ordering
+# (volk before vulkan.h, stb implementation macros before stb headers, etc.).
+SortIncludes: false
+IncludeBlocks: Preserve

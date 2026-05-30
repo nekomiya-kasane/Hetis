@@ -1,0 +1,86 @@
+{
+  "folders": [
+    {
+      "name": "Vulkan",
+      "path": "."
+    }
+  ],
+  "settings": {
+    // ===================================================================
+    //  C/C++ IntelliSense = the COCA p2996 clangd (NOT Microsoft cpptools).
+    //  The fork's clangd understands reflection (^^, splicers) and the
+    //  -freflection flag that the toolchain injects into the compile DB.
+    //  Tuning lives in the repo-root .clangd file.
+    // ===================================================================
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.errorSquiggles": "disabled",
+    "clangd.path": "T:/toolchains/coca-toolchain-p2996/bin/clangd.exe",
+    "clangd.checkUpdates": false,
+    "clangd.detectExtensionConflicts": true,
+    "clangd.arguments": [
+      "--background-index",
+      "--clang-tidy",
+      "--completion-style=detailed",
+      "--header-insertion=never",
+      "--all-scopes-completion",
+      "--pch-storage=memory",
+      "--function-arg-placeholders=true",
+      "--limit-results=200",
+      "-j=8",
+      "--query-driver=T:/toolchains/coca-toolchain-p2996/bin/clang*.exe"
+    ],
+
+    // ===================================================================
+    //  CMake — driven entirely by CMakePresets.json (shared with VS). The
+    //  COCA p2996 toolchain pins its own clang++ and bundled ninja, so the
+    //  MSVC developer environment must NOT be injected (it would leak the
+    //  host INCLUDE/LIB and conflict with the sysroot).
+    // ===================================================================
+    "cmake.useCMakePresets": "always",
+    "cmake.useVsDeveloperEnvironment": "never",
+    "cmake.configureOnOpen": true,
+    "cmake.options.statusBarVisibility": "compact",
+
+    // ===================================================================
+    //  Editor / files
+    // ===================================================================
+    "[cpp]": {
+      "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+    },
+    "[c]": {
+      "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+    },
+    "files.associations": {
+      "*.slang": "hlsl",
+      "*.inl": "cpp",
+      "*.ipp": "cpp",
+      "*.comp": "glsl",
+      "*.vert": "glsl",
+      "*.frag": "glsl",
+      "*.geom": "glsl",
+      "*.rgen": "glsl",
+      "*.rchit": "glsl",
+      "*.rmiss": "glsl"
+    },
+    "search.exclude": {
+      "**/build": true,
+      "**/.cache": true,
+      "**/out": true
+    },
+    "files.watcherExclude": {
+      "**/build/**": true,
+      "**/.cache/**": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "llvm-vs-code-extensions.vscode-clangd",
+      "ms-vscode.cmake-tools",
+      "twxs.cmake"
+    ],
+    "unwantedRecommendations": [
+      "ms-vscode.cpptools"
+    ]
+  }
+}
