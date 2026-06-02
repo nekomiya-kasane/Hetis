@@ -7,15 +7,25 @@ set(CMAKE_EXPERIMENTAL_EXPORT_BUILD_DATABASE "73194a1d-c0b5-41b9-9190-a4512925e1
 
 project(Hetis LANGUAGES C CXX)
 
+enable_testing()
+
 if(NOT DEFINED CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()
+
+add_compile_definitions(
+    "$<$<CONFIG:Debug>:DEBUG;_DEBUG>"
+    "$<$<NOT:$<CONFIG:Debug>>:NDEBUG;_NDEBUG>"
+)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build dependencies as static libraries")
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(ReflectionFeatureProbes)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_EXPORT_BUILD_DATABASE ON)
@@ -28,5 +38,7 @@ set(CMAKE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/thirdparty thirdparty)
 
-add_subdirectory(Hetis)
+add_subdirectory(Nova)
+add_subdirectory(Mashiro)
+
 add_subdirectory(tests)

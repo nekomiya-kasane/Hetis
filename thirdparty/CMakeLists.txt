@@ -414,6 +414,7 @@ if(VK_TP_BUILD_CATCH2)
     set(CATCH_INSTALL_DOCS    OFF CACHE BOOL "" FORCE)
     set(CATCH_INSTALL_EXTRAS  OFF CACHE BOOL "" FORCE)
     set(CATCH_DEVELOPMENT_BUILD OFF CACHE BOOL "" FORCE)
+    set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/catch2/extras" CACHE STRING "" FORCE)
     add_subdirectory(catch2)
 endif()
 
@@ -500,12 +501,36 @@ endif()
 # transitively links (assimp-*, glfw3, ktx, meshoptimizer, spdlog, tbb12, ...)
 # next to its executable. Statically-linked libraries contribute nothing.
 # Uses $<TARGET_RUNTIME_DLLS> so the set always tracks the real link graph.
+#
+# Additionally copies COCA toolchain runtime DLLs (c++.dll, and the ASan
+# dynamic runtime when sanitizers are enabled) which are not tracked by
+# CMake's target graph but are required at process start.
 function(vk_tp_deploy_runtime tgt)
     add_custom_command(TARGET ${tgt} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_RUNTIME_DLLS:${tgt}>" "$<TARGET_FILE_DIR:${tgt}>"
         COMMAND_EXPAND_LISTS
         COMMENT "Deploying runtime DLLs -> $<TARGET_FILE_DIR:${tgt}>")
+
+    # -- COCA toolchain runtime DLLs ------------------------------------------
+    # COCA_RUNTIME_DLLS is populated by the toolchain (c++.dll, etc.).
+    # COCA_ASAN_RUNTIME_DLL is conditionally appended when ASan is active.
+    set(_deploy_dlls ${COCA_RUNTIME_DLLS})
+    if(DEFINED COCA_ASAN_RUNTIME_DLL)
+        if(CMAKE_CXX_FLAGS_DEBUG MATCHES "-fsanitize=address"
+           OR CMAKE_CXX_FLAGS MATCHES "-fsanitize=address")
+            list(APPEND _deploy_dlls "${COCA_ASAN_RUNTIME_DLL}")
+        endif()
+    endif()
+    foreach(_dll IN LISTS _deploy_dlls)
+        if(EXISTS "${_dll}")
+            cmake_path(GET _dll FILENAME _dll_name)
+            add_custom_command(TARGET ${tgt} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_dll}" "$<TARGET_FILE_DIR:${tgt}>"
+                COMMENT "Deploying ${_dll_name} -> $<TARGET_FILE_DIR:${tgt}>")
+        endif()
+    endforeach()
 endfunction()
 
 # Backwards-compatible alias: runtime deployment now covers TBB and every other

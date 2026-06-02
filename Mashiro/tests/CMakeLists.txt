@@ -1,0 +1,19 @@
+function(add_mashiro_test CATEGORY TEST_NAME)
+    set(TEST_TARGET Test.${CATEGORY}.${TEST_NAME})
+
+    add_executable(${TEST_TARGET} ${CATEGORY}/${TEST_NAME}.cpp)
+    target_link_libraries(${TEST_TARGET} PRIVATE Mashiro Catch2::Catch2WithMain)
+    set_target_properties(${TEST_TARGET} PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        FOLDER "Mashiro/Tests/${CATEGORY}"
+    )
+    vk_tp_deploy_runtime(${TEST_TARGET})
+    catch_discover_tests(${TEST_TARGET})
+endfunction()
+
+include(CTest)
+include(Catch)
+
+add_mashiro_test(Core ToStringTest)
+add_mashiro_test(Core TypesTest)
