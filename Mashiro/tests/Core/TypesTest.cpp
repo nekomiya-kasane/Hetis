@@ -1,4 +1,5 @@
 #include "Mashiro/Core/Types.h"
+#include "Mashiro/Geom/GeometryUtils.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -43,7 +44,7 @@ namespace {
     }
 
     constexpr float SphereRadius() {
-        BoundingSphere s{};
+        Sphere s{};
         s.radius = 4.5f;
         return s.radius;
     }
@@ -86,8 +87,8 @@ TEST_CASE("Matrix types have GPU-compatible size and alignment", "[Core.Types]")
 TEST_CASE("Geometry types have GPU-compatible size and alignment", "[Core.Types]") {
     STATIC_REQUIRE(sizeof(AABB) == 32);
     STATIC_REQUIRE(alignof(AABB) == 16);
-    STATIC_REQUIRE(sizeof(BoundingSphere) == 16);
-    STATIC_REQUIRE(alignof(BoundingSphere) == 16);
+    STATIC_REQUIRE(sizeof(Sphere) == 16);
+    STATIC_REQUIRE(alignof(Sphere) == 16);
     STATIC_REQUIRE(sizeof(FrustumPlanes) == 96);
     STATIC_REQUIRE(alignof(FrustumPlanes) == 16);
     STATIC_REQUIRE(sizeof(Ray) == 32);
@@ -109,7 +110,7 @@ TEST_CASE("All GPU types are trivially copyable and standard layout", "[Core.Typ
     STATIC_REQUIRE(std::is_trivially_copyable_v<uvec3>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<uvec4>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<AABB>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<BoundingSphere>);
+    STATIC_REQUIRE(std::is_trivially_copyable_v<Sphere>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<FrustumPlanes>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<Ray>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<Plane>);
@@ -122,7 +123,7 @@ TEST_CASE("All GPU types are trivially copyable and standard layout", "[Core.Typ
     STATIC_REQUIRE(std::is_standard_layout_v<AABB>);
     STATIC_REQUIRE(std::is_standard_layout_v<Ray>);
     STATIC_REQUIRE(std::is_standard_layout_v<Plane>);
-    STATIC_REQUIRE(std::is_standard_layout_v<BoundingSphere>);
+    STATIC_REQUIRE(std::is_standard_layout_v<Sphere>);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,8 +265,8 @@ TEST_CASE("Ray stores origin and direction", "[Core.Types]") {
     REQUIRE(r.direction.y == 1.0f);
 }
 
-TEST_CASE("BoundingSphere stores center and radius", "[Core.Types]") {
-    BoundingSphere s{};
+TEST_CASE("Sphere stores center and radius", "[Core.Types]") {
+    Sphere s{};
     s.center = vec3b{1.0f, 2.0f, 3.0f};
     s.radius = 2.5f;
     REQUIRE(s.radius == 2.5f);

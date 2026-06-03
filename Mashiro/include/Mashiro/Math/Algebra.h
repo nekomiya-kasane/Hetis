@@ -243,6 +243,67 @@ namespace Mashiro {
 
         /// @}
 
+        // -----------------------------------------------------------------
+        // Approximate comparison (tolerance-based)
+        // -----------------------------------------------------------------
+
+        /// @name Approximate comparison operators
+        /// @{
+
+        /** @cond INTERNAL */
+        namespace Detail {
+            template <std::floating_point F>
+            inline constexpr F kDefaultEps = F(128) * std::numeric_limits<F>::epsilon();
+        } // namespace Detail
+        /** @endcond */
+
+        /** @brief Approximate equality for MetricSpace types: Distance(a, b) < eps. */
+        template <MetricSpace T>
+            requires std::floating_point<FieldOf<T>>
+        [[nodiscard]] constexpr bool ApproxEq(T a, T b,
+                                              FieldOf<T> eps = Detail::kDefaultEps<FieldOf<T>>) {
+            return Distance(a, b) < eps;
+        }
+
+        /** @brief Approximate equality for floating-point scalars: |a - b| < eps. */
+        template <std::floating_point F>
+        [[nodiscard]] constexpr bool ApproxEq(F a, F b, F eps = Detail::kDefaultEps<F>) {
+            return Math::Abs(a - b) < eps;
+        }
+
+        /** @brief Approximate inequality: !ApproxEq(a, b, eps). */
+        template <typename T>
+            requires requires(T a, T b) { ApproxEq(a, b); }
+        [[nodiscard]] constexpr bool ApproxNe(T a, T b, auto... eps) {
+            return !ApproxEq(a, b, eps...);
+        }
+
+        /** @brief a < b with tolerance: a < b - eps. */
+        template <std::floating_point F>
+        [[nodiscard]] constexpr bool ApproxLt(F a, F b, F eps = Detail::kDefaultEps<F>) {
+            return a < b - eps;
+        }
+
+        /** @brief a <= b with tolerance: a < b + eps. */
+        template <std::floating_point F>
+        [[nodiscard]] constexpr bool ApproxLe(F a, F b, F eps = Detail::kDefaultEps<F>) {
+            return a < b + eps;
+        }
+
+        /** @brief a > b with tolerance: a > b + eps. */
+        template <std::floating_point F>
+        [[nodiscard]] constexpr bool ApproxGt(F a, F b, F eps = Detail::kDefaultEps<F>) {
+            return a > b + eps;
+        }
+
+        /** @brief a >= b with tolerance: a > b - eps. */
+        template <std::floating_point F>
+        [[nodiscard]] constexpr bool ApproxGe(F a, F b, F eps = Detail::kDefaultEps<F>) {
+            return a > b - eps;
+        }
+
+        /// @}
+
     } // namespace Math
 
 } // namespace Mashiro
