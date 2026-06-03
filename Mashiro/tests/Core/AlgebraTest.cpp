@@ -9,7 +9,7 @@
  *   - Compile-time evaluation works for all algorithms
  */
 #include "Mashiro/Math/Algebra.h"
-#include "Mashiro/Core/Quanterion.h"
+#include "Mashiro/Math/Quanterion.h"
 #include "Mashiro/Core/Types.h"
 
 #include <catch2/catch_approx.hpp>

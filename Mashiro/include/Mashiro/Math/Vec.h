@@ -201,10 +201,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator+(V a, V b) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = a[i] + b[i];
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] + b[i];
         return r;
     }
 
@@ -212,10 +209,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator-(V a, V b) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = a[i] - b[i];
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] - b[i];
         return r;
     }
 
@@ -223,10 +217,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator*(V a, V b) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = a[i] * b[i];
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] * b[i];
         return r;
     }
 
@@ -234,10 +225,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator/(V a, V b) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = a[i] / b[i];
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] / b[i];
         return r;
     }
 
@@ -245,10 +233,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator*(V a, ScalarOf<V> s) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = a[i] * s;
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] * s;
         return r;
     }
 
@@ -262,10 +247,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator/(V a, ScalarOf<V> s) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = a[i] / s;
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] / s;
         return r;
     }
 
@@ -274,10 +256,7 @@ namespace Mashiro {
         requires std::is_signed_v<ScalarOf<V>>
     [[nodiscard]] constexpr V operator-(V a) {
         V r;
-        template for (constexpr auto i :
-                      std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = -a[i];
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = -a[i];
         return r;
     }
 

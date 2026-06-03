@@ -21,9 +21,11 @@ add_mashiro_test(Core QuanterionTest)
 add_mashiro_test(Core MathUtilsTest)
 add_mashiro_test(Core AlgebraTest)
 
-# Eigen-oracle test: additional link to Eigen (header-only)
+# Eigen-oracle test: additional link to Eigen (header-only).
+# Support/ contains the generic EigenBridge.h conversion layer.
 set(_EIGEN_TEST Test.Core.EigenOracleTest)
 add_executable(${_EIGEN_TEST} Core/EigenOracleTest.cpp)
+target_include_directories(${_EIGEN_TEST} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${_EIGEN_TEST} PRIVATE Mashiro Catch2::Catch2WithMain eigen)
 set_target_properties(${_EIGEN_TEST} PROPERTIES
     CXX_STANDARD 26

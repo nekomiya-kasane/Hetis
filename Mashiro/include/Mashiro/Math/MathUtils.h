@@ -60,9 +60,7 @@ namespace Mashiro::Math {
         requires std::floating_point<ScalarOf<V>>
     [[nodiscard]] constexpr ScalarOf<V> Norm1(V v) {
         ScalarOf<V> sum{};
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            sum += Math::Abs(v[i]);
-        }
+        for (int i = 0; i < VecDim<V>; ++i) sum += Math::Abs(v[i]);
         return sum;
     }
 
@@ -71,9 +69,7 @@ namespace Mashiro::Math {
         requires std::floating_point<ScalarOf<V>>
     [[nodiscard]] constexpr ScalarOf<V> NormInf(V v) {
         ScalarOf<V> m{};
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            m = Math::Max(m, Math::Abs(v[i]));
-        }
+        for (int i = 0; i < VecDim<V>; ++i) m = Math::Max(m, Math::Abs(v[i]));
         return m;
     }
 
@@ -95,9 +91,7 @@ namespace Mashiro::Math {
     template <HomogeneousVec V, std::same_as<V>... Vs>
     [[nodiscard]] constexpr V Min(V a, Vs... rest) {
         V r;
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = Math::Min(a[i], rest[i]...);
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = Math::Min(a[i], rest[i]...);
         return r;
     }
 
@@ -105,9 +99,7 @@ namespace Mashiro::Math {
     template <HomogeneousVec V, std::same_as<V>... Vs>
     [[nodiscard]] constexpr V Max(V a, Vs... rest) {
         V r;
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = Math::Max(a[i], rest[i]...);
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = Math::Max(a[i], rest[i]...);
         return r;
     }
 
@@ -115,9 +107,7 @@ namespace Mashiro::Math {
     template <HomogeneousVec V>
     [[nodiscard]] constexpr V Clamp(V v, V lo, V hi) {
         V r;
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = Math::Clamp(v[i], lo[i], hi[i]);
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = Math::Clamp(v[i], lo[i], hi[i]);
         return r;
     }
 
@@ -126,9 +116,7 @@ namespace Mashiro::Math {
         requires std::is_signed_v<ScalarOf<V>>
     [[nodiscard]] constexpr V Abs(V v) {
         V r;
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, VecDim<V>))) {
-            r[i] = Math::Abs(v[i]);
-        }
+        for (int i = 0; i < VecDim<V>; ++i) r[i] = Math::Abs(v[i]);
         return r;
     }
 
@@ -141,11 +129,9 @@ namespace Mashiro::Math {
     template <typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, C, R> Transpose(const Mat<T, R, C>& m) {
         Mat<T, C, R> r{};
-        template for (constexpr auto row : std::define_static_array(std::views::iota(0, R))) {
-            template for (constexpr auto col : std::define_static_array(std::views::iota(0, C))) {
+        for (int row = 0; row < R; ++row)
+            for (int col = 0; col < C; ++col)
                 r[col, row] = m[row, col];
-            }
-        }
         return r;
     }
 
@@ -154,9 +140,7 @@ namespace Mashiro::Math {
     [[nodiscard]] constexpr M Identity() {
         using S = ScalarOf<MatColType<M>>;
         M m{};
-        template for (constexpr auto i : std::define_static_array(std::views::iota(0, MatDim<M>))) {
-            m[i, i] = S(1);
-        }
+        for (int i = 0; i < MatDim<M>; ++i) m[i, i] = S(1);
         return m;
     }
 
@@ -590,27 +574,21 @@ namespace Mashiro::Math {
     [[nodiscard]] constexpr Mat<T, 3, 4> InverseAffine(const Mat<T, 3, 4>& m) {
         // Extract the 3×3 upper-left
         Mat<T, 3> R{};
-        template for (constexpr auto c : std::define_static_array(std::views::iota(0, 3))) {
-            R[c] = m[c]; // column c (Vec<T,3>)
-        }
+        for (int c = 0; c < 3; ++c) R[c] = m[c];
         Mat<T, 3> Ri = Inverse(R);
 
         // Translation column
         Vec<T, 3> t = m[3]; // column 3
         // -Ri * t
         Vec<T, 3> nt{};
-        template for (constexpr auto row : std::define_static_array(std::views::iota(0, 3))) {
+        for (int row = 0; row < 3; ++row) {
             T sum{};
-            template for (constexpr auto k : std::define_static_array(std::views::iota(0, 3))) {
-                sum += Ri[row, k] * t[k];
-            }
+            for (int k = 0; k < 3; ++k) sum += Ri[row, k] * t[k];
             nt[row] = -sum;
         }
 
         Mat<T, 3, 4> r{};
-        template for (constexpr auto c : std::define_static_array(std::views::iota(0, 3))) {
-            r[c] = Ri[c];
-        }
+        for (int c = 0; c < 3; ++c) r[c] = Ri[c];
         r[3] = nt;
         return r;
     }

@@ -159,9 +159,7 @@ namespace Mashiro {
         requires std::is_arithmetic_v<ScalarOf<V>>
     [[nodiscard]] constexpr ScalarOf<V> InnerProduct(V a, V b) {
         ScalarOf<V> sum = a[0] * b[0];
-        template for (constexpr auto i : std::define_static_array(std::views::iota(1, VecDim<V>))) {
-            sum += a[i] * b[i];
-        }
+        for (int i = 1; i < VecDim<V>; ++i) sum += a[i] * b[i];
         return sum;
     }
 

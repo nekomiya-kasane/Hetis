@@ -1,227 +1,214 @@
 /**
  * @file Flags.h
- * @brief Type-safe bitfield wrapper for scoped enumerations.
- * @copyright Copyright (c) 2024-2026 mitsuki. All rights reserved.
- * @license MIT
+ * @brief Zero-boilerplate bitfield support for scoped enumerations via C++26 reflection.
+ *
+ * Any `enum class` whose enumerators are all either 0 or exact powers of two automatically 
+ * satisfies the `BitfieldEnum` concept. For such enums this header provides:
+ *
+ * - **Bitwise operators** (`|`, `&`, `^`, `~`, `|=`, `&=`, `^=`) that return the
+ *   enum type itself — no wrapper class, no macros, no opt-in boilerplate.
+ * - **Query functions**: `HasFlag`, `HasAny`, `HasAll`, `IsEmpty`, `PopCount`.
+ * - **Mutation functions**: `SetFlag`, `ClearFlag`, `ToggleFlag`.
+ * - **Iteration**: `EachFlag(flags)` returns a `std::generator<E>` that yields
+ *   each set bit as its enumerator, lowest first.
+ * - **Compile-time safety**: `BitfieldEnum` is validated at compile time via
+ *   P2996 reflection — a non-power-of-2 enumerator is a hard error.
+ * - **Masked complement**: `operator~` only flips bits within the valid flag
+ *   space (OR of all enumerators), never sets high garbage bits.
+ *
  * @ingroup Core
  */
 #pragma once
 
 #include <bit>
 #include <concepts>
-#include <cstdint>
-#include <iterator>
+#include <generator>
+#include <meta>
 #include <type_traits>
 
 namespace Mashiro {
 
-    /**
-     * @brief Type-safe bitfield wrapper for scoped enums.
-     *
-     * Wraps a scoped `enum class` whose enumerators are powers of two into
-     * a value-semantic bitfield with query, mutation, and iteration support.
-     *
-     * @tparam E Scoped enum type whose enumerators are power-of-2 values.
-     *
-     * Example usage:
-     * @code
-     * enum class MyFlags : uint32_t { None = 0, A = 1, B = 2, C = 4 };
-     * using MyFlagsSet = EnumFlags<MyFlags>;
-     * MyFlagsSet flags = MyFlags::A | MyFlags::B;
-     * if (flags.Has(MyFlags::A)) { /* ... */ }
-     * @endcode
-     */
-    template <typename E>
-        requires std::is_enum_v<E>
-    class EnumFlags {
-       public:
-        using EnumType = E;              ///< The wrapped enum type.
-        using UnderlyingType = std::underlying_type_t<E>; ///< Integer representation.
+    namespace Traits {
 
-        /// @name Constructors
-        /// @{
-        constexpr EnumFlags() noexcept = default;
-        /// @brief Implicit conversion from a single enumerator.
-        constexpr EnumFlags(E value) noexcept : bits_(static_cast<UnderlyingType>(value)) {}
-        /// @brief Explicit construction from a raw bitmask.
-        constexpr explicit EnumFlags(UnderlyingType bits) noexcept : bits_(bits) {}
-        /// @}
+        /** @cond INTERNAL */
+        namespace Detail {
 
-        /// @name Queries
-        /// @{
+            /// @brief Unsigned version of an enum's underlying type.
+            template <typename E> requires std::is_enum_v<E>
+            using UnsignedUnderlying = std::make_unsigned_t<std::underlying_type_t<E>>;
 
-        /// @brief Test whether a single flag bit is set.
-        [[nodiscard]] constexpr auto Has(E flag) const noexcept -> bool {
-            auto f = static_cast<UnderlyingType>(flag);
-            return (bits_ & f) == f;
-        }
+            /// @brief Compile-time check: every enumerator is 0 or a power of 2.
+            template <typename E>
+            consteval bool AllPowerOfTwo() {
+                for (auto e : std::meta::enumerators_of(^^E)) {
+                    auto v = static_cast<UnsignedUnderlying<E>>([:e:]);
+                    if (v != 0 && !std::has_single_bit(v))
+                        return false;
+                }
+                return true;
+            }
 
-        /// @brief Test whether *any* bit in @p other is also set here.
-        [[nodiscard]] constexpr auto HasAny(EnumFlags other) const noexcept -> bool {
-            return (bits_ & other.bits_) != 0;
-        }
+            /// @brief Compile-time OR of all enumerators — the valid-bit mask.
+            template <typename E>
+            consteval UnsignedUnderlying<E> AllBitsMask() {
+                UnsignedUnderlying<E> mask{};
+                for (auto e : std::meta::enumerators_of(^^E)) {
+                    mask |= static_cast<UnsignedUnderlying<E>>([:e:]);
+                }
+                return mask;
+            }
 
-        /// @brief Test whether *all* bits in @p other are also set here.
-        [[nodiscard]] constexpr auto HasAll(EnumFlags other) const noexcept -> bool {
-            return (bits_ & other.bits_) == other.bits_;
-        }
-
-        /// @}
-
-        /// @name Mutators
-        /// @{
-
-        /// @brief Set a single flag bit.
-        constexpr auto Set(E flag) noexcept -> EnumFlags& {
-            bits_ |= static_cast<UnderlyingType>(flag);
-            return *this;
-        }
-
-        /// @brief Clear a single flag bit.
-        constexpr auto Clear(E flag) noexcept -> EnumFlags& {
-            bits_ &= ~static_cast<UnderlyingType>(flag);
-            return *this;
-        }
-
-        /// @brief Toggle (XOR) a single flag bit.
-        constexpr auto Toggle(E flag) noexcept -> EnumFlags& {
-            bits_ ^= static_cast<UnderlyingType>(flag);
-            return *this;
-        }
-
-        /// @brief Clear all bits (set to zero).
-        constexpr auto ClearAll() noexcept -> EnumFlags& {
-            bits_ = 0;
-            return *this;
-        }
-
-        /// @}
-
-        /// @name Accessors
-        /// @{
-        [[nodiscard]] constexpr auto IsEmpty()  const noexcept -> bool           { return bits_ == 0; }            ///< True if no bits are set.
-        [[nodiscard]] constexpr auto GetRaw()   const noexcept -> UnderlyingType { return bits_; }                 ///< Raw integer bitmask.
-        [[nodiscard]] constexpr auto PopCount() const noexcept -> int            { return std::popcount(bits_); }  ///< Number of set bits.
-        /// @}
-
-        /// @name Bitwise compound-assignment operators
-        /// @{
-        constexpr auto operator|=(EnumFlags other) noexcept -> EnumFlags& { bits_ |= other.bits_; return *this; }
-        constexpr auto operator&=(EnumFlags other) noexcept -> EnumFlags& { bits_ &= other.bits_; return *this; }
-        constexpr auto operator^=(EnumFlags other) noexcept -> EnumFlags& { bits_ ^= other.bits_; return *this; }
-        /// @}
-
-        /// @name Bitwise operators (hidden friends)
-        /// @{
-        [[nodiscard]] friend constexpr auto operator|(EnumFlags a, EnumFlags b) noexcept -> EnumFlags {
-            return EnumFlags{static_cast<UnderlyingType>(a.bits_ | b.bits_)};
-        }
-        [[nodiscard]] friend constexpr auto operator&(EnumFlags a, EnumFlags b) noexcept -> EnumFlags {
-            return EnumFlags{static_cast<UnderlyingType>(a.bits_ & b.bits_)};
-        }
-        [[nodiscard]] friend constexpr auto operator^(EnumFlags a, EnumFlags b) noexcept -> EnumFlags {
-            return EnumFlags{static_cast<UnderlyingType>(a.bits_ ^ b.bits_)};
-        }
-        [[nodiscard]] friend constexpr auto operator~(EnumFlags a) noexcept -> EnumFlags {
-            return EnumFlags{static_cast<UnderlyingType>(~a.bits_)};
-        }
-        /// @}
-
-        /// @name Comparison operators (hidden friends)
-        /// @{
-        [[nodiscard]] friend constexpr auto operator==(EnumFlags a, EnumFlags b) noexcept -> bool {
-            return a.bits_ == b.bits_;
-        }
-        [[nodiscard]] friend constexpr auto operator!=(EnumFlags a, EnumFlags b) noexcept -> bool {
-            return a.bits_ != b.bits_;
-        }
-        /// @}
-
-        /// @brief Enable `MyFlags::A | MyFlags::B` to produce an EnumFlags directly.
-        [[nodiscard]] friend constexpr auto operator|(E a, E b) noexcept -> EnumFlags {
-            return EnumFlags{a} | EnumFlags{b};
-        }
+        } // namespace Detail
+        /** @endcond */
 
         /**
-         * @brief Forward iterator that yields each set bit as an enumerator.
+         * @brief A scoped enum whose enumerators are all 0 or exact powers of two.
          *
-         * Iterates from the lowest set bit to the highest, extracting one
-         * enumerator per step. Satisfies `std::forward_iterator`.
+         * Validated at compile time via P2996 static reflection. Any `enum class`
+         * satisfying this concept automatically gets bitwise operators and query
+         * functions — zero opt-in required.
          */
-        class Iterator {
-           public:
-            using iterator_category = std::forward_iterator_tag;
-            using value_type        = E;
-            using difference_type   = std::ptrdiff_t;
-            using pointer           = const E*;
-            using reference         = E;
+        template <typename E>
+        concept BitfieldEnum = std::is_enum_v<E> && Detail::AllPowerOfTwo<E>();
+        
+        /// @brief All-valid-bits mask for a BitfieldEnum (OR of all enumerators).
+        template <BitfieldEnum E>
+        inline constexpr auto BitfieldMask = static_cast<E>(Detail::AllBitsMask<E>());
 
-            constexpr Iterator() noexcept = default;
-            /// @brief Construct from the raw bitmask to iterate.
-            constexpr explicit Iterator(UnderlyingType bits) noexcept : remaining_(bits) { Advance(); }
+    }
 
-            /// @brief Dereference: returns the current flag as an enumerator.
-            [[nodiscard]] constexpr auto operator*() const noexcept -> E { return static_cast<E>(current_); }
+    // =========================================================================
+    // Bitwise operators — return E, not a wrapper
+    // =========================================================================
 
-            constexpr auto operator++() noexcept -> Iterator& {
-                remaining_ &= ~current_;
-                Advance();
-                return *this;
-            }
+    /// @name Bitwise operators for BitfieldEnum
+    /// @{
 
-            constexpr auto operator++(int) noexcept -> Iterator {
-                auto tmp = *this;
-                ++(*this);
-                return tmp;
-            }
+    /// @brief Bitwise OR.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr E operator|(E a, E b) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        return static_cast<E>(static_cast<U>(a) | static_cast<U>(b));
+    }
 
-            [[nodiscard]] friend constexpr auto operator==(const Iterator& a, const Iterator& b) noexcept -> bool {
-                return a.remaining_ == b.remaining_;
-            }
-            [[nodiscard]] friend constexpr auto operator!=(const Iterator& a, const Iterator& b) noexcept -> bool {
-                return a.remaining_ != b.remaining_;
-            }
+    /// @brief Bitwise AND.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr E operator&(E a, E b) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        return static_cast<E>(static_cast<U>(a) & static_cast<U>(b));
+    }
 
-           private:
-            /// @brief Isolate the lowest set bit into @c current_.
-            constexpr void Advance() noexcept {
-                if (remaining_ != 0) {
-                    current_ = remaining_ & (~remaining_ + 1);
-                } else {
-                    current_ = 0;
-                }
-            }
+    /// @brief Bitwise XOR.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr E operator^(E a, E b) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        return static_cast<E>(static_cast<U>(a) ^ static_cast<U>(b));
+    }
 
-            UnderlyingType remaining_ = 0; ///< Bits not yet yielded.
-            UnderlyingType current_   = 0; ///< Isolated current bit.
-        };
+    /// @brief Masked complement — only flips bits within the valid flag space.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr E operator~(E a) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        return static_cast<E>(~static_cast<U>(a) & Traits::Detail::AllBitsMask<E>());
+    }
 
-        /// @name Range interface
-        /// @{
-        [[nodiscard]] constexpr auto begin() const noexcept -> Iterator { return Iterator{bits_}; }
-        [[nodiscard]] constexpr auto end()   const noexcept -> Iterator { return Iterator{0}; }
-        /// @}
+    /// @brief Compound OR.
+    template <Traits::BitfieldEnum E>
+    constexpr E& operator|=(E& a, E b) noexcept { return a = a | b; }
 
-       private:
-        UnderlyingType bits_ = 0;
-    };
+    /// @brief Compound AND.
+    template <Traits::BitfieldEnum E>
+    constexpr E& operator&=(E& a, E b) noexcept { return a = a & b; }
 
-/**
- * @brief Convenience macro: injects a free `operator|` so that two bare
- *        enumerators combine into an @c EnumFlags without an explicit cast.
- *
- * Place this in the same namespace as @p EnumType (or at global scope).
- *
- * @code
- * enum class Access : uint8_t { Read = 1, Write = 2, Exec = 4 };
- * MIKI_ENABLE_ENUM_FLAGS(Access);
- * auto rw = Access::Read | Access::Write; // EnumFlags<Access>
- * @endcode
- */
-#define MIKI_ENABLE_ENUM_FLAGS(EnumType)                                                    \
-    [[nodiscard]] inline constexpr auto operator|(EnumType a, EnumType b) noexcept          \
-        -> ::miki::core::EnumFlags<EnumType> {                                              \
-        return ::miki::core::EnumFlags<EnumType>{a} | ::miki::core::EnumFlags<EnumType>{b}; \
+    /// @brief Compound XOR.
+    template <Traits::BitfieldEnum E>
+    constexpr E& operator^=(E& a, E b) noexcept { return a = a ^ b; }
+
+    /// @}
+
+    // =========================================================================
+    // Query functions
+    // =========================================================================
+
+    /// @name Bitfield queries
+    /// @{
+
+    /// @brief Test whether all bits of @p flag are set in @p set.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr bool HasFlag(E set, E flag) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        auto f = static_cast<U>(flag);
+        return f == 0 ? static_cast<U>(set) == 0 : (static_cast<U>(set) & f) == f;
+    }
+
+    /// @brief Test whether *any* bit of @p test is set in @p set.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr bool HasAny(E set, E test) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        return (static_cast<U>(set) & static_cast<U>(test)) != 0;
+    }
+
+    /// @brief Test whether *all* bits of @p test are set in @p set.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr bool HasAll(E set, E test) noexcept {
+        using U = Traits::Detail::UnsignedUnderlying<E>;
+        return (static_cast<U>(set) & static_cast<U>(test)) == static_cast<U>(test);
+    }
+
+    /// @brief True if no bits are set.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr bool IsEmpty(E e) noexcept {
+        return static_cast<Traits::Detail::UnsignedUnderlying<E>>(e) == 0;
+    }
+
+    /// @brief Number of set bits.
+    template <Traits::BitfieldEnum E>
+    [[nodiscard]] constexpr int PopCount(E e) noexcept {
+        return std::popcount(static_cast<Traits::Detail::UnsignedUnderlying<E>>(e));
+    }
+
+    /// @}
+
+    // =========================================================================
+    // Mutation functions
+    // =========================================================================
+
+    /// @name Bitfield mutation
+    /// @{
+
+    /// @brief Set flag bit(s).
+    template <Traits::BitfieldEnum E>
+    constexpr E& SetFlag(E& set, E flag) noexcept { return set |= flag; }
+
+    /// @brief Clear flag bit(s).
+    template <Traits::BitfieldEnum E>
+    constexpr E& ClearFlag(E& set, E flag) noexcept { return set = set & ~flag; }
+
+    /// @brief Toggle flag bit(s).
+    template <Traits::BitfieldEnum E>
+    constexpr E& ToggleFlag(E& set, E flag) noexcept { return set ^= flag; }
+
+    /// @}
+
+    // =========================================================================
+    // Iteration — yields each set bit as its enumerator (lowest first)
+    // =========================================================================
+
+    /**
+     * @brief Lazily yields each set flag bit as its enumerator, lowest first.
+     *
+     * @code
+     * for (auto f : EachFlag(Access::Read | Access::Exec)) {  Read, Exec  }
+     * @endcode
+     */
+    template <Traits::BitfieldEnum E>
+    std::generator<E> EachFlag(E flags) {
+        auto bits = static_cast<Traits::Detail::UnsignedUnderlying<E>>(flags);
+        while (bits != 0) {
+            auto lowest = bits & static_cast<decltype(bits)>(-bits);
+            co_yield static_cast<E>(lowest);
+            bits &= ~lowest;
+        }
     }
 
 }  // namespace Mashiro

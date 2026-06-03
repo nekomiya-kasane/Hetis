@@ -60,8 +60,8 @@ namespace Mashiro {
                 case 1: return self.y;
                 case 2: return self.z;
                 case 3: return self.w;
+                default: __builtin_unreachable();
             }
-            __builtin_unreachable();
         }
 
         /// @name Operators (hidden friends — ADL, no namespace pollution)
