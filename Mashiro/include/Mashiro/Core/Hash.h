@@ -288,8 +288,7 @@ namespace Mashiro::Hashing {
 
         /// @brief Invoke a stateless or stateful algo on a byte span.
         template <AnyAlgo A>
-        [[nodiscard]] constexpr ResultOf<A> InvokeAlgo(
-            const A& algo, std::span<const std::byte> data) noexcept {
+        [[nodiscard]] constexpr ResultOf<A> InvokeAlgo(const A& algo, std::span<const std::byte> data) noexcept {
             if constexpr (StatelessAlgo<A>) {
                 return algo(data);
             } else {
@@ -351,8 +350,7 @@ namespace Mashiro::Hashing {
         consteval bool HasWithAnnotation(std::meta::info entity) {
             for (auto a : std::meta::annotations_of(entity)) {
                 auto t = type_of(a);
-                if (std::meta::has_template_arguments(t) &&
-                    std::meta::template_of(t) == ^^Anno::With)
+                if (std::meta::has_template_arguments(t) && std::meta::template_of(t) == ^^Anno::With)
                     return true;
             }
             return false;
@@ -362,8 +360,7 @@ namespace Mashiro::Hashing {
         consteval std::meta::info GetAlgoFor(std::meta::info entity, std::meta::info defaultAlgo) {
             for (auto a : std::meta::annotations_of(entity)) {
                 auto t = type_of(a);
-                if (std::meta::has_template_arguments(t) &&
-                    std::meta::template_of(t) == ^^Anno::With)
+                if (std::meta::has_template_arguments(t) && std::meta::template_of(t) == ^^Anno::With)
                     return std::meta::template_arguments_of(t)[0];
             }
             return defaultAlgo;
@@ -372,8 +369,7 @@ namespace Mashiro::Hashing {
         /// @brief Check if any member of T has the Anno::Key annotation.
         template <typename T>
         consteval bool IsKeyMode() {
-            for (auto m : std::meta::nonstatic_data_members_of(^^T,
-                    std::meta::access_context::unchecked()))
+            for (auto m : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()))
                 if (HasAnnotation<Anno::Key>(m)) return true;
             return false;
         }
@@ -444,15 +440,13 @@ namespace Mashiro::Hashing {
         /// @brief Hash a value using algorithm @p algo (default: Fnv1a64).
         template <AnyAlgo A = DefaultAlgo, typename T>
             requires Hashable<T, A>
-        [[nodiscard]] constexpr ResultOf<A> operator()(
-            const T& value, const A& algo = {}) const noexcept {
+        [[nodiscard]] constexpr ResultOf<A> operator()(const T& value, const A& algo = {}) const noexcept {
             return Dispatch<A>(value, algo);
         }
 
     private:
         template <AnyAlgo A, typename T>
-        [[nodiscard]] constexpr ResultOf<A> Dispatch(
-            const T& value, const A& algo) const noexcept {
+        [[nodiscard]] constexpr ResultOf<A> Dispatch(const T& value, const A& algo) const noexcept {
             using R = ResultOf<A>;
 
             // 1. ADL hook
@@ -490,8 +484,7 @@ namespace Mashiro::Hashing {
                 if constexpr (sizeof(ResultOf<EffectiveAlgo>) == sizeof(R)) {
                     EffectiveAlgo effAlgo{};
                     ResultOf<EffectiveAlgo> seed{};
-                    template for (constexpr auto m : std::define_static_array(
-                        Detail::HashableMembers<T>())) {
+                    template for (constexpr auto m : std::define_static_array(Detail::HashableMembers<T>())) {
                         auto memberHash = Dispatch<EffectiveAlgo>(value.[:m:], effAlgo);
                         seed = Combine(seed, memberHash);
                     }
@@ -499,8 +492,7 @@ namespace Mashiro::Hashing {
                 } else {
                     // Width mismatch: fall back to caller's algo
                     R seed{};
-                    template for (constexpr auto m : std::define_static_array(
-                        Detail::HashableMembers<T>())) {
+                    template for (constexpr auto m : std::define_static_array(Detail::HashableMembers<T>())) {
                         R memberHash = Dispatch<A>(value.[:m:], algo);
                         seed = Combine(seed, memberHash);
                     }
@@ -576,8 +568,7 @@ namespace Mashiro::Hashing {
                 Detail::FeedString(state, sv);
             }
             else if constexpr (std::is_class_v<T> && !std::is_union_v<T>) {
-                template for (constexpr auto m : std::define_static_array(
-                    Detail::HashableMembers<T>())) {
+                template for (constexpr auto m : std::define_static_array(Detail::HashableMembers<T>())) {
                     FeedImpl(value.[:m:]);
                 }
             }
@@ -595,14 +586,12 @@ namespace Mashiro::Hashing {
     namespace Literals {
 
         /// @brief Compile-time 64-bit string hash: `"hello"_hash`.
-        [[nodiscard]] consteval uint64_t operator""_hash(
-            const char* str, std::size_t len) noexcept {
+        [[nodiscard]] consteval uint64_t operator""_hash(const char* str, std::size_t len) noexcept {
             return Detail::HashString(Fnv1a64{}, std::string_view{str, len});
         }
 
         /// @brief Compile-time 32-bit string hash: `"hello"_hash32`.
-        [[nodiscard]] consteval uint32_t operator""_hash32(
-            const char* str, std::size_t len) noexcept {
+        [[nodiscard]] consteval uint32_t operator""_hash32(const char* str, std::size_t len) noexcept {
             return Detail::HashString(Fnv1a32{}, std::string_view{str, len});
         }
 
