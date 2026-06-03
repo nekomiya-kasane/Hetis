@@ -23,9 +23,9 @@
   ],
 
   // ─── TestMate C++: test discovery + coverage ───
-  // Point at the asan-cov build for simultaneous sanitizer + coverage.
-  // Switch to x64-coverage if ASan overhead is unwanted.
-  "testMate.cpp.test.executables": "${workspaceFolder}/build/x64-asan-cov/bin/Test.*.exe",
+  // Use x64-coverage (no sanitizers) for stable coverage collection.
+  // ASan+coverage combo is unstable on Windows debug CRT; use x64-asan separately.
+  "testMate.cpp.test.executables": "${workspaceFolder}/build/x64-coverage/bin/Test.*.exe",
   "testMate.cpp.experimental.llvm-cov": {
     "enabled": true,
     "logpanel": true
