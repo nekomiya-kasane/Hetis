@@ -140,3 +140,201 @@ TEST_CASE("Intersect: origin inside box gives tmin=0", "[Core.Geometry]") {
     STATIC_REQUIRE(result.first == 0.0f);
     REQUIRE(result.second == Approx(1.0f));
 }
+
+// ===========================================================================
+// Interval operations — constexpr
+// ===========================================================================
+
+TEST_CASE("Interval: Length and Midpoint", "[Core.Geometry.Interval]") {
+    constexpr Interval iv{.lo = 2.0f, .hi = 8.0f};
+    STATIC_REQUIRE(Length(iv) == 6.0f);
+    STATIC_REQUIRE(Midpoint(iv) == 5.0f);
+}
+
+TEST_CASE("Interval: Contains", "[Core.Geometry.Interval]") {
+    constexpr Interval iv{.lo = 0.0f, .hi = 10.0f};
+    STATIC_REQUIRE(Contains(iv, 5.0f));
+    STATIC_REQUIRE(Contains(iv, 0.0f));
+    STATIC_REQUIRE(Contains(iv, 10.0f));
+    STATIC_REQUIRE(!Contains(iv, -1.0f));
+    STATIC_REQUIRE(!Contains(iv, 11.0f));
+}
+
+TEST_CASE("Interval: Intersects", "[Core.Geometry.Interval]") {
+    constexpr Interval a{.lo = 0, .hi = 5};
+    constexpr Interval b{.lo = 3, .hi = 8};
+    constexpr Interval c{.lo = 6, .hi = 9};
+    STATIC_REQUIRE(Intersects(a, b));
+    STATIC_REQUIRE(!Intersects(a, c));
+}
+
+TEST_CASE("Interval: Union and Intersection", "[Core.Geometry.Interval]") {
+    constexpr Interval a{.lo = 1, .hi = 5};
+    constexpr Interval b{.lo = 3, .hi = 8};
+    constexpr auto u = Union(a, b);
+    STATIC_REQUIRE(u.lo == 1.0f);
+    STATIC_REQUIRE(u.hi == 8.0f);
+    constexpr auto i = Intersection(a, b);
+    STATIC_REQUIRE(i.lo == 3.0f);
+    STATIC_REQUIRE(i.hi == 5.0f);
+}
+
+TEST_CASE("Interval: Union with point", "[Core.Geometry.Interval]") {
+    constexpr Interval iv{.lo = 2, .hi = 4};
+    constexpr auto grown = Union(iv, 7.0f);
+    STATIC_REQUIRE(grown.lo == 2.0f);
+    STATIC_REQUIRE(grown.hi == 7.0f);
+}
+
+TEST_CASE("Interval: Expand and Clamp", "[Core.Geometry.Interval]") {
+    constexpr Interval iv{.lo = 2, .hi = 4};
+    constexpr auto exp = Expand(iv, 1.0f);
+    STATIC_REQUIRE(exp.lo == 1.0f);
+    STATIC_REQUIRE(exp.hi == 5.0f);
+    STATIC_REQUIRE(Clamp(0.0f, iv) == 2.0f);
+    STATIC_REQUIRE(Clamp(3.0f, iv) == 3.0f);
+    STATIC_REQUIRE(Clamp(9.0f, iv) == 4.0f);
+}
+
+// ===========================================================================
+// Box2D operations — constexpr
+// ===========================================================================
+
+TEST_CASE("Box2D: Union of two boxes", "[Core.Geometry.Box2D]") {
+    constexpr Box2D a{.min={.x=0,.y=0}, .max={.x=2,.y=2}};
+    constexpr Box2D b{.min={.x=1,.y=1}, .max={.x=4,.y=3}};
+    constexpr auto u = Union(a, b);
+    STATIC_REQUIRE(u.min.x == 0.0f);
+    STATIC_REQUIRE(u.max.x == 4.0f);
+    STATIC_REQUIRE(u.max.y == 3.0f);
+}
+
+TEST_CASE("Box2D: Union with point", "[Core.Geometry.Box2D]") {
+    constexpr Box2D box{.min={.x=0,.y=0}, .max={.x=1,.y=1}};
+    constexpr auto grown = Union(box, vec2{5.0f, -1.0f});
+    STATIC_REQUIRE(grown.min.y == -1.0f);
+    STATIC_REQUIRE(grown.max.x == 5.0f);
+}
+
+TEST_CASE("Box2D: Area and Perimeter", "[Core.Geometry.Box2D]") {
+    constexpr Box2D box{.min={.x=0,.y=0}, .max={.x=3,.y=4}};
+    STATIC_REQUIRE(Area(box) == 12.0f);
+    STATIC_REQUIRE(Perimeter(box) == 14.0f);
+}
+
+TEST_CASE("Box2D: Contains and Intersects", "[Core.Geometry.Box2D]") {
+    constexpr Box2D a{.min={.x=0,.y=0}, .max={.x=4,.y=4}};
+    constexpr Box2D b{.min={.x=3,.y=3}, .max={.x=6,.y=6}};
+    constexpr Box2D c{.min={.x=5,.y=5}, .max={.x=7,.y=7}};
+    STATIC_REQUIRE(Contains(a, vec2{2.0f, 2.0f}));
+    STATIC_REQUIRE(!Contains(a, vec2{5.0f, 5.0f}));
+    STATIC_REQUIRE(Intersects(a, b));
+    STATIC_REQUIRE(!Intersects(a, c));
+}
+
+TEST_CASE("Box2D: Intersection region", "[Core.Geometry.Box2D]") {
+    constexpr Box2D a{.min={.x=0,.y=0}, .max={.x=4,.y=4}};
+    constexpr Box2D b{.min={.x=2,.y=2}, .max={.x=6,.y=6}};
+    constexpr auto i = Intersection(a, b);
+    STATIC_REQUIRE(i.min.x == 2.0f);
+    STATIC_REQUIRE(i.min.y == 2.0f);
+    STATIC_REQUIRE(i.max.x == 4.0f);
+    STATIC_REQUIRE(i.max.y == 4.0f);
+}
+
+// ===========================================================================
+// Circle operations — constexpr
+// ===========================================================================
+
+TEST_CASE("Circle: Contains point", "[Core.Geometry.Circle]") {
+    constexpr Circle c{.center={.x=0,.y=0}, .radius=5.0f};
+    STATIC_REQUIRE(Contains(c, vec2{3.0f, 4.0f}));  // distance = 5, on boundary
+    STATIC_REQUIRE(!Contains(c, vec2{4.0f, 4.0f})); // distance > 5
+}
+
+TEST_CASE("Circle: Intersects circles", "[Core.Geometry.Circle]") {
+    constexpr Circle a{.center={.x=0,.y=0}, .radius=3.0f};
+    constexpr Circle b{.center={.x=4,.y=0}, .radius=2.0f};
+    constexpr Circle c{.center={.x=10,.y=0}, .radius=1.0f};
+    STATIC_REQUIRE(Intersects(a, b));  // distance=4, sum radii=5
+    STATIC_REQUIRE(!Intersects(a, c)); // distance=10, sum radii=4
+}
+
+TEST_CASE("Circle: Bounds", "[Core.Geometry.Circle]") {
+    constexpr Circle c{.center={.x=1,.y=2}, .radius=3.0f};
+    constexpr auto bb = Bounds(c);
+    STATIC_REQUIRE(bb.min.x == -2.0f);
+    STATIC_REQUIRE(bb.min.y == -1.0f);
+    STATIC_REQUIRE(bb.max.x == 4.0f);
+    STATIC_REQUIRE(bb.max.y == 5.0f);
+}
+
+// ===========================================================================
+// AABB additional operations — constexpr
+// ===========================================================================
+
+TEST_CASE("AABB: Union with point", "[Core.Geometry]") {
+    constexpr auto grown = Union(kUnit, vec3{5.0f, 5.0f, 5.0f});
+    STATIC_REQUIRE(grown.max.x == 5.0f);
+    STATIC_REQUIRE(grown.min.x == -1.0f);
+}
+
+TEST_CASE("AABB: Intersection region", "[Core.Geometry]") {
+    constexpr auto i = Intersection(kUnit, kShift);
+    STATIC_REQUIRE(i.min.x == 0.0f);
+    STATIC_REQUIRE(i.max.x == 1.0f);
+}
+
+TEST_CASE("AABB: Expand", "[Core.Geometry]") {
+    constexpr auto exp = Expand(kUnit, 0.5f);
+    STATIC_REQUIRE(exp.min.x == -1.5f);
+    STATIC_REQUIRE(exp.max.x == 1.5f);
+}
+
+TEST_CASE("AABB: Volume", "[Core.Geometry]") {
+    STATIC_REQUIRE(Volume(kUnit) == 8.0f); // 2*2*2
+}
+
+TEST_CASE("AABB: ClosestPoint", "[Core.Geometry]") {
+    constexpr auto cp = ClosestPoint(kUnit, vec3{5.0f, 0.0f, 0.0f});
+    STATIC_REQUIRE(cp.x == 1.0f);
+    STATIC_REQUIRE(cp.y == 0.0f);
+}
+
+// ===========================================================================
+// Sphere operations
+// ===========================================================================
+
+TEST_CASE("Sphere: Contains point", "[Core.Geometry.Sphere]") {
+    constexpr Sphere s{.center={0, 0, 0}, .radius=2.0f};
+    STATIC_REQUIRE(Contains(s, vec3{1, 1, 1}));   // dist ~1.73
+    STATIC_REQUIRE(!Contains(s, vec3{2, 2, 0}));  // dist ~2.83
+}
+
+TEST_CASE("Sphere: Intersects sphere", "[Core.Geometry.Sphere]") {
+    constexpr Sphere a{.center={0, 0, 0}, .radius=2.0f};
+    constexpr Sphere b{.center={3, 0, 0}, .radius=2.0f};
+    constexpr Sphere c{.center={10, 0, 0}, .radius=1.0f};
+    STATIC_REQUIRE(Intersects(a, b));
+    STATIC_REQUIRE(!Intersects(a, c));
+}
+
+TEST_CASE("Sphere: Intersects AABB", "[Core.Geometry.Sphere]") {
+    constexpr Sphere s{.center={3, 0, 0}, .radius=2.5f};
+    STATIC_REQUIRE(Intersects(s, kUnit));  // sphere at x=3, reaches x=0.5 which is inside [-1,1]
+    constexpr Sphere far{.center={10, 10, 10}, .radius=1.0f};
+    STATIC_REQUIRE(!Intersects(far, kUnit));
+}
+
+// ===========================================================================
+// Plane operations
+// ===========================================================================
+
+TEST_CASE("Plane: SignedDistance and Side", "[Core.Geometry.Plane]") {
+    constexpr Plane pl{.normal={0, 1, 0}, .dist=0.0f}; // y=0 plane
+    STATIC_REQUIRE(SignedDistance(pl, vec3{0, 5, 0}) == 5.0f);
+    STATIC_REQUIRE(SignedDistance(pl, vec3{0, -3, 0}) == -3.0f);
+    STATIC_REQUIRE(Side(pl, vec3{0, 1, 0}) == 1);
+    STATIC_REQUIRE(Side(pl, vec3{0, -1, 0}) == -1);
+    STATIC_REQUIRE(Side(pl, vec3{0, 0, 0}) == 0);
+}
