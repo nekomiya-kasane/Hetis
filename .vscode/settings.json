@@ -20,5 +20,14 @@
     "--compile-commands-dir=${workspaceFolder}/build/x64-debug",
     "--background-index",
     "--clang-tidy"
-  ]
+  ],
+
+  // ─── TestMate C++: test discovery + coverage ───
+  // Point at the asan-cov build for simultaneous sanitizer + coverage.
+  // Switch to x64-coverage if ASan overhead is unwanted.
+  "testMate.cpp.test.executables": "${workspaceFolder}/build/x64-asan-cov/bin/Test.*.exe",
+  "testMate.cpp.experimental.llvm-cov": {
+    "enabled": true,
+    "logpanel": true
+  }
 }

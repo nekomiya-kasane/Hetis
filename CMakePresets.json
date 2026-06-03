@@ -99,6 +99,43 @@
         "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG -fno-omit-frame-pointer -fno-optimize-sibling-calls",
         "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG -fno-omit-frame-pointer -fno-optimize-sibling-calls"
       }
+    },
+    {
+      "name": "x64-coverage",
+      "displayName": "x64 Coverage (clang-p2996)",
+      "description": "Source-based code coverage via -fprofile-instr-generate -fcoverage-mapping. No sanitizers. Use llvm-profdata + llvm-cov to produce reports.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS_DEBUG": "-O0 -g -fprofile-instr-generate -fcoverage-mapping",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O0 -g -fprofile-instr-generate -fcoverage-mapping",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fprofile-instr-generate",
+        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fprofile-instr-generate",
+        "CMAKE_CATCH_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST"
+      },
+      "environment": {
+        "LLVM_PROFILE_FILE": "${sourceDir}/build/x64-coverage/profraw/%p-%m.profraw"
+      }
+    },
+    {
+      "name": "x64-asan-cov",
+      "displayName": "x64 ASan+UBSan+Coverage (clang-p2996)",
+      "description": "All three: AddressSanitizer + UBSan + source-based coverage. Heavier but catches bugs while collecting coverage in one pass.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS_DEBUG": "-O0 -g -fno-omit-frame-pointer -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fprofile-instr-generate -fcoverage-mapping",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O0 -g -fno-omit-frame-pointer -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fprofile-instr-generate -fcoverage-mapping",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined -fprofile-instr-generate",
+        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined -fprofile-instr-generate",
+        "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined -fprofile-instr-generate",
+        "CMAKE_CATCH_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST"
+      },
+      "environment": {
+        "PATH": "T:\\toolchains\\coca-toolchain-p2996\\lib\\clang\\21\\lib\\windows;$penv{PATH}",
+        "ASAN_OPTIONS": "alloc_dealloc_mismatch=0",
+        "LLVM_PROFILE_FILE": "${sourceDir}/build/x64-asan-cov/profraw/%p-%m.profraw"
+      }
     }
   ],
   "buildPresets": [
@@ -121,6 +158,14 @@
     {
       "name": "x64-profile",
       "configurePreset": "x64-profile"
+    },
+    {
+      "name": "x64-coverage",
+      "configurePreset": "x64-coverage"
+    },
+    {
+      "name": "x64-asan-cov",
+      "configurePreset": "x64-asan-cov"
     }
   ],
   "testPresets": [
