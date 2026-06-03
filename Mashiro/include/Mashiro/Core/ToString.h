@@ -1,3 +1,30 @@
+/**
+ * @file ToString.h
+ * @brief Reflection-driven, extensible string conversion framework.
+ *
+ * Provides three customisation-point objects:
+ * - `ToString(v)`     → `std::string`       (always owning).
+ * - `ToStringView(v)` → `std::string_view`   (zero-alloc for enums, bools, …).
+ * - `Str(v)`          → one of the above, preferring the view when safe.
+ *
+ * And the inverse:
+ * - `FromString<T>(sv)` → `T`.
+ *
+ * Dispatch priority (ToString):
+ *  1. ADL `ToString(v)`
+ *  2. `v.ToString()`
+ *  3. `nullptr` / `bool` / `char` / string-like literals
+ *  4. Scoped enum → reflection-based name (with bitmask decomposition)
+ *  5. Range → `[elem, elem, …]`
+ *  6. Tuple-like → `(elem, elem, …)`
+ *  7. Variant → visit
+ *  8. Pointer → `Type*(0xaddr)`
+ *  9. `std::to_string` / `operator<<`
+ * 10. Complete class → reflection member dump `Type{a=…, b=…}`
+ * 11. Fallback → `<Type at 0xaddr>`
+ *
+ * @ingroup Core
+ */
 #pragma once
 
 // clang-format off
@@ -17,20 +44,17 @@
 
 namespace Mashiro {
 
-    template<typename T>
-    [[nodiscard]] constexpr std::string ToString(T&& iValue);
-
+    /// @brief Parse a value of type @p T from its string representation.
     template<typename T>
     [[nodiscard]] constexpr T FromString(std::string_view iString);
 
-    template<typename T>
-    [[nodiscard]] constexpr std::string_view ToStringView(T&& iValue);
-
+    /// @brief Compile-time human-readable name of @p T (via P2996 reflection).
     template<typename T>
     [[nodiscard]] std::string_view TypeName() {
         return std::meta::display_string_of(^^T);
     }
 
+    /// @brief Convert any string-like value to an owning `std::string`.
     template<typename T>
     [[nodiscard]] constexpr std::string MakeString(T&& iValue) {
         if constexpr (std::same_as<std::remove_cvref_t<T>, std::string>) {
@@ -40,84 +64,83 @@ namespace Mashiro {
         }
     }
 
+    /** @cond INTERNAL */
     namespace Detail {
 
+        /// @name ADL hook detection
+        /// @{
         namespace ADL {
 
             namespace FreeToString {
+                void ToString() = delete; ///< Poison pill.
 
-                // Zero-arg poison pill
-                void ToString() = delete;
-
+                /// @brief True if `ToString(v)` is found via ADL.
                 template<typename T>
                 concept Available = requires(T&& iValue) {
                     { ToString(std::forward<T>(iValue)) } -> std::convertible_to<std::string>;
                 };
 
-                template<typename T>
-                    requires Available<T>
+                template<typename T> requires Available<T>
                 [[nodiscard]] constexpr std::string Invoke(T&& iValue) {
                     return MakeString(ToString(std::forward<T>(iValue)));
                 }
-
             } // namespace FreeToString
 
             namespace FreeToStringView {
+                void ToStringView() = delete; ///< Poison pill.
 
-                // Zero-arg poison pill
-                void ToStringView() = delete;
-
+                /// @brief True if `ToStringView(v)` is found via ADL.
                 template<typename T>
                 concept Available = requires(T&& iValue) {
                     { ToStringView(std::forward<T>(iValue)) } -> std::convertible_to<std::string_view>;
                 };
 
-                template<typename T>
-                    requires Available<T>
+                template<typename T> requires Available<T>
                 [[nodiscard]] constexpr std::string_view Invoke(T&& iValue) {
                     return ToStringView(std::forward<T>(iValue));
                 }
-
             } // namespace FreeToStringView
 
             namespace FreeFromString {
-                
-                // Zero-arg poison pill
-                void FromString() = delete;
+                void FromString() = delete; ///< Poison pill.
 
+                /// @brief True if `FromString<T>(sv)` is found via ADL.
                 template <typename T>
                 concept Available = requires(std::string_view iString) {
                     { FromString<T>(iString) } -> std::convertible_to<T>;
                 };
 
-                template <typename T>
-                    requires Available<T>
+                template <typename T> requires Available<T>
                 [[nodiscard]] constexpr T Invoke(std::string_view iString) {
                     return FromString<T>(iString);
                 }
-
             } // namespace FreeFromString
 
         } // namespace ADL
+        /// @}
 
+        /// @brief `v.ToString()` member detected.
         template <typename T>
         concept HasMemberToString = requires(T&& iValue) {
             { std::forward<T>(iValue).ToString() } -> std::convertible_to<std::string>;
         };
 
+        /// @brief `v.ToStringView()` member detected.
         template <typename T>
         concept HasMemberToStringView = requires(T&& iValue) {
             { std::forward<T>(iValue).ToStringView() } -> std::convertible_to<std::string_view>;
         };
 
+        /// @brief `T::FromString(sv)` static member detected.
         template <typename T>
         concept HasMemberFromString = requires {
             { T::FromString(std::string_view{}) } -> std::convertible_to<T>;
         };
 
-        // Types for which ToStringView yields a view over storage that outlives the call
-        // (custom hooks, the null-pointer literal, bool literals, and reflected enum names).
-        // Anything else would require materializing a std::string, whose view would dangle.
+        /**
+         * @brief Types whose `ToStringView` result is a view over static / stable
+         *        storage (won't dangle). Everything else must go through `ToString`.
+         */
         template <typename T>
         concept ViewStringable = ADL::FreeToStringView::Available<std::remove_cvref_t<T>> ||
                                  HasMemberToStringView<std::remove_cvref_t<T>> ||
@@ -125,10 +148,9 @@ namespace Mashiro {
                                  std::same_as<std::remove_cvref_t<T>, bool> ||
                                  std::is_enum_v<std::remove_cvref_t<T>>;
 
-    } // namespace Detail
-
+    /// @brief Core dispatch: value → owning `std::string`.
     template <typename T>
-    [[nodiscard]] constexpr std::string ToString(T&& iValue) {
+    [[nodiscard]] constexpr std::string ToStringImpl(T&& iValue) {
         using U = std::remove_cvref_t<T>;
 
         // 1. free ToString(...) via ADL
@@ -198,7 +220,7 @@ namespace Mashiro {
             bool first = true;
 
             for (auto&& item : iValue) {
-                ss << (first ? "" : ", ") << ToString(item);
+                ss << (first ? "" : ", ") << ToStringImpl(item);
                 first = false;
             }
 
@@ -215,7 +237,7 @@ namespace Mashiro {
             bool first = false;
 
             std::apply([&]<typename... Ts>(Ts&&... args) {
-                ((ss << (first ? ", " : "") << ToString(std::forward<decltype(args)>(args)), first = true), ...);
+                ((ss << (first ? ", " : "") << ToStringImpl(std::forward<decltype(args)>(args)), first = true), ...);
             }, iValue);
 
             ss << ")";
@@ -229,7 +251,7 @@ namespace Mashiro {
 
             return std::visit(
                 [](auto&& iAlternative) -> std::string {
-                    return ToString(std::forward<decltype(iAlternative)>(iAlternative));
+                    return ToStringImpl(std::forward<decltype(iAlternative)>(iAlternative));
                 },
                 std::forward<T>(iValue));
         }
@@ -272,9 +294,9 @@ namespace Mashiro {
                 }
 
                 if constexpr (std::meta::is_bit_field(m)) {
-                    ss << "=" << ToString(auto(iValue.[:m:]));
+                    ss << "=" << ToStringImpl(auto(iValue.[:m:]));
                 } else {
-                    ss << "=" << ToString(iValue.[:m:]);
+                    ss << "=" << ToStringImpl(iValue.[:m:]);
                 }
             }
 
@@ -287,8 +309,9 @@ namespace Mashiro {
         }
     }
 
+    /// @brief Core dispatch: value → non-owning `std::string_view` (limited types).
     template <typename T>
-    [[nodiscard]] constexpr std::string_view ToStringView(T&& iValue) {
+    [[nodiscard]] constexpr std::string_view ToStringViewImpl(T&& iValue) {
         using U = std::remove_cvref_t<T>;
 
         // 1. free ToStringView(...) via ADL
@@ -327,7 +350,36 @@ namespace Mashiro {
             static_assert(false, "Unsupported type for ToStringView");
         }
     }
+    
+    /// @brief CPO functor: `ToString(v)` → `std::string`.
+    struct ToStringFn {
+        template <typename T>
+        [[nodiscard]] constexpr std::string operator()(T&& iValue) const {
+            return ToStringImpl(std::forward<T>(iValue));
+        }
+    };
 
+    /// @brief CPO functor: `ToStringView(v)` → `std::string_view`.
+    struct ToStringViewFn {
+        template <typename T>
+        [[nodiscard]] constexpr std::string_view operator()(T&& iValue) const {
+            return ToStringViewImpl(std::forward<T>(iValue));
+        }
+    };
+
+    } // namespace Detail
+    /** @endcond */
+
+    /// @brief Customisation-point object: convert any value to `std::string`.
+    inline constexpr Detail::ToStringFn     ToString{};
+    /// @brief Customisation-point object: convert to `std::string_view` (zero-alloc, limited types).
+    inline constexpr Detail::ToStringViewFn ToStringView{};
+
+    /**
+     * @brief Smart string conversion: returns `string_view` when safe, `string` otherwise.
+     * @tparam T Deduced value type.
+     * @return `std::string_view` for ViewStringable types, `std::string` for everything else.
+     */
     template <typename T>
     [[nodiscard]] constexpr auto Str(T&& iValue) {
         if constexpr (Detail::ViewStringable<T>) {
@@ -337,6 +389,17 @@ namespace Mashiro {
         }
     }
 
+    /**
+     * @brief Parse a value of type @p T from its string representation.
+     *
+     * Dispatch priority mirrors ToString in reverse:
+     *  1. ADL `FromString<T>(sv)` → 2. `T::FromString(sv)` →
+     *  3. `nullptr` → 4. pointer → 5. `bool` → 6. enum (reflection match) → 7. fail.
+     *
+     * @tparam T Target type.
+     * @param iString Input string.
+     * @return Parsed value of type @p T.
+     */
     template <typename T> [[nodiscard]] constexpr T FromString(std::string_view iString) {
         using U = std::remove_cvref_t<T>;
 
@@ -384,6 +447,7 @@ namespace Mashiro {
         }
     }
 
+    /// @brief Convenience alias: parse a scoped enum from its display name.
     template<typename T> requires std::is_enum_v<T> T Enum(std::string_view iString) {
         return FromString<T>(iString);
     }

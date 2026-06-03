@@ -17,3 +17,18 @@ include(Catch)
 
 add_mashiro_test(Core ToStringTest)
 add_mashiro_test(Core TypesTest)
+add_mashiro_test(Core QuanterionTest)
+add_mashiro_test(Core MathUtilsTest)
+add_mashiro_test(Core AlgebraTest)
+
+# Eigen-oracle test: additional link to Eigen (header-only)
+set(_EIGEN_TEST Test.Core.EigenOracleTest)
+add_executable(${_EIGEN_TEST} Core/EigenOracleTest.cpp)
+target_link_libraries(${_EIGEN_TEST} PRIVATE Mashiro Catch2::Catch2WithMain eigen)
+set_target_properties(${_EIGEN_TEST} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    FOLDER "Mashiro/Tests/Core"
+)
+vk_tp_deploy_runtime(${_EIGEN_TEST})
+catch_discover_tests(${_EIGEN_TEST})

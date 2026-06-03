@@ -419,6 +419,12 @@ if(VK_TP_BUILD_CATCH2)
 endif()
 
 # -----------------------------------------------------------------------------
+# 31b. Eigen — header-only linear algebra library (used as oracle in math tests)
+# -----------------------------------------------------------------------------
+add_library(eigen INTERFACE)
+target_include_directories(eigen SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/eigen)
+
+# -----------------------------------------------------------------------------
 # 32. efsw — cross-platform filesystem watcher.
 #     With BUILD_SHARED_LIBS OFF the unconditional add_library(efsw) becomes a
 #     STATIC lib; we disable BUILD_STATIC_LIBS to avoid the duplicate

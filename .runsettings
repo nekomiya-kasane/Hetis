@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Visual Studio Run Settings for the Hetis project (VS 2026 Insiders).
+  Workaround: ExternalBuildProjectDiscoverer fails to load on 18.x Insiders,
+  so we use the "Test Adapter for Catch2" VSIX (JohnnyHendriks.ext-vst-Catch2TestAdapter)
+  which directly invokes test exe -list-tests for discovery.
+  
+  Install the VSIX from: https://marketplace.visualstudio.com/items?itemName=JohnnyHendriks.ext-vst-Catch2TestAdapter
+-->
+<RunSettings>
+  <RunConfiguration>
+    <TestSessionTimeout>300000</TestSessionTimeout>
+    <!-- Point Test Platform to the EBF directory so it can resolve the discoverer and its deps -->
+    <TestAdaptersPaths>C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\IDE\CommonExtensions\Microsoft\EBF</TestAdaptersPaths>
+  </RunConfiguration>
+
+  <!-- Catch2 Test Adapter VSIX (fallback if EBF still fails) -->
+  <Catch2Adapter disabled="false">
+    <FilenameFilter>.*\\bin\\(Test\.|core\.).*\.exe$</FilenameFilter>
+    <WorkingDirectory>$(BuildRoot)\bin</WorkingDirectory>
+    <Environment>
+      <Variable name="PATH" value="T:\toolchains\coca-toolchain-p2996\bin;T:\toolchains\coca-toolchain-p2996\lib\clang\21\lib\windows;$(BuildRoot)\bin;%PATH%" />
+    </Environment>
+    <DiscoverCommandLine>--list-tests --verbosity high</DiscoverCommandLine>
+    <DiscoverTimeout>60000</DiscoverTimeout>
+    <TestCaseTimeout>30000</TestCaseTimeout>
+    <Logging>Normal</Logging>
+  </Catch2Adapter>
+</RunSettings>

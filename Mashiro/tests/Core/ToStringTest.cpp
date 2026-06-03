@@ -1,4 +1,5 @@
 #include "Mashiro/Core/ToString.h"
+#include "Mashiro/Core/Types.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -17,6 +18,10 @@
 
 using namespace Mashiro;
 
+// Free-function customizations live in their own namespace (found via ADL by the ToString CPO) so they don't clash with the Mashiro::ToString *object* under
+// `using namespace Mashiro`. Only the type names are pulled in, for terse tests.
+namespace Detail {
+
 struct FreeToStringType {
     int value{};
 };
@@ -25,12 +30,6 @@ std::string ToString(const FreeToStringType& v) {
     return "free-ToString:" + std::to_string(v.value);
 }
 
-struct MemberToStringType {
-    int value{};
-
-    std::string ToString() const { return "member-ToString:" + std::to_string(value); }
-};
-
 struct FreeAndMemberType {
     std::string ToString() const { return "member"; }
 };
@@ -38,6 +37,17 @@ struct FreeAndMemberType {
 std::string ToString(const FreeAndMemberType&) {
     return "free";
 }
+
+} // namespace Detail
+
+using ::Detail::FreeToStringType;
+using ::Detail::FreeAndMemberType;
+
+struct MemberToStringType {
+    int value{};
+
+    std::string ToString() const { return "member-ToString:" + std::to_string(value); }
+};
 
 struct ConvertibleAndMemberType {
     operator std::string() const { return "converted"; }
@@ -108,7 +118,7 @@ namespace {
 
 } // namespace
 
-TEST_CASE("ToString accepts all common value categories", "[meta]") {
+TEST_CASE("ToString accepts all common value categories", "[Core.ToString]") {
     int x = 42;
     const int cx = 43;
 
@@ -122,7 +132,7 @@ TEST_CASE("ToString accepts all common value categories", "[meta]") {
     REQUIRE(S(44) == "44");
 }
 
-TEST_CASE("ToString returns string-compatible results", "[meta]") {
+TEST_CASE("ToString returns string-compatible results", "[Core.ToString]") {
     STATIC_REQUIRE(ToStringReturnsStringLike<int>);
     STATIC_REQUIRE(ToStringReturnsStringLike<bool>);
     STATIC_REQUIRE(ToStringReturnsStringLike<char>);
@@ -134,17 +144,17 @@ TEST_CASE("ToString returns string-compatible results", "[meta]") {
     STATIC_REQUIRE(ToStringReturnsStringLike<OstreamOnlyType>);
 }
 
-TEST_CASE("ToString prefers custom free ToString", "[meta]") {
+TEST_CASE("ToString prefers custom free ToString", "[Core.ToString]") {
     REQUIRE(S(FreeToStringType{7}) == "free-ToString:7");
     REQUIRE(S(FreeAndMemberType{}) == "free");
 }
 
-TEST_CASE("ToString prefers member ToString over string conversion", "[meta]") {
+TEST_CASE("ToString prefers member ToString over string conversion", "[Core.ToString]") {
     REQUIRE(S(MemberToStringType{9}) == "member-ToString:9");
     REQUIRE(S(ConvertibleAndMemberType{}) == "member");
 }
 
-TEST_CASE("ToString handles string-like values", "[meta]") {
+TEST_CASE("ToString handles string-like values", "[Core.ToString]") {
     std::string s = "hello";
     std::string_view sv = "view";
     const char* cstr = "cstr";
@@ -155,7 +165,7 @@ TEST_CASE("ToString handles string-like values", "[meta]") {
     REQUIRE(S(cstr) == "cstr");
 }
 
-TEST_CASE("ToString handles scalar values", "[meta]") {
+TEST_CASE("ToString handles scalar values", "[Core.ToString]") {
     REQUIRE(S(true) == "true");
     REQUIRE(S(false) == "false");
     REQUIRE(S('x') == "x");
@@ -164,7 +174,7 @@ TEST_CASE("ToString handles scalar values", "[meta]") {
     REQUIRE(S(3.5) == "3.500000");
 }
 
-TEST_CASE("ToString handles enum values", "[meta]") {
+TEST_CASE("ToString handles enum values", "[Core.ToString]") {
     REQUIRE(S(Color::red) == "red");
     REQUIRE(S(Color::green) == "green");
     REQUIRE(S(Color::blue) == "blue");
@@ -173,17 +183,17 @@ TEST_CASE("ToString handles enum values", "[meta]") {
     REQUIRE(S(SparseEnum::big) == "big");
 }
 
-TEST_CASE("ToString handles unknown enum values", "[meta]") {
+TEST_CASE("ToString handles unknown enum values", "[Core.ToString]") {
     auto s = S(static_cast<Color>(123));
     REQUIRE_THAT(s, Catch::Matchers::ContainsSubstring("unknown"));
 }
 
-TEST_CASE("ToString handles enum aliases deterministically", "[meta]") {
+TEST_CASE("ToString handles enum aliases deterministically", "[Core.ToString]") {
     REQUIRE(S(AliasEnum::first) == "first");
     REQUIRE(S(AliasEnum::second) == "first");
 }
 
-TEST_CASE("ToString handles unscoped enum values", "[meta]") {
+TEST_CASE("ToString handles unscoped enum values", "[Core.ToString]") {
     REQUIRE(S(unscopedRed) == "unscopedRed");
     REQUIRE(S(unscopedGreen) == "unscopedGreen");
     REQUIRE(S(unscopedBlue) == "unscopedBlue");
@@ -196,7 +206,7 @@ TEST_CASE("ToString handles unscoped enum values", "[meta]") {
     REQUIRE_THAT(unknown, Catch::Matchers::ContainsSubstring("unknown"));
 }
 
-TEST_CASE("ToString decomposes flag enums", "[meta]") {
+TEST_CASE("ToString decomposes flag enums", "[Core.ToString]") {
     // Exact matches take precedence (including the zero value).
     REQUIRE(S(Permission::none) == "none");
     REQUIRE(S(Permission::read) == "read");
@@ -210,14 +220,14 @@ TEST_CASE("ToString decomposes flag enums", "[meta]") {
     REQUIRE_THAT(leftover, Catch::Matchers::ContainsSubstring("unknown"));
 }
 
-TEST_CASE("ToString handles tuple-like values", "[meta]") {
+TEST_CASE("ToString handles tuple-like values", "[Core.ToString]") {
     REQUIRE(S(std::tuple<>{}) == "()");
     REQUIRE(S(std::tuple{1}) == "(1)");
     REQUIRE(S(std::tuple{1, std::string{"abc"}, Color::blue}) == "(1, abc, blue)");
     REQUIRE(S(std::pair{2, std::string{"two"}}) == "(2, two)");
 }
 
-TEST_CASE("ToString handles range-like values", "[meta]") {
+TEST_CASE("ToString handles range-like values", "[Core.ToString]") {
     REQUIRE(S(std::vector<int>{}) == "[]");
     REQUIRE(S(std::vector<int>{1}) == "[1]");
     REQUIRE(S(std::vector<int>{1, 2, 3}) == "[1, 2, 3]");
@@ -225,11 +235,11 @@ TEST_CASE("ToString handles range-like values", "[meta]") {
     REQUIRE(S(std::vector<Color>{Color::red, Color::green}) == "[red, green]");
 }
 
-TEST_CASE("ToString treats string as a string instead of a range", "[meta]") {
+TEST_CASE("ToString treats string as a string instead of a range", "[Core.ToString]") {
     REQUIRE(S(std::string{"abc"}) == "abc");
 }
 
-TEST_CASE("ToString handles map-like ranges through pair formatting", "[meta]") {
+TEST_CASE("ToString handles map-like ranges through pair formatting", "[Core.ToString]") {
     std::map<std::string, int> m{
         {"a", 1},
         {"b", 2},
@@ -238,7 +248,7 @@ TEST_CASE("ToString handles map-like ranges through pair formatting", "[meta]") 
     REQUIRE(S(m) == "[(a, 1), (b, 2)]");
 }
 
-TEST_CASE("ToString handles pointer values", "[meta]") {
+TEST_CASE("ToString handles pointer values", "[Core.ToString]") {
     int value = 42;
     int* p = &value;
     int* null_p = nullptr;
@@ -253,11 +263,11 @@ TEST_CASE("ToString handles pointer values", "[meta]") {
     REQUIRE_THAT(null_text, Catch::Matchers::ContainsSubstring("nullptr"));
 }
 
-TEST_CASE("ToString uses ostream before class reflection", "[meta]") {
+TEST_CASE("ToString uses ostream before class reflection", "[Core.ToString]") {
     REQUIRE(S(OstreamOnlyType{11}) == "ostream:11");
 }
 
-TEST_CASE("ToString reflects plain objects", "[meta]") {
+TEST_CASE("ToString reflects plain objects", "[Core.ToString]") {
     PlainObject obj{
         .id = 1,
         .name = "neo",
@@ -273,7 +283,7 @@ TEST_CASE("ToString reflects plain objects", "[meta]") {
     REQUIRE_THAT(s, !Catch::Matchers::ContainsSubstring("{, "));
 }
 
-TEST_CASE("ToString reflects nested objects recursively", "[meta]") {
+TEST_CASE("ToString reflects nested objects recursively", "[Core.ToString]") {
     NestedObject obj{
         .plain =
             PlainObject{
@@ -293,14 +303,14 @@ TEST_CASE("ToString reflects nested objects recursively", "[meta]") {
     REQUIRE_THAT(s, Catch::Matchers::ContainsSubstring("colors=[red, blue]"));
 }
 
-TEST_CASE("ToString reflects empty objects", "[meta]") {
+TEST_CASE("ToString reflects empty objects", "[Core.ToString]") {
     auto s = S(EmptyObject{});
 
     REQUIRE_THAT(s, Catch::Matchers::ContainsSubstring("EmptyObject"));
     REQUIRE_THAT(s, Catch::Matchers::ContainsSubstring("{}"));
 }
 
-TEST_CASE("ToString reflects bit-field members", "[meta]") {
+TEST_CASE("ToString reflects bit-field members", "[Core.ToString]") {
     STATIC_REQUIRE(ToStringReturnsStringLike<BitFieldObject>);
 
     BitFieldObject obj{
@@ -313,7 +323,7 @@ TEST_CASE("ToString reflects bit-field members", "[meta]") {
     REQUIRE(S(obj) == "BitFieldObject {flags=5, level=-3, color=blue, plain=42}");
 }
 
-TEST_CASE("Enum to string conversion", "[meta]") {
+TEST_CASE("Enum to string conversion", "[Core.ToString]") {
     enum class TestEnum {
         ValueA = 0,
         ValueB = 1,
@@ -325,6 +335,8 @@ TEST_CASE("Enum to string conversion", "[meta]") {
     CHECK(ToString(TestEnum::ValueC) == "ValueC");
 }
 
+namespace cust {
+
 struct FreeToStringViewType {
     int value{};
 };
@@ -333,16 +345,20 @@ std::string_view ToStringView(const FreeToStringViewType&) {
     return "free-view";
 }
 
+} // namespace cust
+
+using cust::FreeToStringViewType;
+
 struct MemberToStringViewType {
     std::string_view ToStringView() const { return "member-view"; }
 };
 
-TEST_CASE("ToStringView prefers custom free and member hooks", "[meta]") {
+TEST_CASE("ToStringView prefers custom free and member hooks", "[Core.ToString]") {
     REQUIRE(ToStringView(FreeToStringViewType{}) == "free-view");
     REQUIRE(ToStringView(MemberToStringViewType{}) == "member-view");
 }
 
-TEST_CASE("ToStringView handles built-in types", "[meta]") {
+TEST_CASE("ToStringView handles built-in types", "[Core.ToString]") {
     REQUIRE(ToStringView(true) == "true");
     REQUIRE(ToStringView(false) == "false");
     REQUIRE(ToStringView(nullptr) == "nullptr");
@@ -352,12 +368,12 @@ TEST_CASE("ToStringView handles built-in types", "[meta]") {
     REQUIRE(ToStringView(unscopedGreen) == "unscopedGreen");
 }
 
-TEST_CASE("ToStringView falls back to the type name for unknown enums", "[meta]") {
+TEST_CASE("ToStringView falls back to the type name for unknown enums", "[Core.ToString]") {
     auto sv = ToStringView(static_cast<UnscopedFlags>(99));
     REQUIRE_THAT(std::string(sv), Catch::Matchers::ContainsSubstring("UnscopedFlags"));
 }
 
-TEST_CASE("FromString reconstructs built-in values", "[meta]") {
+TEST_CASE("FromString reconstructs built-in values", "[Core.ToString]") {
     REQUIRE(FromString<bool>("true") == true);
     REQUIRE(FromString<bool>("false") == false);
 
@@ -366,21 +382,21 @@ TEST_CASE("FromString reconstructs built-in values", "[meta]") {
     REQUIRE(FromString<UnscopedColor>("unscopedGreen") == unscopedGreen);
 }
 
-TEST_CASE("FromString round-trips enum values through ToString", "[meta]") {
+TEST_CASE("FromString round-trips enum values through ToString", "[Core.ToString]") {
     for (auto c : {Color::red, Color::green, Color::blue}) {
         REQUIRE(FromString<Color>(ToString(c)) == c);
     }
 }
 
-TEST_CASE("FromString handles null pointer text", "[meta]") {
+TEST_CASE("FromString handles null pointer text", "[Core.ToString]") {
     REQUIRE(FromString<int*>("nullptr") == nullptr);
 }
 
-TEST_CASE("Str yields a string_view", "[meta]") {
+TEST_CASE("Str yields a string_view", "[Core.ToString]") {
     STATIC_REQUIRE(std::same_as<decltype(Str(Color::red)), std::string_view>);
 }
 
-TEST_CASE("Str returns views for view-supported types", "[meta]") {
+TEST_CASE("Str returns views for view-supported types", "[Core.ToString]") {
     REQUIRE(Str(true) == "true");
     REQUIRE(Str(false) == "false");
     REQUIRE(Str(nullptr) == "nullptr");
@@ -390,12 +406,12 @@ TEST_CASE("Str returns views for view-supported types", "[meta]") {
     REQUIRE(Str(unscopedGreen) == "unscopedGreen");
 }
 
-TEST_CASE("Str dispatches to custom ToStringView hooks", "[meta]") {
+TEST_CASE("Str dispatches to custom ToStringView hooks", "[Core.ToString]") {
     REQUIRE(Str(FreeToStringViewType{}) == "free-view");
     REQUIRE(Str(MemberToStringViewType{}) == "member-view");
 }
 
-TEST_CASE("Enum parses scoped and unscoped enums", "[meta]") {
+TEST_CASE("Enum parses scoped and unscoped enums", "[Core.ToString]") {
     REQUIRE(Enum<Color>("red") == Color::red);
     REQUIRE(Enum<Color>("green") == Color::green);
     REQUIRE(Enum<Color>("blue") == Color::blue);
@@ -404,18 +420,18 @@ TEST_CASE("Enum parses scoped and unscoped enums", "[meta]") {
     REQUIRE(Enum<Permission>("read") == Permission::read);
 }
 
-TEST_CASE("Enum round-trips through ToString", "[meta]") {
+TEST_CASE("Enum round-trips through ToString", "[Core.ToString]") {
     for (auto c : {Color::red, Color::green, Color::blue}) {
         REQUIRE(Enum<Color>(ToString(c)) == c);
     }
 }
 
-TEST_CASE("Enum is callable for enum types", "[meta]") {
+TEST_CASE("Enum is callable for enum types", "[Core.ToString]") {
     STATIC_REQUIRE(requires(std::string_view sv) { Enum<Color>(sv); });
     STATIC_REQUIRE(requires(std::string_view sv) { Enum<UnscopedColor>(sv); });
 }
 
-TEST_CASE("Str is callable for view-stable types", "[meta]") {
+TEST_CASE("Str is callable for view-stable types", "[Core.ToString]") {
     // Accepted: custom hooks, the null-pointer literal, bool, and reflected enums.
     STATIC_REQUIRE(requires(bool b) { Str(b); });
     STATIC_REQUIRE(requires { Str(nullptr); });
@@ -425,7 +441,7 @@ TEST_CASE("Str is callable for view-stable types", "[meta]") {
     STATIC_REQUIRE(requires(MemberToStringViewType v) { Str(v); });
 }
 
-TEST_CASE("ViewStringable gates Str to types with a stable view", "[meta]") {
+TEST_CASE("ViewStringable gates Str to types with a stable view", "[Core.ToString]") {
     using Mashiro::Detail::ViewStringable;
 
     // Accepted: views backed by storage that outlives the call.
@@ -445,13 +461,13 @@ TEST_CASE("ViewStringable gates Str to types with a stable view", "[meta]") {
     STATIC_REQUIRE_FALSE(ViewStringable<PlainObject>);
 }
 
-TEST_CASE("Str agrees with ToStringView", "[meta]") {
+TEST_CASE("Str agrees with ToStringView", "[Core.ToString]") {
     REQUIRE(Str(Color::green) == ToStringView(Color::green));
     REQUIRE(Str(true) == ToStringView(true));
     REQUIRE(Str(FreeToStringViewType{}) == ToStringView(FreeToStringViewType{}));
 }
 
-TEST_CASE("Str picks string_view for view-stable types and std::string otherwise", "[meta]") {
+TEST_CASE("Str picks string_view for view-stable types and std::string otherwise", "[Core.ToString]") {
     // View branch: non-owning std::string_view.
     STATIC_REQUIRE(std::same_as<decltype(Str(true)), std::string_view>);
     STATIC_REQUIRE(std::same_as<decltype(Str(nullptr)), std::string_view>);
@@ -470,7 +486,7 @@ TEST_CASE("Str picks string_view for view-stable types and std::string otherwise
     STATIC_REQUIRE(std::same_as<decltype(Str(MemberToStringType{})), std::string>);
 }
 
-TEST_CASE("Str materializes an owning string for non-view types", "[meta]") {
+TEST_CASE("Str materializes an owning string for non-view types", "[Core.ToString]") {
     REQUIRE(Str(42) == "42");
     REQUIRE(Str(-7) == "-7");
     REQUIRE(Str(3.5) == ToString(3.5));
@@ -483,7 +499,7 @@ TEST_CASE("Str materializes an owning string for non-view types", "[meta]") {
     REQUIRE(Str(obj) == ToString(obj));
 }
 
-TEST_CASE("Str is now total over any ToString-able type", "[meta]") {
+TEST_CASE("Str is now total over any ToString-able type", "[Core.ToString]") {
     STATIC_REQUIRE(requires(int x) { Str(x); });
     STATIC_REQUIRE(requires(double x) { Str(x); });
     STATIC_REQUIRE(requires(std::string s) { Str(s); });
@@ -491,12 +507,12 @@ TEST_CASE("Str is now total over any ToString-able type", "[meta]") {
     STATIC_REQUIRE(requires(PlainObject o) { Str(o); });
 }
 
-TEST_CASE("Str owning result matches ToString for view-incapable types", "[meta]") {
+TEST_CASE("Str owning result matches ToString for view-incapable types", "[Core.ToString]") {
     REQUIRE(Str(std::vector<int>{1, 2, 3}) == ToString(std::vector<int>{1, 2, 3}));
     REQUIRE(Str(NestedObject{}) == ToString(NestedObject{}));
 }
 
-TEST_CASE("VariantLike detects only std::variant", "[meta]") {
+TEST_CASE("VariantLike detects only std::variant", "[Core.ToString]") {
     STATIC_REQUIRE(Traits::VariantLike<std::variant<int>>);
     STATIC_REQUIRE(Traits::VariantLike<std::variant<int, std::string, Color>>);
     STATIC_REQUIRE(Traits::VariantLike<const std::variant<int>&>);
@@ -507,7 +523,7 @@ TEST_CASE("VariantLike detects only std::variant", "[meta]") {
     STATIC_REQUIRE_FALSE(Traits::VariantLike<PlainObject>);
 }
 
-TEST_CASE("ToString renders the active variant alternative", "[meta]") {
+TEST_CASE("ToString renders the active variant alternative", "[Core.ToString]") {
     std::variant<int, std::string, Color> v;
 
     v = 42;
@@ -520,7 +536,7 @@ TEST_CASE("ToString renders the active variant alternative", "[meta]") {
     REQUIRE(S(v) == "green");
 }
 
-TEST_CASE("ToString recurses into composite variant alternatives", "[meta]") {
+TEST_CASE("ToString recurses into composite variant alternatives", "[Core.ToString]") {
     std::variant<std::vector<int>, PlainObject> v;
 
     v = std::vector<int>{1, 2, 3};
@@ -530,7 +546,7 @@ TEST_CASE("ToString recurses into composite variant alternatives", "[meta]") {
     REQUIRE(S(v) == ToString(PlainObject{1, "a", Color::red}));
 }
 
-TEST_CASE("ToString handles variant holding std::monostate", "[meta]") {
+TEST_CASE("ToString handles variant holding std::monostate", "[Core.ToString]") {
     std::variant<std::monostate, int> v;
     REQUIRE(S(v) == S(std::monostate{}));
 
@@ -538,8 +554,23 @@ TEST_CASE("ToString handles variant holding std::monostate", "[meta]") {
     REQUIRE(S(v) == "7");
 }
 
-TEST_CASE("ToString supports nested variants", "[meta]") {
+TEST_CASE("ToString supports nested variants", "[Core.ToString]") {
     using Inner = std::variant<int, Color>;
     std::variant<Inner, std::string> v = Inner{Color::blue};
     REQUIRE(S(v) == "blue");
 }
+
+// Regression: ToString must work on types declared in namespace Mashiro. The CPO
+// design prevents the ADL probe from rediscovering the dispatcher (which used to
+// recurse infinitely). vec3 also has no named _pad member, so reflection must
+// surface only x/y/z.
+TEST_CASE("ToString reflects Mashiro types without self-recursion or padding", "[Core.ToString]") {
+    const std::string out = S(vec3{1.0f, 2.0f, 3.0f});
+
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT(out, ContainsSubstring("x="));
+    REQUIRE_THAT(out, ContainsSubstring("y="));
+    REQUIRE_THAT(out, ContainsSubstring("z="));
+    REQUIRE(out.find("_pad") == std::string::npos);
+}
+

@@ -1,8 +1,11 @@
-/** 
- * @brief Geometry utility functions for Types.h primitives (AABB, Ray, Frustum).
+/**
+ * @file GeometryUtils.h
+ * @brief Geometry utility functions for AABB, Ray, and Frustum primitives.
  *
- * Header-only, inline. All functions operate on miki::core geometry types. Consumed by BVH, Octree, GPU culling,
- * picking, and any spatial query code.
+ * Header-only, all `inline`. Operates on Mashiro geometry types defined in
+ * Types.h. Consumed by BVH, octree, GPU culling, picking, and spatial queries.
+ *
+ * @ingroup Core
  */
 #pragma once
 
@@ -15,11 +18,10 @@
 
 namespace Mashiro {
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // AABB operations
-    // ─────────────────────────────────────────────────────────────────────────────
+    /// @name AABB operations
+    /// @{
 
-    /** @brief Union of two AABBs (smallest AABB enclosing both). */
+    /** @brief Smallest AABB enclosing both @p a and @p b. */
     [[nodiscard]] inline auto UnionAABB(AABB const& a, AABB const& b) -> AABB {
         return AABB{
             .min = {.x = std::min(a.min.x, b.min.x), .y = std::min(a.min.y, b.min.y), .z = std::min(a.min.z, b.min.z)},
@@ -36,8 +38,8 @@ namespace Mashiro {
     }
 
     /** @brief Centroid of an AABB. */
-    [[nodiscard]] inline auto Centroid(AABB const& box) -> float3 {
-        return float3{
+    [[nodiscard]] inline auto Centroid(AABB const& box) -> vec3 {
+        return vec3{
             .x = 0.5f * (box.min.x + box.max.x),
             .y = 0.5f * (box.min.y + box.max.y),
             .z = 0.5f * (box.min.z + box.max.z)
@@ -45,8 +47,8 @@ namespace Mashiro {
     }
 
     /** @brief Extents (half-size per axis) of an AABB. */
-    [[nodiscard]] inline auto Extents(AABB const& box) -> float3 {
-        return float3{
+    [[nodiscard]] inline auto Extents(AABB const& box) -> vec3 {
+        return vec3{
             .x = 0.5f * (box.max.x - box.min.x),
             .y = 0.5f * (box.max.y - box.min.y),
             .z = 0.5f * (box.max.z - box.min.z)
@@ -60,17 +62,28 @@ namespace Mashiro {
     }
 
     /** @brief Test if a point is inside an AABB (inclusive). */
-    [[nodiscard]] inline auto AABBContainsPoint(AABB const& box, float3 const& p) -> bool {
+    [[nodiscard]] inline auto AABBContainsPoint(AABB const& box, vec3 const& p) -> bool {
         return p.x >= box.min.x && p.x <= box.max.x && p.y >= box.min.y && p.y <= box.max.y && p.z >= box.min.z
                && p.z <= box.max.z;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Frustum tests
-    // ─────────────────────────────────────────────────────────────────────────────
+    /// @}
 
-    /** @brief Test AABB against frustum (6 planes). Conservative: may return true for near-misses.
-     *  Plane equation: dot(normal, point) + w >= 0 means inside. */
+    /// @name Frustum tests
+    /// @{
+
+    /**
+     * @brief Conservative AABB-vs-frustum test (6 planes).
+     *
+     * May return `true` for near-misses (false positive), but never `false`
+     * for a box that is actually inside the frustum.
+     *
+     * Plane equation convention: `dot(normal, point) + w >= 0` means *inside*.
+     *
+     * @param box     Axis-aligned bounding box to test.
+     * @param frustum Six clipping planes of the view frustum.
+     * @return `true` if the box is (conservatively) inside the frustum.
+     */
     [[nodiscard]] inline auto AABBIntersectsFrustum(AABB const& box, FrustumPlanes const& frustum) -> bool {
         for (int i = 0; i < 6; ++i) {
             auto const& p = frustum.planes[i];
@@ -85,20 +98,23 @@ namespace Mashiro {
         return true;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Point-AABB distance
-    // ─────────────────────────────────────────────────────────────────────────────
+    /// @}
 
-    /** @brief Squared distance from a point to the nearest point on an AABB surface.
-     *  Returns 0 if the point is inside or on the AABB. Used by nearest-neighbor queries. */
-    [[nodiscard]] inline auto PointAABBDistSq(float3 const& p, AABB const& box) -> float {
+    /// @name Point–AABB distance
+    /// @{
+
+    /**
+     * @brief Squared distance from point @p p to the nearest point on @p box.
+     * @return 0 if @p p is inside or on the surface; used by nearest-neighbour queries.
+     */
+    [[nodiscard]] inline auto PointAABBDistSq(vec3 const& p, AABB const& box) -> float {
         float dx = std::max(std::max(box.min.x - p.x, p.x - box.max.x), 0.0f);
         float dy = std::max(std::max(box.min.y - p.y, p.y - box.max.y), 0.0f);
         float dz = std::max(std::max(box.min.z - p.z, p.z - box.max.z), 0.0f);
         return dx * dx + dy * dy + dz * dz;
     }
 
-    /** @brief Index of the largest extent axis (0=x, 1=y, 2=z). */
+    /// @brief Index of the largest extent axis (0 = x, 1 = y, 2 = z).
     [[nodiscard]] inline auto LargestAxis(AABB const& box) -> uint32_t {
         float dx = box.max.x - box.min.x;
         float dy = box.max.y - box.min.y;
@@ -112,17 +128,22 @@ namespace Mashiro {
         return 2;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Ray precomputation
-    // ─────────────────────────────────────────────────────────────────────────────
+    /// @}
 
-    /** @brief Precomputed ray data for fast BVH traversal.
-     *  Compute once per ray at traversal entry, reuse for all node tests.
-     *  invDir handles dir≈0 via copysign(1e20f) — IEEE 754 guarantees correct slab test. */
+    /// @name Ray precomputation
+    /// @{
+
+    /**
+     * @brief Precomputed ray data for fast BVH traversal.
+     *
+     * Compute once per ray at traversal entry with PrepareRay(), then reuse for
+     * every node test. `invDir` handles near-zero components via
+     * `copysign(1e20f)` — IEEE 754 guarantees correct slab arithmetic.
+     */
     struct RayPrecomp {
-        float3 origin;
-        float3 invDir;
-        uint32_t dirSign[3];  // 1 if direction < 0, 0 otherwise
+        vec3     origin;      ///< Ray origin.
+        vec3     invDir;      ///< Component-wise `1 / direction` (safe for dir ≈ 0).
+        uint32_t dirSign[3];  ///< 1 if direction component < 0, 0 otherwise.
     };
 
     /** @brief Prepare a ray for fast traversal. O(1), call once per ray. */
@@ -137,21 +158,25 @@ namespace Mashiro {
         return r;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Ray-AABB intersection tests
-    // ─────────────────────────────────────────────────────────────────────────────
+    /// @}
 
-    /** @brief Tavian Barnes 2022 NaN-safe, boundary-inclusive ray-AABB slab test.
+    /// @name Ray–AABB intersection tests
+    /// @{
+
+    /**
+     * @brief Tavian Barnes 2022 NaN-safe, boundary-inclusive ray–AABB slab test.
      *
-     *  Uses precomputed invDir. Handles:
-     *  - Ray direction ≈ 0 (invDir = ±1e20, IEEE 754 correct)
-     *  - Ray exactly on AABB face/edge/corner (boundary-inclusive, tmin <= tmax)
-     *  - NaN from 0 * ∞ (pushed into inner min/max, at least one arg non-NaN)
+     * Uses precomputed `invDir`. Correctly handles:
+     * - Ray direction ≈ 0 (`invDir = ±1e20`, IEEE 754 correct).
+     * - Ray exactly on AABB face / edge / corner (boundary-inclusive, `tmin ≤ tmax`).
+     * - NaN from `0 × ∞` (pushed into inner min/max; at least one arg is non-NaN).
      *
-     *  Returns (tMin, tMax). Hit if tMin <= tMax. tMin < 0 means origin inside box.
+     * @param ray Precomputed ray (see PrepareRay()).
+     * @param box Axis-aligned bounding box.
+     * @return `(tMin, tMax)`. Hit iff `tMin ≤ tMax`. `tMin < 0` ⇒ origin inside box.
      *
-     *  Reference: Tavian Barnes, "Fast, Branchless Ray/Bounding Box Intersections,
-     *  Part 3: Boundaries", 2022. https://tavianator.com/2022/ray_box_boundary.html */
+     * @see https://tavianator.com/2022/ray_box_boundary.html
+     */
     [[nodiscard]] inline auto RayAABBFast(RayPrecomp const& ray, AABB const& box) -> std::pair<float, float> {
         float tmin = 0.0f;
         float tmax = std::numeric_limits<float>::infinity();
@@ -174,12 +199,16 @@ namespace Mashiro {
         return {tmin, tmax};
     }
 
-    /** @brief Legacy ray-AABB slab test (non-precomputed, backward compatible).
-     *  Returns (tMin, tMax). If tMin > tMax, no intersection.
-     *  tMin < 0 means the ray origin is inside the box. */
+    /**
+     * @brief Convenience ray–AABB test without precomputation.
+     * @return `(tMin, tMax)`. If `tMin > tMax`, no intersection.
+     *         `tMin < 0` means the ray origin is inside the box.
+     */
     [[nodiscard]] inline auto RayAABBIntersect(Ray const& ray, AABB const& box) -> std::pair<float, float> {
         auto precomp = PrepareRay(ray);
         return RayAABBFast(precomp, box);
     }
 
-}  // namespace miki::core
+    /// @}
+
+}  // namespace Mashiro
