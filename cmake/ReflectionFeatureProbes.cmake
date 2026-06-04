@@ -8,7 +8,9 @@
 #
 #   HAVE_REFLECTION            P2996  Reflection for C++26       (MANDATORY)
 #   HAVE_DEFINE_STATIC_ARRAY   P3491  std::define_static_array   (MANDATORY)
-#   HAVE_ANNOTATIONS           P3394  Annotations for Reflection (MANDATORY*)
+#   HAVE_ANNOTATIONS           P3394  Annotations for Reflection (MANDATORY)
+#   HAVE_CONSTEVAL_BLOCKS       P3289  consteval { } blocks       (MANDATORY)
+#   HAVE_EXPANSION_STATEMENTS   P1306  template for               (MANDATORY)
 #
 # (*) P3394 was plenary-approved into the C++26 IS working draft (Sofia, 2025),
 #     so it is a standard feature. Per project policy it is therefore required;
@@ -149,6 +151,39 @@ int main() {
 }
 " HAVE_DATA_MEMBER_SPEC_ATTRIBUTES)
 
+# --- P3289: consteval blocks (namespace/class scope immediate evaluation) -----
+check_cxx_source_compiles("
+#include <meta>
+struct HetisConstevalBlockProbe;
+consteval {
+    std::meta::define_aggregate(^^HetisConstevalBlockProbe, {
+        std::meta::data_member_spec(^^int,   {.name = \"x\"}),
+        std::meta::data_member_spec(^^float, {.name = \"y\"}),
+    });
+}
+static_assert(sizeof(HetisConstevalBlockProbe) == 8);
+int main() { return 0; }
+" HAVE_CONSTEVAL_BLOCKS)
+
+# --- P1306: expansion statements (template for) ------------------------------
+check_cxx_source_compiles("
+#include <meta>
+#include <ranges>
+struct HetisExpansionProbe { int a; float b; double c; };
+consteval int hetisCountViaExpansion() {
+    int n = 0;
+    template for (constexpr auto m : std::define_static_array(
+            std::meta::nonstatic_data_members_of(
+                ^^HetisExpansionProbe,
+                std::meta::access_context::unchecked()))) {
+        ++n;
+    }
+    return n;
+}
+static_assert(hetisCountViaExpansion() == 3);
+int main() { return 0; }
+" HAVE_EXPANSION_STATEMENTS)
+
 # --- P3394: annotation structural value --------------------------------------
 check_cxx_source_compiles("
 #include <meta>
@@ -184,5 +219,18 @@ if(NOT HAVE_ANNOTATIONS OR NOT HAVE_STRUCTURAL_ANNOTATION_VALUE)
         "        (-freflection-latest must implement annotations).")
 endif()
 
-message(STATUS "[Hetis] C++26 reflection features: P2996 reflection, "
-               "P3491 define_static_array, P3394 annotations -> all present (required).")
+if(NOT HAVE_CONSTEVAL_BLOCKS)
+    message(FATAL_ERROR
+        "[Hetis] consteval blocks (P3289) are required but the compiler probe failed.\n"
+        "        P3289 is the preferred mechanism for compile-time code generation.\n"
+        "        Ensure -freflection-latest is enabled (COCA clang-p2996 implements P3289).")
+endif()
+
+if(NOT HAVE_EXPANSION_STATEMENTS)
+    message(FATAL_ERROR
+        "[Hetis] expansion statements / template for (P1306) are required but the compiler probe failed.\n"
+        "        P1306 is essential for compile-time iteration over reflected members.\n"
+        "        Ensure -freflection-latest is enabled.")
+endif()
+
+message(STATUS "[Hetis] C++26 reflection features: P2996, P3491, P3394, P3289, P1306 -> all present (required).")
