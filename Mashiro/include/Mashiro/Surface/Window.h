@@ -15,7 +15,13 @@
 #include <string_view>
 #include <vector>
 
-namespace neko::platform {
+namespace Mashiro {
+
+    namespace Platform {
+
+        
+
+    }
 
 // ============================================================================
 // Forward Declarations

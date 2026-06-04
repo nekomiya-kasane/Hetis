@@ -40,7 +40,7 @@
  */
 #pragma once
 
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 #include "Mashiro/Math/MathUtils.h"
 
 #include <concepts>

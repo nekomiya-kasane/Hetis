@@ -41,59 +41,59 @@
 
 namespace Mashiro::Math {
 
+    // =================================================================
+    // Polynomial coefficient tables & Horner evaluation
+    // =================================================================
+
+    /**
+     * @brief Compile-time factorial computed in `long double` for maximum precision.
+     * @param n  Non-negative integer.
+     * @return \f$ n! \f$.
+     */
+    [[nodiscard]] constexpr long double Factorial(int n) {
+        long double f = 1.0L;
+        for (int i = 2; i <= n; ++i) {
+            f *= static_cast<long double>(i);
+        }
+        return f;
+    }
+
+    /**
+     * @brief Horner-scheme polynomial evaluation.
+     *
+     * Computes \f$ c_0 + t(c_1 + t(c_2 + \cdots)) \f$.
+     *
+     * @tparam T  Floating-point scalar type.
+     * @tparam N  Number of coefficients.
+     * @param t   Evaluation point.
+     * @param c   Coefficient array (ascending powers).
+     */
+    template<std::floating_point T, size_t N>
+    [[nodiscard]] constexpr T Horner(T t, const std::array<T, N>& c) {
+        T acc = c[N - 1];
+        for (size_t i = N - 1; i > 0; --i) {
+            acc = acc * t + c[i - 1];
+        }
+        return acc;
+    }
+
+    /**
+     * @brief Build a polynomial coefficient table at compile time.
+     * @tparam T      Scalar type of the coefficients.
+     * @tparam Terms  Number of terms to generate.
+     * @param gen     Generator callable: `gen(int k) -> T`.
+     */
+    template<std::floating_point T, size_t Terms, typename Gen>
+    [[nodiscard]] consteval std::array<T, Terms> MakePoly(Gen gen) {
+        std::array<T, Terms> c{};
+        for (size_t k = 0; k < Terms; ++k) {
+            c[k] = gen(static_cast<int>(k));
+        }
+        return c;
+    }
+
     /** @cond INTERNAL */
     namespace Detail {
-
-        // =================================================================
-        // Polynomial coefficient tables & Horner evaluation
-        // =================================================================
-
-        /**
-         * @brief Compile-time factorial computed in `long double` for maximum precision.
-         * @param n  Non-negative integer.
-         * @return \f$ n! \f$.
-         */
-        [[nodiscard]] constexpr long double Factorial(int n) {
-            long double f = 1.0L;
-            for (int i = 2; i <= n; ++i) {
-                f *= static_cast<long double>(i);
-            }
-            return f;
-        }
-
-        /**
-         * @brief Horner-scheme polynomial evaluation.
-         *
-         * Computes \f$ c_0 + t(c_1 + t(c_2 + \cdots)) \f$.
-         *
-         * @tparam T  Floating-point scalar type.
-         * @tparam N  Number of coefficients.
-         * @param t   Evaluation point.
-         * @param c   Coefficient array (ascending powers).
-         */
-        template<std::floating_point T, size_t N>
-        [[nodiscard]] constexpr T Horner(T t, const std::array<T, N>& c) {
-            T acc = c[N - 1];
-            for (size_t i = N - 1; i > 0; --i) {
-                acc = acc * t + c[i - 1];
-            }
-            return acc;
-        }
-
-        /**
-         * @brief Build a polynomial coefficient table at compile time.
-         * @tparam T      Scalar type of the coefficients.
-         * @tparam Terms  Number of terms to generate.
-         * @param gen     Generator callable: `gen(int k) -> T`.
-         */
-        template<std::floating_point T, size_t Terms, typename Gen>
-        [[nodiscard]] consteval std::array<T, Terms> MakePoly(Gen gen) {
-            std::array<T, Terms> c{};
-            for (size_t k = 0; k < Terms; ++k) {
-                c[k] = gen(static_cast<int>(k));
-            }
-            return c;
-        }
 
         // -----------------------------------------------------------------
         // Precision-dependent configuration
@@ -141,7 +141,8 @@ namespace Mashiro::Math {
             return static_cast<T>((k & 1) ? -v : v);
         });
 
-        /// \f$ \operatorname{atan}(a) = a \cdot A(a^2),\; A(t) = \sum_k \frac{(-1)^k\, t^k}{2k+1} \f$
+        /// \f$ \operatorname{atan}(a) = a \cdot A(a^2),\; A(t) = \sum_k \frac{(-1)^k\, t^k}{2k+1}
+        /// \f$
         template<std::floating_point T>
         inline constexpr auto kAtanPoly = MakePoly<T, kAtanTerms<T>>([](int k) -> T {
             long double v = 1.0L / static_cast<long double>(2 * k + 1);
@@ -198,7 +199,7 @@ namespace Mashiro::Math {
             T kf = x * Const::kTwoOverPi<T>;
             long long k = static_cast<long long>(kf + (kf < T(0) ? T(-0.5) : T(0.5)));
             T kfl = static_cast<T>(k);
-            T r = (x - kfl * Const::kHalfPiHi<T>) - kfl * Const::kHalfPiLo<T>;
+            T r = (x - kfl * Const::kHalfPiHi<T>)-kfl * Const::kHalfPiLo<T>;
             T r2 = r * r;
 
             T s = r * Horner(r2, kSinPoly<T>);
@@ -268,7 +269,8 @@ namespace Mashiro::Math {
         }
 
         /**
-         * @brief Constexpr arcsine via the identity \f$\arcsin(x) = \operatorname{atan2}(x, \sqrt{1-x^2})\f$.
+         * @brief Constexpr arcsine via the identity \f$\arcsin(x) = \operatorname{atan2}(x,
+         * \sqrt{1-x^2})\f$.
          * @tparam T  `float` or `double`.
          */
         template<std::floating_point T>
@@ -283,7 +285,8 @@ namespace Mashiro::Math {
         }
 
         /**
-         * @brief Constexpr arccosine via the identity \f$\arccos(x) = \operatorname{atan2}(\sqrt{1-x^2}, x)\f$.
+         * @brief Constexpr arccosine via the identity \f$\arccos(x) =
+         * \operatorname{atan2}(\sqrt{1-x^2}, x)\f$.
          * @tparam T  `float` or `double`.
          */
         template<std::floating_point T>
@@ -511,5 +514,45 @@ namespace Mashiro::Math {
     }
 
     /// @}
+
+    /// @brief Degrees literal (float): `90.0_deg` → radians.
+    [[nodiscard]] consteval float operator""_deg(long double deg) {
+        return static_cast<float>(deg * Const::kDegToRad<long double>);
+    }
+
+    /// @brief Degrees literal (integer, float): `90_deg` → radians.
+    [[nodiscard]] consteval float operator""_deg(unsigned long long deg) {
+        return static_cast<float>(static_cast<long double>(deg) * Const::kDegToRad<long double>);
+    }
+
+    /// @brief Radians literal (float): `1.57_rad` — identity, serves as documentation.
+    [[nodiscard]] consteval float operator""_rad(long double rad) {
+        return static_cast<float>(rad);
+    }
+
+    /// @brief Radians literal (integer, float): `1_rad` — identity.
+    [[nodiscard]] consteval float operator""_rad(unsigned long long rad) {
+        return static_cast<float>(rad);
+    }
+
+    /// @brief Degrees literal (long double): `90.0_deg_d` → radians.
+    [[nodiscard]] consteval long double operator""_deg_d(long double deg) {
+        return deg * Const::kDegToRad<long double>;
+    }
+
+    /// @brief Degrees literal (integer, long double): `90_deg_d` → radians.
+    [[nodiscard]] consteval long double operator""_deg_d(unsigned long long deg) {
+        return static_cast<long double>(deg) * Const::kDegToRad<long double>;
+    }
+
+    /// @brief Radians literal (long double): `1.57_rad_d` — identity.
+    [[nodiscard]] consteval long double operator""_rad_d(long double rad) {
+        return rad;
+    }
+
+    /// @brief Radians literal (integer, long double): `1_rad_d` — identity.
+    [[nodiscard]] consteval long double operator""_rad_d(unsigned long long rad) {
+        return static_cast<long double>(rad);
+    }
 
 } // namespace Mashiro::Math
