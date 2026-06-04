@@ -117,4 +117,58 @@ namespace Mashiro::Traits {
     template<typename... Ts>
     Overload(Ts...) -> Overload<Ts...>;
 
+    namespace Detail {
+
+        /// @brief Compile-time check: the enum values increases from 0 within the enum type
+        template<typename T>
+            requires std::is_enum_v<T>
+        consteval bool IsEnumSequential() {
+            auto enumerators = std::meta::enumerators_of(^^T);
+            if (enumerators.size() == 0) {
+                return false;
+            }
+            for (size_t i = 0; i < enumerators.size(); ++i) {
+                if (std::meta::value_of(enumerators[i]) !=
+                    static_cast<std::underlying_type_t<T>>(i)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// @brief Compile-time check: the enum type is a flags enum
+        template<typename T>
+            requires std::is_enum_v<T>
+        consteval bool IsEnumFlags() {
+            auto enumerators = std::meta::enumerators_of(^^T);
+            if (enumerators.size() == 0) {
+                return false;
+            }
+            for (size_t i = 0; i < enumerators.size(); ++i) {
+                if (std::meta::value_of(enumerators[i]) !=
+                    static_cast<std::underlying_type_t<T>>(1 << i)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// @brief Compile-time getter for the number of enumerators in an enum type
+        template<typename T>
+            requires std::is_enum_v<T>
+        consteval size_t GetEnumEnumeratorCount() {
+            return std::meta::enumerators_of(^^T).size();
+        }
+
+    } // namespace Detail
+
+    template<typename T> requires std::is_enum_v<T>
+    concept SequentialEnum = Detail::IsEnumSequential<T>();
+    
+    template<typename T> requires std::is_enum_v<T>
+    concept FlagLikeEnum = Detail::IsEnumFlags<T>();
+
+    template<typename T>
+    inline constexpr size_t EnumEnumeratorsCount = Detail::GetEnumEnumeratorCount<T>();
+
 } // namespace Mashiro::Traits
