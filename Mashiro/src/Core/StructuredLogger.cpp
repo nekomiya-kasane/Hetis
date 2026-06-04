@@ -44,7 +44,7 @@ namespace Mashiro {
             constexpr auto buildStyleTable = [] consteval {
                 std::array<tapioca::style, 6> table{};
                 for (int i = 0; i < 6; ++i) {
-                    auto c = Detail::Log::GetLevelColor(static_cast<LogLevel>(i));
+                    auto c = Detail::Log::kLevelColors[i];
                     table[i].fg = color::from_rgb(c.r, c.g, c.b);
                     table[i].bg = color::default_color();
                     table[i].attrs = (c.bold ? attr::bold : attr::none) | (c.dim ? attr::dim : attr::none);
@@ -253,7 +253,7 @@ namespace Mashiro {
     StructuredLogger::StructuredLogger() {
         // Initialize per-category levels from [[=LogAnno::DefaultLevel{N}]] annotations.
         for (std::size_t i = 0; i < categoryLevels_.size(); ++i) {
-            uint8_t defaultLvl = (i < Detail::Log::kDefaultCategoryLevels.size())
+            uint8_t defaultLvl = (i < std::size(Detail::Log::kDefaultCategoryLevels))
                 ? Detail::Log::kDefaultCategoryLevels[i]
                 : 0; // Trace for user-extended categories
             categoryLevels_[i].store(defaultLvl, std::memory_order_relaxed);
@@ -314,6 +314,15 @@ namespace Mashiro {
         std::lock_guard lock(ringsMutex_);
         for (auto& reg : rings_)
             if (reg.ring) reg.ring->Reset();
+    }
+
+    void StructuredLogger::Submit(LogLevel level, LogCategory cat,
+                                     SourceLoc loc, std::string_view message)
+    {
+        auto ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        WriteToRing(level, cat, loc.file, loc.line, loc.function, ns, message);
     }
 
     void StructuredLogger::WriteToRing(

@@ -28,6 +28,7 @@ add_mashiro_test(Core InlineFunctionTest)
 add_mashiro_test(Core ChunkedSlotMapTest)
 add_mashiro_test(Core LinearAllocatorTest)
 add_mashiro_test(Core SpscRingBufferTest)
+add_mashiro_test(Core StructuredLoggerTest)
 
 add_mashiro_test(Math VecTest eigen)
 add_mashiro_test(Math MatTest eigen)

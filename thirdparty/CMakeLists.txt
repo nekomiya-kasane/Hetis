@@ -419,7 +419,13 @@ if(VK_TP_BUILD_CATCH2)
 endif()
 
 # -----------------------------------------------------------------------------
-# 31b. Eigen — header-only linear algebra library (used as oracle in math tests)
+# 31b. icetea + tapioca (Mashiro infrastructure)
+# -----------------------------------------------------------------------------
+add_subdirectory(icetea)
+add_subdirectory(tapioca)
+
+# -----------------------------------------------------------------------------
+# 31c. Eigen — header-only linear algebra library (used as oracle in math tests)
 # -----------------------------------------------------------------------------
 add_library(eigen INTERFACE)
 target_include_directories(eigen SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/eigen)

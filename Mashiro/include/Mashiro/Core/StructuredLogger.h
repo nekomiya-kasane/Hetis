@@ -73,18 +73,12 @@ namespace Mashiro {
 
     /// @brief Severity level for log messages (ordered by increasing severity).
     enum class LogLevel : uint8_t {
-        [[=LogAnno::LevelColor{128, 128, 128, false, true}]]
-        Trace = 0,
-        [[=LogAnno::LevelColor{0, 200, 200}]]
-        Debug = 1,
-        [[=LogAnno::LevelColor{0, 200, 0}]]
-        Info  = 2,
-        [[=LogAnno::LevelColor{220, 220, 0, true}]]
-        Warn  = 3,
-        [[=LogAnno::LevelColor{220, 0, 0, true}]]
-        Error = 4,
-        [[=LogAnno::LevelColor{255, 255, 255, true}]]
-        Fatal = 5,
+        Trace = 0, ///< Finest-grained diagnostic output.
+        Debug = 1, ///< Debug-time information.
+        Info  = 2, ///< Normal operational messages.
+        Warn  = 3, ///< Potentially harmful conditions.
+        Error = 4, ///< Recoverable errors.
+        Fatal = 5, ///< Unrecoverable errors (typically followed by abort).
     };
 
     /// @brief Compile-time minimum log level. Messages below this are eliminated.
@@ -105,55 +99,89 @@ namespace Mashiro {
     /**
      * @brief Semantic domain for log messages (runtime-filterable).
      *
-     * Annotated with `[[=LogAnno::DefaultLevel{N}]]` for initial runtime level.
+     * Default levels are declared in `Detail::Log::kDefaultCategoryLevels[]`.
      * Users extend via: `inline constexpr LogCategory kMyPlugin = static_cast<LogCategory>(100);`
      */
     enum class LogCategory : uint16_t {
-        [[=LogAnno::DefaultLevel{2}]] Core     = 0,
-        [[=LogAnno::DefaultLevel{2}]] Render   = 1,
-        [[=LogAnno::DefaultLevel{2}]] Resource = 2,
-        [[=LogAnno::DefaultLevel{1}]] Scene    = 3,
-        [[=LogAnno::DefaultLevel{1}]] Input    = 4,
-        [[=LogAnno::DefaultLevel{2}]] Audio    = 5,
-        [[=LogAnno::DefaultLevel{2}]] Network  = 6,
-        [[=LogAnno::DefaultLevel{1}]] Script   = 7,
-        [[=LogAnno::DefaultLevel{1}]] Editor   = 8,
-        [[=LogAnno::DefaultLevel{1}]] Physics  = 9,
-        [[=LogAnno::DefaultLevel{2}]] UI       = 10,
-        [[=LogAnno::DefaultLevel{0}]] App      = 11,
+        Core     = 0,
+        Render   = 1,
+        Resource = 2,
+        Scene    = 3,
+        Input    = 4,
+        Audio    = 5,
+        Network  = 6,
+        Script   = 7,
+        Editor   = 8,
+        Physics  = 9,
+        UI       = 10,
+        App      = 11,
     };
 
     // =========================================================================
-    // Annotation extraction (consteval — zero runtime cost)
+    // Log traits — specialise to customise category/level display properties
     // =========================================================================
+
+    /// @brief Default level for a LogCategory. Specialise to override.
+    template <LogCategory Cat>
+    struct LogCategoryTraits {
+        static constexpr LogLevel defaultLevel = LogLevel::Trace;
+    };
+
+    template <> struct LogCategoryTraits<LogCategory::Core>     { static constexpr LogLevel defaultLevel = LogLevel::Info;  };
+    template <> struct LogCategoryTraits<LogCategory::Render>   { static constexpr LogLevel defaultLevel = LogLevel::Info;  };
+    template <> struct LogCategoryTraits<LogCategory::Resource> { static constexpr LogLevel defaultLevel = LogLevel::Info;  };
+    template <> struct LogCategoryTraits<LogCategory::Scene>    { static constexpr LogLevel defaultLevel = LogLevel::Debug; };
+    template <> struct LogCategoryTraits<LogCategory::Input>    { static constexpr LogLevel defaultLevel = LogLevel::Debug; };
+    template <> struct LogCategoryTraits<LogCategory::Audio>    { static constexpr LogLevel defaultLevel = LogLevel::Info;  };
+    template <> struct LogCategoryTraits<LogCategory::Network>  { static constexpr LogLevel defaultLevel = LogLevel::Info;  };
+    template <> struct LogCategoryTraits<LogCategory::Script>   { static constexpr LogLevel defaultLevel = LogLevel::Debug; };
+    template <> struct LogCategoryTraits<LogCategory::Editor>   { static constexpr LogLevel defaultLevel = LogLevel::Debug; };
+    template <> struct LogCategoryTraits<LogCategory::Physics>  { static constexpr LogLevel defaultLevel = LogLevel::Debug; };
+    template <> struct LogCategoryTraits<LogCategory::UI>       { static constexpr LogLevel defaultLevel = LogLevel::Info;  };
+    template <> struct LogCategoryTraits<LogCategory::App>      { static constexpr LogLevel defaultLevel = LogLevel::Trace; };
+
+    /// @brief Display color for a LogLevel. Specialise to override.
+    template <LogLevel Level>
+    struct LogLevelTraits {
+        static constexpr LogAnno::LevelColor color = {255, 255, 255};
+    };
+
+    template <> struct LogLevelTraits<LogLevel::Trace> { static constexpr LogAnno::LevelColor color = {128, 128, 128, false, true};  };
+    template <> struct LogLevelTraits<LogLevel::Debug> { static constexpr LogAnno::LevelColor color = {0,   200, 200};                };
+    template <> struct LogLevelTraits<LogLevel::Info>  { static constexpr LogAnno::LevelColor color = {0,   200, 0};                  };
+    template <> struct LogLevelTraits<LogLevel::Warn>  { static constexpr LogAnno::LevelColor color = {220, 220, 0,   true};          };
+    template <> struct LogLevelTraits<LogLevel::Error> { static constexpr LogAnno::LevelColor color = {220, 0,   0,   true};          };
+    template <> struct LogLevelTraits<LogLevel::Fatal> { static constexpr LogAnno::LevelColor color = {255, 255, 255, true};          };
 
     /** @cond INTERNAL */
     namespace Detail::Log {
 
+        /// @brief Build default-level array from traits at compile time.
         consteval auto BuildDefaultLevels() {
-            auto enumerators = std::meta::enumerators_of(^^LogCategory);
-            std::array<uint8_t, enumerators.size()> levels{};
-            for (std::size_t i = 0; i < enumerators.size(); ++i) {
-                auto annots = std::meta::annotations_of(enumerators[i], ^^LogAnno::DefaultLevel);
-                levels[i] = (annots.size() > 0)
-                    ? std::meta::extract<LogAnno::DefaultLevel>(annots[0]).level
-                    : 0;
+            constexpr auto N = Traits::EnumEnumeratorsCount<LogCategory>;
+            std::array<uint8_t, N> levels{};
+            template for (constexpr auto e : std::define_static_array(
+                std::meta::enumerators_of(^^LogCategory))) {
+                constexpr auto cat = [:e:];
+                levels[static_cast<std::size_t>(cat)] =
+                    static_cast<uint8_t>(LogCategoryTraits<cat>::defaultLevel);
             }
             return levels;
         }
-
         inline constexpr auto kDefaultCategoryLevels = BuildDefaultLevels();
 
-        consteval LogAnno::LevelColor GetLevelColor(LogLevel level) {
-            for (auto e : std::meta::enumerators_of(^^LogLevel)) {
-                if (std::meta::constant_of(e) == static_cast<uint8_t>(level)) {
-                    auto annots = std::meta::annotations_of(e, ^^LogAnno::LevelColor);
-                    if (annots.size() > 0)
-                        return std::meta::extract<LogAnno::LevelColor>(annots[0]);
-                }
+        /// @brief Build color array from traits at compile time.
+        consteval auto BuildLevelColors() {
+            constexpr auto N = Traits::EnumEnumeratorsCount<LogLevel>;
+            std::array<LogAnno::LevelColor, N> colors{};
+            template for (constexpr auto e : std::define_static_array(
+                std::meta::enumerators_of(^^LogLevel))) {
+                constexpr auto lvl = [:e:];
+                colors[static_cast<std::size_t>(lvl)] = LogLevelTraits<lvl>::color;
             }
-            return {255, 255, 255};
+            return colors;
         }
+        inline constexpr auto kLevelColors = BuildLevelColors();
 
     } // namespace Detail::Log
     /** @endcond */
@@ -177,6 +205,22 @@ namespace Mashiro {
         [[nodiscard]] std::string FileName() const {
             return std::filesystem::path{file}.filename().string();
         }
+    };
+
+    /// @brief Carries an auto-captured `SourceLoc`.
+    ///
+    /// Implicitly constructs from nothing via the defaulted
+    /// `std::source_location::current()` parameter, capturing the
+    /// **caller's** site. Use as the last non-pack parameter:
+    /// @code
+    ///   template <typename... Args>
+    ///   void f(CallerLoc loc, std::format_string<Args...> fmt, Args&&... args);
+    ///   // caller: f({}, "hello {}", 42);  — loc captures caller site
+    /// @endcode
+    struct CallerLoc {
+        SourceLoc loc;
+        constexpr CallerLoc(std::source_location l = std::source_location::current()) noexcept
+            : loc{SourceLoc::Current(l)} {}
     };
 
     // =========================================================================
@@ -306,26 +350,24 @@ namespace Mashiro {
          *
          * Formats into a stack-local 512-byte buffer, serialises to the
          * thread-local SPSC ring, and notifies the drain thread. `SourceLoc`
-         * is auto-captured via default parameter.
+         * is auto-captured via `CallerLoc`'s implicit constructor.
+         *
+         * @param caller  Auto-captured caller site (pass `{}` or omit).
          */
         template <typename... Args>
-        void Log(LogLevel level, LogCategory cat,
-                 std::format_string<Args...> fmt, Args&&... args,
-                 SourceLoc loc = SourceLoc::Current()) {
+        void Log(CallerLoc caller, LogLevel level, LogCategory cat,
+                 std::format_string<Args...> fmt, Args&&... args) {
             if (static_cast<uint8_t>(level) < static_cast<uint8_t>(kMinLogLevel)) return;
             if (static_cast<uint8_t>(level) < static_cast<uint8_t>(GetCategoryLevel(cat))) return;
-
-            auto ns = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()).count());
-
             char buf[512];
             auto result = std::format_to_n(buf, sizeof(buf) - 1, fmt, std::forward<Args>(args)...);
             *result.out = '\0';
-
-            WriteToRing(level, cat, loc.file, loc.line, loc.function, ns,
-                        std::string_view{buf, static_cast<std::size_t>(result.out - buf)});
+            Submit(level, cat, caller.loc,
+                   std::string_view{buf, static_cast<std::size_t>(result.out - buf)});
         }
+
+        /// @brief Non-template entry point (exported from DLL). Called by Log/LogAt.
+        void Submit(LogLevel level, LogCategory cat, SourceLoc loc, std::string_view message);
 
         /// @brief Flush all sinks. Blocks until drain processes pending entries.
         void Flush();
@@ -410,12 +452,11 @@ namespace Mashiro {
      * @endcode
      */
     template <LogLevel Level, LogCategory Cat, typename... Args>
-    void Log(std::format_string<Args...> fmt, Args&&... args,
-             SourceLoc loc = SourceLoc::Current()) {
+    void Log(CallerLoc caller, std::format_string<Args...> fmt, Args&&... args) {
         if constexpr (static_cast<uint8_t>(Level) >= static_cast<uint8_t>(kMinLogLevel)) {
             auto& logger = StructuredLogger::Instance();
             if (static_cast<uint8_t>(Level) >= static_cast<uint8_t>(logger.GetCategoryLevel(Cat)))
-                logger.Log(Level, Cat, fmt, std::forward<Args>(args)..., loc);
+                logger.Log(caller, Level, Cat, fmt, std::forward<Args>(args)...);
         }
     }
 
@@ -429,4 +470,4 @@ namespace Mashiro {
 // =============================================================================
 
 #define MLOG(level, cat, ...) \
-    ::Mashiro::Log<::Mashiro::LogLevel::level, ::Mashiro::LogCategory::cat>(__VA_ARGS__)
+    ::Mashiro::Log<::Mashiro::LogLevel::level, ::Mashiro::LogCategory::cat>({}, __VA_ARGS__)

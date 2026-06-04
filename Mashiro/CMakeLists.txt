@@ -14,10 +14,15 @@ target_include_directories(Mashiro PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
 )
+target_link_libraries(Mashiro PRIVATE tapioca)
+if(WIN32)
+    target_link_libraries(Mashiro PRIVATE dbghelp)
+endif()
 set_target_properties(Mashiro PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
     FOLDER "Mashiro"
 
     COMPILE_PDB_NAME "Mashiro.Comp"
