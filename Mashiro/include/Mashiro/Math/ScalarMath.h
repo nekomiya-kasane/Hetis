@@ -14,29 +14,30 @@
  *
  * **Precision.**
  * - `float`: 5-term Taylor tails (sin/cos), 6-term atan, 5 Newton–Raphson iterations
- *   for sqrt. Error < ~3e-7 (≈1 ULP).
+ *   for sqrt. Error \f$< 3 \times 10^{-7}\f$ (\f$\approx 1\f$ ULP).
  * - `double`: 10-term Taylor tails, 12-term atan, 8 Newton–Raphson iterations.
- *   Error < ~2e-15 (≈1 ULP). A compile-time–folded value may differ from its
- *   runtime counterpart by a few ULP; irrelevant for renderer constants.
+ *   Error \f$< 2 \times 10^{-15}\f$ (\f$\approx 1\f$ ULP).
  *
- * **Zero technical debt.** Constants derive from `<numbers>` (`pi_v`, `inv_pi_v`,
- * `sqrt3_v`, `inv_sqrt3_v`). Polynomial coefficients are generated at compile time
- * from closed-form reciprocal-factorial/reciprocal-odd-integer series. Cody–Waite
- * high/low words are computed from `long double` π/2 to maximise cancellation.
+ * A compile-time–folded value may differ from its runtime counterpart by a few ULP;
+ * irrelevant for renderer constants.
  *
- * Namespace: Mashiro::Math
+ * **Architecture.** Public constants live in `Mashiro::Math::Const` (see Constants.h).
+ * This file's `Detail` namespace contains *only* the compile-time polynomial/Newton
+ * kernels and their private configuration (term counts, Horner evaluator, coefficient
+ * tables). The public API lives directly in `Mashiro::Math`.
  *
+ * @see Constants.h
  * @ingroup Math
  */
 #pragma once
+
+#include "Mashiro/Math/Constants.h"
 
 #include <array>
 #include <bit>
 #include <cmath>
 #include <concepts>
-#include <cstddef>
 #include <cstdint>
-#include <numbers>
 
 namespace Mashiro::Math {
 
@@ -44,46 +45,14 @@ namespace Mashiro::Math {
     namespace Detail {
 
         // =================================================================
-        // Derived constants (all from <numbers>, never hand-typed)
-        // =================================================================
-
-        template<std::floating_point T>
-        inline constexpr T kPi = std::numbers::pi_v<T>;
-        template<std::floating_point T>
-        inline constexpr T kHalfPi = std::numbers::pi_v<T> / T(2);
-        template<std::floating_point T>
-        inline constexpr T kPiOverSix = std::numbers::pi_v<T> / T(6);
-        template<std::floating_point T>
-        inline constexpr T kTwoOverPi = std::numbers::inv_pi_v<T> * T(2);
-
-        /// Cody–Waite split of π/2 for `float`: `kHalfPiHi` keeps low mantissa bits clear;
-        /// `kHalfPiLo` carries the residual.
-        template<std::floating_point T>
-        inline constexpr T kHalfPiHi{};
-        template<std::floating_point T>
-        inline constexpr T kHalfPiLo{};
-        template<>
-        inline constexpr float kHalfPiHi<float> = 1.5707963109016418f;
-        template<>
-        inline constexpr float kHalfPiLo<float> = static_cast<float>(
-            std::numbers::pi_v<double> / 2.0 - static_cast<double>(kHalfPiHi<float>));
-        template<>
-        inline constexpr double kHalfPiHi<double> = 1.5707963267948966;
-        template<>
-        inline constexpr double kHalfPiLo<double> =
-            static_cast<long double>(std::numbers::pi_v<long double>) / 2.0L -
-            static_cast<long double>(kHalfPiHi<double>);
-
-        template<std::floating_point T>
-        inline constexpr T kTanPi6 = std::numbers::inv_sqrt3_v<T>;
-        template<std::floating_point T>
-        inline constexpr T kTanPi12 = T(2) - std::numbers::sqrt3_v<T>;
-
-        // =================================================================
         // Polynomial coefficient tables & Horner evaluation
         // =================================================================
 
-        /// @brief Compile-time factorial (computed in `long double` for max precision).
+        /**
+         * @brief Compile-time factorial computed in `long double` for maximum precision.
+         * @param n  Non-negative integer.
+         * @return \f$ n! \f$.
+         */
         [[nodiscard]] constexpr long double Factorial(int n) {
             long double f = 1.0L;
             for (int i = 2; i <= n; ++i) {
@@ -92,7 +61,16 @@ namespace Mashiro::Math {
             return f;
         }
 
-        /// @brief Horner-scheme evaluation: `c[0] + t*(c[1] + t*(c[2] + …))`.
+        /**
+         * @brief Horner-scheme polynomial evaluation.
+         *
+         * Computes \f$ c_0 + t(c_1 + t(c_2 + \cdots)) \f$.
+         *
+         * @tparam T  Floating-point scalar type.
+         * @tparam N  Number of coefficients.
+         * @param t   Evaluation point.
+         * @param c   Coefficient array (ascending powers).
+         */
         template<std::floating_point T, size_t N>
         [[nodiscard]] constexpr T Horner(T t, const std::array<T, N>& c) {
             T acc = c[N - 1];
@@ -102,7 +80,12 @@ namespace Mashiro::Math {
             return acc;
         }
 
-        /// @brief Build a polynomial coefficient table at compile time.
+        /**
+         * @brief Build a polynomial coefficient table at compile time.
+         * @tparam T      Scalar type of the coefficients.
+         * @tparam Terms  Number of terms to generate.
+         * @param gen     Generator callable: `gen(int k) -> T`.
+         */
         template<std::floating_point T, size_t Terms, typename Gen>
         [[nodiscard]] consteval std::array<T, Terms> MakePoly(Gen gen) {
             std::array<T, Terms> c{};
@@ -112,33 +95,53 @@ namespace Mashiro::Math {
             return c;
         }
 
-        /// @brief Precision-dependent term count for the Taylor tails.
+        // -----------------------------------------------------------------
+        // Precision-dependent configuration
+        // -----------------------------------------------------------------
+
+        /// @brief Taylor-tail term count for \f$\sin\f$.
         template<std::floating_point T>
         inline constexpr size_t kSinTerms = 5;
         template<>
         inline constexpr size_t kSinTerms<double> = 10;
+
+        /// @brief Taylor-tail term count for \f$\cos\f$.
         template<std::floating_point T>
         inline constexpr size_t kCosTerms = 5;
         template<>
         inline constexpr size_t kCosTerms<double> = 10;
+
+        /// @brief Taylor-tail term count for \f$\operatorname{atan}\f$.
         template<std::floating_point T>
         inline constexpr size_t kAtanTerms = 6;
         template<>
         inline constexpr size_t kAtanTerms<double> = 12;
 
-        /// sin(r) = r · P(r²), P(t) = ∑ₖ (−1)ᵏ tᵏ / (2k+1)!
+        /// @brief Newton–Raphson step count for \f$\sqrt{x}\f$: more iterations for wider mantissa.
+        template<std::floating_point T>
+        inline constexpr int kSqrtNewtonSteps = 5;
+        template<>
+        inline constexpr int kSqrtNewtonSteps<double> = 8;
+
+        // -----------------------------------------------------------------
+        // Precomputed polynomial coefficient tables
+        // -----------------------------------------------------------------
+
+        /// \f$ \sin(r) = r \cdot P(r^2),\; P(t) = \sum_k \frac{(-1)^k\, t^k}{(2k+1)!} \f$
         template<std::floating_point T>
         inline constexpr auto kSinPoly = MakePoly<T, kSinTerms<T>>([](int k) -> T {
             long double v = 1.0L / Factorial(2 * k + 1);
             return static_cast<T>((k & 1) ? -v : v);
         });
-        /// cos(r) = Q(r²), Q(t) = ∑ₖ (−1)ᵏ tᵏ / (2k)!
+
+        /// \f$ \cos(r) = Q(r^2),\; Q(t) = \sum_k \frac{(-1)^k\, t^k}{(2k)!} \f$
         template<std::floating_point T>
         inline constexpr auto kCosPoly = MakePoly<T, kCosTerms<T>>([](int k) -> T {
             long double v = 1.0L / Factorial(2 * k);
             return static_cast<T>((k & 1) ? -v : v);
         });
-        /// atan(a) = a · A(a²), A(t) = ∑ₖ (−1)ᵏ tᵏ / (2k+1)
+
+        /// \f$ \operatorname{atan}(a) = a \cdot A(a^2),\; A(t) = \sum_k \frac{(-1)^k\, t^k}{2k+1} \f$
         template<std::floating_point T>
         inline constexpr auto kAtanPoly = MakePoly<T, kAtanTerms<T>>([](int k) -> T {
             long double v = 1.0L / static_cast<long double>(2 * k + 1);
@@ -146,16 +149,19 @@ namespace Mashiro::Math {
         });
 
         // =================================================================
-        // Constexpr kernels (templatized over T)
+        // Constexpr kernels
         // =================================================================
 
-        /// @brief Newton–Raphson step count: more iterations for wider mantissa.
-        template<std::floating_point T>
-        inline constexpr int kSqrtNewtonSteps = 5;
-        template<>
-        inline constexpr int kSqrtNewtonSteps<double> = 8;
-
-        /// @brief Constexpr square root — bit-hack seed + Newton–Raphson. Full precision for T.
+        /**
+         * @brief Constexpr square root via bit-hack seed + Newton–Raphson.
+         *
+         * Uses the "fast inverse square root" bit trick to generate an initial estimate,
+         * then refines with Newton iterations to full `T` precision.
+         *
+         * @tparam T  `float` or `double`.
+         * @param x   Non-negative input.
+         * @return \f$ \sqrt{x} \f$.
+         */
         template<std::floating_point T>
         [[nodiscard]] constexpr T CtSqrt(T x) {
             if (x <= T(0)) {
@@ -174,20 +180,25 @@ namespace Mashiro::Math {
             return y;
         }
 
-        /// @brief Internal sin/cos pair returned from the kernel.
+        /// @brief Internal sin/cos result pair from the kernel.
         template<std::floating_point T>
         struct SinCosResult {
-            T s;
-            T c;
+            T s; ///< \f$\sin\f$ component.
+            T c; ///< \f$\cos\f$ component.
         };
 
-        /// @brief Cody–Waite reduction to [−π/4, π/4], then Taylor tails.
+        /**
+         * @brief Cody–Waite argument reduction to \f$[-\pi/4, \pi/4]\f$, then Taylor tails.
+         * @tparam T  `float` or `double`.
+         * @param x   Input angle in radians.
+         * @return Simultaneously computed \f$(\sin x, \cos x)\f$.
+         */
         template<std::floating_point T>
         [[nodiscard]] constexpr SinCosResult<T> CtSinCos(T x) {
-            T kf = x * kTwoOverPi<T>;
+            T kf = x * Const::kTwoOverPi<T>;
             long long k = static_cast<long long>(kf + (kf < T(0) ? T(-0.5) : T(0.5)));
             T kfl = static_cast<T>(k);
-            T r = (x - kfl * kHalfPiHi<T>)-kfl * kHalfPiLo<T>;
+            T r = (x - kfl * Const::kHalfPiHi<T>) - kfl * Const::kHalfPiLo<T>;
             T r2 = r * r;
 
             T s = r * Horner(r2, kSinPoly<T>);
@@ -205,7 +216,12 @@ namespace Mashiro::Math {
             }
         }
 
-        /// @brief Constexpr atan via range reduction to [−tan 15°, tan 15°].
+        /**
+         * @brief Constexpr arctangent via range reduction to \f$[-\tan 15°, \tan 15°]\f$.
+         * @tparam T  `float` or `double`.
+         * @param x   Input value.
+         * @return \f$\arctan(x)\f$ in \f$[-\pi/2, \pi/2]\f$.
+         */
         template<std::floating_point T>
         [[nodiscard]] constexpr T CtAtan(T x) {
             bool neg = x < T(0);
@@ -214,59 +230,69 @@ namespace Mashiro::Math {
             if (inv) {
                 a = T(1) / a;
             }
-            bool red = a > kTanPi12<T>;
+            bool red = a > Const::kTanPiOverTwelve<T>;
             if (red) {
-                a = (a - kTanPi6<T>) / (T(1) + kTanPi6<T> * a);
+                a = (a - Const::kTanPiOverSix<T>) / (T(1) + Const::kTanPiOverSix<T> * a);
             }
             T a2 = a * a;
             T p = a * Horner(a2, kAtanPoly<T>);
             if (red) {
-                p += kPiOverSix<T>;
+                p += Const::kPiOverSix<T>;
             }
             if (inv) {
-                p = kHalfPi<T> - p;
+                p = Const::kHalfPi<T> - p;
             }
             return neg ? -p : p;
         }
 
-        /// @brief Constexpr atan2 (four-quadrant).
+        /**
+         * @brief Constexpr four-quadrant arctangent.
+         * @tparam T  `float` or `double`.
+         * @return \f$\operatorname{atan2}(y, x)\f$ in \f$[-\pi, \pi]\f$.
+         */
         template<std::floating_point T>
         [[nodiscard]] constexpr T CtAtan2(T y, T x) {
             if (x > T(0)) {
                 return CtAtan(y / x);
             }
             if (x < T(0)) {
-                return CtAtan(y / x) + (y < T(0) ? -kPi<T> : kPi<T>);
+                return CtAtan(y / x) + (y < T(0) ? -Const::kPi<T> : Const::kPi<T>);
             }
             if (y > T(0)) {
-                return kHalfPi<T>;
+                return Const::kHalfPi<T>;
             }
             if (y < T(0)) {
-                return -kHalfPi<T>;
+                return -Const::kHalfPi<T>;
             }
             return T(0);
         }
 
-        /// @brief Constexpr arcsin via atan2 identity.
+        /**
+         * @brief Constexpr arcsine via the identity \f$\arcsin(x) = \operatorname{atan2}(x, \sqrt{1-x^2})\f$.
+         * @tparam T  `float` or `double`.
+         */
         template<std::floating_point T>
         [[nodiscard]] constexpr T CtAsin(T x) {
             if (x >= T(1)) {
-                return kHalfPi<T>;
+                return Const::kHalfPi<T>;
             }
             if (x <= T(-1)) {
-                return -kHalfPi<T>;
+                return -Const::kHalfPi<T>;
             }
             return CtAtan2(x, CtSqrt(T(1) - x * x));
         }
 
-        /// @brief Constexpr arccos via atan2 identity.
+        /**
+         * @brief Constexpr arccosine via the identity \f$\arccos(x) = \operatorname{atan2}(\sqrt{1-x^2}, x)\f$.
+         * @tparam T  `float` or `double`.
+         */
         template<std::floating_point T>
         [[nodiscard]] constexpr T CtAcos(T x) {
             if (x >= T(1)) {
                 return T(0);
             }
             if (x <= T(-1)) {
-                return kPi<T>;
+                return Const::kPi<T>;
             }
             return CtAtan2(CtSqrt(T(1) - x * x), x);
         }
@@ -274,17 +300,28 @@ namespace Mashiro::Math {
     } // namespace Detail
     /** @endcond */
 
-    /** @brief sin/cos pair returned together (one argument reduction computes both). */
+    // =========================================================================
+    // Public API
+    // =========================================================================
+
+    /**
+     * @brief sin/cos pair returned together (one argument reduction computes both).
+     * @tparam T  Floating-point scalar (default `float`).
+     */
     template<std::floating_point T = float>
     struct SinCosPair {
-        T sin; ///< sin component.
-        T cos; ///< cos component.
+        T sin; ///< \f$\sin\f$ component.
+        T cos; ///< \f$\cos\f$ component.
     };
 
-    /// @name Absolute value / sign copy (no dual path — builtins fold at compile time)
+    /// @name Absolute value / sign copy
     /// @{
 
-    /// @brief Absolute value (floating-point).
+    /**
+     * @brief Absolute value (floating-point).
+     *
+     * Uses compiler builtins that fold at compile time — no `if consteval` needed.
+     */
     template<std::floating_point T>
     [[nodiscard]] constexpr T Abs(T x) {
         if constexpr (std::same_as<T, float>) {
@@ -293,13 +330,18 @@ namespace Mashiro::Math {
             return __builtin_fabs(x);
         }
     }
+
     /// @brief Absolute value (signed integer).
     template<std::signed_integral T>
     [[nodiscard]] constexpr T Abs(T x) {
         return x < T(0) ? static_cast<T>(-x) : x;
     }
 
-    /// @brief Copy the sign of @p sgn onto @p mag.
+    /**
+     * @brief Copy the sign of @p sgn onto the magnitude of @p mag.
+     *
+     * Uses compiler builtins that fold at compile time.
+     */
     template<std::floating_point T>
     [[nodiscard]] constexpr T CopySign(T mag, T sgn) {
         if constexpr (std::same_as<T, float>) {
@@ -311,10 +353,10 @@ namespace Mashiro::Math {
 
     /// @}
 
-    /// @name Transcendental façade (hardware at run-time, polynomial at compile-time)
+    /// @name Transcendental functions
     /// @{
 
-    /// @brief Square root.
+    /// @brief Square root: \f$\sqrt{x}\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Sqrt(T x) {
         if consteval {
@@ -323,7 +365,8 @@ namespace Mashiro::Math {
             return std::sqrt(x);
         }
     }
-    /// @brief Sine.
+
+    /// @brief Sine: \f$\sin(x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Sin(T x) {
         if consteval {
@@ -332,7 +375,8 @@ namespace Mashiro::Math {
             return std::sin(x);
         }
     }
-    /// @brief Cosine.
+
+    /// @brief Cosine: \f$\cos(x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Cos(T x) {
         if consteval {
@@ -342,7 +386,10 @@ namespace Mashiro::Math {
         }
     }
 
-    /** @brief Both sin and cos from a single argument reduction. */
+    /**
+     * @brief Both \f$\sin\f$ and \f$\cos\f$ from a single argument reduction.
+     * @return SinCosPair with `.sin` and `.cos` fields.
+     */
     template<std::floating_point T>
     [[nodiscard]] constexpr SinCosPair<T> SinCos(T x) {
         if consteval {
@@ -353,7 +400,7 @@ namespace Mashiro::Math {
         }
     }
 
-    /// @brief Tangent.
+    /// @brief Tangent: \f$\tan(x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Tan(T x) {
         if consteval {
@@ -363,7 +410,8 @@ namespace Mashiro::Math {
             return std::tan(x);
         }
     }
-    /// @brief Arctangent.
+
+    /// @brief Arctangent: \f$\arctan(x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Atan(T x) {
         if consteval {
@@ -372,7 +420,8 @@ namespace Mashiro::Math {
             return std::atan(x);
         }
     }
-    /// @brief Four-quadrant arctangent.
+
+    /// @brief Four-quadrant arctangent: \f$\operatorname{atan2}(y, x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Atan2(T y, T x) {
         if consteval {
@@ -381,7 +430,8 @@ namespace Mashiro::Math {
             return std::atan2(y, x);
         }
     }
-    /// @brief Arcsine.
+
+    /// @brief Arcsine: \f$\arcsin(x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Asin(T x) {
         if consteval {
@@ -390,7 +440,8 @@ namespace Mashiro::Math {
             return std::asin(x);
         }
     }
-    /// @brief Arccosine.
+
+    /// @brief Arccosine: \f$\arccos(x)\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Acos(T x) {
         if consteval {
@@ -405,13 +456,14 @@ namespace Mashiro::Math {
     /// @name Generic scalar helpers
     /// @{
 
-    /// @brief Variadic minimum (fold, 1+ args of the same arithmetic type).
+    /// @brief Variadic minimum (fold over 1+ args of the same arithmetic type).
     template<typename T, std::same_as<T>... Ts>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] constexpr T Min(T a, Ts... rest) {
         ((a = rest < a ? rest : a), ...);
         return a;
     }
+
     /// @brief Variadic maximum.
     template<typename T, std::same_as<T>... Ts>
         requires std::is_arithmetic_v<T>
@@ -420,37 +472,42 @@ namespace Mashiro::Math {
         return a;
     }
 
-    /// @brief Clamp @p v to [lo, hi].
+    /// @brief Clamp @p v to \f$[\text{lo}, \text{hi}]\f$.
     template<typename T>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] constexpr T Clamp(T v, T lo, T hi) {
         return v < lo ? lo : (v > hi ? hi : v);
     }
-    /// @brief Clamp to [0, 1].
+
+    /// @brief Clamp to \f$[0, 1]\f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Saturate(T v) {
         return Clamp(v, T(0), T(1));
     }
-    /// @brief Scalar linear interpolation: `a + (b − a) * t`.
+
+    /// @brief Scalar linear interpolation: \f$ a + (b - a) \cdot t \f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Lerp(T a, T b, T t) {
         return a + (b - a) * t;
     }
-    /// @brief Sign function: −1, 0, or +1.
+
+    /// @brief Sign function: returns \f$-1\f$, \f$0\f$, or \f$+1\f$.
     template<typename T>
         requires(std::is_arithmetic_v<T> && std::is_signed_v<T>)
     [[nodiscard]] constexpr T Sign(T x) {
         return x > T(0) ? T(1) : (x < T(0) ? T(-1) : T(0));
     }
-    /// @brief Degrees → radians.
+
+    /// @brief Degrees to radians: \f$ \deg \cdot \frac{\pi}{180} \f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Radians(T deg) {
-        return deg * (std::numbers::pi_v<T> / T(180));
+        return deg * Const::kDegToRad<T>;
     }
-    /// @brief Radians → degrees.
+
+    /// @brief Radians to degrees: \f$ \text{rad} \cdot \frac{180}{\pi} \f$.
     template<std::floating_point T>
     [[nodiscard]] constexpr T Degrees(T rad) {
-        return rad * (T(180) / std::numbers::pi_v<T>);
+        return rad * Const::kRadToDeg<T>;
     }
 
     /// @}

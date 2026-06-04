@@ -30,7 +30,6 @@
 
 #include "Mashiro/Math/MathUtils.h"
 
-#include <numbers>
 
 namespace Mashiro {
 
@@ -473,7 +472,7 @@ namespace Mashiro {
             vec3 e{};
             float sinp = 2.0f * (q.w * q.y - q.z * q.x);
             if (Math::Abs(sinp) >= 1.0f) {
-                e.y = Math::CopySign(std::numbers::pi_v<float> * 0.5f, sinp); // gimbal lock
+                e.y = Math::CopySign(Math::Const::kHalfPi<float>, sinp); // gimbal lock
                 e.x = 0.0f;
                 e.z = Math::Atan2(2.0f * (q.x * q.y + q.w * q.z),
                                   1.0f - 2.0f * (q.y * q.y + q.z * q.z));
@@ -520,7 +519,7 @@ namespace Mashiro {
                 if (Math::Dot(axis, axis) < 1e-6f) {
                     axis = Math::Cross(vec3{0.0f, 1.0f, 0.0f}, f);
                 }
-                return MakeAxisAngle(Math::Normalize(axis), std::numbers::pi_v<float>);
+                return MakeAxisAngle(Math::Normalize(axis), Math::Const::kPi<float>);
             }
             vec3 c = Math::Cross(f, t);
             quat q{.x = c.x, .y = c.y, .z = c.z, .w = 1.0f + d};
