@@ -16,8 +16,8 @@ using Catch::Approx;
 // ===========================================================================
 
 TEST_CASE("Mat4 add/sub/scalar matches Eigen", AUTO_TAG) {
-    mat4 a = Math::MakeTranslation(vec3{1,2,3});
-    mat4 b = Math::MakeScale(vec3{2,3,4});
+    mat4 a = Math::MakeTranslation(vec3{1,2,3}).ToMat();
+    mat4 b = Math::MakeScale(vec3{2,3,4}).ToMat();
     auto ea = ToEigen(a), eb = ToEigen(b);
 
     RequireCloseEigen(a + b, ea + eb);
@@ -27,16 +27,16 @@ TEST_CASE("Mat4 add/sub/scalar matches Eigen", AUTO_TAG) {
 }
 
 TEST_CASE("Mat4 * Mat4 matches Eigen", AUTO_TAG) {
-    mat4 a = Math::MakeRotateZ(0.7f);
-    mat4 b = Math::MakeTranslation(vec3{5,-3,2});
+    mat4 a = Math::MakeRotateZ(0.7f).ToMat();
+    mat4 b = Math::MakeTranslation(vec3{5,-3,2}).ToMat();
     auto ea = ToEigen(a), eb = ToEigen(b);
     RequireCloseEigen(a * b, ea * eb);
     RequireCloseEigen(b * a, eb * ea);
 }
 
 TEST_CASE("Mat4 * Vec4 matches Eigen", AUTO_TAG) {
-    mat4 m = Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
-             * Math::MakeTranslation(vec3{10,20,30});
+    mat4 m = (Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
+             * Math::MakeTranslation(vec3{10,20,30})).ToMat();
     vec4 v{1,2,3,1};
     RequireCloseEigen(m * v, ToEigen(m) * ToEigen(v));
 }
@@ -66,7 +66,7 @@ TEST_CASE("Mat2 * Vec2 matches Eigen", AUTO_TAG) {
 // ===========================================================================
 
 TEST_CASE("Transpose matches Eigen .transpose()", AUTO_TAG) {
-    mat4 m = Math::MakeRotateAxis(vec3{1,1,0}, 0.5f);
+    mat4 m = Math::MakeRotateAxis(vec3{1,1,0}, 0.5f).ToMat();
     RequireCloseEigen(Math::Transpose(m), ToEigen(m).transpose());
 
     mat3 m3{};
@@ -88,8 +88,8 @@ TEST_CASE("Det matches Eigen .determinant()", AUTO_TAG) {
     m3[2,0]=2; m3[2,1]=8; m3[2,2]=7;
     RequireClose(Math::Det(m3), ToEigen(m3).determinant());
 
-    mat4 m4 = Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
-              * Math::MakeScale(vec3{2,0.5f,1.5f});
+    mat4 m4 = (Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
+              * Math::MakeScale(vec3{2,0.5f,1.5f})).ToMat();
     RequireClose(Math::Det(m4), ToEigen(m4).determinant(), 1e-3f);
 }
 
@@ -109,9 +109,9 @@ TEST_CASE("Inverse(mat3) matches Eigen", AUTO_TAG) {
 }
 
 TEST_CASE("Inverse(mat4) matches Eigen", AUTO_TAG) {
-    mat4 m = Math::MakeTranslation(vec3{5,-3,2})
+    mat4 m = (Math::MakeTranslation(vec3{5,-3,2})
              * Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
-             * Math::MakeScale(vec3{2,0.5f,1.5f});
+             * Math::MakeScale(vec3{2,0.5f,1.5f})).ToMat();
     RequireCloseEigen(Math::Inverse(m), ToEigen(m).inverse(), 1e-4f);
 }
 

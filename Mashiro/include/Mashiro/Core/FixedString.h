@@ -429,7 +429,7 @@ namespace Mashiro {
     /**
      * @brief Free-function algorithms operating on FixedString.
      */
-    namespace Str {
+    namespace String {
 
         /** @brief Repeat a string @p n times. */
         template<size_t Cap = 1024>
@@ -525,7 +525,7 @@ namespace Mashiro {
             return n;
         }
 
-    } // namespace FixedStr
+    } // namespace Str
 
     /**
      * @brief Promote a compile-time FixedString to static storage, returning `const char*`.

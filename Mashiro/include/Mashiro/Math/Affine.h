@@ -107,6 +107,8 @@ namespace Mashiro {
             return t;
         }
 
+        /// @brief To matrix
+
         /// @brief Full homogeneous matrix `Mat<T, N+1>` with the `[0 … 0 1]` row materialised.
         [[nodiscard]] constexpr FullType ToMat() const {
             if constexpr (S == AffineStorage::Full) {

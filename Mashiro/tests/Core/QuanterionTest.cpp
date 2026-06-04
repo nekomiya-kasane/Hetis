@@ -150,7 +150,7 @@ TEST_CASE("Quat::ToMat4 embeds the 3x3 rotation with affine identity", AUTO_TAG)
 
 TEST_CASE("Quat::MakeTransform builds a TRS matrix", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
-    mat4 m = Quat::MakeTransform(vec3{5, 6, 7}, q, vec3{2, 2, 2});
+    mat4 m = Quat::MakeTransform(vec3{5, 6, 7}, q, vec3{2, 2, 2}).ToMat();
 
     // Column 3 is the translation.
     REQUIRE((m[0, 3]) == Approx(5.0f));
@@ -178,7 +178,7 @@ TEST_CASE("Quat::RotateMat3 equals matrix product of the rotation", AUTO_TAG) {
 
 TEST_CASE("Quat::RotateMat4 rotates basis and translation, keeps homogeneous row", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
-    mat4 m = Quat::MakeTransform(vec3{1, 0, 0}, Quat::Identity(), vec3{1, 1, 1});
+    mat4 m = Quat::MakeTransform(vec3{1, 0, 0}, Quat::Identity(), vec3{1, 1, 1}).ToMat();
 
     mat4 out = Quat::RotateMat4(q, m);
 

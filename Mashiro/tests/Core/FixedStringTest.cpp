@@ -3,7 +3,7 @@
  * @brief Comprehensive tests for Mashiro::FixedString — compile-time fixed-capacity string.
  *
  * Covers: construction, observers, comparison, search, substring extraction,
- * transformation, path operations, append/push, concatenation, Str:: algorithms,
+ * transformation, path operations, append/push, concatenation, FixedStr:: algorithms,
  * static storage promotion, reflection integration, and UDL.
  */
 #include "Mashiro/Core/FixedString.h"
@@ -349,54 +349,54 @@ TEST_CASE("FixedString concat with string_view", AUTO_TAG) {
 // =============================================================================
 
 TEST_CASE("Str::Repeat", AUTO_TAG) {
-    constexpr auto result = Str::Repeat("ab", 4);
+    constexpr auto result = String::Repeat("ab", 4);
     STATIC_REQUIRE(result == "abababab"sv);
 }
 
 TEST_CASE("Str::Repeat zero times", AUTO_TAG) {
-    constexpr auto result = Str::Repeat("x", 0);
+    constexpr auto result = String::Repeat("x", 0);
     STATIC_REQUIRE(result.empty());
 }
 
 TEST_CASE("Str::Join array", AUTO_TAG) {
     constexpr std::array<std::string_view, 3> parts = {"a", "b", "c"};
-    constexpr auto result = Str::Join<64>(", ", parts);
+    constexpr auto result = String::Join<64>(", ", parts);
     STATIC_REQUIRE(result == "a, b, c"sv);
 }
 
 TEST_CASE("Str::Join two strings", AUTO_TAG) {
-    constexpr auto result = Str::Join(".", "Core", "Hash");
+    constexpr auto result = String::Join(".", "Core", "Hash");
     STATIC_REQUIRE(result == "Core.Hash"sv);
 }
 
 TEST_CASE("Str::FromInt positive", AUTO_TAG) {
-    STATIC_REQUIRE(Str::FromInt(12345) == "12345"sv);
+    STATIC_REQUIRE(String::FromInt(12345) == "12345"sv);
 }
 
 TEST_CASE("Str::FromInt negative", AUTO_TAG) {
-    STATIC_REQUIRE(Str::FromInt(-42) == "-42"sv);
+    STATIC_REQUIRE(String::FromInt(-42) == "-42"sv);
 }
 
 TEST_CASE("Str::FromInt zero", AUTO_TAG) {
-    STATIC_REQUIRE(Str::FromInt(0) == "0"sv);
+    STATIC_REQUIRE(String::FromInt(0) == "0"sv);
 }
 
 TEST_CASE("Str::ToHex", AUTO_TAG) {
-    STATIC_REQUIRE(Str::ToHex(0xFF) == "ff"sv);
-    STATIC_REQUIRE(Str::ToHex(0) == "0"sv);
-    STATIC_REQUIRE(Str::ToHex(0xDEAD) == "dead"sv);
+    STATIC_REQUIRE(String::ToHex(0xFF) == "ff"sv);
+    STATIC_REQUIRE(String::ToHex(0) == "0"sv);
+    STATIC_REQUIRE(String::ToHex(0xDEAD) == "dead"sv);
 }
 
 TEST_CASE("Str::Wrap", AUTO_TAG) {
-    constexpr auto result = Str::Wrap("[", "]", "tag");
+    constexpr auto result = String::Wrap("[", "]", "tag");
     STATIC_REQUIRE(result == "[tag]"sv);
 }
 
 TEST_CASE("Str::Count", AUTO_TAG) {
-    STATIC_REQUIRE(Str::Count("abcabcabc", "abc") == 3);
-    STATIC_REQUIRE(Str::Count("aaa", "aa") == 1); // non-overlapping
-    STATIC_REQUIRE(Str::Count("hello", "xyz") == 0);
-    STATIC_REQUIRE(Str::Count("test", "") == 0); // empty needle
+    STATIC_REQUIRE(String::Count("abcabcabc", "abc") == 3);
+    STATIC_REQUIRE(String::Count("aaa", "aa") == 1); // non-overlapping
+    STATIC_REQUIRE(String::Count("hello", "xyz") == 0);
+    STATIC_REQUIRE(String::Count("test", "") == 0); // empty needle
 }
 
 // =============================================================================
