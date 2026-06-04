@@ -99,7 +99,8 @@ namespace Mashiro {
     /**
      * @brief Semantic domain for log messages (runtime-filterable).
      *
-     * Default levels are declared in `Detail::Log::kDefaultCategoryLevels[]`.
+     * Default levels are declared via `LogCategoryTraits` specialisations;
+     * the table is built by reflection at compile time.
      * Users extend via: `inline constexpr LogCategory kMyPlugin = static_cast<LogCategory>(100);`
      */
     enum class LogCategory : uint16_t {
@@ -118,7 +119,7 @@ namespace Mashiro {
     };
 
     // =========================================================================
-    // Log traits — specialise to customise category/level display properties
+    // Log traits -- specialise to customise category/level display properties
     // =========================================================================
 
     /// @brief Default level for a LogCategory. Specialise to override.
@@ -152,6 +153,7 @@ namespace Mashiro {
     template <> struct LogLevelTraits<LogLevel::Warn>  { static constexpr LogAnno::LevelColor color = {220, 220, 0,   true};          };
     template <> struct LogLevelTraits<LogLevel::Error> { static constexpr LogAnno::LevelColor color = {220, 0,   0,   true};          };
     template <> struct LogLevelTraits<LogLevel::Fatal> { static constexpr LogAnno::LevelColor color = {255, 255, 255, true};          };
+
 
     /** @cond INTERNAL */
     namespace Detail::Log {

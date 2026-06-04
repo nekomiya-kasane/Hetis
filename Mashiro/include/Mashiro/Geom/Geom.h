@@ -41,7 +41,7 @@
 #pragma once
 
 #include "Mashiro/Math/Types.h"
-#include "Mashiro/Math/MathUtils.h"
+#include "Mashiro/Math/MatOps.h"
 
 #include <concepts>
 #include <cstdint>
@@ -204,6 +204,20 @@ namespace Mashiro {
     static_assert(sizeof(Ray3) == 32 && alignof(Ray3) == 16);
     static_assert(sizeof(Plane) == 16 && alignof(Plane) == 16);
     static_assert(sizeof(Frustum) == 96 && alignof(Frustum) == 16);
+
+    // Compile-time invariant: all 3-D float bounded primitives must be 16-byte aligned
+    // (GPU buffer binding requirement). Validated via reflection over annotations.
+    consteval {
+        auto check = [](std::meta::info type, size_t expectedAlign) {
+            if (std::meta::alignment_of(type) < expectedAlign)
+                throw "Geom primitive violates GPU alignment contract (must be >= 16B aligned)";
+        };
+        check(^^Box3,    16);
+        check(^^Sphere,  16);
+        check(^^Ray3,    16);
+        check(^^Plane,   16);
+        check(^^Frustum, 16);
+    }
 
     namespace Geom {
 

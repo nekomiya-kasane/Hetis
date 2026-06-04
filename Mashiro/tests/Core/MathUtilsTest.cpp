@@ -1,4 +1,5 @@
-#include "Mashiro/Math/MathUtils.h"
+#include "Mashiro/Math/Affine.h"
+#include "Mashiro/Math/MatOps.h"
 #include "Mashiro/Math/Types.h"
 
 #include <catch2/catch_approx.hpp>
@@ -123,17 +124,16 @@ TEST_CASE("Vector operators are component-wise with scalar broadcast", AUTO_TAG)
 }
 
 TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", AUTO_TAG) {
-    mat4 t = Math::MakeTranslation(vec3{10, 20, 30});
-    vec4 p = t * vec4{1, 2, 3, 1};
+    auto t = Math::MakeTranslation(vec3{10, 20, 30});
+    vec3 p = t * vec3{1, 2, 3};
     REQUIRE(p.x == Approx(11.0f));
     REQUIRE(p.y == Approx(22.0f));
     REQUIRE(p.z == Approx(33.0f));
-    REQUIRE(p.w == Approx(1.0f));
 
-    mat4 a = Math::MakeRotateZ(0.5f);
-    mat4 b = Math::MakeTranslation(vec3{1, 2, 3});
-    RequireMatApprox(a * b, RefMul(a, b));
-    RequireMatApprox(a * Math::Identity(), a);
+    auto a = Math::MakeRotateZ(0.5f);
+    auto b = Math::MakeTranslation(vec3{1, 2, 3});
+    RequireMatApprox((a * b).ToMat(), RefMul(a.ToMat(), b.ToMat()));
+    RequireMatApprox((a * affine3::Identity()).ToMat(), a.ToMat());
 }
 
 // ---------------------------------------------------------------------------
@@ -141,14 +141,14 @@ TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", AUTO_
 // ---------------------------------------------------------------------------
 
 TEST_CASE("MakeRotateZ turns +X toward +Y", AUTO_TAG) {
-    mat4 m = Math::MakeRotateZ(kPi * 0.5f);
-    vec4 r = m * vec4{1, 0, 0, 0};
+    auto m = Math::MakeRotateZ(kPi * 0.5f);
+    vec3 r = m.TransformVector(vec3{1, 0, 0});
     REQUIRE(r.x == Approx(0.0f).margin(1e-6f));
     REQUIRE(r.y == Approx(1.0f).margin(1e-6f));
 }
 
 TEST_CASE("Transpose swaps rows and columns", AUTO_TAG) {
-    mat4 m = Math::MakeTranslation(vec3{1, 2, 3});
+    mat4 m = Math::MakeTranslation(vec3{1, 2, 3}).ToMat();
     mat4 mt = Math::Transpose(m);
     for (int row = 0; row < 4; ++row) {
         for (int col = 0; col < 4; ++col) {
@@ -182,8 +182,8 @@ TEST_CASE("Det for mat2 / mat3 / mat4", AUTO_TAG) {
     m3[2, 0] = 2.0f; m3[2, 1] = 8.0f; m3[2, 2] = 7.0f;
     REQUIRE(Math::Det(m3) == Approx(-306.0f));
 
-    mat4 rotScale = Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
-                        * Math::MakeScale(vec3{2, 0.5f, 1.5f});
+    mat4 rotScale = (Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
+                        * Math::MakeScale(vec3{2, 0.5f, 1.5f})).ToMat();
     REQUIRE(Math::Det(rotScale) == Approx(2.0f * 0.5f * 1.5f).margin(1e-4f));
 }
 
@@ -208,57 +208,32 @@ TEST_CASE("Inverse for mat2 and mat3", AUTO_TAG) {
 }
 
 TEST_CASE("Inverse undoes a TRS transform (mat4)", AUTO_TAG) {
-    mat4 trs = Math::MakeTranslation(vec3{5, -3, 2})
+    auto trs = Math::MakeTranslation(vec3{5, -3, 2})
                    * Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
                    * Math::MakeScale(vec3{2, 0.5f, 1.5f});
-    RequireMatApprox(trs * Math::Inverse(trs), Math::Identity());
-    RequireMatApprox(Math::Inverse(trs) * trs, Math::Identity());
+    RequireMatApprox((trs * Math::Inverse(trs)).ToMat(), Math::Identity());
+    RequireMatApprox((Math::Inverse(trs) * trs).ToMat(), Math::Identity());
 }
 
-TEST_CASE("InverseAffine undoes a compact affine transform", AUTO_TAG) {
-    // Build an affine3 from a rotation + translation
-    mat3 rot{};
-    {
-        mat4 r4 = Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f);
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j)
-                rot[i, j] = r4[i, j];
-    }
-    vec3 trans{5.0f, -3.0f, 2.0f};
+TEST_CASE("Inverse(Affine) round-trips to identity", AUTO_TAG) {
+    affine3 a = Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f);
+    a.m[0, 3] = 5.0f;
+    a.m[1, 3] = -3.0f;
+    a.m[2, 3] = 2.0f;
 
-    affine3 a{};
-    for (int c = 0; c < 3; ++c)
-        a[c] = rot[c];
-    a[3] = trans;
+    affine3 ai = Math::Inverse(a);
+    RequireMatApprox((a * ai).ToMat(), Math::Identity());
+    RequireMatApprox((ai * a).ToMat(), Math::Identity());
 
-    affine3 ai = Math::InverseAffine(a);
-
-    // a * ai should give identity rotation + zero translation
-    // Multiply manually: R_result = R * Ri, t_result = R * ti + t
-    mat3 Ri{};
-    for (int c = 0; c < 3; ++c) Ri[c] = ai[c];
-    mat3 product = rot * Ri;
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 3; ++j)
-            REQUIRE((product[i, j]) == Approx(i == j ? 1.0f : 0.0f).margin(1e-4f));
-
-    // t_result = R * ai.translation + a.translation should be ~0
-    vec3 tResult{};
-    for (int i = 0; i < 3; ++i) {
-        float s = 0.0f;
-        for (int k = 0; k < 3; ++k)
-            s += rot[i, k] * ai[3][k];
-        tResult[i] = s + trans[i];
-    }
-    REQUIRE(tResult[0] == Approx(0.0f).margin(1e-4f));
-    REQUIRE(tResult[1] == Approx(0.0f).margin(1e-4f));
-    REQUIRE(tResult[2] == Approx(0.0f).margin(1e-4f));
+    // Round-trip a point through the transform and its inverse.
+    vec3 p{1.0f, 2.0f, 3.0f};
+    RequireVecApprox(ai * (a * p), p);
 }
 
 TEST_CASE("MakeLookAt places the eye at the origin of view space", AUTO_TAG) {
     vec3 eye{0, 0, 5};
-    mat4 view = Math::MakeLookAt(eye, vec3{0, 0, 0}, vec3{0, 1, 0});
-    vec4 origin = view * vec4{eye.x, eye.y, eye.z, 1.0f};
+    auto view = Math::MakeLookAt(eye, vec3{0, 0, 0}, vec3{0, 1, 0});
+    vec3 origin = view * eye;
     REQUIRE(origin.x == Approx(0.0f).margin(1e-5f));
     REQUIRE(origin.y == Approx(0.0f).margin(1e-5f));
     REQUIRE(origin.z == Approx(0.0f).margin(1e-5f));
@@ -288,9 +263,9 @@ TEST_CASE("MathUtils folds at compile time", AUTO_TAG) {
     STATIC_REQUIRE(Close(d, 32.0f));
 
     // operator* and MakeRotateZ fold; column 0 of Rz(90) is (0, 1, 0).
-    constexpr mat4 m = Math::MakeRotateZ(kPi * 0.5f);
-    STATIC_REQUIRE(Close(m[0].x, 0.0f));
-    STATIC_REQUIRE(Close(m[0].y, 1.0f));
+    constexpr auto m = Math::MakeRotateZ(kPi * 0.5f);
+    STATIC_REQUIRE(Close(m.m[0].x, 0.0f));
+    STATIC_REQUIRE(Close(m.m[0].y, 1.0f));
 
     // Perspective is a constant expression (exercises constexpr Tan).
     constexpr mat4 proj = Math::MakePerspective(kPi * 0.25f, 1.0f, 0.1f, 100.0f);

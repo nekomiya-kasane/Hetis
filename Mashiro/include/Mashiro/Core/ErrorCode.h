@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <meta>
 
 /**
  * @brief Universal error code returned by fallible engine operations.
@@ -109,3 +110,12 @@ enum class ErrorCode : uint16_t {
     SurfaceLost        = 0xF003, ///< Window surface is no longer valid.
     /// @}
 };
+
+// Compile-time invariant: no two ErrorCode enumerators share the same value.
+consteval {
+    auto enums = std::meta::enumerators_of(^^ErrorCode);
+    for (size_t i = 0; i < enums.size(); ++i)
+        for (size_t j = i + 1; j < enums.size(); ++j)
+            if (std::meta::constant_of(enums[i]) == std::meta::constant_of(enums[j]))
+                throw "ErrorCode: duplicate enumerator value detected";
+}

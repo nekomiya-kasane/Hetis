@@ -138,11 +138,6 @@ namespace Mashiro {
     using mat4x2 = Mat<float, 4, 2>; ///< 4 rows × 2 cols.
     using mat4x3 = Mat<float, 4, 3>; ///< 4 rows × 3 cols.
 
-    /** @brief Compact 2D affine transform: 2×2 rotation/scale + translation column (2 rows × 3 cols). */
-    using affine2 = mat2x3;
-    /** @brief Compact 3D affine transform: 3×3 rotation/scale + translation column (3 rows × 4 cols). */
-    using affine3 = mat3x4;
-
     static_assert(sizeof(mat2x3) == 24);
     static_assert(alignof(mat2x3) == 8);
     static_assert(sizeof(mat2x4) == 32);

@@ -184,7 +184,7 @@ namespace Mashiro {
             consteval bool AllPowerOfTwo() {
                 for (auto e : Enumerators<E>) {
                     auto v = static_cast<UnsignedUnderlying<E>>([:e:]);
-                    if (v != 0 && !std::has_single_bit(v))
+                    if (v != 0 && !std::has_single_bit(v) && (std::meta::display_string_of(e) != "None"))
                         return false;
                 }
                 return true;
@@ -253,5 +253,180 @@ namespace Mashiro {
 #endif
 
     } // namespace Platform
+
+    namespace Traits {
+
+        // =====================================================================
+        // Type-level list and combinators
+        // =====================================================================
+
+        /// @brief A compile-time list of types — the type-level analogue of a tuple.
+        template<typename... Ts>
+        struct TypeList {
+            static constexpr size_t size = sizeof...(Ts); ///< Number of elements.
+        };
+
+        /// @brief Number of elements in @p L.
+        template<template<typename...> class L, typename... Ts>
+        inline constexpr size_t Length = L<Ts...>::size;
+
+        /** @cond INTERNAL */
+        namespace Detail {
+
+            template<typename L, size_t I>
+            struct AtT;
+            template<typename... Ts, size_t I>
+            struct AtT<TypeList<Ts...>, I> {
+                using type = Ts...[I];
+            };
+
+            template<typename L>
+            struct TailT;
+            template<typename T, typename... Ts>
+            struct TailT<TypeList<T, Ts...>> {
+                using type = TypeList<Ts...>;
+            };
+
+            template<typename... Ls>
+            consteval std::meta::info ConcatImpl() {
+                std::vector<std::meta::info> types;
+                auto collect = [&](std::meta::info listType) {
+                    for (auto arg : std::meta::template_arguments_of(listType))
+                        types.push_back(arg);
+                };
+                (collect(^^Ls), ...);
+                return std::meta::substitute(^^TypeList, types);
+            }
+
+            template<typename... Ls>
+            struct ConcatT {
+                using type = typename [:ConcatImpl<Ls...>():]; 
+            };
+            template<>
+            struct ConcatT<> {
+                using type = TypeList<>;
+            };
+
+            template<template<typename> typename F, typename L>
+            struct MapTT;
+            template<template<typename> typename F, typename... Ts>
+            struct MapTT<F, TypeList<Ts...>> {
+                using type = TypeList<F<Ts>...>;
+            };
+
+            template<template<typename> typename Pred, typename L>
+            struct FilterTT;
+            template<template<typename> typename Pred, typename... Ts>
+            struct FilterTT<Pred, TypeList<Ts...>> {
+                static consteval std::meta::info Compute() {
+                    std::vector<std::meta::info> result;
+                    const bool keep[] = {Pred<Ts>::value...};
+                    auto all = std::meta::template_arguments_of(^^TypeList<Ts...>);
+                    for (size_t i = 0; i < all.size(); ++i) {
+                        if (keep[i])
+                            result.push_back(all[i]);
+                    }
+                    return std::meta::substitute(^^TypeList, result);
+                }
+                using type = typename [:Compute():]; 
+            };
+
+            template<template<typename...> typename F, typename L>
+            struct ApplyTT;
+            template<template<typename...> typename F, typename... Ts>
+            struct ApplyTT<F, TypeList<Ts...>> {
+                using type = F<Ts...>;
+            };
+
+            template<template<typename, typename> typename Op, typename Acc, typename L>
+            struct FoldTT;
+            template<template<typename, typename> typename Op, typename Acc>
+            struct FoldTT<Op, Acc, TypeList<>> {
+                using type = Acc;
+            };
+            template<template<typename, typename> typename Op, typename Acc, typename T, typename... Ts>
+            struct FoldTT<Op, Acc, TypeList<T, Ts...>> {
+                using type = typename FoldTT<Op, typename [:std::meta::substitute(^^Op, {^^Acc, ^^T}):], TypeList<Ts...>>::type;
+            };
+
+            template<typename T, typename... Ts>
+            consteval size_t IndexOfImpl() {
+                if constexpr (sizeof...(Ts) == 0) {
+                    return size_t(-1);
+                } else {
+                    const bool match[] = {std::is_same_v<T, Ts>...};
+                    for (size_t i = 0; i < sizeof...(Ts); ++i) {
+                        if (match[i]) {
+                            return i;
+                        }
+                    }
+                    return size_t(-1);
+                }
+            }
+            template<typename L, typename T>
+            struct IndexOfT;
+            template<typename T, typename... Ts>
+            struct IndexOfT<TypeList<Ts...>, T> {
+                static constexpr size_t value = IndexOfImpl<T, Ts...>();
+            };
+
+            template<typename T>
+            consteval std::meta::info TypeListReflOf() {
+                std::vector<std::meta::info> types;
+                for (auto m : std::meta::nonstatic_data_members_of(
+                         ^^T, std::meta::access_context::unchecked())) {
+                    types.push_back(std::meta::type_of(m));
+                }
+                return std::meta::substitute(^^TypeList, types);
+            }
+
+        } // namespace Detail
+        /** @endcond */
+
+        /// @brief The @p I-th element of @p L (C++26 pack indexing).
+        template<typename L, size_t I>
+        using At = typename Detail::AtT<L, I>::type;
+
+        /// @brief First element of @p L.
+        template<typename L>
+        using Head = At<L, 0>;
+
+        /// @brief All but the first element of @p L.
+        template<typename L>
+        using Tail = typename Detail::TailT<L>::type;
+
+        /// @brief Concatenate any number of `TypeList`s.
+        template<typename... Ls>
+        using Concat = typename Detail::ConcatT<Ls...>::type;
+
+        /// @brief Apply unary metafunction @p F to each element: `TypeList<F<Ts>...>`.
+        template<template<typename> typename F, typename L>
+        using MapT = typename Detail::MapTT<F, L>::type;
+
+        /// @brief Keep elements for which `Pred<T>::value` holds.
+        template<template<typename> typename Pred, typename L>
+        using FilterT = typename Detail::FilterTT<Pred, L>::type;
+
+        /// @brief Instantiate variadic template @p F with the list elements: `F<Ts...>`.
+        template<template<typename...> typename F, typename L>
+        using ApplyT = typename Detail::ApplyTT<F, L>::type;
+
+        /// @brief Left fold with binary metafunction `Op<Acc, T>` and seed @p Init.
+        template<template<typename, typename> typename Op, typename Init, typename L>
+        using FoldT = typename Detail::FoldTT<Op, Init, L>::type;
+
+        /// @brief Index of the first occurrence of @p T in @p L, or `size_t(-1)`.
+        template<typename L, typename T>
+        inline constexpr size_t IndexOf = Detail::IndexOfT<L, T>::value;
+
+        /// @brief Whether @p L contains type @p T.
+        template<typename L, typename T>
+        inline constexpr bool Contains = (IndexOf<L, T> != size_t(-1));
+
+        /// @brief Reflection bridge: a `TypeList` of @p T's data-member types.
+        template<typename T>
+        using ToTypeList = [:Detail::TypeListReflOf<T>():];
+
+    }
 
 } // namespace Mashiro

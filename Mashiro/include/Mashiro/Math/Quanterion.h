@@ -28,7 +28,9 @@
  */
 #pragma once
 
-#include "Mashiro/Math/MathUtils.h"
+#include "Mashiro/Math/Affine.h"
+#include "Mashiro/Math/Types.h"
+#include "Mashiro/Math/VecOps.h"
 
 
 namespace Mashiro {
@@ -347,33 +349,30 @@ namespace Mashiro {
         }
 
         /**
-         * @brief Build a column-major TRS transform: translate * rotate(quat) * scale.
+         * @brief Build a TRS affine transform: translate * rotate(quat) * scale.
          *
-         * The most common "quaternion acting on a matrix" in a renderer: the rotation
-         * block is the quaternion matrix scaled per-axis, with translation in column 3.
+         * The most common "quaternion acting on a transform" in a renderer: the linear
+         * block is the quaternion matrix scaled per-axis, with translation in column N.
+         * Defaults to compact storage; pass `AffineStorage::Full` for a `mat4`-backed
+         * result, or call `.ToMat()` on the returned value.
          */
-        [[nodiscard]] constexpr mat4 MakeTransform(vec3 translation, quat rotation, vec3 scale) {
+        template<AffineStorage S = AffineStorage::Compact>
+        [[nodiscard]] constexpr Affine<float, 3, S> MakeTransform(vec3 translation, quat rotation,
+                                                                 vec3 scale) {
             mat3 r = ToMat3(rotation);
-            mat4 m{};
-            m[0] = vec4{
-                .x = r[0].x * scale.x, .y = r[0].y * scale.x, .z = r[0].z * scale.x, .w = 0.0f};
-            m[1] = vec4{
-                .x = r[1].x * scale.y, .y = r[1].y * scale.y, .z = r[1].z * scale.y, .w = 0.0f};
-            m[2] = vec4{
-                .x = r[2].x * scale.z, .y = r[2].y * scale.z, .z = r[2].z * scale.z, .w = 0.0f};
-            m[3] = vec4{.x = translation.x, .y = translation.y, .z = translation.z, .w = 1.0f};
-            return m;
-        }
-
-        /** @brief Compact affine TRS: translate * rotate(quat) * scale → mat3x4. */
-        [[nodiscard]] constexpr affine3 MakeTransformAffine(vec3 translation, quat rotation,
-                                                            vec3 scale) {
-            mat3 r = ToMat3(rotation);
-            affine3 m{};
-            m[0] = vec3{.x = r[0].x * scale.x, .y = r[0].y * scale.x, .z = r[0].z * scale.x};
-            m[1] = vec3{.x = r[1].x * scale.y, .y = r[1].y * scale.y, .z = r[1].z * scale.y};
-            m[2] = vec3{.x = r[2].x * scale.z, .y = r[2].y * scale.z, .z = r[2].z * scale.z};
-            m[3] = translation;
+            Affine<float, 3, S> m = Affine<float, 3, S>::Identity();
+            m.m[0, 0] = r[0].x * scale.x;
+            m.m[1, 0] = r[0].y * scale.x;
+            m.m[2, 0] = r[0].z * scale.x;
+            m.m[0, 1] = r[1].x * scale.y;
+            m.m[1, 1] = r[1].y * scale.y;
+            m.m[2, 1] = r[1].z * scale.y;
+            m.m[0, 2] = r[2].x * scale.z;
+            m.m[1, 2] = r[2].y * scale.z;
+            m.m[2, 2] = r[2].z * scale.z;
+            m.m[0, 3] = translation.x;
+            m.m[1, 3] = translation.y;
+            m.m[2, 3] = translation.z;
             return m;
         }
 
@@ -622,7 +621,9 @@ namespace Mashiro {
 
     /// Expose the quaternion API under `Mashiro::Math::Quat` as well.
     namespace Math {
+
         namespace Quat = ::Mashiro::Quat;
+        
     }
 
 } // namespace Mashiro

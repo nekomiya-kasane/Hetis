@@ -22,6 +22,7 @@
  */
 #pragma once
 
+#include "Mashiro/Core/Meta.h"
 #include "Mashiro/Math/Vec.h"
 #include "Mashiro/Core/TypeTraits.h"
 
@@ -96,7 +97,7 @@ namespace Mashiro {
         requires std::is_signed_v<T>
     [[nodiscard]] constexpr Mat<T, R, C> operator-(const Mat<T, R, C>& a) {
         Mat<T, R, C> r;
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             r.columns[c] = -a.columns[c];
         }
         return r;
@@ -106,7 +107,7 @@ namespace Mashiro {
     template<typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, R, C> operator+(const Mat<T, R, C>& a, const Mat<T, R, C>& b) {
         Mat<T, R, C> r;
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             r.columns[c] = a.columns[c] + b.columns[c];
         }
         return r;
@@ -116,7 +117,7 @@ namespace Mashiro {
     template<typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, R, C> operator-(const Mat<T, R, C>& a, const Mat<T, R, C>& b) {
         Mat<T, R, C> r;
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             r.columns[c] = a.columns[c] - b.columns[c];
         }
         return r;
@@ -126,7 +127,7 @@ namespace Mashiro {
     template<typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, R, C> operator*(const Mat<T, R, C>& a, T s) {
         Mat<T, R, C> r;
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             r.columns[c] = a.columns[c] * s;
         }
         return r;
@@ -145,7 +146,7 @@ namespace Mashiro {
             return a * (T(1) / s);
         } else {
             Mat<T, R, C> r;
-            for (int c = 0; c < C; ++c) {
+            template for (constexpr int c : Iota<C>) {
                 r.columns[c] = a.columns[c] / s;
             }
             return r;
@@ -156,8 +157,8 @@ namespace Mashiro {
     template<typename T, int R, int C, AlignTag A>
     [[nodiscard]] constexpr Vec<T, R> operator*(const Mat<T, R, C>& a, const Vec<T, C, A>& v) {
         // r = v[0]*col[0] + v[1]*col[1] + ... — cache-friendly column access.
-        Vec<T, R> r = a.columns[0] * v[0];
-        for (int k = 1; k < C; ++k) {
+        Vec<T, R> r{};
+        template for (constexpr int k : Iota<C>) {
             r += a.columns[k] * v[k];
         }
         return r;
@@ -166,11 +167,11 @@ namespace Mashiro {
     /** @brief Row vector × matrix: Vec<R> × Mat<R,C> → Vec<C> (vᵀ · M). */
     template<typename T, int R, int C, AlignTag A>
     [[nodiscard]] constexpr Vec<T, C> operator*(const Vec<T, R, A>& v, const Mat<T, R, C>& a) {
-        // r[col] = dot(v, a.col[col]). Seed with first term.
+        // r[col] = dot(v, a.col[col]).
         Vec<T, C> r;
-        for (int col = 0; col < C; ++col) {
-            T sum = v[0] * a[0, col];
-            for (int row = 1; row < R; ++row) {
+        template for (constexpr int col : Iota<C>) {
+            T sum{};
+            template for (constexpr int row : Iota<R>) {
                 sum += v[row] * a[row, col];
             }
             r[col] = sum;
@@ -183,7 +184,7 @@ namespace Mashiro {
     [[nodiscard]] constexpr Mat<T, R, C> operator*(const Mat<T, R, K>& a, const Mat<T, K, C>& b) {
         // r.col[c] = a * b.col[c]  — each column of result is mat*vec.
         Mat<T, R, C> r;
-        for (int col = 0; col < C; ++col) {
+        template for (constexpr int col : Iota<C>) {
             r.columns[col] = a * b.columns[col];
         }
         return r;
@@ -192,7 +193,7 @@ namespace Mashiro {
     /** @brief Compound addition. */
     template<typename T, int R, int C>
     constexpr Mat<T, R, C>& operator+=(Mat<T, R, C>& a, const Mat<T, R, C>& b) {
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             a.columns[c] += b.columns[c];
         }
         return a;
@@ -200,7 +201,7 @@ namespace Mashiro {
     /** @brief Compound subtraction. */
     template<typename T, int R, int C>
     constexpr Mat<T, R, C>& operator-=(Mat<T, R, C>& a, const Mat<T, R, C>& b) {
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             a.columns[c] -= b.columns[c];
         }
         return a;
@@ -208,7 +209,7 @@ namespace Mashiro {
     /** @brief Compound scalar multiplication. */
     template<typename T, int R, int C>
     constexpr Mat<T, R, C>& operator*=(Mat<T, R, C>& a, T s) {
-        for (int c = 0; c < C; ++c) {
+        template for (constexpr int c : Iota<C>) {
             a.columns[c] *= s;
         }
         return a;
@@ -219,7 +220,7 @@ namespace Mashiro {
         if constexpr (std::floating_point<T>) {
             a *= (T(1) / s);
         } else {
-            for (int c = 0; c < C; ++c) {
+            template for (constexpr int c : Iota<C>) {
                 a.columns[c] /= s;
             }
         }

@@ -24,8 +24,10 @@
 #include <type_traits>
 #include <ranges>
 
+#include "Mashiro/Core/Meta.h"
 #include "Mashiro/Core/TypeTraits.h"
 #include "Mashiro/Math/ScalarMath.h"
+#include "Mashiro/Math/Algebra.h"
 
 namespace Mashiro {
 
@@ -174,8 +176,7 @@ namespace Mashiro {
      */
     template<typename T>
     concept HomogeneousVec =
-        Traits::Homogeneous<T> && Traits::Members<T>.size() >= 2 &&
-        requires(T v, int i) {
+        Traits::Homogeneous<T> && Traits::Members<T>.size() >= 2 && requires(T v, int i) {
             { v[i] };
         } && std::is_arithmetic_v<std::remove_cvref_t<decltype(std::declval<T>()[0])>>;
 
@@ -202,7 +203,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator+(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = a[i] + b[i];
         }
         return r;
@@ -212,7 +213,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator-(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = a[i] - b[i];
         }
         return r;
@@ -222,7 +223,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator*(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = a[i] * b[i];
         }
         return r;
@@ -232,7 +233,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator/(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = a[i] / b[i];
         }
         return r;
@@ -242,7 +243,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator*(V a, ScalarOf<V> s) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = a[i] * s;
         }
         return r;
@@ -258,7 +259,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator/(V a, ScalarOf<V> s) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = a[i] / s;
         }
         return r;
@@ -269,7 +270,7 @@ namespace Mashiro {
         requires std::is_signed_v<ScalarOf<V>>
     [[nodiscard]] constexpr V operator-(V a) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) {
+        template for (constexpr int i : Iota<VecDim<V>>) {
             r[i] = -a[i];
         }
         return r;

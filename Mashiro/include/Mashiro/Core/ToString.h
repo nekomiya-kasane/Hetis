@@ -54,6 +54,19 @@ namespace Mashiro {
         return std::meta::display_string_of(^^T);
     }
 
+    /// @brief Annotation: when placed on a pointer member, ToString will dereference
+    /// and recursively print the pointee instead of printing the raw address.
+    ///
+    /// @code
+    /// struct Node {
+    ///     int value;
+    ///     [[=DerefPrint{}]] Node* next;  // prints *next recursively
+    /// };
+    /// @endcode
+    struct DerefPrint {
+        constexpr bool operator==(const DerefPrint&) const = default;
+    };
+
     /// @brief Convert any string-like value to an owning `std::string`.
     template<typename T>
     [[nodiscard]] constexpr std::string MakeString(T&& iValue) {
@@ -295,6 +308,14 @@ namespace Mashiro {
 
                 if constexpr (std::meta::is_bit_field(m)) {
                     ss << "=" << ToStringImpl(auto(iValue.[:m:]));
+                } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(m):]> &&
+                                     std::meta::annotations_of(m, ^^DerefPrint).size() > 0) {
+                    auto* ptr = iValue.[:m:];
+                    if (ptr == nullptr) {
+                        ss << "=nullptr";
+                    } else {
+                        ss << "=" << ToStringImpl(*ptr);
+                    }
                 } else {
                     ss << "=" << ToStringImpl(iValue.[:m:]);
                 }
@@ -453,5 +474,32 @@ namespace Mashiro {
     }
 
 } // namespace Mashiro
+
+// =============================================================================
+// Automatic std::formatter injection for Mashiro types
+// =============================================================================
+
+/// @brief Auto-specialise `std::formatter` for any Mashiro-reflectable type.
+///
+/// Enables `std::format("{}", myEnum)` and `std::format("{}", myStruct)` for:
+/// - Scoped enums (reflection-based name)
+/// - Complete classes with reflectable members (member dump)
+/// - Any type with an ADL `ToString()` or `.ToString()` member
+///
+/// Excludes arithmetic types, string-like types, and standard library types
+/// that already have formatters.
+template <typename T>
+    requires (!std::is_arithmetic_v<T> &&
+              !std::convertible_to<T, std::string_view> &&
+              !std::convertible_to<T, std::string> &&
+              (std::is_enum_v<T> ||
+               (std::is_class_v<T> && !std::is_union_v<T> && requires { sizeof(T); })))
+struct std::formatter<T> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    auto format(const T& value, std::format_context& ctx) const {
+        return std::format_to(ctx.out(), "{}", Mashiro::ToString(value));
+    }
+};
 
 // clang-format on

@@ -15,7 +15,7 @@
 #pragma once
 
 #include "Mashiro/Geom/Geom.h"
-#include "Mashiro/Math/MathUtils.h"
+#include "Mashiro/Math/MatOps.h"
 
 #include <concepts>
 #include <meta>

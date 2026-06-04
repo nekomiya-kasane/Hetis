@@ -99,6 +99,12 @@ namespace Mashiro::Math {
         // Precision-dependent configuration
         // -----------------------------------------------------------------
 
+        /// @brief Taylor-tail term count for \f$\exp\f$
+        template<std::floating_point T>
+        inline constexpr int kExpTerms = 12;
+        template<>
+        inline constexpr int kExpTerms<double> = 25;
+
         /// @brief Taylor-tail term count for \f$\sin\f$.
         template<std::floating_point T>
         inline constexpr size_t kSinTerms = 5;
@@ -152,6 +158,63 @@ namespace Mashiro::Math {
         // =================================================================
         // Constexpr kernels
         // =================================================================
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T CtExp(T x) {
+            T sum = T(1);
+            T term = T(1);
+            for (int i = 1; i < kExpTerms<T>; ++i) {
+                term *= x / static_cast<T>(i);
+                sum += term;
+            }
+            return sum;
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T CtLog(T x) {
+            if (x <= T(0)) {
+                return T(-1e30);
+            }
+            if (x == T(1)) {
+                return T(0);
+            }
+
+            // Range reduction: x = m * 2^e, 0.5 <= m < 1
+            // log(x) = e*ln2 + log(m)
+            int e = 0;
+            T m = x;
+            while (m >= T(2)) {
+                m *= T(0.5);
+                ++e;
+            }
+            while (m < T(0.5)) {
+                m *= T(2);
+                --e;
+            }
+
+            // log(m) via series around 1: let u = (m-1)/(m+1), log(m) = 2*(u + u^3/3 + u^5/5 + ...)
+            T u = (m - T(1)) / (m + T(1));
+            T u2 = u * u;
+            T sum = u;
+            T term = u;
+            constexpr int terms = std::same_as<T, float> ? 12 : 30;
+            for (int k = 1; k < terms; ++k) {
+                term *= u2;
+                sum += term / static_cast<T>(2 * k + 1);
+            }
+            return T(2) * sum + static_cast<T>(e) * Math::Const::kLn2<T>;
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T CtPow(T base, T exp) {
+            if (base <= T(0)) {
+                if (base == T(0)) {
+                    return (exp > T(0)) ? T(0) : T(1);
+                }
+                return T(0); // negative base with non-integer exp: undefined
+            }
+            return CtExp(exp * CtLog(base));
+        }
 
         /**
          * @brief Constexpr square root via bit-hack seed + Newton–Raphson.
@@ -306,6 +369,33 @@ namespace Mashiro::Math {
     // =========================================================================
     // Public API
     // =========================================================================
+
+    template<std::floating_point T>
+    [[nodiscard]] constexpr T Exp(T x) {
+        if consteval {
+            return Detail::CtExp(x);
+        } else {
+            return std::exp(x);
+        }
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] constexpr T Log(T x) {
+        if consteval {
+            return Detail::CtLog(x);
+        } else {
+            return std::log(x);
+        }
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] constexpr T Pow(T base, T exp) {
+        if consteval {
+            return Detail::CtPow(base, exp);
+        } else {
+            return std::pow(base, exp);
+        }
+    }
 
     /**
      * @brief sin/cos pair returned together (one argument reduction computes both).

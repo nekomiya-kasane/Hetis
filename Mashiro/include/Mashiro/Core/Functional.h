@@ -47,8 +47,10 @@
 
 #include <array>
 #include <concepts>
+#include <expected>
 #include <functional>
 #include <meta>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -57,33 +59,24 @@
 #include <utility>
 #include <vector>
 
-namespace Mashiro::Meta {
+namespace Mashiro {
 
-    // =====================================================================
-    // Detection concepts
-    // =====================================================================
+    namespace Traits {
 
-    using Traits::TupleLike;
+        /// @brief A class type usable as a fixed-size record (reconstructed by `Map`).
+        template<typename T>
+        concept Aggregate = std::is_aggregate_v<std::remove_cvref_t<T>>;
 
-    /// @brief A class type usable as a fixed-size record (reconstructed by `Map`).
-    template<typename T>
-    concept Aggregate = std::is_aggregate_v<std::remove_cvref_t<T>>;
+        /// @brief An iterable that is *not* tuple-like — eligible for lazy view adaptors.
+        template<typename T>
+        concept LazyRange = std::ranges::input_range<T> && !Traits::TupleLike<std::remove_cvref_t<T>>;
 
-    /// @brief An iterable that is *not* tuple-like — eligible for lazy view adaptors.
-    template<typename T>
-    concept LazyRange = std::ranges::input_range<T> && !TupleLike<std::remove_cvref_t<T>>;
+        /// @brief A reflectable record: a class that is neither tuple-like nor a range.
+        template<typename T>
+        concept Record = std::is_class_v<std::remove_cvref_t<T>> &&
+                         !Traits::TupleLike<std::remove_cvref_t<T>> && !std::ranges::range<T>;
 
-    /// @brief A reflectable record: a class that is neither tuple-like nor a range.
-    template<typename T>
-    concept Record = std::is_class_v<std::remove_cvref_t<T>> &&
-                     !TupleLike<std::remove_cvref_t<T>> && !std::ranges::range<T>;
-
-    /** @cond INTERNAL */
-    namespace Detail {
-
-
-    } // namespace Detail
-    /** @endcond */
+    }
 
     // =====================================================================
     // Closure core & the pipe operator
@@ -111,21 +104,26 @@ namespace Mashiro::Meta {
     template<typename F>
     Adaptor(F) -> Adaptor<F>;
 
-    /** @cond INTERNAL */
-    namespace Detail {
+    namespace Traits {
 
+        /** @cond INTERNAL */
+        namespace Detail {
+
+            template<typename T>
+            consteval bool IsAdaptorOf() {
+                constexpr auto r = ^^T;
+                return std::meta::has_template_arguments(r) &&
+                    std::meta::template_of(r) == ^^Adaptor;
+            }
+
+        } // namespace Detail
+        /** @endcond */
+
+        /// @brief A type that is not an `Adaptor` (guards the pipe against `adaptor | adaptor`).
         template<typename T>
-        struct IsAdaptor : std::false_type {};
+        concept NonAdaptor = !Detail::IsAdaptorOf<std::remove_cvref_t<T>>();
 
-        template<typename F>
-        struct IsAdaptor<Adaptor<F>> : std::true_type {};
-
-    } // namespace Detail
-    /** @endcond */
-
-    /// @brief A type that is not an `Adaptor` (guards the pipe against `adaptor | adaptor`).
-    template<typename T>
-    concept NonAdaptor = !Detail::IsAdaptor<std::remove_cvref_t<T>>::value;
+    }
 
     /**
      * @brief Postfix application: `x | f` ≡ `f(x)` (Mathematica `x // f`).
@@ -133,9 +131,15 @@ namespace Mashiro::Meta {
      * Found by ADL on the right-hand `Adaptor`. The left operand is constrained to
      * be a non-adaptor so closure composition stays the job of `Compose`/`Then`.
      */
-    template<NonAdaptor X, typename F>
+    template<Traits::NonAdaptor X, typename F>
     [[nodiscard]] constexpr decltype(auto) operator|(X&& x, const Adaptor<F>& a) {
         return a(std::forward<X>(x));
+    }
+
+    /// @brief Rvalue overload: enables move-only closures in the pipe.
+    template<Traits::NonAdaptor X, typename F>
+    [[nodiscard]] constexpr decltype(auto) operator|(X&& x, Adaptor<F>&& a) {
+        return std::move(a)(std::forward<X>(x));
     }
 
     /// @brief The identity combinator: `x | Identity` ≡ `x`.
@@ -162,16 +166,12 @@ namespace Mashiro::Meta {
     /** @cond INTERNAL */
     namespace Detail {
 
-        template<typename T, typename F, typename X, size_t... I>
-        constexpr T MapRecordImpl(F& f, X&& xs, std::index_sequence<I...>) {
-            return T{f(std::forward<X>(xs).[:Traits::Members<T>[I]:])...};
-        }
-
         template<typename F, typename X>
         constexpr auto MapRecord(F& f, X&& xs) {
             using T = std::remove_cvref_t<X>;
-            return MapRecordImpl<T>(f, std::forward<X>(xs),
-                                    std::make_index_sequence<Traits::Members<T>.size()>{});
+            return [&]<size_t... I>(std::index_sequence<I...>) {
+                return T{f(std::forward<X>(xs).[:Traits::Members<T>[I]:])...};
+            }(std::make_index_sequence<Traits::Members<T>.size()>{});
         }
 
         template<size_t I, size_t N, typename F, typename Acc, typename Tuple>
@@ -199,9 +199,9 @@ namespace Mashiro::Meta {
     [[nodiscard]] constexpr auto Map(F f) {
         return Adaptor{[f = std::move(f)](auto&& xs) -> decltype(auto) {
             using X = std::remove_cvref_t<decltype(xs)>;
-            if constexpr (LazyRange<X>) {
+            if constexpr (Traits::LazyRange<X>) {
                 return std::views::transform(std::forward<decltype(xs)>(xs), f);
-            } else if constexpr (TupleLike<X>) {
+            } else if constexpr (Traits::TupleLike<X>) {
                 return std::apply(
                     [&](auto&&... es) {
                         return std::tuple{f(std::forward<decltype(es)>(es))...};
@@ -236,7 +236,7 @@ namespace Mashiro::Meta {
     [[nodiscard]] constexpr auto Fold(F f, Init init) {
         return Adaptor{[f = std::move(f), init = std::move(init)](auto&& xs) {
             using X = std::remove_cvref_t<decltype(xs)>;
-            if constexpr (TupleLike<X>) {
+            if constexpr (Traits::TupleLike<X>) {
                 return Detail::FoldFrom<0, std::tuple_size_v<X>>(f, init,
                                                                  std::forward<decltype(xs)>(xs));
             } else {
@@ -263,7 +263,7 @@ namespace Mashiro::Meta {
 
     /// @brief Eager spread-apply: `Apply(f, t)` ≡ `f(get<0>(t), get<1>(t), …)`.
     template<typename F, typename T>
-        requires TupleLike<std::remove_cvref_t<T>>
+        requires Traits::TupleLike<std::remove_cvref_t<T>>
     [[nodiscard]] constexpr decltype(auto) Apply(F&& f, T&& t) {
         return std::apply(std::forward<F>(f), std::forward<T>(t));
     }
@@ -282,7 +282,7 @@ namespace Mashiro::Meta {
      * `MapThread(f, {a0,a1}, {b0,b1})` ⇒ `{f(a0,b0), f(a1,b1)}`.
      */
     template<typename F, typename T0, typename... Ts>
-        requires TupleLike<std::remove_cvref_t<T0>>
+        requires Traits::TupleLike<std::remove_cvref_t<T0>>
     [[nodiscard]] constexpr auto MapThread(F f, T0&& t0, Ts&&... ts) {
         constexpr size_t N = std::tuple_size_v<std::remove_cvref_t<T0>>;
         auto atI = [&]<size_t I>(std::integral_constant<size_t, I>) {
@@ -464,170 +464,204 @@ namespace Mashiro::Meta {
         }
     }
 
-} // namespace Mashiro::Meta
-
-namespace Mashiro::Traits {
-
     // =====================================================================
-    // Type-level list and combinators
+    // Fallible-type pipe adaptors (Result<T> / optional<T>)
     // =====================================================================
-
-    /// @brief A compile-time list of types — the type-level analogue of a tuple.
-    template<typename... Ts>
-    struct TypeList {
-        static constexpr size_t size = sizeof...(Ts); ///< Number of elements.
-    };
-
-    /// @brief Number of elements in @p L.
-    template<template<typename...> class L, typename... Ts>
-    inline constexpr size_t Length = L<Ts...>::size;
 
     /** @cond INTERNAL */
     namespace Detail {
 
-        template<typename L, size_t I>
-        struct AtT;
-        template<typename... Ts, size_t I>
-        struct AtT<TypeList<Ts...>, I> {
-            using type = Ts...[I];
-        };
-
-        template<typename L>
-        struct TailT;
-        template<typename T, typename... Ts>
-        struct TailT<TypeList<T, Ts...>> {
-            using type = TypeList<Ts...>;
-        };
-
-        template<typename...>
-        struct ConcatT;
-        template<>
-        struct ConcatT<> {
-            using type = TypeList<>;
-        };
-        template<typename... Ts>
-        struct ConcatT<TypeList<Ts...>> {
-            using type = TypeList<Ts...>;
-        };
-        template<typename... As, typename... Bs, typename... Rest>
-        struct ConcatT<TypeList<As...>, TypeList<Bs...>, Rest...> {
-            using type = typename ConcatT<TypeList<As..., Bs...>, Rest...>::type;
-        };
-
-        template<template<typename> typename F, typename L>
-        struct MapTT;
-        template<template<typename> typename F, typename... Ts>
-        struct MapTT<F, TypeList<Ts...>> {
-            using type = TypeList<F<Ts>...>;
-        };
-
-        template<template<typename> typename Pred, typename L>
-        struct FilterTT;
-        template<template<typename> typename Pred>
-        struct FilterTT<Pred, TypeList<>> {
-            using type = TypeList<>;
-        };
-        template<template<typename> typename Pred, typename T, typename... Ts>
-        struct FilterTT<Pred, TypeList<T, Ts...>> {
-            using tail = typename FilterTT<Pred, TypeList<Ts...>>::type;
-            using type =
-                std::conditional_t<Pred<T>::value, typename ConcatT<TypeList<T>, tail>::type, tail>;
-        };
-
-        template<template<typename...> typename F, typename L>
-        struct ApplyTT;
-        template<template<typename...> typename F, typename... Ts>
-        struct ApplyTT<F, TypeList<Ts...>> {
-            using type = F<Ts...>;
-        };
-
-        template<template<typename, typename> typename Op, typename Acc, typename L>
-        struct FoldTT;
-        template<template<typename, typename> typename Op, typename Acc>
-        struct FoldTT<Op, Acc, TypeList<>> {
-            using type = Acc;
-        };
-        template<template<typename, typename> typename Op, typename Acc, typename T, typename... Ts>
-        struct FoldTT<Op, Acc, TypeList<T, Ts...>> {
-            using type = typename FoldTT<Op, Op<Acc, T>, TypeList<Ts...>>::type;
-        };
-
-        template<typename T, typename... Ts>
-        consteval size_t IndexOfImpl() {
-            if constexpr (sizeof...(Ts) == 0) {
-                return size_t(-1);
-            } else {
-                const bool match[] = {std::is_same_v<T, Ts>...};
-                for (size_t i = 0; i < sizeof...(Ts); ++i) {
-                    if (match[i]) {
-                        return i;
-                    }
-                }
-                return size_t(-1);
-            }
-        }
-        template<typename L, typename T>
-        struct IndexOfT;
-        template<typename T, typename... Ts>
-        struct IndexOfT<TypeList<Ts...>, T> {
-            static constexpr size_t value = IndexOfImpl<T, Ts...>();
-        };
+        template<typename T>
+        struct IsExpected : std::false_type {};
+        template<typename V, typename E>
+        struct IsExpected<std::expected<V, E>> : std::true_type {};
 
         template<typename T>
-        consteval std::meta::info TypeListReflOf() {
-            std::vector<std::meta::info> types;
-            for (auto m : std::meta::nonstatic_data_members_of(
-                     ^^T, std::meta::access_context::unchecked())) {
-                types.push_back(std::meta::type_of(m));
-            }
-            return std::meta::substitute(^^TypeList, types);
-        }
+        struct IsOptional : std::false_type {};
+        template<typename V>
+        struct IsOptional<std::optional<V>> : std::true_type {};
 
     } // namespace Detail
     /** @endcond */
 
-    /// @brief The @p I-th element of @p L (C++26 pack indexing).
-    template<typename L, size_t I>
-    using At = typename Detail::AtT<L, I>::type;
-
-    /// @brief First element of @p L.
-    template<typename L>
-    using Head = At<L, 0>;
-
-    /// @brief All but the first element of @p L.
-    template<typename L>
-    using Tail = typename Detail::TailT<L>::type;
-
-    /// @brief Concatenate any number of `TypeList`s.
-    template<typename... Ls>
-    using Concat = typename Detail::ConcatT<Ls...>::type;
-
-    /// @brief Apply unary metafunction @p F to each element: `TypeList<F<Ts>...>`.
-    template<template<typename> typename F, typename L>
-    using MapT = typename Detail::MapTT<F, L>::type;
-
-    /// @brief Keep elements for which `Pred<T>::value` holds.
-    template<template<typename> typename Pred, typename L>
-    using FilterT = typename Detail::FilterTT<Pred, L>::type;
-
-    /// @brief Instantiate variadic template @p F with the list elements: `F<Ts...>`.
-    template<template<typename...> typename F, typename L>
-    using ApplyT = typename Detail::ApplyTT<F, L>::type;
-
-    /// @brief Left fold with binary metafunction `Op<Acc, T>` and seed @p Init.
-    template<template<typename, typename> typename Op, typename Init, typename L>
-    using FoldT = typename Detail::FoldTT<Op, Init, L>::type;
-
-    /// @brief Index of the first occurrence of @p T in @p L, or `size_t(-1)`.
-    template<typename L, typename T>
-    inline constexpr size_t IndexOf = Detail::IndexOfT<L, T>::value;
-
-    /// @brief Whether @p L contains type @p T.
-    template<typename L, typename T>
-    inline constexpr bool Contains = (IndexOf<L, T> != size_t(-1));
-
-    /// @brief Reflection bridge: a `TypeList` of @p T's data-member types.
+    /// @brief A type that supports monadic chaining (std::expected or std::optional).
     template<typename T>
-    using ToTypeList = [:Detail::TypeListReflOf<T>():];
+    concept Fallible = Detail::IsExpected<std::remove_cvref_t<T>>::value ||
+                       Detail::IsOptional<std::remove_cvref_t<T>>::value;
 
-} // namespace Mashiro::Traits
+    /**
+     * @brief Monadic bind: `result | AndThen(f)` ≡ `result.and_then(f)`.
+     *
+     * `f` receives the success value and must return a Fallible type.
+     * On error/nullopt the original error propagates unchanged.
+     *
+     * @code
+     * auto pipeline = LoadFile(path)
+     *               | AndThen(Parse)
+     *               | AndThen(Validate);
+     * @endcode
+     */
+    template<typename F>
+    [[nodiscard]] constexpr auto AndThen(F f) {
+        return Adaptor{[f = std::move(f)](auto&& m) -> decltype(auto)
+            requires Fallible<decltype(m)>
+        {
+            return std::forward<decltype(m)>(m).and_then(f);
+        }};
+    }
+
+    /**
+     * @brief Functor map: `result | Transform(f)` ≡ `result.transform(f)`.
+     *
+     * `f` receives the success value; its return is wrapped in the same Fallible container.
+     */
+    template<typename F>
+    [[nodiscard]] constexpr auto Transform(F f) {
+        return Adaptor{[f = std::move(f)](auto&& m) -> decltype(auto)
+            requires Fallible<decltype(m)>
+        {
+            return std::forward<decltype(m)>(m).transform(f);
+        }};
+    }
+
+    /**
+     * @brief Error recovery: `result | OrElse(f)` ≡ `result.or_else(f)`.
+     *
+     * `f` receives the error and must return a Fallible of the same value type.
+     * For `std::optional`, `f` takes no arguments.
+     */
+    template<typename F>
+    [[nodiscard]] constexpr auto OrElse(F f) {
+        return Adaptor{[f = std::move(f)](auto&& m) -> decltype(auto)
+            requires Fallible<decltype(m)>
+        {
+            return std::forward<decltype(m)>(m).or_else(f);
+        }};
+    }
+
+    /**
+     * @brief Unwrap with default: `result | ValueOr(fallback)`.
+     *
+     * Returns the success value, or `fallback` if in error/nullopt state.
+     */
+    template<typename V>
+    [[nodiscard]] constexpr auto ValueOr(V fallback) {
+        return Adaptor{[fallback = std::move(fallback)](auto&& m)
+            requires Fallible<decltype(m)>
+        {
+            return std::forward<decltype(m)>(m).value_or(fallback);
+        }};
+    }
+
+    // =====================================================================
+    // Scan (prefix accumulation / running fold)
+    // =====================================================================
+
+    /**
+     * @brief Prefix accumulation: `range | Scan(f, init)`.
+     *
+     * Materialises a `std::vector` of running accumulations: element `i` is
+     * `fold(range[0..i], f, init)`. The first output is `f(init, range[0])`.
+     *
+     * This is intentionally **eager** — scan requires stateful sequential
+     * dependency (element `i` depends on `i-1`), which is inherently
+     * non-parallelisable and cannot benefit from lazy view composition.
+     * Materialising into a contiguous `vector` is the cache-optimal choice.
+     *
+     * @code
+     * auto sums = std::vector{1,2,3,4} | Scan([](int a, int b){ return a+b; }, 0);
+     * // yields: {1, 3, 6, 10}
+     * @endcode
+     */
+    template<typename F, typename Init>
+    [[nodiscard]] constexpr auto Scan(F f, Init init) {
+        return Adaptor{[f = std::move(f), init = std::move(init)](auto&& xs) {
+            using Acc = std::remove_cvref_t<Init>;
+            std::vector<Acc> result;
+            if constexpr (std::ranges::sized_range<std::remove_cvref_t<decltype(xs)>>) {
+                result.reserve(std::ranges::size(xs));
+            }
+            Acc acc = init;
+            for (auto&& elem : xs) {
+                acc = f(std::move(acc), elem);
+                result.push_back(acc);
+            }
+            return result;
+        }};
+    }
+
+    // =====================================================================
+    // Zip (multi-range co-iteration)
+    // =====================================================================
+
+    /**
+     * @brief Zip two ranges into a view of pairs: `Zip(a, b)`.
+     *
+     * Returns `std::views::zip(a, b)`. Pipeable form: `a | ZipWith(b)`.
+     *
+     * @code
+     * auto ids = std::vector{1, 2, 3};
+     * auto names = std::vector{"a", "b", "c"};
+     * for (auto [id, name] : Zip(ids, names)) { ... }
+     * @endcode
+     */
+    template<std::ranges::input_range... Rs>
+    [[nodiscard]] constexpr auto Zip(Rs&&... ranges) {
+        return std::views::zip(std::forward<Rs>(ranges)...);
+    }
+
+    /**
+     * @brief Pipeable zip: `range1 | ZipWith(range2)` → view of pairs.
+     *
+     * The right-hand range is captured; the left-hand range arrives via pipe.
+     *
+     * @code
+     * auto paired = positions | ZipWith(velocities) | Map([](auto pv) { ... });
+     * @endcode
+     */
+    template<std::ranges::input_range R>
+    [[nodiscard]] constexpr auto ZipWith(R& other) {
+        return Adaptor{[&other](auto&& lhs) {
+            return std::views::zip(std::forward<decltype(lhs)>(lhs), other);
+        }};
+    }
+
+    // =====================================================================
+    // Enumerate (index + value)
+    // =====================================================================
+
+    /**
+     * @brief Pipeable enumerate: `range | Enumerate()` → view of `(index, value)`.
+     *
+     * @code
+     * for (auto [i, pos] : positions | Enumerate()) {
+     *     fmt::print("[{}] = {}\n", i, pos);
+     * }
+     * @endcode
+     */
+    [[nodiscard]] constexpr auto Enumerate() {
+        return Adaptor{[](auto&& xs) {
+            return std::views::zip(
+                std::views::iota(size_t{0}),
+                std::forward<decltype(xs)>(xs));
+        }};
+    }
+
+    /**
+     * @brief Enumerate with a custom starting index.
+     *
+     * @code
+     * for (auto [i, v] : data | Enumerate(100)) { ... } // i starts at 100
+     * @endcode
+     */
+    template<std::integral I = size_t>
+    [[nodiscard]] constexpr auto Enumerate(I start) {
+        return Adaptor{[start](auto&& xs) {
+            return std::views::zip(
+                std::views::iota(start),
+                std::forward<decltype(xs)>(xs));
+        }};
+    }
+
+} // namespace Mashiro::Meta
+
