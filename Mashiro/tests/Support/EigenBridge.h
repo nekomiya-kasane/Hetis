@@ -21,7 +21,7 @@
 
 #include "Mashiro/Math/MathUtils.h"
 #include "Mashiro/Math/Quanterion.h"
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>

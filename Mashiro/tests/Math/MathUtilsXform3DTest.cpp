@@ -3,6 +3,7 @@
  * @brief MathUtils.h 3D transforms, affine, projection validated against Eigen.
  */
 #include "Support/EigenBridge.h"
+#include "Support/Meta.h"
 
 #include <Eigen/Dense>
 #include <numbers>
@@ -20,42 +21,42 @@ namespace {
 // 3D transform builders
 // ===========================================================================
 
-TEST_CASE("MakeTranslation matches Eigen", "[Math.MathUtils]") {
+TEST_CASE("MakeTranslation matches Eigen", AUTO_TAG) {
     vec3 t{10,-20,30};
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.translate(ToEigen(t));
     RequireCloseEigen(Math::MakeTranslation(t), ea.matrix());
 }
 
-TEST_CASE("MakeScale matches Eigen", "[Math.MathUtils]") {
+TEST_CASE("MakeScale matches Eigen", AUTO_TAG) {
     vec3 s{2,3,4};
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.scale(ToEigen(s));
     RequireCloseEigen(Math::MakeScale(s), ea.matrix());
 }
 
-TEST_CASE("MakeRotateX matches Eigen", "[Math.MathUtils]") {
+TEST_CASE("MakeRotateX matches Eigen", AUTO_TAG) {
     float angle = 1.2f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitX()));
     RequireCloseEigen(Math::MakeRotateX(angle), ea.matrix());
 }
 
-TEST_CASE("MakeRotateY matches Eigen", "[Math.MathUtils]") {
+TEST_CASE("MakeRotateY matches Eigen", AUTO_TAG) {
     float angle = -0.7f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitY()));
     RequireCloseEigen(Math::MakeRotateY(angle), ea.matrix());
 }
 
-TEST_CASE("MakeRotateZ matches Eigen", "[Math.MathUtils]") {
+TEST_CASE("MakeRotateZ matches Eigen", AUTO_TAG) {
     float angle = 2.1f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ()));
     RequireCloseEigen(Math::MakeRotateZ(angle), ea.matrix());
 }
 
-TEST_CASE("MakeRotateAxis matches Eigen", "[Math.MathUtils]") {
+TEST_CASE("MakeRotateAxis matches Eigen", AUTO_TAG) {
     vec3 axis{0.3f,0.8f,-0.5f};
     float angle = 1.1f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
@@ -63,14 +64,14 @@ TEST_CASE("MakeRotateAxis matches Eigen", "[Math.MathUtils]") {
     RequireCloseEigen(Math::MakeRotateAxis(axis, angle), ea.matrix(), 1e-4f);
 }
 
-TEST_CASE("Rotation matrices have det = 1", "[Math.MathUtils]") {
+TEST_CASE("Rotation matrices have det = 1", AUTO_TAG) {
     RequireClose(Math::Det(Math::MakeRotateX(0.5f)), 1.0f);
     RequireClose(Math::Det(Math::MakeRotateY(1.2f)), 1.0f);
     RequireClose(Math::Det(Math::MakeRotateZ(-0.3f)), 1.0f);
     RequireClose(Math::Det(Math::MakeRotateAxis(vec3{1,1,1}, 2.0f)), 1.0f);
 }
 
-TEST_CASE("MakeLookAt matches manual Eigen construction", "[Math.MathUtils]") {
+TEST_CASE("MakeLookAt matches manual Eigen construction", AUTO_TAG) {
     vec3 eye{0,0,5}, target{0,0,0}, up{0,1,0};
     mat4 view = Math::MakeLookAt(eye, target, up);
 
@@ -93,7 +94,7 @@ TEST_CASE("MakeLookAt matches manual Eigen construction", "[Math.MathUtils]") {
 // 3D Affine (mat3x4 compact)
 // ===========================================================================
 
-TEST_CASE("IdentityAffine is upper 3 rows of Identity()", "[Math.MathUtils]") {
+TEST_CASE("IdentityAffine is upper 3 rows of Identity()", AUTO_TAG) {
     affine3 a = Math::IdentityAffine();
     mat4 full = Math::Identity();
     for (int r = 0; r < 3; ++r)
@@ -101,7 +102,7 @@ TEST_CASE("IdentityAffine is upper 3 rows of Identity()", "[Math.MathUtils]") {
             RequireClose(a[r,c], full[r,c]);
 }
 
-TEST_CASE("Affine3D builders match upper rows of 4x4", "[Math.MathUtils]") {
+TEST_CASE("Affine3D builders match upper rows of 4x4", AUTO_TAG) {
     auto check = [](auto affFn, auto fullFn) {
         auto a = affFn();
         auto f = fullFn();
@@ -126,7 +127,7 @@ TEST_CASE("Affine3D builders match upper rows of 4x4", "[Math.MathUtils]") {
           []{return Math::MakeLookAt(vec3{3,4,5},vec3{0,0,0},vec3{0,1,0});});
 }
 
-TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", "[Math.MathUtils]") {
+TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", AUTO_TAG) {
     vec3 axis{0.3f,0.8f,-0.5f}, t{5,-3,2};
     float angle = 1.1f;
     affine3 a = Math::MakeRotateAxisAffine(axis, angle);
@@ -146,7 +147,7 @@ TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", "[Math.MathUtils]")
 // Projection
 // ===========================================================================
 
-TEST_CASE("MakePerspective: near->Z=0, far->Z=1 (Vulkan)", "[Math.MathUtils]") {
+TEST_CASE("MakePerspective: near->Z=0, far->Z=1 (Vulkan)", AUTO_TAG) {
     float nearZ=0.1f, farZ=100.0f;
     mat4 p = Math::MakePerspective(kPi*0.25f, 16.0f/9.0f, nearZ, farZ);
     vec4 nearPt = p * vec4{0,0,-nearZ,1};
@@ -155,13 +156,13 @@ TEST_CASE("MakePerspective: near->Z=0, far->Z=1 (Vulkan)", "[Math.MathUtils]") {
     RequireClose(farPt.z / farPt.w, 1.0f, 1e-4f);
 }
 
-TEST_CASE("MakePerspectiveYFlipped has positive Y", "[Math.MathUtils]") {
+TEST_CASE("MakePerspectiveYFlipped has positive Y", AUTO_TAG) {
     mat4 p = Math::MakePerspectiveYFlipped(kPi*0.25f, 1.0f, 0.1f, 100.0f);
     vec4 above = p * vec4{0,1,-1,1};
     REQUIRE(above.y / above.w > 0.0f);
 }
 
-TEST_CASE("MakeOrtho: near->Z=0, far->Z=1 (Vulkan)", "[Math.MathUtils]") {
+TEST_CASE("MakeOrtho: near->Z=0, far->Z=1 (Vulkan)", AUTO_TAG) {
     float l=-1,r=1,b=-1,t=1,n=0.1f,f=100.0f;
     mat4 o = Math::MakeOrtho(l,r,b,t,n,f);
     vec4 nearPt = o * vec4{0,0,-n,1};
@@ -170,7 +171,7 @@ TEST_CASE("MakeOrtho: near->Z=0, far->Z=1 (Vulkan)", "[Math.MathUtils]") {
     RequireClose(farPt.z / farPt.w, 1.0f, 1e-4f);
 }
 
-TEST_CASE("MakeOrthoYFlipped has positive Y", "[Math.MathUtils]") {
+TEST_CASE("MakeOrthoYFlipped has positive Y", AUTO_TAG) {
     mat4 o = Math::MakeOrthoYFlipped(-1.0f,1.0f,-1.0f,1.0f,0.1f,100.0f);
     vec4 above = o * vec4{0,0.5f,-1,1};
     REQUIRE(above.y / above.w > 0.0f);

@@ -1,6 +1,7 @@
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 #include "Mashiro/Geom/Geom.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <concepts>
@@ -55,7 +56,7 @@ namespace {
 // Layout / ABI invariants (must stay GPU-uploadable)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Vector types have GPU-compatible size and alignment", "[Core.Types]") {
+TEST_CASE("Vector types have GPU-compatible size and alignment", AUTO_TAG) {
     STATIC_REQUIRE(sizeof(vec2) == 8);
     STATIC_REQUIRE(alignof(vec2) == 8);
     STATIC_REQUIRE(sizeof(vec3b) == 12);
@@ -75,7 +76,7 @@ TEST_CASE("Vector types have GPU-compatible size and alignment", "[Core.Types]")
     STATIC_REQUIRE(alignof(uvec4) == 16);
 }
 
-TEST_CASE("Matrix types have GPU-compatible size and alignment", "[Core.Types]") {
+TEST_CASE("Matrix types have GPU-compatible size and alignment", AUTO_TAG) {
     STATIC_REQUIRE(sizeof(mat2) == 16);
     STATIC_REQUIRE(alignof(mat2) == 8);
     STATIC_REQUIRE(sizeof(mat3) == 48);
@@ -84,7 +85,7 @@ TEST_CASE("Matrix types have GPU-compatible size and alignment", "[Core.Types]")
     STATIC_REQUIRE(alignof(mat4) == 16);
 }
 
-TEST_CASE("Geometry types have GPU-compatible size and alignment", "[Core.Types]") {
+TEST_CASE("Geometry types have GPU-compatible size and alignment", AUTO_TAG) {
     STATIC_REQUIRE(sizeof(AABB) == 32);
     STATIC_REQUIRE(alignof(AABB) == 16);
     STATIC_REQUIRE(sizeof(Sphere) == 16);
@@ -97,7 +98,7 @@ TEST_CASE("Geometry types have GPU-compatible size and alignment", "[Core.Types]
     STATIC_REQUIRE(alignof(Plane) == 16);
 }
 
-TEST_CASE("All GPU types are trivially copyable and standard layout", "[Core.Types]") {
+TEST_CASE("All GPU types are trivially copyable and standard layout", AUTO_TAG) {
     STATIC_REQUIRE(std::is_trivially_copyable_v<vec2>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<vec3b>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<vec3>);
@@ -130,7 +131,7 @@ TEST_CASE("All GPU types are trivially copyable and standard layout", "[Core.Typ
 // Default initialization
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Vector types value-initialize to zero", "[Core.Types]") {
+TEST_CASE("Vector types value-initialize to zero", AUTO_TAG) {
     vec2 f2{};
     REQUIRE(f2.x == 0.0f);
     REQUIRE(f2.y == 0.0f);
@@ -158,7 +159,7 @@ TEST_CASE("Vector types value-initialize to zero", "[Core.Types]") {
 // Vector subscript
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Vector operator[] reads and writes components", "[Core.Types]") {
+TEST_CASE("Vector operator[] reads and writes components", AUTO_TAG) {
     vec4 v{};
     v[0] = 1.0f;
     v[1] = 2.0f;
@@ -188,7 +189,7 @@ TEST_CASE("Vector operator[] reads and writes components", "[Core.Types]") {
     REQUIRE(i.y == 7);
 }
 
-TEST_CASE("vec3 operator[] reads and writes x, y, z", "[Core.Types]") {
+TEST_CASE("vec3 operator[] reads and writes x, y, z", AUTO_TAG) {
     vec3 v{};
     v[0] = 1.0f;
     v[1] = 2.0f;
@@ -203,7 +204,7 @@ TEST_CASE("vec3 operator[] reads and writes x, y, z", "[Core.Types]") {
 // Matrix subscript (column-major)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Matrix single subscript returns the column vector", "[Core.Types]") {
+TEST_CASE("Matrix single subscript returns the column vector", AUTO_TAG) {
     mat4 m{};
     m[2].x = 5.0f;
     REQUIRE(m.columns[2].x == 5.0f);
@@ -216,7 +217,7 @@ TEST_CASE("Matrix single subscript returns the column vector", "[Core.Types]") {
     REQUIRE(cm[2].x == 5.0f);
 }
 
-TEST_CASE("Matrix dual subscript is column-major", "[Core.Types]") {
+TEST_CASE("Matrix dual subscript is column-major", AUTO_TAG) {
     mat4 m{};
     m[1, 2] = 7.0f; // row 1, column 2 -> columns[2][1]
     REQUIRE(m.columns[2][1] == 7.0f);
@@ -232,16 +233,16 @@ TEST_CASE("Matrix dual subscript is column-major", "[Core.Types]") {
     REQUIRE(t.columns[0].z == 11.0f);
 }
 
-TEST_CASE("Matrix single subscript works in constant expressions", "[Core.Types]") {
+TEST_CASE("Matrix single subscript works in constant expressions", AUTO_TAG) {
     STATIC_REQUIRE(MatrixColumn() == 5.0f);
 }
 
-TEST_CASE("Vector subscript works in constant expressions for every index", "[Core.Types]") {
+TEST_CASE("Vector subscript works in constant expressions for every index", AUTO_TAG) {
     STATIC_REQUIRE(VecSubscript() == 10.0f);
     STATIC_REQUIRE(UintSubscript() == 7u);
 }
 
-TEST_CASE("Matrix dual subscript works in constant expressions for any row", "[Core.Types]") {
+TEST_CASE("Matrix dual subscript works in constant expressions for any row", AUTO_TAG) {
     STATIC_REQUIRE(MatrixElement() == 16.0f);
 }
 
@@ -249,7 +250,7 @@ TEST_CASE("Matrix dual subscript works in constant expressions for any row", "[C
 // Geometry types
 // ---------------------------------------------------------------------------
 
-TEST_CASE("AABB stores min and max corners", "[Core.Types]") {
+TEST_CASE("AABB stores min and max corners", AUTO_TAG) {
     AABB box{};
     box.min = vec3{-1.0f, -2.0f, -3.0f};
     box.max = vec3{4.0f, 5.0f, 6.0f};
@@ -257,7 +258,7 @@ TEST_CASE("AABB stores min and max corners", "[Core.Types]") {
     REQUIRE(box.max.z == 6.0f);
 }
 
-TEST_CASE("Ray stores origin and direction", "[Core.Types]") {
+TEST_CASE("Ray stores origin and direction", AUTO_TAG) {
     Ray r{};
     r.origin    = vec3{1.0f, 0.0f, 0.0f};
     r.direction = vec3{0.0f, 1.0f, 0.0f};
@@ -265,7 +266,7 @@ TEST_CASE("Ray stores origin and direction", "[Core.Types]") {
     REQUIRE(r.direction.y == 1.0f);
 }
 
-TEST_CASE("Sphere stores center and radius", "[Core.Types]") {
+TEST_CASE("Sphere stores center and radius", AUTO_TAG) {
     Sphere s{};
     s.center = vec3b{1.0f, 2.0f, 3.0f};
     s.radius = 2.5f;
@@ -276,7 +277,7 @@ TEST_CASE("Sphere stores center and radius", "[Core.Types]") {
     STATIC_REQUIRE(SphereRadius() == 4.5f);
 }
 
-TEST_CASE("Plane stores normal and distance", "[Core.Types]") {
+TEST_CASE("Plane stores normal and distance", AUTO_TAG) {
     Plane p{};
     p.normal = vec3b{0.0f, 1.0f, 0.0f};
     p.dist = -3.0f;
@@ -284,7 +285,7 @@ TEST_CASE("Plane stores normal and distance", "[Core.Types]") {
     REQUIRE(p.normal.y == 1.0f);
 }
 
-TEST_CASE("FrustumPlanes holds six zero-initialized planes", "[Core.Types]") {
+TEST_CASE("FrustumPlanes holds six zero-initialized planes", AUTO_TAG) {
     FrustumPlanes f{};
     for (int i = 0; i < 6; ++i) {
         REQUIRE(f.planes[i].x == 0.0f);
@@ -299,7 +300,7 @@ TEST_CASE("FrustumPlanes holds six zero-initialized planes", "[Core.Types]") {
 // Operator overloads (hidden friends). Values are exact in float, so == is safe.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("float vector operators are component-wise with scalar broadcast", "[Core.Types]") {
+TEST_CASE("float vector operators are component-wise with scalar broadcast", AUTO_TAG) {
     vec3 a{1.0f, 2.0f, 3.0f};
     vec3 b{4.0f, 5.0f, 6.0f};
 
@@ -322,7 +323,7 @@ TEST_CASE("float vector operators are component-wise with scalar broadcast", "[C
     REQUIRE(-d == vec2{-3.0f, -4.0f});
 }
 
-TEST_CASE("float vector compound assignment mutates in place", "[Core.Types]") {
+TEST_CASE("float vector compound assignment mutates in place", AUTO_TAG) {
     vec3 v{1.0f, 2.0f, 3.0f};
     v += vec3{1.0f, 1.0f, 1.0f};
     REQUIRE(v == vec3{2.0f, 3.0f, 4.0f});
@@ -336,7 +337,7 @@ TEST_CASE("float vector compound assignment mutates in place", "[Core.Types]") {
     REQUIRE(v == vec3{0.0f, 2.0f, 4.0f});
 }
 
-TEST_CASE("integer vector operators are component-wise", "[Core.Types]") {
+TEST_CASE("integer vector operators are component-wise", AUTO_TAG) {
     ivec2 a{2, -3};
     ivec2 b{5, 7};
     REQUIRE(a + b == ivec2{7, 4});
@@ -352,7 +353,7 @@ TEST_CASE("integer vector operators are component-wise", "[Core.Types]") {
     REQUIRE(u != uvec3{1u, 2u, 4u});
 }
 
-TEST_CASE("matrix * vector applies the linear map", "[Core.Types]") {
+TEST_CASE("matrix * vector applies the linear map", AUTO_TAG) {
     mat4 m{};
     m[0, 0] = 2.0f;
     m[1, 1] = 3.0f;
@@ -373,7 +374,7 @@ TEST_CASE("matrix * vector applies the linear map", "[Core.Types]") {
     REQUIRE(v == vec3{4.0f, 2.0f, 0.0f});
 }
 
-TEST_CASE("matrix * matrix is column-major composition", "[Core.Types]") {
+TEST_CASE("matrix * matrix is column-major composition", AUTO_TAG) {
     mat4 id{};
     id[0, 0] = 1.0f;
     id[1, 1] = 1.0f;
@@ -396,7 +397,7 @@ TEST_CASE("matrix * matrix is column-major composition", "[Core.Types]") {
     REQUIRE((twice[3, 3]) == 1.0f);
 }
 
-TEST_CASE("matrix additive and scalar operators are component-wise", "[Core.Types]") {
+TEST_CASE("matrix additive and scalar operators are component-wise", AUTO_TAG) {
     mat2 a{};
     a[0, 0] = 1.0f;
     a[1, 1] = 2.0f;
@@ -408,7 +409,7 @@ TEST_CASE("matrix additive and scalar operators are component-wise", "[Core.Type
     REQUIRE(a == a);
 }
 
-TEST_CASE("non-square matrix operators produce exact shapes", "[Core.Types]") {
+TEST_CASE("non-square matrix operators produce exact shapes", AUTO_TAG) {
     // A : 2 rows x 3 cols = [[1,2,3],[4,5,6]]
     mat2x3 A{};
     A[0, 0] = 1.0f; A[0, 1] = 2.0f; A[0, 2] = 3.0f;
@@ -440,7 +441,7 @@ TEST_CASE("non-square matrix operators produce exact shapes", "[Core.Types]") {
     REQUIRE(-A == A * -1.0f);
 }
 
-TEST_CASE("non-square matrix multiply folds at compile time", "[Core.Types]") {
+TEST_CASE("non-square matrix multiply folds at compile time", AUTO_TAG) {
     constexpr mat2 AB = [] {
         mat2x3 A{};
         A[0, 0] = 1.0f; A[0, 1] = 2.0f; A[0, 2] = 3.0f;
@@ -454,7 +455,7 @@ TEST_CASE("non-square matrix multiply folds at compile time", "[Core.Types]") {
     STATIC_REQUIRE((AB[1, 1]) == 154.0f);
 }
 
-TEST_CASE("operators fold at compile time", "[Core.Types]") {
+TEST_CASE("operators fold at compile time", AUTO_TAG) {
     constexpr vec3 a{1.0f, 2.0f, 3.0f};
     constexpr vec3 sum = a + vec3{4.0f, 4.0f, 4.0f};
     STATIC_REQUIRE(sum == vec3{5.0f, 6.0f, 7.0f});

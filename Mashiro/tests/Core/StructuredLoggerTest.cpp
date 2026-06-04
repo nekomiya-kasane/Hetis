@@ -7,6 +7,7 @@
 #include "Mashiro/Core/StructuredLogger.h"
 #include "Mashiro/Core/ToString.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -21,7 +22,7 @@ using namespace Mashiro;
 // [LogLevel / LogCategory] — Enum basics and reflection
 // =============================================================================
 
-TEST_CASE("LogLevel: values are ordered", "[Core.Logger]") {
+TEST_CASE("LogLevel: values are ordered", AUTO_TAG) {
     STATIC_REQUIRE(LogLevel::Trace < LogLevel::Debug);
     STATIC_REQUIRE(LogLevel::Debug < LogLevel::Info);
     STATIC_REQUIRE(LogLevel::Info < LogLevel::Warn);
@@ -29,13 +30,13 @@ TEST_CASE("LogLevel: values are ordered", "[Core.Logger]") {
     STATIC_REQUIRE(LogLevel::Error < LogLevel::Fatal);
 }
 
-TEST_CASE("LogLevel: ToStringView via reflection", "[Core.Logger]") {
+TEST_CASE("LogLevel: ToStringView via reflection", AUTO_TAG) {
     REQUIRE(ToStringView(LogLevel::Trace) == "Trace");
     REQUIRE(ToStringView(LogLevel::Info) == "Info");
     REQUIRE(ToStringView(LogLevel::Fatal) == "Fatal");
 }
 
-TEST_CASE("LogCategory: ToStringView via reflection", "[Core.Logger]") {
+TEST_CASE("LogCategory: ToStringView via reflection", AUTO_TAG) {
     REQUIRE(ToStringView(LogCategory::Core) == "Core");
     REQUIRE(ToStringView(LogCategory::Render) == "Render");
     REQUIRE(ToStringView(LogCategory::Physics) == "Physics");
@@ -45,13 +46,13 @@ TEST_CASE("LogCategory: ToStringView via reflection", "[Core.Logger]") {
 // [Annotations] — DefaultLevel / LevelColor consteval extraction
 // =============================================================================
 
-TEST_CASE("DefaultLevel table values", "[Core.Logger]") {
+TEST_CASE("DefaultLevel table values", AUTO_TAG) {
     STATIC_REQUIRE(Detail::Log::kDefaultCategoryLevels[0] == 2);  // Core → Info
     STATIC_REQUIRE(Detail::Log::kDefaultCategoryLevels[3] == 1);  // Scene → Debug
     STATIC_REQUIRE(Detail::Log::kDefaultCategoryLevels[11] == 0); // App → Trace
 }
 
-TEST_CASE("LevelColor table values", "[Core.Logger]") {
+TEST_CASE("LevelColor table values", AUTO_TAG) {
     constexpr auto traceColor = Detail::Log::kLevelColors[0];
     STATIC_REQUIRE(traceColor.dim == true);
     STATIC_REQUIRE(traceColor.r == 128);
@@ -66,7 +67,7 @@ TEST_CASE("LevelColor table values", "[Core.Logger]") {
 // [SourceLoc] — Auto-capture and filename extraction
 // =============================================================================
 
-TEST_CASE("SourceLoc: Current captures caller info", "[Core.Logger]") {
+TEST_CASE("SourceLoc: Current captures caller info", AUTO_TAG) {
     auto loc = SourceLoc::Current();
     REQUIRE(loc.line > 0);
     REQUIRE(!loc.file.empty());
@@ -75,7 +76,7 @@ TEST_CASE("SourceLoc: Current captures caller info", "[Core.Logger]") {
     REQUIRE(loc.file.find("StructuredLoggerTest") != std::string_view::npos);
 }
 
-TEST_CASE("SourceLoc: FileName extracts basename", "[Core.Logger]") {
+TEST_CASE("SourceLoc: FileName extracts basename", AUTO_TAG) {
     SourceLoc loc{"C:\\foo\\bar\\baz.cpp", "f", 1};
     REQUIRE(loc.FileName() == "baz.cpp");
 
@@ -132,7 +133,7 @@ namespace {
             logger.ResetDroppedCount();
             logger.ResetRings();
             // Set all categories to Trace so nothing is filtered
-            for (int i = 0; i < static_cast<int>(Traits::EnumEnumeratorsCount<LogCategory>); ++i) {
+            for (int i = 0; i < static_cast<int>(Traits::EnumeratorsCount<LogCategory>); ++i) {
                 logger.SetCategoryLevel(static_cast<LogCategory>(i), LogLevel::Trace);
             }
             logger.AddSink(CallbackSink{[this](const LogEntry& e) { captured.Capture(e); }});
@@ -154,7 +155,7 @@ namespace {
 // [StructuredLogger] — Basic logging via callback sink
 // =============================================================================
 
-TEST_CASE("Logger: basic log and drain", "[Core.Logger]") {
+TEST_CASE("Logger: basic log and drain", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -168,7 +169,7 @@ TEST_CASE("Logger: basic log and drain", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[0].line > 0);
 }
 
-TEST_CASE("Logger: multiple messages", "[Core.Logger]") {
+TEST_CASE("Logger: multiple messages", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -183,7 +184,7 @@ TEST_CASE("Logger: multiple messages", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[2].message == "fatal");
 }
 
-TEST_CASE("Logger: source location is captured", "[Core.Logger]") {
+TEST_CASE("Logger: source location is captured", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -201,7 +202,7 @@ TEST_CASE("Logger: source location is captured", "[Core.Logger]") {
 // [Level filtering] — Compile-time and runtime
 // =============================================================================
 
-TEST_CASE("Logger: runtime level filtering", "[Core.Logger]") {
+TEST_CASE("Logger: runtime level filtering", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -217,7 +218,7 @@ TEST_CASE("Logger: runtime level filtering", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[1].message == "also passes");
 }
 
-TEST_CASE("Logger: category level defaults from annotation", "[Core.Logger]") {
+TEST_CASE("Logger: category level defaults from annotation", AUTO_TAG) {
     // Fresh logger should have Core at Info (DefaultLevel{2})
     auto& logger = StructuredLogger::Instance();
     // Reset to annotation defaults by recreating — but singleton, so test indirectly:
@@ -231,7 +232,7 @@ TEST_CASE("Logger: category level defaults from annotation", "[Core.Logger]") {
 // [Free-function Log<>] — Template NTTP interface
 // =============================================================================
 
-TEST_CASE("Log<Level, Cat>: free function works", "[Core.Logger]") {
+TEST_CASE("Log<Level, Cat>: free function works", AUTO_TAG) {
     LogTestFixture fix;
     using enum LogLevel;
     using enum LogCategory;
@@ -245,7 +246,7 @@ TEST_CASE("Log<Level, Cat>: free function works", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[0].message == "draw calls: 100");
 }
 
-TEST_CASE("MLOG macro works", "[Core.Logger]") {
+TEST_CASE("MLOG macro works", AUTO_TAG) {
     LogTestFixture fix;
 
     MLOG(Error, Core, "macro test {}", 99);
@@ -260,7 +261,7 @@ TEST_CASE("MLOG macro works", "[Core.Logger]") {
 // [Backpressure] — Drop policy
 // =============================================================================
 
-TEST_CASE("Logger: dropped count increments on overflow", "[Core.Logger]") {
+TEST_CASE("Logger: dropped count increments on overflow", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
     logger.SetBackpressurePolicy(BackpressurePolicy::Drop);
@@ -281,7 +282,7 @@ TEST_CASE("Logger: dropped count increments on overflow", "[Core.Logger]") {
 // [Drain thread] — Background drain
 // =============================================================================
 
-TEST_CASE("Logger: drain thread processes messages", "[Core.Logger]") {
+TEST_CASE("Logger: drain thread processes messages", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
     logger.StartDrainThread();
@@ -303,7 +304,7 @@ TEST_CASE("Logger: drain thread processes messages", "[Core.Logger]") {
 // [Multi-thread] — Concurrent logging from multiple producers
 // =============================================================================
 
-TEST_CASE("Logger: multi-thread concurrent logging", "[Core.Logger]") {
+TEST_CASE("Logger: multi-thread concurrent logging", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
     logger.SetBackpressurePolicy(BackpressurePolicy::Block);
@@ -339,7 +340,7 @@ TEST_CASE("Logger: multi-thread concurrent logging", "[Core.Logger]") {
 // [LogFlush] — Convenience function
 // =============================================================================
 
-TEST_CASE("LogFlush: works without drain thread", "[Core.Logger]") {
+TEST_CASE("LogFlush: works without drain thread", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -353,7 +354,7 @@ TEST_CASE("LogFlush: works without drain thread", "[Core.Logger]") {
 // [Edge cases]
 // =============================================================================
 
-TEST_CASE("Logger: empty format string", "[Core.Logger]") {
+TEST_CASE("Logger: empty format string", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -364,7 +365,7 @@ TEST_CASE("Logger: empty format string", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[0].message.empty());
 }
 
-TEST_CASE("Logger: long format arguments", "[Core.Logger]") {
+TEST_CASE("Logger: long format arguments", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -376,7 +377,7 @@ TEST_CASE("Logger: long format arguments", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[0].message.size() == 400);
 }
 
-TEST_CASE("Logger: message truncated at 511 chars", "[Core.Logger]") {
+TEST_CASE("Logger: message truncated at 511 chars", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
@@ -388,7 +389,7 @@ TEST_CASE("Logger: message truncated at 511 chars", "[Core.Logger]") {
     REQUIRE(fix.captured.entries[0].message.size() <= 511);
 }
 
-TEST_CASE("Logger: ClearSinks removes all sinks", "[Core.Logger]") {
+TEST_CASE("Logger: ClearSinks removes all sinks", AUTO_TAG) {
     auto& logger = StructuredLogger::Instance();
     logger.AddSink(CallbackSink{[](const LogEntry&) {}});
     logger.ClearSinks();
@@ -397,7 +398,7 @@ TEST_CASE("Logger: ClearSinks removes all sinks", "[Core.Logger]") {
     logger.Flush();
 }
 
-TEST_CASE("Logger: timestamp is monotonic", "[Core.Logger]") {
+TEST_CASE("Logger: timestamp is monotonic", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 

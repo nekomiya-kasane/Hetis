@@ -3,6 +3,7 @@
  * @brief Stress tests and constexpr fold verification for math library.
  */
 #include "Support/EigenBridge.h"
+#include "Support/Meta.h"
 
 #include <Eigen/Dense>
 #include <numbers>
@@ -19,7 +20,7 @@ namespace {
 // Constexpr fold verification
 // ===========================================================================
 
-TEST_CASE("Constexpr vector ops fold correctly", "[Math.Stress]") {
+TEST_CASE("Constexpr vector ops fold correctly", AUTO_TAG) {
     constexpr vec3 a{1,2,3}, b{4,5,6};
     constexpr vec3 sum = a + b;
     STATIC_REQUIRE(sum.x == 5.0f);
@@ -33,7 +34,7 @@ TEST_CASE("Constexpr vector ops fold correctly", "[Math.Stress]") {
     STATIC_REQUIRE(cross.z == 1.0f);
 }
 
-TEST_CASE("Constexpr matrix ops fold correctly", "[Math.Stress]") {
+TEST_CASE("Constexpr matrix ops fold correctly", AUTO_TAG) {
     constexpr mat4 id = Math::Identity();
     STATIC_REQUIRE(id[0,0] == 1.0f);
     STATIC_REQUIRE(id[1,1] == 1.0f);
@@ -46,7 +47,7 @@ TEST_CASE("Constexpr matrix ops fold correctly", "[Math.Stress]") {
     STATIC_REQUIRE(t[3,3] == 1.0f);
 }
 
-TEST_CASE("Constexpr Det folds at compile time", "[Math.Stress]") {
+TEST_CASE("Constexpr Det folds at compile time", AUTO_TAG) {
     constexpr mat2 m2 = [] {
         mat2 m{};
         m[0,0]=3; m[0,1]=8;
@@ -56,7 +57,7 @@ TEST_CASE("Constexpr Det folds at compile time", "[Math.Stress]") {
     STATIC_REQUIRE(Math::Det(m2) == -14.0f);
 }
 
-TEST_CASE("Constexpr 2D rotation folds at compile time", "[Math.Stress]") {
+TEST_CASE("Constexpr 2D rotation folds at compile time", AUTO_TAG) {
     constexpr mat3 r = Math::MakeRotate2D(0.0f);
     STATIC_REQUIRE(r[0,0] == 1.0f);
     STATIC_REQUIRE(r[1,1] == 1.0f);
@@ -68,7 +69,7 @@ TEST_CASE("Constexpr 2D rotation folds at compile time", "[Math.Stress]") {
 // Stress tests
 // ===========================================================================
 
-TEST_CASE("Inverse is left and right inverse (multiple TRS)", "[Math.Stress]") {
+TEST_CASE("Inverse is left and right inverse (multiple TRS)", AUTO_TAG) {
     struct TD { vec3 t; vec3 axis; float angle; vec3 s; };
     TD cases[] = {
         {{1,2,3},      {1,0,0}, 0.5f,  {1,1,1}},
@@ -86,7 +87,7 @@ TEST_CASE("Inverse is left and right inverse (multiple TRS)", "[Math.Stress]") {
     }
 }
 
-TEST_CASE("InverseAffine matches full Inverse upper rows", "[Math.Stress]") {
+TEST_CASE("InverseAffine matches full Inverse upper rows", AUTO_TAG) {
     struct TD { vec3 axis; float angle; vec3 t; };
     TD cases[] = {
         {{1,0,0}, 0.5f,  {1,2,3}},

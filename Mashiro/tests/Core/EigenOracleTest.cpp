@@ -7,6 +7,7 @@
  * Conversions and comparison helpers come from the generic EigenBridge.h.
  */
 #include "Support/EigenBridge.h"
+#include "Support/Meta.h"
 
 #include <Eigen/Dense>
 
@@ -26,7 +27,7 @@ namespace {
 // [Vec.Arith] — Vector arithmetic ops vs Eigen
 // ===========================================================================
 
-TEST_CASE("Vec3 arithmetic matches Eigen", "[Vec.Arith][Eigen]") {
+TEST_CASE("Vec3 arithmetic matches Eigen", AUTO_TAG) {
     vec3 a{1.5f, -2.3f, 4.1f};
     vec3 b{3.7f, 0.8f, -1.2f};
     auto ea = Testing::ToEigen(a);
@@ -39,7 +40,7 @@ TEST_CASE("Vec3 arithmetic matches Eigen", "[Vec.Arith][Eigen]") {
     RequireCloseEigen(-a, -ea);
 }
 
-TEST_CASE("Vec4 arithmetic matches Eigen", "[Vec.Arith][Eigen]") {
+TEST_CASE("Vec4 arithmetic matches Eigen", AUTO_TAG) {
     vec4 a{1.0f, -2.0f, 3.0f, -4.0f};
     vec4 b{5.0f, 6.0f, -7.0f, 8.0f};
     auto ea = Testing::ToEigen(a);
@@ -51,7 +52,7 @@ TEST_CASE("Vec4 arithmetic matches Eigen", "[Vec.Arith][Eigen]") {
     RequireCloseEigen(-b, -eb);
 }
 
-TEST_CASE("Vec2 arithmetic matches Eigen", "[Vec.Arith][Eigen]") {
+TEST_CASE("Vec2 arithmetic matches Eigen", AUTO_TAG) {
     vec2 a{3.0f, -1.5f};
     vec2 b{-2.0f, 4.0f};
     auto ea = Testing::ToEigen(a);
@@ -66,7 +67,7 @@ TEST_CASE("Vec2 arithmetic matches Eigen", "[Vec.Arith][Eigen]") {
     RequireClose((a - b).y, ediff.y());
 }
 
-TEST_CASE("Hadamard (component-wise) product matches Eigen cwiseProduct", "[Vec.Arith][Eigen]") {
+TEST_CASE("Hadamard (component-wise) product matches Eigen cwiseProduct", AUTO_TAG) {
     vec3 a{2.0f, 3.0f, 4.0f};
     vec3 b{5.0f, 6.0f, 7.0f};
     auto ea = Testing::ToEigen(a);
@@ -76,7 +77,7 @@ TEST_CASE("Hadamard (component-wise) product matches Eigen cwiseProduct", "[Vec.
     RequireCloseEigen(a * b, expected);
 }
 
-TEST_CASE("Component-wise division matches Eigen cwiseQuotient", "[Vec.Arith][Eigen]") {
+TEST_CASE("Component-wise division matches Eigen cwiseQuotient", AUTO_TAG) {
     vec3 a{6.0f, 8.0f, 10.0f};
     vec3 b{2.0f, 4.0f, 5.0f};
     auto ea = Testing::ToEigen(a);
@@ -90,7 +91,7 @@ TEST_CASE("Component-wise division matches Eigen cwiseQuotient", "[Vec.Arith][Ei
 // [Vec.Func] — Vector functions vs Eigen
 // ===========================================================================
 
-TEST_CASE("Dot product matches Eigen", "[Vec.Func][Eigen]") {
+TEST_CASE("Dot product matches Eigen", AUTO_TAG) {
     vec3 a{1.0f, 2.0f, 3.0f};
     vec3 b{4.0f, -5.0f, 6.0f};
     RequireClose(Math::Dot(a, b), Testing::ToEigen(a).dot(Testing::ToEigen(b)));
@@ -104,7 +105,7 @@ TEST_CASE("Dot product matches Eigen", "[Vec.Func][Eigen]") {
     RequireClose(Math::Dot(e, f), Testing::ToEigen(e).dot(Testing::ToEigen(f)));
 }
 
-TEST_CASE("Cross product (3D) matches Eigen", "[Vec.Func][Eigen]") {
+TEST_CASE("Cross product (3D) matches Eigen", AUTO_TAG) {
     vec3 a{1.0f, 0.0f, 0.0f};
     vec3 b{0.0f, 1.0f, 0.0f};
     RequireCloseEigen(Math::Cross(a, b), Testing::ToEigen(a).cross(Testing::ToEigen(b)));
@@ -114,7 +115,7 @@ TEST_CASE("Cross product (3D) matches Eigen", "[Vec.Func][Eigen]") {
     RequireCloseEigen(Math::Cross(c, d), Testing::ToEigen(c).cross(Testing::ToEigen(d)));
 }
 
-TEST_CASE("Cross product (2D) matches Eigen-style computation", "[Vec.Func][Eigen]") {
+TEST_CASE("Cross product (2D) matches Eigen-style computation", AUTO_TAG) {
     vec2 a{3.0f, 4.0f};
     vec2 b{-1.0f, 2.0f};
     // 2D cross = a.x*b.y - a.y*b.x
@@ -124,7 +125,7 @@ TEST_CASE("Cross product (2D) matches Eigen-style computation", "[Vec.Func][Eige
     RequireClose(Math::Cross(a, b), eigenCross);
 }
 
-TEST_CASE("Norm1 / Norm2 / NormInf match Eigen norms", "[Vec.Func][Eigen]") {
+TEST_CASE("Norm1 / Norm2 / NormInf match Eigen norms", AUTO_TAG) {
     vec3 v{3.0f, -4.0f, 12.0f};
     auto ev = Testing::ToEigen(v);
 
@@ -139,7 +140,7 @@ TEST_CASE("Norm1 / Norm2 / NormInf match Eigen norms", "[Vec.Func][Eigen]") {
     RequireClose(Math::NormInf(w), ew.lpNorm<Eigen::Infinity>());
 }
 
-TEST_CASE("Normalize matches Eigen .normalized()", "[Vec.Func][Eigen]") {
+TEST_CASE("Normalize matches Eigen .normalized()", AUTO_TAG) {
     vec3 v{3.0f, -4.0f, 0.0f};
     auto ev = Testing::ToEigen(v);
     RequireCloseEigen(Math::Normalize(v), ev.normalized());
@@ -149,7 +150,7 @@ TEST_CASE("Normalize matches Eigen .normalized()", "[Vec.Func][Eigen]") {
     RequireCloseEigen(Math::Normalize(w), ew.normalized());
 }
 
-TEST_CASE("Distance matches Eigen (b-a).norm()", "[Vec.Func][Eigen]") {
+TEST_CASE("Distance matches Eigen (b-a).norm()", AUTO_TAG) {
     vec3 a{1.0f, 2.0f, 3.0f};
     vec3 b{4.0f, 6.0f, 3.0f};
     auto ea = Testing::ToEigen(a);
@@ -161,7 +162,7 @@ TEST_CASE("Distance matches Eigen (b-a).norm()", "[Vec.Func][Eigen]") {
 // [Vec.CW] — Component-wise functions vs Eigen
 // ===========================================================================
 
-TEST_CASE("Min / Max match Eigen cwiseMin / cwiseMax", "[Vec.CW][Eigen]") {
+TEST_CASE("Min / Max match Eigen cwiseMin / cwiseMax", AUTO_TAG) {
     vec3 a{1.0f, 5.0f, 3.0f};
     vec3 b{4.0f, 2.0f, 6.0f};
     auto ea = Testing::ToEigen(a);
@@ -171,13 +172,13 @@ TEST_CASE("Min / Max match Eigen cwiseMin / cwiseMax", "[Vec.CW][Eigen]") {
     RequireCloseEigen(Math::Max(a, b), ea.cwiseMax(eb));
 }
 
-TEST_CASE("Abs matches Eigen .cwiseAbs()", "[Vec.CW][Eigen]") {
+TEST_CASE("Abs matches Eigen .cwiseAbs()", AUTO_TAG) {
     vec3 v{-1.0f, 2.0f, -3.0f};
     auto ev = Testing::ToEigen(v);
     RequireCloseEigen(Math::Abs(v), ev.cwiseAbs());
 }
 
-TEST_CASE("Lerp matches Eigen manual lerp", "[Vec.CW][Eigen]") {
+TEST_CASE("Lerp matches Eigen manual lerp", AUTO_TAG) {
     vec3 a{0.0f, 0.0f, 0.0f};
     vec3 b{10.0f, 20.0f, 30.0f};
     float t = 0.3f;
@@ -187,7 +188,7 @@ TEST_CASE("Lerp matches Eigen manual lerp", "[Vec.CW][Eigen]") {
     RequireCloseEigen(Math::Lerp(a, b, t), expected);
 }
 
-TEST_CASE("Reflect matches Eigen formula: v - 2(v.n)n", "[Vec.CW][Eigen]") {
+TEST_CASE("Reflect matches Eigen formula: v - 2(v.n)n", AUTO_TAG) {
     vec3 v{1.0f, -1.0f, 0.0f};
     vec3 n{0.0f, 1.0f, 0.0f};
     auto ev = Testing::ToEigen(v);
@@ -196,7 +197,7 @@ TEST_CASE("Reflect matches Eigen formula: v - 2(v.n)n", "[Vec.CW][Eigen]") {
     RequireCloseEigen(Math::Reflect(v, n), expected);
 }
 
-TEST_CASE("Clamp matches Eigen cwiseMin/cwiseMax composition", "[Vec.CW][Eigen]") {
+TEST_CASE("Clamp matches Eigen cwiseMin/cwiseMax composition", AUTO_TAG) {
     vec3 v{-1.0f, 0.5f, 9.0f};
     vec3 lo{0.0f, 0.0f, 0.0f};
     vec3 hi{1.0f, 1.0f, 1.0f};
@@ -211,7 +212,7 @@ TEST_CASE("Clamp matches Eigen cwiseMin/cwiseMax composition", "[Vec.CW][Eigen]"
 // [Mat.Arith] — Matrix arithmetic vs Eigen
 // ===========================================================================
 
-TEST_CASE("Mat4 add/sub/scalar matches Eigen", "[Mat.Arith][Eigen]") {
+TEST_CASE("Mat4 add/sub/scalar matches Eigen", AUTO_TAG) {
     mat4 a = Math::MakeTranslation(vec3{1, 2, 3});
     mat4 b = Math::MakeScale(vec3{2, 3, 4});
     auto ea = Testing::ToEigen(a);
@@ -223,7 +224,7 @@ TEST_CASE("Mat4 add/sub/scalar matches Eigen", "[Mat.Arith][Eigen]") {
     RequireCloseEigen(-a, -ea);
 }
 
-TEST_CASE("Mat4 * Mat4 matches Eigen", "[Mat.Arith][Eigen]") {
+TEST_CASE("Mat4 * Mat4 matches Eigen", AUTO_TAG) {
     mat4 a = Math::MakeRotateZ(0.7f);
     mat4 b = Math::MakeTranslation(vec3{5, -3, 2});
     auto ea = Testing::ToEigen(a);
@@ -233,7 +234,7 @@ TEST_CASE("Mat4 * Mat4 matches Eigen", "[Mat.Arith][Eigen]") {
     RequireCloseEigen(b * a, eb * ea);
 }
 
-TEST_CASE("Mat4 * Vec4 matches Eigen", "[Mat.Arith][Eigen]") {
+TEST_CASE("Mat4 * Vec4 matches Eigen", AUTO_TAG) {
     mat4 m = Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
              * Math::MakeTranslation(vec3{10, 20, 30});
     vec4 v{1, 2, 3, 1};
@@ -242,7 +243,7 @@ TEST_CASE("Mat4 * Vec4 matches Eigen", "[Mat.Arith][Eigen]") {
     RequireCloseEigen(m * v, em * ev);
 }
 
-TEST_CASE("Mat3 * Mat3 matches Eigen", "[Mat.Arith][Eigen]") {
+TEST_CASE("Mat3 * Mat3 matches Eigen", AUTO_TAG) {
     mat3 a{};
     a[0, 0] = 1; a[0, 1] = 2; a[0, 2] = 3;
     a[1, 0] = 4; a[1, 1] = 5; a[1, 2] = 6;
@@ -256,7 +257,7 @@ TEST_CASE("Mat3 * Mat3 matches Eigen", "[Mat.Arith][Eigen]") {
     RequireCloseEigen(a * b, Testing::ToEigen(a) * Testing::ToEigen(b));
 }
 
-TEST_CASE("Mat2 * Vec2 matches Eigen", "[Mat.Arith][Eigen]") {
+TEST_CASE("Mat2 * Vec2 matches Eigen", AUTO_TAG) {
     mat2 m{};
     m[0, 0] = 1; m[0, 1] = 2;
     m[1, 0] = 3; m[1, 1] = 4;
@@ -274,7 +275,7 @@ TEST_CASE("Mat2 * Vec2 matches Eigen", "[Mat.Arith][Eigen]") {
 // [Mat.Func] — Transpose / Identity / Det / Inverse vs Eigen
 // ===========================================================================
 
-TEST_CASE("Transpose matches Eigen .transpose()", "[Mat.Func][Eigen]") {
+TEST_CASE("Transpose matches Eigen .transpose()", AUTO_TAG) {
     mat4 m = Math::MakeRotateAxis(vec3{1, 1, 0}, 0.5f);
     auto em = Testing::ToEigen(m);
     RequireCloseEigen(Math::Transpose(m), em.transpose());
@@ -286,7 +287,7 @@ TEST_CASE("Transpose matches Eigen .transpose()", "[Mat.Func][Eigen]") {
     RequireCloseEigen(Math::Transpose(m3), Testing::ToEigen(m3).transpose());
 }
 
-TEST_CASE("Det matches Eigen .determinant()", "[Mat.Func][Eigen]") {
+TEST_CASE("Det matches Eigen .determinant()", AUTO_TAG) {
     // mat2
     mat2 m2{};
     m2[0, 0] = 3; m2[0, 1] = 8;
@@ -306,14 +307,14 @@ TEST_CASE("Det matches Eigen .determinant()", "[Mat.Func][Eigen]") {
     RequireClose(Math::Det(m4), Testing::ToEigen(m4).determinant(), 1e-3f);
 }
 
-TEST_CASE("Inverse(mat2) matches Eigen .inverse()", "[Mat.Func][Eigen]") {
+TEST_CASE("Inverse(mat2) matches Eigen .inverse()", AUTO_TAG) {
     mat2 m{};
     m[0, 0] = 3; m[0, 1] = 8;
     m[1, 0] = 4; m[1, 1] = 6;
     RequireCloseEigen(Math::Inverse(m), Testing::ToEigen(m).inverse());
 }
 
-TEST_CASE("Inverse(mat3) matches Eigen .inverse()", "[Mat.Func][Eigen]") {
+TEST_CASE("Inverse(mat3) matches Eigen .inverse()", AUTO_TAG) {
     mat3 m{};
     m[0, 0] = 6; m[0, 1] = 1; m[0, 2] = 1;
     m[1, 0] = 4; m[1, 1] = -2; m[1, 2] = 5;
@@ -321,14 +322,14 @@ TEST_CASE("Inverse(mat3) matches Eigen .inverse()", "[Mat.Func][Eigen]") {
     RequireCloseEigen(Math::Inverse(m), Testing::ToEigen(m).inverse(), 1e-4f);
 }
 
-TEST_CASE("Inverse(mat4) matches Eigen .inverse()", "[Mat.Func][Eigen]") {
+TEST_CASE("Inverse(mat4) matches Eigen .inverse()", AUTO_TAG) {
     mat4 m = Math::MakeTranslation(vec3{5, -3, 2})
              * Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
              * Math::MakeScale(vec3{2, 0.5f, 1.5f});
     RequireCloseEigen(Math::Inverse(m), Testing::ToEigen(m).inverse(), 1e-4f);
 }
 
-TEST_CASE("Identity matches Eigen Identity", "[Mat.Func][Eigen]") {
+TEST_CASE("Identity matches Eigen Identity", AUTO_TAG) {
     RequireCloseEigen(Math::Identity(), Eigen::Matrix4f::Identity().eval());
     RequireCloseEigen(Math::Identity<mat3>(), Eigen::Matrix3f::Identity().eval());
     RequireCloseEigen(Math::Identity<mat2>(), Eigen::Matrix2f::Identity().eval());
@@ -338,7 +339,7 @@ TEST_CASE("Identity matches Eigen Identity", "[Mat.Func][Eigen]") {
 // [Xform3D] — 3D Transform builders vs Eigen
 // ===========================================================================
 
-TEST_CASE("MakeTranslation matches Eigen Translation3f", "[Xform3D][Eigen]") {
+TEST_CASE("MakeTranslation matches Eigen Translation3f", AUTO_TAG) {
     vec3 t{10, -20, 30};
     mat4 m = Math::MakeTranslation(t);
 
@@ -347,7 +348,7 @@ TEST_CASE("MakeTranslation matches Eigen Translation3f", "[Xform3D][Eigen]") {
     RequireCloseEigen(m, ea.matrix());
 }
 
-TEST_CASE("MakeScale matches Eigen Scaling", "[Xform3D][Eigen]") {
+TEST_CASE("MakeScale matches Eigen Scaling", AUTO_TAG) {
     vec3 s{2, 3, 4};
     mat4 m = Math::MakeScale(s);
 
@@ -356,7 +357,7 @@ TEST_CASE("MakeScale matches Eigen Scaling", "[Xform3D][Eigen]") {
     RequireCloseEigen(m, ea.matrix());
 }
 
-TEST_CASE("MakeRotateX matches Eigen AngleAxisf(X)", "[Xform3D][Eigen]") {
+TEST_CASE("MakeRotateX matches Eigen AngleAxisf(X)", AUTO_TAG) {
     float angle = 1.2f;
     mat4 m = Math::MakeRotateX(angle);
 
@@ -365,7 +366,7 @@ TEST_CASE("MakeRotateX matches Eigen AngleAxisf(X)", "[Xform3D][Eigen]") {
     RequireCloseEigen(m, ea.matrix());
 }
 
-TEST_CASE("MakeRotateY matches Eigen AngleAxisf(Y)", "[Xform3D][Eigen]") {
+TEST_CASE("MakeRotateY matches Eigen AngleAxisf(Y)", AUTO_TAG) {
     float angle = -0.7f;
     mat4 m = Math::MakeRotateY(angle);
 
@@ -374,7 +375,7 @@ TEST_CASE("MakeRotateY matches Eigen AngleAxisf(Y)", "[Xform3D][Eigen]") {
     RequireCloseEigen(m, ea.matrix());
 }
 
-TEST_CASE("MakeRotateZ matches Eigen AngleAxisf(Z)", "[Xform3D][Eigen]") {
+TEST_CASE("MakeRotateZ matches Eigen AngleAxisf(Z)", AUTO_TAG) {
     float angle = 2.1f;
     mat4 m = Math::MakeRotateZ(angle);
 
@@ -383,7 +384,7 @@ TEST_CASE("MakeRotateZ matches Eigen AngleAxisf(Z)", "[Xform3D][Eigen]") {
     RequireCloseEigen(m, ea.matrix());
 }
 
-TEST_CASE("MakeRotateAxis matches Eigen AngleAxisf(arbitrary)", "[Xform3D][Eigen]") {
+TEST_CASE("MakeRotateAxis matches Eigen AngleAxisf(arbitrary)", AUTO_TAG) {
     vec3 axis{0.3f, 0.8f, -0.5f};
     float angle = 1.1f;
     mat4 m = Math::MakeRotateAxis(axis, angle);
@@ -394,14 +395,14 @@ TEST_CASE("MakeRotateAxis matches Eigen AngleAxisf(arbitrary)", "[Xform3D][Eigen
     RequireCloseEigen(m, ea.matrix(), 1e-4f);
 }
 
-TEST_CASE("Rotation matrices have det = 1", "[Xform3D][Eigen]") {
+TEST_CASE("Rotation matrices have det = 1", AUTO_TAG) {
     RequireClose(Math::Det(Math::MakeRotateX(0.5f)), 1.0f);
     RequireClose(Math::Det(Math::MakeRotateY(1.2f)), 1.0f);
     RequireClose(Math::Det(Math::MakeRotateZ(-0.3f)), 1.0f);
     RequireClose(Math::Det(Math::MakeRotateAxis(vec3{1, 1, 1}, 2.0f)), 1.0f);
 }
 
-TEST_CASE("MakeLookAt matches Eigen LookAt construction", "[Xform3D][Eigen]") {
+TEST_CASE("MakeLookAt matches Eigen LookAt construction", AUTO_TAG) {
     vec3 eye{0, 0, 5};
     vec3 target{0, 0, 0};
     vec3 up{0, 1, 0};
@@ -432,7 +433,7 @@ TEST_CASE("MakeLookAt matches Eigen LookAt construction", "[Xform3D][Eigen]") {
 // [Affine3D] — 3D Affine transforms (Mat<float,3,4>) vs 4×4 upper rows
 // ===========================================================================
 
-TEST_CASE("IdentityAffine is upper 3 rows of Identity()", "[Affine3D][Eigen]") {
+TEST_CASE("IdentityAffine is upper 3 rows of Identity()", AUTO_TAG) {
     affine3 a = Math::IdentityAffine();
     mat4 full = Math::Identity();
     for (int r = 0; r < 3; ++r)
@@ -440,7 +441,7 @@ TEST_CASE("IdentityAffine is upper 3 rows of Identity()", "[Affine3D][Eigen]") {
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeTranslationAffine is upper 3 rows of MakeTranslation", "[Affine3D][Eigen]") {
+TEST_CASE("MakeTranslationAffine is upper 3 rows of MakeTranslation", AUTO_TAG) {
     vec3 t{5, -3, 7};
     affine3 a = Math::MakeTranslationAffine(t);
     mat4 full = Math::MakeTranslation(t);
@@ -449,7 +450,7 @@ TEST_CASE("MakeTranslationAffine is upper 3 rows of MakeTranslation", "[Affine3D
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeScaleAffine is upper 3 rows of MakeScale", "[Affine3D][Eigen]") {
+TEST_CASE("MakeScaleAffine is upper 3 rows of MakeScale", AUTO_TAG) {
     vec3 s{2, 0.5f, 3};
     affine3 a = Math::MakeScaleAffine(s);
     mat4 full = Math::MakeScale(s);
@@ -458,7 +459,7 @@ TEST_CASE("MakeScaleAffine is upper 3 rows of MakeScale", "[Affine3D][Eigen]") {
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeRotateXAffine is upper 3 rows of MakeRotateX", "[Affine3D][Eigen]") {
+TEST_CASE("MakeRotateXAffine is upper 3 rows of MakeRotateX", AUTO_TAG) {
     float angle = 0.9f;
     affine3 a = Math::MakeRotateXAffine(angle);
     mat4 full = Math::MakeRotateX(angle);
@@ -467,7 +468,7 @@ TEST_CASE("MakeRotateXAffine is upper 3 rows of MakeRotateX", "[Affine3D][Eigen]
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeRotateYAffine is upper 3 rows of MakeRotateY", "[Affine3D][Eigen]") {
+TEST_CASE("MakeRotateYAffine is upper 3 rows of MakeRotateY", AUTO_TAG) {
     float angle = -1.3f;
     affine3 a = Math::MakeRotateYAffine(angle);
     mat4 full = Math::MakeRotateY(angle);
@@ -476,7 +477,7 @@ TEST_CASE("MakeRotateYAffine is upper 3 rows of MakeRotateY", "[Affine3D][Eigen]
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeRotateZAffine is upper 3 rows of MakeRotateZ", "[Affine3D][Eigen]") {
+TEST_CASE("MakeRotateZAffine is upper 3 rows of MakeRotateZ", AUTO_TAG) {
     float angle = 2.0f;
     affine3 a = Math::MakeRotateZAffine(angle);
     mat4 full = Math::MakeRotateZ(angle);
@@ -485,7 +486,7 @@ TEST_CASE("MakeRotateZAffine is upper 3 rows of MakeRotateZ", "[Affine3D][Eigen]
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeRotateAxisAffine is upper 3 rows of MakeRotateAxis", "[Affine3D][Eigen]") {
+TEST_CASE("MakeRotateAxisAffine is upper 3 rows of MakeRotateAxis", AUTO_TAG) {
     vec3 axis{0.3f, 0.8f, -0.5f};
     float angle = 1.1f;
     affine3 a = Math::MakeRotateAxisAffine(axis, angle);
@@ -495,7 +496,7 @@ TEST_CASE("MakeRotateAxisAffine is upper 3 rows of MakeRotateAxis", "[Affine3D][
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeLookAtAffine is upper 3 rows of MakeLookAt", "[Affine3D][Eigen]") {
+TEST_CASE("MakeLookAtAffine is upper 3 rows of MakeLookAt", AUTO_TAG) {
     vec3 eye{3, 4, 5};
     vec3 target{0, 0, 0};
     vec3 up{0, 1, 0};
@@ -506,7 +507,7 @@ TEST_CASE("MakeLookAtAffine is upper 3 rows of MakeLookAt", "[Affine3D][Eigen]")
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", "[Affine3D][Eigen]") {
+TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", AUTO_TAG) {
     // Build a rotation+translation affine
     float angle = 1.1f;
     vec3 axis{0.3f, 0.8f, -0.5f};
@@ -536,7 +537,7 @@ TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", "[Affine3D][Eigen]"
 // [Xform2D] — 2D transform builders vs Eigen
 // ===========================================================================
 
-TEST_CASE("MakeTranslation2D matches Eigen Translation2f", "[Xform2D][Eigen]") {
+TEST_CASE("MakeTranslation2D matches Eigen Translation2f", AUTO_TAG) {
     vec2 t{3, -7};
     mat3 m = Math::MakeTranslation2D(t);
 
@@ -547,7 +548,7 @@ TEST_CASE("MakeTranslation2D matches Eigen Translation2f", "[Xform2D][Eigen]") {
     RequireCloseEigen(m, expected);
 }
 
-TEST_CASE("MakeScale2D matches Eigen Scaling2D", "[Xform2D][Eigen]") {
+TEST_CASE("MakeScale2D matches Eigen Scaling2D", AUTO_TAG) {
     vec2 s{2, 3};
     mat3 m = Math::MakeScale2D(s);
 
@@ -556,7 +557,7 @@ TEST_CASE("MakeScale2D matches Eigen Scaling2D", "[Xform2D][Eigen]") {
     RequireCloseEigen(m, ea.matrix());
 }
 
-TEST_CASE("MakeRotate2D matches Eigen Rotation2Df", "[Xform2D][Eigen]") {
+TEST_CASE("MakeRotate2D matches Eigen Rotation2Df", AUTO_TAG) {
     float angle = 1.5f;
     mat3 m = Math::MakeRotate2D(angle);
 
@@ -569,7 +570,7 @@ TEST_CASE("MakeRotate2D matches Eigen Rotation2Df", "[Xform2D][Eigen]") {
 // [Affine2D] — 2D Affine transforms (Mat<float,2,3>) vs 3×3 upper rows
 // ===========================================================================
 
-TEST_CASE("IdentityAffine2D is upper 2 rows of Identity<mat3>()", "[Affine2D][Eigen]") {
+TEST_CASE("IdentityAffine2D is upper 2 rows of Identity<mat3>()", AUTO_TAG) {
     affine2 a = Math::IdentityAffine2D();
     mat3 full = Math::Identity<mat3>();
     for (int r = 0; r < 2; ++r)
@@ -577,7 +578,7 @@ TEST_CASE("IdentityAffine2D is upper 2 rows of Identity<mat3>()", "[Affine2D][Ei
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeTranslation2DAffine is upper 2 rows of MakeTranslation2D", "[Affine2D][Eigen]") {
+TEST_CASE("MakeTranslation2DAffine is upper 2 rows of MakeTranslation2D", AUTO_TAG) {
     vec2 t{3, -7};
     affine2 a = Math::MakeTranslation2DAffine(t);
     mat3 full = Math::MakeTranslation2D(t);
@@ -586,7 +587,7 @@ TEST_CASE("MakeTranslation2DAffine is upper 2 rows of MakeTranslation2D", "[Affi
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeScale2DAffine is upper 2 rows of MakeScale2D", "[Affine2D][Eigen]") {
+TEST_CASE("MakeScale2DAffine is upper 2 rows of MakeScale2D", AUTO_TAG) {
     vec2 s{2, 0.5f};
     affine2 a = Math::MakeScale2DAffine(s);
     mat3 full = Math::MakeScale2D(s);
@@ -595,7 +596,7 @@ TEST_CASE("MakeScale2DAffine is upper 2 rows of MakeScale2D", "[Affine2D][Eigen]
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("MakeRotate2DAffine is upper 2 rows of MakeRotate2D", "[Affine2D][Eigen]") {
+TEST_CASE("MakeRotate2DAffine is upper 2 rows of MakeRotate2D", AUTO_TAG) {
     float angle = 0.8f;
     affine2 a = Math::MakeRotate2DAffine(angle);
     mat3 full = Math::MakeRotate2D(angle);
@@ -604,7 +605,7 @@ TEST_CASE("MakeRotate2DAffine is upper 2 rows of MakeRotate2D", "[Affine2D][Eige
             RequireClose(a[r, c], full[r, c]);
 }
 
-TEST_CASE("InverseAffine2D matches Eigen Affine2f .inverse()", "[Affine2D][Eigen]") {
+TEST_CASE("InverseAffine2D matches Eigen Affine2f .inverse()", AUTO_TAG) {
     float angle = 0.8f;
     vec2 t{3, -7};
     affine2 a = Math::MakeRotate2DAffine(angle);
@@ -627,7 +628,7 @@ TEST_CASE("InverseAffine2D matches Eigen Affine2f .inverse()", "[Affine2D][Eigen
 // [Proj] — Projection matrices: verify near/far plane mapping
 // ===========================================================================
 
-TEST_CASE("MakePerspective: near → Z=0, far → Z=1 (Vulkan)", "[Proj][Eigen]") {
+TEST_CASE("MakePerspective: near → Z=0, far → Z=1 (Vulkan)", AUTO_TAG) {
     float nearZ = 0.1f;
     float farZ = 100.0f;
     mat4 p = Math::MakePerspective(kPi * 0.25f, 16.0f / 9.0f, nearZ, farZ);
@@ -641,14 +642,14 @@ TEST_CASE("MakePerspective: near → Z=0, far → Z=1 (Vulkan)", "[Proj][Eigen]"
     RequireClose(farPt.z / farPt.w, 1.0f, 1e-4f);
 }
 
-TEST_CASE("MakePerspectiveYFlipped has positive Y (Y-up)", "[Proj][Eigen]") {
+TEST_CASE("MakePerspectiveYFlipped has positive Y (Y-up)", AUTO_TAG) {
     mat4 p = Math::MakePerspectiveYFlipped(kPi * 0.25f, 1.0f, 0.1f, 100.0f);
     // A point above center should map to positive clip Y
     vec4 above = p * vec4{0, 1, -1, 1};
     REQUIRE(above.y / above.w > 0.0f);
 }
 
-TEST_CASE("MakeOrtho: near → Z=0, far → Z=1 (Vulkan)", "[Proj][Eigen]") {
+TEST_CASE("MakeOrtho: near → Z=0, far → Z=1 (Vulkan)", AUTO_TAG) {
     float l = -1, r = 1, b = -1, t = 1, n = 0.1f, f = 100.0f;
     mat4 o = Math::MakeOrtho(l, r, b, t, n, f);
 
@@ -661,7 +662,7 @@ TEST_CASE("MakeOrtho: near → Z=0, far → Z=1 (Vulkan)", "[Proj][Eigen]") {
     RequireClose(farPt.z / farPt.w, 1.0f, 1e-4f);
 }
 
-TEST_CASE("MakeOrthoYFlipped has positive Y for point above center", "[Proj][Eigen]") {
+TEST_CASE("MakeOrthoYFlipped has positive Y for point above center", AUTO_TAG) {
     mat4 o = Math::MakeOrthoYFlipped(-1.0f, 1.0f, -1.0f, 1.0f, 0.1f, 100.0f);
     vec4 above = o * vec4{0, 0.5f, -1, 1};
     REQUIRE(above.y / above.w > 0.0f);
@@ -671,7 +672,7 @@ TEST_CASE("MakeOrthoYFlipped has positive Y for point above center", "[Proj][Eig
 // [Constexpr] — compile-time evaluation (constexpr smoke tests)
 // ===========================================================================
 
-TEST_CASE("Constexpr vector ops fold correctly", "[Constexpr][Eigen]") {
+TEST_CASE("Constexpr vector ops fold correctly", AUTO_TAG) {
     constexpr vec3 a{1, 2, 3};
     constexpr vec3 b{4, 5, 6};
     constexpr vec3 sum = a + b;
@@ -686,7 +687,7 @@ TEST_CASE("Constexpr vector ops fold correctly", "[Constexpr][Eigen]") {
     STATIC_REQUIRE(cross.z == 1.0f);
 }
 
-TEST_CASE("Constexpr matrix ops fold correctly", "[Constexpr][Eigen]") {
+TEST_CASE("Constexpr matrix ops fold correctly", AUTO_TAG) {
     constexpr mat4 id = Math::Identity();
     STATIC_REQUIRE(id[0, 0] == 1.0f);
     STATIC_REQUIRE(id[1, 1] == 1.0f);
@@ -699,7 +700,7 @@ TEST_CASE("Constexpr matrix ops fold correctly", "[Constexpr][Eigen]") {
     STATIC_REQUIRE(t[3, 3] == 1.0f);
 }
 
-TEST_CASE("Constexpr Det folds at compile time", "[Constexpr][Eigen]") {
+TEST_CASE("Constexpr Det folds at compile time", AUTO_TAG) {
     constexpr mat2 m2 = [] {
         mat2 m{};
         m[0, 0] = 3; m[0, 1] = 8;
@@ -709,7 +710,7 @@ TEST_CASE("Constexpr Det folds at compile time", "[Constexpr][Eigen]") {
     STATIC_REQUIRE(Math::Det(m2) == -14.0f);
 }
 
-TEST_CASE("Constexpr 2D rotation folds at compile time", "[Constexpr][Eigen]") {
+TEST_CASE("Constexpr 2D rotation folds at compile time", AUTO_TAG) {
     constexpr mat3 r = Math::MakeRotate2D(0.0f);
     STATIC_REQUIRE(r[0, 0] == 1.0f);
     STATIC_REQUIRE(r[1, 1] == 1.0f);
@@ -721,7 +722,7 @@ TEST_CASE("Constexpr 2D rotation folds at compile time", "[Constexpr][Eigen]") {
 // [Stress] — Randomized stress tests with multiple inputs
 // ===========================================================================
 
-TEST_CASE("Inverse is left and right inverse (multiple random TRS)", "[Mat.Func][Eigen][Stress]") {
+TEST_CASE("Inverse is left and right inverse (multiple random TRS)", AUTO_TAG) {
     struct TestData { vec3 t; vec3 axis; float angle; vec3 s; };
     TestData cases[] = {
         {{1, 2, 3},    {1, 0, 0}, 0.5f,  {1, 1, 1}},
@@ -740,7 +741,7 @@ TEST_CASE("Inverse is left and right inverse (multiple random TRS)", "[Mat.Func]
     }
 }
 
-TEST_CASE("InverseAffine matches full Inverse upper rows", "[Affine3D][Eigen][Stress]") {
+TEST_CASE("InverseAffine matches full Inverse upper rows", AUTO_TAG) {
     struct TestData { vec3 axis; float angle; vec3 t; };
     TestData cases[] = {
         {{1, 0, 0}, 0.5f,  {1, 2, 3}},

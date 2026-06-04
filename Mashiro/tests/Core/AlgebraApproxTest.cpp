@@ -4,8 +4,9 @@
  */
 #include "Mashiro/Math/Algebra.h"
 #include "Mashiro/Math/Quanterion.h"
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 using namespace Mashiro;
@@ -15,23 +16,23 @@ using namespace Mashiro::Math;
 // ApproxEq — floating-point scalars
 // ===========================================================================
 
-TEST_CASE("ApproxEq: float identical values", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: float identical values", AUTO_TAG) {
     STATIC_REQUIRE(ApproxEq(1.0f, 1.0f));
     STATIC_REQUIRE(ApproxEq(0.0f, 0.0f));
     STATIC_REQUIRE(ApproxEq(-5.0f, -5.0f));
 }
 
-TEST_CASE("ApproxEq: float within epsilon", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: float within epsilon", AUTO_TAG) {
     STATIC_REQUIRE(ApproxEq(1.0f, 1.0f + 1e-8f));
     STATIC_REQUIRE(!ApproxEq(1.0f, 2.0f));
 }
 
-TEST_CASE("ApproxEq: float custom epsilon", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: float custom epsilon", AUTO_TAG) {
     STATIC_REQUIRE(ApproxEq(1.0f, 1.05f, 0.1f));
     STATIC_REQUIRE(!ApproxEq(1.0f, 1.2f, 0.1f));
 }
 
-TEST_CASE("ApproxEq: double precision", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: double precision", AUTO_TAG) {
     STATIC_REQUIRE(ApproxEq(1.0, 1.0 + 1e-16));
     STATIC_REQUIRE(!ApproxEq(1.0, 1.1));
 }
@@ -40,22 +41,22 @@ TEST_CASE("ApproxEq: double precision", "[Core.Algebra]") {
 // ApproxEq — MetricSpace (vec3, quat)
 // ===========================================================================
 
-TEST_CASE("ApproxEq: vec3 identical", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: vec3 identical", AUTO_TAG) {
     constexpr vec3 a{1,2,3};
     STATIC_REQUIRE(ApproxEq(a, a));
 }
 
-TEST_CASE("ApproxEq: vec3 within epsilon", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: vec3 within epsilon", AUTO_TAG) {
     constexpr vec3 a{1,0,0}, b{1,1e-8f,0};
     STATIC_REQUIRE(ApproxEq(a, b));
 }
 
-TEST_CASE("ApproxEq: vec3 far apart", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: vec3 far apart", AUTO_TAG) {
     constexpr vec3 a{1,0,0}, b{0,1,0};
     STATIC_REQUIRE(!ApproxEq(a, b));
 }
 
-TEST_CASE("ApproxEq: quat within epsilon", "[Core.Algebra]") {
+TEST_CASE("ApproxEq: quat within epsilon", AUTO_TAG) {
     constexpr quat a{}, b{.x=1e-8f, .y=0, .z=0, .w=1};
     STATIC_REQUIRE(ApproxEq(a, b, 1e-4f));
 }
@@ -64,7 +65,7 @@ TEST_CASE("ApproxEq: quat within epsilon", "[Core.Algebra]") {
 // ApproxNe
 // ===========================================================================
 
-TEST_CASE("ApproxNe is negation of ApproxEq", "[Core.Algebra]") {
+TEST_CASE("ApproxNe is negation of ApproxEq", AUTO_TAG) {
     STATIC_REQUIRE(!ApproxNe(1.0f, 1.0f));
     STATIC_REQUIRE(ApproxNe(1.0f, 2.0f));
     constexpr vec3 a{1,0,0}, b{0,1,0};
@@ -75,28 +76,28 @@ TEST_CASE("ApproxNe is negation of ApproxEq", "[Core.Algebra]") {
 // Ordered comparisons — floating-point
 // ===========================================================================
 
-TEST_CASE("ApproxLt: strictly less with tolerance", "[Core.Algebra]") {
+TEST_CASE("ApproxLt: strictly less with tolerance", AUTO_TAG) {
     STATIC_REQUIRE(!ApproxLt(1.0f, 1.0f));      // equal -> not less
     STATIC_REQUIRE(!ApproxLt(1.0f, 1.00001f));   // within eps -> not less
     STATIC_REQUIRE(ApproxLt(1.0f, 1.1f));         // clearly less
     STATIC_REQUIRE(!ApproxLt(1.1f, 1.0f));        // greater
 }
 
-TEST_CASE("ApproxLe: less-or-equal with tolerance", "[Core.Algebra]") {
+TEST_CASE("ApproxLe: less-or-equal with tolerance", AUTO_TAG) {
     STATIC_REQUIRE(ApproxLe(1.0f, 1.0f));         // equal -> le
     STATIC_REQUIRE(ApproxLe(1.0f, 1.00001f));     // within eps -> le
     STATIC_REQUIRE(ApproxLe(0.5f, 1.0f));          // clearly less
     STATIC_REQUIRE(!ApproxLe(2.0f, 1.0f));         // greater
 }
 
-TEST_CASE("ApproxGt: strictly greater with tolerance", "[Core.Algebra]") {
+TEST_CASE("ApproxGt: strictly greater with tolerance", AUTO_TAG) {
     STATIC_REQUIRE(!ApproxGt(1.0f, 1.0f));
     STATIC_REQUIRE(!ApproxGt(1.00001f, 1.0f));
     STATIC_REQUIRE(ApproxGt(1.1f, 1.0f));
     STATIC_REQUIRE(!ApproxGt(0.5f, 1.0f));
 }
 
-TEST_CASE("ApproxGe: greater-or-equal with tolerance", "[Core.Algebra]") {
+TEST_CASE("ApproxGe: greater-or-equal with tolerance", AUTO_TAG) {
     STATIC_REQUIRE(ApproxGe(1.0f, 1.0f));
     STATIC_REQUIRE(ApproxGe(1.00001f, 1.0f));
     STATIC_REQUIRE(ApproxGe(2.0f, 1.0f));
@@ -107,7 +108,7 @@ TEST_CASE("ApproxGe: greater-or-equal with tolerance", "[Core.Algebra]") {
 // Constexpr fold verification
 // ===========================================================================
 
-TEST_CASE("All Approx operators fold at compile time", "[Core.Algebra]") {
+TEST_CASE("All Approx operators fold at compile time", AUTO_TAG) {
     constexpr vec3 a{1,2,3}, b{1,2,3};
     STATIC_REQUIRE(ApproxEq(a, b));
     STATIC_REQUIRE(!ApproxNe(a, b));

@@ -5,6 +5,7 @@
  */
 #include "Mashiro/Core/LinearAllocator.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -16,7 +17,7 @@ using namespace Mashiro;
 // [Construction] — Basic construction and initial state
 // =============================================================================
 
-TEST_CASE("Default construction: correct initial state", "[Core.Arena]") {
+TEST_CASE("Default construction: correct initial state", AUTO_TAG) {
     LinearAllocator arena(1024);
     REQUIRE(arena.GetCapacity() == 1024);
     REQUIRE(arena.GetUsedBytes() == 0);
@@ -24,7 +25,7 @@ TEST_CASE("Default construction: correct initial state", "[Core.Arena]") {
     REQUIRE(arena.GetBuffer() != nullptr);
 }
 
-TEST_CASE("Small arena (minimum useful size)", "[Core.Arena]") {
+TEST_CASE("Small arena (minimum useful size)", AUTO_TAG) {
     LinearAllocator arena(8);
     REQUIRE(arena.GetCapacity() == 8);
     auto* p = arena.Emplace<int>(42);
@@ -36,14 +37,14 @@ TEST_CASE("Small arena (minimum useful size)", "[Core.Arena]") {
 // [Allocation] — Allocate, AllocateArray, Emplace, CopyToArena
 // =============================================================================
 
-TEST_CASE("Allocate raw bytes", "[Core.Arena]") {
+TEST_CASE("Allocate raw bytes", AUTO_TAG) {
     LinearAllocator arena(256);
     void* p = arena.Allocate(64);
     REQUIRE(p != nullptr);
     REQUIRE(arena.GetUsedBytes() == 64);
 }
 
-TEST_CASE("Allocate respects alignment", "[Core.Arena]") {
+TEST_CASE("Allocate respects alignment", AUTO_TAG) {
     LinearAllocator arena(256);
     // Allocate 1 byte first to offset
     (void)arena.Allocate(1, 1);
@@ -53,7 +54,7 @@ TEST_CASE("Allocate respects alignment", "[Core.Arena]") {
     REQUIRE(reinterpret_cast<uintptr_t>(p) % 16 == 0);
 }
 
-TEST_CASE("Allocate multiple with different alignments", "[Core.Arena]") {
+TEST_CASE("Allocate multiple with different alignments", AUTO_TAG) {
     LinearAllocator arena(512);
     void* a = arena.Allocate(3, 1);   // 3 bytes, 1-align
     void* b = arena.Allocate(8, 8);   // 8 bytes, 8-align
@@ -65,7 +66,7 @@ TEST_CASE("Allocate multiple with different alignments", "[Core.Arena]") {
     REQUIRE(reinterpret_cast<uintptr_t>(c) % 32 == 0);
 }
 
-TEST_CASE("AllocateArray returns correct span", "[Core.Arena]") {
+TEST_CASE("AllocateArray returns correct span", AUTO_TAG) {
     LinearAllocator arena(256);
     auto arr = arena.AllocateArray<float>(10);
     REQUIRE(arr.size() == 10);
@@ -74,14 +75,14 @@ TEST_CASE("AllocateArray returns correct span", "[Core.Arena]") {
     for (int i = 0; i < 10; ++i) REQUIRE(arr[i] == static_cast<float>(i));
 }
 
-TEST_CASE("AllocateArray with count=0 returns empty span", "[Core.Arena]") {
+TEST_CASE("AllocateArray with count=0 returns empty span", AUTO_TAG) {
     LinearAllocator arena(256);
     auto arr = arena.AllocateArray<int>(0);
     REQUIRE(arr.empty());
     REQUIRE(arena.GetUsedBytes() == 0);
 }
 
-TEST_CASE("Emplace constructs object correctly", "[Core.Arena]") {
+TEST_CASE("Emplace constructs object correctly", AUTO_TAG) {
     LinearAllocator arena(256);
     struct Vec3 { float x, y, z; };
     auto* v = arena.Emplace<Vec3>(1.0f, 2.0f, 3.0f);
@@ -91,7 +92,7 @@ TEST_CASE("Emplace constructs object correctly", "[Core.Arena]") {
     REQUIRE(v->z == 3.0f);
 }
 
-TEST_CASE("Emplace multiple objects", "[Core.Arena]") {
+TEST_CASE("Emplace multiple objects", AUTO_TAG) {
     LinearAllocator arena(1024);
     auto* a = arena.Emplace<int>(10);
     auto* b = arena.Emplace<double>(3.14);
@@ -104,7 +105,7 @@ TEST_CASE("Emplace multiple objects", "[Core.Arena]") {
     REQUIRE(reinterpret_cast<void*>(b) != reinterpret_cast<void*>(c));
 }
 
-TEST_CASE("CopyToArena copies data correctly", "[Core.Arena]") {
+TEST_CASE("CopyToArena copies data correctly", AUTO_TAG) {
     LinearAllocator arena(256);
     int src[] = {10, 20, 30, 40, 50};
     auto copy = arena.CopyToArena(std::span<const int>(src));
@@ -119,7 +120,7 @@ TEST_CASE("CopyToArena copies data correctly", "[Core.Arena]") {
 // [OOM] — Out-of-memory handling
 // =============================================================================
 
-TEST_CASE("Allocate returns nullptr when exhausted", "[Core.Arena]") {
+TEST_CASE("Allocate returns nullptr when exhausted", AUTO_TAG) {
     LinearAllocator arena(32);
     void* p1 = arena.Allocate(32);
     REQUIRE(p1 != nullptr);
@@ -127,19 +128,19 @@ TEST_CASE("Allocate returns nullptr when exhausted", "[Core.Arena]") {
     REQUIRE(p2 == nullptr);
 }
 
-TEST_CASE("Emplace returns nullptr when exhausted", "[Core.Arena]") {
+TEST_CASE("Emplace returns nullptr when exhausted", AUTO_TAG) {
     LinearAllocator arena(4); // only 4 bytes
     auto* p = arena.Emplace<double>(1.0); // needs 8 bytes
     REQUIRE(p == nullptr);
 }
 
-TEST_CASE("AllocateArray returns empty span when exhausted", "[Core.Arena]") {
+TEST_CASE("AllocateArray returns empty span when exhausted", AUTO_TAG) {
     LinearAllocator arena(16);
     auto arr = arena.AllocateArray<int>(100); // needs 400 bytes
     REQUIRE(arr.empty());
 }
 
-TEST_CASE("Alignment padding can cause OOM", "[Core.Arena]") {
+TEST_CASE("Alignment padding can cause OOM", AUTO_TAG) {
     LinearAllocator arena(20);
     (void)arena.Allocate(1, 1); // offset=1
     // Need 16 bytes at 16-align: aligned offset=16, end=32 > capacity=20
@@ -151,7 +152,7 @@ TEST_CASE("Alignment padding can cause OOM", "[Core.Arena]") {
 // [Savepoint / Restore] — Manual rollback
 // =============================================================================
 
-TEST_CASE("Save and Restore rewinds allocations", "[Core.Arena]") {
+TEST_CASE("Save and Restore rewinds allocations", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1);
     auto mark = arena.Save();
@@ -165,7 +166,7 @@ TEST_CASE("Save and Restore rewinds allocations", "[Core.Arena]") {
     REQUIRE(arena.GetUsedBytes() == savedOffset);
 }
 
-TEST_CASE("Restore to beginning (offset=0)", "[Core.Arena]") {
+TEST_CASE("Restore to beginning (offset=0)", AUTO_TAG) {
     LinearAllocator arena(256);
     auto mark = arena.Save(); // offset=0
     (void)arena.Emplace<int>(42);
@@ -173,7 +174,7 @@ TEST_CASE("Restore to beginning (offset=0)", "[Core.Arena]") {
     REQUIRE(arena.GetUsedBytes() == 0);
 }
 
-TEST_CASE("Multiple save/restore nested", "[Core.Arena]") {
+TEST_CASE("Multiple save/restore nested", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1);
     auto mark1 = arena.Save();
@@ -193,7 +194,7 @@ TEST_CASE("Multiple save/restore nested", "[Core.Arena]") {
 // [ScopeGuard] — RAII restore
 // =============================================================================
 
-TEST_CASE("ScopeGuard auto-restores on destruction", "[Core.Arena]") {
+TEST_CASE("ScopeGuard auto-restores on destruction", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1);
     size_t before = arena.GetUsedBytes();
@@ -206,7 +207,7 @@ TEST_CASE("ScopeGuard auto-restores on destruction", "[Core.Arena]") {
     REQUIRE(arena.GetUsedBytes() == before);
 }
 
-TEST_CASE("ScopeGuard Release commits allocations", "[Core.Arena]") {
+TEST_CASE("ScopeGuard Release commits allocations", AUTO_TAG) {
     LinearAllocator arena(256);
     size_t after;
     {
@@ -218,7 +219,7 @@ TEST_CASE("ScopeGuard Release commits allocations", "[Core.Arena]") {
     REQUIRE(arena.GetUsedBytes() == after); // not rolled back
 }
 
-TEST_CASE("ScopeGuard move construction", "[Core.Arena]") {
+TEST_CASE("ScopeGuard move construction", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1);
     size_t before = arena.GetUsedBytes();
@@ -231,7 +232,7 @@ TEST_CASE("ScopeGuard move construction", "[Core.Arena]") {
     REQUIRE(arena.GetUsedBytes() == before);
 }
 
-TEST_CASE("Nested ScopeGuards", "[Core.Arena]") {
+TEST_CASE("Nested ScopeGuards", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1);
     size_t level0 = arena.GetUsedBytes();
@@ -253,7 +254,7 @@ TEST_CASE("Nested ScopeGuards", "[Core.Arena]") {
 // [Reset] — Full rewind
 // =============================================================================
 
-TEST_CASE("Reset rewinds to zero", "[Core.Arena]") {
+TEST_CASE("Reset rewinds to zero", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1);
     (void)arena.Emplace<int>(2);
@@ -264,7 +265,7 @@ TEST_CASE("Reset rewinds to zero", "[Core.Arena]") {
     REQUIRE(arena.GetRemainingBytes() == 256);
 }
 
-TEST_CASE("Can allocate after Reset", "[Core.Arena]") {
+TEST_CASE("Can allocate after Reset", AUTO_TAG) {
     LinearAllocator arena(64);
     (void)arena.Allocate(64);
     REQUIRE(arena.Allocate(1) == nullptr); // full
@@ -277,7 +278,7 @@ TEST_CASE("Can allocate after Reset", "[Core.Arena]") {
 // [Move semantics]
 // =============================================================================
 
-TEST_CASE("Move construction transfers arena", "[Core.Arena]") {
+TEST_CASE("Move construction transfers arena", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(42);
     size_t used = arena.GetUsedBytes();
@@ -289,7 +290,7 @@ TEST_CASE("Move construction transfers arena", "[Core.Arena]") {
     REQUIRE(arena2.GetCapacity() == 256);
 }
 
-TEST_CASE("Move assignment transfers arena", "[Core.Arena]") {
+TEST_CASE("Move assignment transfers arena", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(42);
 
@@ -303,7 +304,7 @@ TEST_CASE("Move assignment transfers arena", "[Core.Arena]") {
 // =============================================================================
 
 #ifndef NDEBUG
-TEST_CASE("Debug stats: peak usage tracks high-water mark", "[Core.Arena]") {
+TEST_CASE("Debug stats: peak usage tracks high-water mark", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Emplace<int>(1); // ~4 bytes
     (void)arena.Emplace<int>(2); // ~8 bytes
@@ -319,7 +320,7 @@ TEST_CASE("Debug stats: peak usage tracks high-water mark", "[Core.Arena]") {
     REQUIRE(arena.GetStats().peakUsage == peak2);
 }
 
-TEST_CASE("Debug stats: allocation count", "[Core.Arena]") {
+TEST_CASE("Debug stats: allocation count", AUTO_TAG) {
     LinearAllocator arena(256);
     arena.ResetStats();
     (void)arena.Allocate(4);
@@ -328,7 +329,7 @@ TEST_CASE("Debug stats: allocation count", "[Core.Arena]") {
     REQUIRE(arena.GetStats().allocationCount == 3);
 }
 
-TEST_CASE("Debug stats: ResetStats clears counters", "[Core.Arena]") {
+TEST_CASE("Debug stats: ResetStats clears counters", AUTO_TAG) {
     LinearAllocator arena(256);
     (void)arena.Allocate(4);
     arena.ResetStats();
@@ -341,14 +342,14 @@ TEST_CASE("Debug stats: ResetStats clears counters", "[Core.Arena]") {
 // [Edge cases]
 // =============================================================================
 
-TEST_CASE("Zero-byte allocation succeeds (returns valid pointer)", "[Core.Arena]") {
+TEST_CASE("Zero-byte allocation succeeds (returns valid pointer)", AUTO_TAG) {
     LinearAllocator arena(64);
     void* p = arena.Allocate(0);
     // Zero-byte allocation is allowed (pointer to current position)
     REQUIRE(p != nullptr);
 }
 
-TEST_CASE("Exact capacity fill then OOM", "[Core.Arena]") {
+TEST_CASE("Exact capacity fill then OOM", AUTO_TAG) {
     LinearAllocator arena(64);
     void* p = arena.Allocate(64, 1); // exactly fills
     REQUIRE(p != nullptr);
@@ -356,21 +357,21 @@ TEST_CASE("Exact capacity fill then OOM", "[Core.Arena]") {
     REQUIRE(arena.Allocate(1) == nullptr);
 }
 
-TEST_CASE("Large alignment with small allocation", "[Core.Arena]") {
+TEST_CASE("Large alignment with small allocation", AUTO_TAG) {
     LinearAllocator arena(4096);
     void* p = arena.Allocate(1, 256);
     REQUIRE(p != nullptr);
     REQUIRE(reinterpret_cast<uintptr_t>(p) % 256 == 0);
 }
 
-TEST_CASE("Sequential allocations are contiguous (no gap beyond alignment)", "[Core.Arena]") {
+TEST_CASE("Sequential allocations are contiguous (no gap beyond alignment)", AUTO_TAG) {
     LinearAllocator arena(256);
     auto* a = static_cast<std::byte*>(arena.Allocate(4, 1));
     auto* b = static_cast<std::byte*>(arena.Allocate(4, 1));
     REQUIRE(b == a + 4); // directly adjacent (1-byte alignment, no padding)
 }
 
-TEST_CASE("GetBuffer returns start of arena", "[Core.Arena]") {
+TEST_CASE("GetBuffer returns start of arena", AUTO_TAG) {
     LinearAllocator arena(256);
     auto* first = arena.Allocate(1, 1);
     REQUIRE(first == arena.GetBuffer());

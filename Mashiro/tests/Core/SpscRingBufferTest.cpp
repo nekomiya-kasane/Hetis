@@ -5,6 +5,7 @@
  */
 #include "Mashiro/Core/SpscRingBuffer.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstring>
@@ -54,7 +55,7 @@ namespace {
 // [SpscQueue] — Basic operations
 // =============================================================================
 
-TEST_CASE("SpscQueue: push and pop single element", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: push and pop single element", AUTO_TAG) {
     SpscQueue<int, 4> q;
     REQUIRE(q.Empty());
     REQUIRE(q.TryPush(42));
@@ -67,7 +68,7 @@ TEST_CASE("SpscQueue: push and pop single element", "[Core.Spsc]") {
     REQUIRE(q.Empty());
 }
 
-TEST_CASE("SpscQueue: fill to capacity", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: fill to capacity", AUTO_TAG) {
     SpscQueue<int, 4> q; // capacity = 4
     REQUIRE(q.TryPush(1));
     REQUIRE(q.TryPush(2));
@@ -77,7 +78,7 @@ TEST_CASE("SpscQueue: fill to capacity", "[Core.Spsc]") {
     REQUIRE(q.SizeApprox() == 4);
 }
 
-TEST_CASE("SpscQueue: pop empties then refill", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: pop empties then refill", AUTO_TAG) {
     SpscQueue<int, 4> q;
     for (int i = 0; i < 4; ++i) (void)q.TryPush(i);
 
@@ -96,20 +97,20 @@ TEST_CASE("SpscQueue: pop empties then refill", "[Core.Spsc]") {
     }
 }
 
-TEST_CASE("SpscQueue: TryPop on empty returns false", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: TryPop on empty returns false", AUTO_TAG) {
     SpscQueue<int, 4> q;
     int v = 99;
     REQUIRE(!q.TryPop(v));
     REQUIRE(v == 99); // unchanged
 }
 
-TEST_CASE("SpscQueue: TryPop optional on empty returns nullopt", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: TryPop optional on empty returns nullopt", AUTO_TAG) {
     SpscQueue<int, 4> q;
     auto opt = q.TryPop();
     REQUIRE(!opt.has_value());
 }
 
-TEST_CASE("SpscQueue: TryPop optional on non-empty", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: TryPop optional on non-empty", AUTO_TAG) {
     SpscQueue<int, 4> q;
     (void)q.TryPush(77);
     auto opt = q.TryPop();
@@ -117,7 +118,7 @@ TEST_CASE("SpscQueue: TryPop optional on non-empty", "[Core.Spsc]") {
     REQUIRE(*opt == 77);
 }
 
-TEST_CASE("SpscQueue: TryEmplace", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: TryEmplace", AUTO_TAG) {
     SpscQueue<NonTrivial, 4> q;
     REQUIRE(q.TryEmplace("hello", 5));
     NonTrivial out;
@@ -130,7 +131,7 @@ TEST_CASE("SpscQueue: TryEmplace", "[Core.Spsc]") {
 // [SpscQueue] — Non-trivial types
 // =============================================================================
 
-TEST_CASE("SpscQueue: move-only type", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: move-only type", AUTO_TAG) {
     SpscQueue<MoveOnly, 4> q;
     REQUIRE(q.TryPush(MoveOnly{42}));
     auto opt = q.TryPop();
@@ -138,7 +139,7 @@ TEST_CASE("SpscQueue: move-only type", "[Core.Spsc]") {
     REQUIRE(opt->value == 42);
 }
 
-TEST_CASE("SpscQueue: destructor called on remaining elements", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: destructor called on remaining elements", AUTO_TAG) {
     int dtorCount = 0;
     {
         SpscQueue<DtorCounter, 8> q;
@@ -150,7 +151,7 @@ TEST_CASE("SpscQueue: destructor called on remaining elements", "[Core.Spsc]") {
     REQUIRE(dtorCount == 3);
 }
 
-TEST_CASE("SpscQueue: destructor not called after pop", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: destructor not called after pop", AUTO_TAG) {
     int dtorCount = 0;
     {
         SpscQueue<DtorCounter, 8> q;
@@ -165,7 +166,7 @@ TEST_CASE("SpscQueue: destructor not called after pop", "[Core.Spsc]") {
 // [SpscQueue] — Wrap-around stress
 // =============================================================================
 
-TEST_CASE("SpscQueue: wrap-around correctness (1000 cycles)", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: wrap-around correctness (1000 cycles)", AUTO_TAG) {
     SpscQueue<int, 8> q;
     for (int cycle = 0; cycle < 1000; ++cycle) {
         REQUIRE(q.TryPush(cycle));
@@ -175,7 +176,7 @@ TEST_CASE("SpscQueue: wrap-around correctness (1000 cycles)", "[Core.Spsc]") {
     }
 }
 
-TEST_CASE("SpscQueue: interleaved push/pop maintains FIFO", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: interleaved push/pop maintains FIFO", AUTO_TAG) {
     SpscQueue<int, 16> q;
     std::vector<int> results;
 
@@ -200,7 +201,7 @@ TEST_CASE("SpscQueue: interleaved push/pop maintains FIFO", "[Core.Spsc]") {
 // [SpscQueue] — Cross-thread
 // =============================================================================
 
-TEST_CASE("SpscQueue: producer-consumer across threads", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: producer-consumer across threads", AUTO_TAG) {
     constexpr int kCount = 10000;
     SpscQueue<int, 1024> q;
     std::vector<int> received;
@@ -225,7 +226,7 @@ TEST_CASE("SpscQueue: producer-consumer across threads", "[Core.Spsc]") {
 // [SpscByteRing] — Basic operations
 // =============================================================================
 
-TEST_CASE("SpscByteRing: write and read single message", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: write and read single message", AUTO_TAG) {
     SpscByteRing<256> ring;
     int payload = 42;
     REQUIRE(ring.TryWrite(&payload, sizeof(payload)));
@@ -241,7 +242,7 @@ TEST_CASE("SpscByteRing: write and read single message", "[Core.Spsc]") {
     REQUIRE(!ring.HasData());
 }
 
-TEST_CASE("SpscByteRing: write multiple messages", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: write multiple messages", AUTO_TAG) {
     SpscByteRing<1024> ring;
     for (int i = 0; i < 10; ++i) {
         REQUIRE(ring.TryWrite(&i, sizeof(i)));
@@ -257,7 +258,7 @@ TEST_CASE("SpscByteRing: write multiple messages", "[Core.Spsc]") {
     for (int i = 0; i < 10; ++i) REQUIRE(results[i] == i);
 }
 
-TEST_CASE("SpscByteRing: write from span", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: write from span", AUTO_TAG) {
     SpscByteRing<256> ring;
     std::byte payload[] = {std::byte{0xDE}, std::byte{0xAD}, std::byte{0xBE}, std::byte{0xEF}};
     REQUIRE(ring.TryWrite(std::span<const std::byte>{payload, 4}));
@@ -273,7 +274,7 @@ TEST_CASE("SpscByteRing: write from span", "[Core.Spsc]") {
 // [SpscByteRing] — Capacity and OOM
 // =============================================================================
 
-TEST_CASE("SpscByteRing: full ring rejects write", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: full ring rejects write", AUTO_TAG) {
     SpscByteRing<64> ring; // 64 bytes total
     // Each write = 4 (header) + payload. Fill up.
     char big[50] = {};
@@ -281,7 +282,7 @@ TEST_CASE("SpscByteRing: full ring rejects write", "[Core.Spsc]") {
     REQUIRE(!ring.TryWrite(big, sizeof(big)));    // no room for another 54
 }
 
-TEST_CASE("SpscByteRing: zero-length message", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: zero-length message", AUTO_TAG) {
     SpscByteRing<256> ring;
     // Zero-length write: header only (4 bytes)
     REQUIRE(ring.TryWrite(nullptr, 0));
@@ -300,7 +301,7 @@ TEST_CASE("SpscByteRing: zero-length message", "[Core.Spsc]") {
 // [SpscByteRing] — Wrap-around
 // =============================================================================
 
-TEST_CASE("SpscByteRing: wrap-around correctness", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: wrap-around correctness", AUTO_TAG) {
     SpscByteRing<128> ring;
 
     for (int cycle = 0; cycle < 100; ++cycle) {
@@ -319,7 +320,7 @@ TEST_CASE("SpscByteRing: wrap-around correctness", "[Core.Spsc]") {
 // [SpscByteRing] — Variable-length messages
 // =============================================================================
 
-TEST_CASE("SpscByteRing: mixed message sizes", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: mixed message sizes", AUTO_TAG) {
     SpscByteRing<4096> ring;
 
     // Write messages of varying sizes
@@ -341,7 +342,7 @@ TEST_CASE("SpscByteRing: mixed message sizes", "[Core.Spsc]") {
 // [SpscByteRing] — Reset
 // =============================================================================
 
-TEST_CASE("SpscByteRing: Reset discards pending data", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: Reset discards pending data", AUTO_TAG) {
     SpscByteRing<256> ring;
     int v = 1;
     (void)ring.TryWrite(&v, sizeof(v));
@@ -356,7 +357,7 @@ TEST_CASE("SpscByteRing: Reset discards pending data", "[Core.Spsc]") {
 // [SpscByteRing] — Cross-thread
 // =============================================================================
 
-TEST_CASE("SpscByteRing: producer-consumer across threads", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: producer-consumer across threads", AUTO_TAG) {
     constexpr int kCount = 5000;
     SpscByteRing<65536> ring;
 
@@ -395,7 +396,7 @@ TEST_CASE("SpscByteRing: producer-consumer across threads", "[Core.Spsc]") {
 // [SpscByteRing] — BytesPending
 // =============================================================================
 
-TEST_CASE("SpscByteRing: BytesPending tracks usage", "[Core.Spsc]") {
+TEST_CASE("SpscByteRing: BytesPending tracks usage", AUTO_TAG) {
     SpscByteRing<256> ring;
     REQUIRE(ring.BytesPending() == 0);
 
@@ -414,7 +415,7 @@ TEST_CASE("SpscByteRing: BytesPending tracks usage", "[Core.Spsc]") {
 // [SpscQueue] — GetCapacity
 // =============================================================================
 
-TEST_CASE("SpscQueue: GetCapacity is compile-time", "[Core.Spsc]") {
+TEST_CASE("SpscQueue: GetCapacity is compile-time", AUTO_TAG) {
     STATIC_REQUIRE(SpscQueue<int, 256>::GetCapacity() == 256);
     STATIC_REQUIRE(SpscByteRing<4096>::GetCapacity() == 4096);
 }

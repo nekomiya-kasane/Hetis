@@ -3,6 +3,7 @@
  * @brief Mat arithmetic and functions validated against Eigen reference.
  */
 #include "Support/EigenBridge.h"
+#include "Support/Meta.h"
 
 #include <Eigen/Dense>
 
@@ -14,7 +15,7 @@ using Catch::Approx;
 // Arithmetic
 // ===========================================================================
 
-TEST_CASE("Mat4 add/sub/scalar matches Eigen", "[Math.Mat]") {
+TEST_CASE("Mat4 add/sub/scalar matches Eigen", AUTO_TAG) {
     mat4 a = Math::MakeTranslation(vec3{1,2,3});
     mat4 b = Math::MakeScale(vec3{2,3,4});
     auto ea = ToEigen(a), eb = ToEigen(b);
@@ -25,7 +26,7 @@ TEST_CASE("Mat4 add/sub/scalar matches Eigen", "[Math.Mat]") {
     RequireCloseEigen(-a, -ea);
 }
 
-TEST_CASE("Mat4 * Mat4 matches Eigen", "[Math.Mat]") {
+TEST_CASE("Mat4 * Mat4 matches Eigen", AUTO_TAG) {
     mat4 a = Math::MakeRotateZ(0.7f);
     mat4 b = Math::MakeTranslation(vec3{5,-3,2});
     auto ea = ToEigen(a), eb = ToEigen(b);
@@ -33,14 +34,14 @@ TEST_CASE("Mat4 * Mat4 matches Eigen", "[Math.Mat]") {
     RequireCloseEigen(b * a, eb * ea);
 }
 
-TEST_CASE("Mat4 * Vec4 matches Eigen", "[Math.Mat]") {
+TEST_CASE("Mat4 * Vec4 matches Eigen", AUTO_TAG) {
     mat4 m = Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
              * Math::MakeTranslation(vec3{10,20,30});
     vec4 v{1,2,3,1};
     RequireCloseEigen(m * v, ToEigen(m) * ToEigen(v));
 }
 
-TEST_CASE("Mat3 * Mat3 matches Eigen", "[Math.Mat]") {
+TEST_CASE("Mat3 * Mat3 matches Eigen", AUTO_TAG) {
     mat3 a{};
     a[0,0]=1; a[0,1]=2; a[0,2]=3;
     a[1,0]=4; a[1,1]=5; a[1,2]=6;
@@ -52,7 +53,7 @@ TEST_CASE("Mat3 * Mat3 matches Eigen", "[Math.Mat]") {
     RequireCloseEigen(a * b, ToEigen(a) * ToEigen(b));
 }
 
-TEST_CASE("Mat2 * Vec2 matches Eigen", "[Math.Mat]") {
+TEST_CASE("Mat2 * Vec2 matches Eigen", AUTO_TAG) {
     mat2 m{};
     m[0,0]=1; m[0,1]=2;
     m[1,0]=3; m[1,1]=4;
@@ -64,7 +65,7 @@ TEST_CASE("Mat2 * Vec2 matches Eigen", "[Math.Mat]") {
 // Functions: Transpose / Det / Inverse / Identity
 // ===========================================================================
 
-TEST_CASE("Transpose matches Eigen .transpose()", "[Math.Mat]") {
+TEST_CASE("Transpose matches Eigen .transpose()", AUTO_TAG) {
     mat4 m = Math::MakeRotateAxis(vec3{1,1,0}, 0.5f);
     RequireCloseEigen(Math::Transpose(m), ToEigen(m).transpose());
 
@@ -75,7 +76,7 @@ TEST_CASE("Transpose matches Eigen .transpose()", "[Math.Mat]") {
     RequireCloseEigen(Math::Transpose(m3), ToEigen(m3).transpose());
 }
 
-TEST_CASE("Det matches Eigen .determinant()", "[Math.Mat]") {
+TEST_CASE("Det matches Eigen .determinant()", AUTO_TAG) {
     mat2 m2{};
     m2[0,0]=3; m2[0,1]=8;
     m2[1,0]=4; m2[1,1]=6;
@@ -92,14 +93,14 @@ TEST_CASE("Det matches Eigen .determinant()", "[Math.Mat]") {
     RequireClose(Math::Det(m4), ToEigen(m4).determinant(), 1e-3f);
 }
 
-TEST_CASE("Inverse(mat2) matches Eigen", "[Math.Mat]") {
+TEST_CASE("Inverse(mat2) matches Eigen", AUTO_TAG) {
     mat2 m{};
     m[0,0]=3; m[0,1]=8;
     m[1,0]=4; m[1,1]=6;
     RequireCloseEigen(Math::Inverse(m), ToEigen(m).inverse());
 }
 
-TEST_CASE("Inverse(mat3) matches Eigen", "[Math.Mat]") {
+TEST_CASE("Inverse(mat3) matches Eigen", AUTO_TAG) {
     mat3 m{};
     m[0,0]=6; m[0,1]=1; m[0,2]=1;
     m[1,0]=4; m[1,1]=-2; m[1,2]=5;
@@ -107,14 +108,14 @@ TEST_CASE("Inverse(mat3) matches Eigen", "[Math.Mat]") {
     RequireCloseEigen(Math::Inverse(m), ToEigen(m).inverse(), 1e-4f);
 }
 
-TEST_CASE("Inverse(mat4) matches Eigen", "[Math.Mat]") {
+TEST_CASE("Inverse(mat4) matches Eigen", AUTO_TAG) {
     mat4 m = Math::MakeTranslation(vec3{5,-3,2})
              * Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f)
              * Math::MakeScale(vec3{2,0.5f,1.5f});
     RequireCloseEigen(Math::Inverse(m), ToEigen(m).inverse(), 1e-4f);
 }
 
-TEST_CASE("Identity matches Eigen Identity", "[Math.Mat]") {
+TEST_CASE("Identity matches Eigen Identity", AUTO_TAG) {
     RequireCloseEigen(Math::Identity(), Eigen::Matrix4f::Identity().eval());
     RequireCloseEigen(Math::Identity<mat3>(), Eigen::Matrix3f::Identity().eval());
     RequireCloseEigen(Math::Identity<mat2>(), Eigen::Matrix2f::Identity().eval());

@@ -5,6 +5,7 @@
  */
 #include "Mashiro/Core/ChunkedSlotMap.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -45,19 +46,19 @@ namespace {
 // [SlotHandle] — Value semantics
 // =============================================================================
 
-TEST_CASE("SlotHandle: default is null", "[Core.SlotMap]") {
+TEST_CASE("SlotHandle: default is null", AUTO_TAG) {
     constexpr SlotHandle h;
     STATIC_REQUIRE(!h.IsValid());
     STATIC_REQUIRE(h == SlotHandle::Null());
 }
 
-TEST_CASE("SlotHandle: valid handle", "[Core.SlotMap]") {
+TEST_CASE("SlotHandle: valid handle", AUTO_TAG) {
     constexpr SlotHandle h{1, 1};
     STATIC_REQUIRE(h.IsValid());
     STATIC_REQUIRE(h != SlotHandle::Null());
 }
 
-TEST_CASE("SlotHandle: equality", "[Core.SlotMap]") {
+TEST_CASE("SlotHandle: equality", AUTO_TAG) {
     constexpr SlotHandle a{5, 3};
     constexpr SlotHandle b{5, 3};
     constexpr SlotHandle c{5, 4};
@@ -69,7 +70,7 @@ TEST_CASE("SlotHandle: equality", "[Core.SlotMap]") {
 // [Construction] — Default state
 // =============================================================================
 
-TEST_CASE("Default construction: empty map", "[Core.SlotMap]") {
+TEST_CASE("Default construction: empty map", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     REQUIRE(map.Size() == 0);
     REQUIRE(map.Empty());
@@ -80,7 +81,7 @@ TEST_CASE("Default construction: empty map", "[Core.SlotMap]") {
 // [Insertion] — Emplace and handle validity
 // =============================================================================
 
-TEST_CASE("Emplace single element", "[Core.SlotMap]") {
+TEST_CASE("Emplace single element", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     REQUIRE(h.IsValid());
@@ -88,7 +89,7 @@ TEST_CASE("Emplace single element", "[Core.SlotMap]") {
     REQUIRE(*map.Get(h) == 42);
 }
 
-TEST_CASE("Emplace multiple elements", "[Core.SlotMap]") {
+TEST_CASE("Emplace multiple elements", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(10);
     auto h2 = map.Emplace(20);
@@ -99,14 +100,14 @@ TEST_CASE("Emplace multiple elements", "[Core.SlotMap]") {
     REQUIRE(*map.Get(h3) == 30);
 }
 
-TEST_CASE("Emplace with complex type", "[Core.SlotMap]") {
+TEST_CASE("Emplace with complex type", AUTO_TAG) {
     ChunkedSlotMap<Heavy> map;
     auto h = map.Emplace("hello", 99);
     REQUIRE(map.Get(h)->name == "hello");
     REQUIRE(map.Get(h)->id == 99);
 }
 
-TEST_CASE("Handles have unique indices", "[Core.SlotMap]") {
+TEST_CASE("Handles have unique indices", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(1);
     auto h2 = map.Emplace(2);
@@ -120,7 +121,7 @@ TEST_CASE("Handles have unique indices", "[Core.SlotMap]") {
 // [Removal] — Free and swap-and-pop correctness
 // =============================================================================
 
-TEST_CASE("Free removes element", "[Core.SlotMap]") {
+TEST_CASE("Free removes element", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     REQUIRE(map.Free(h));
@@ -128,7 +129,7 @@ TEST_CASE("Free removes element", "[Core.SlotMap]") {
     REQUIRE(map.Get(h) == nullptr);
 }
 
-TEST_CASE("Free invalidates handle (generation mismatch)", "[Core.SlotMap]") {
+TEST_CASE("Free invalidates handle (generation mismatch)", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     map.Free(h);
@@ -136,19 +137,19 @@ TEST_CASE("Free invalidates handle (generation mismatch)", "[Core.SlotMap]") {
     REQUIRE(map.Get(h) == nullptr);
 }
 
-TEST_CASE("Double-free returns false", "[Core.SlotMap]") {
+TEST_CASE("Double-free returns false", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     REQUIRE(map.Free(h));
     REQUIRE(!map.Free(h)); // already freed
 }
 
-TEST_CASE("Free null handle returns false", "[Core.SlotMap]") {
+TEST_CASE("Free null handle returns false", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     REQUIRE(!map.Free(SlotHandle::Null()));
 }
 
-TEST_CASE("Free middle element preserves others (swap-and-pop)", "[Core.SlotMap]") {
+TEST_CASE("Free middle element preserves others (swap-and-pop)", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(10);
     auto h2 = map.Emplace(20);
@@ -161,7 +162,7 @@ TEST_CASE("Free middle element preserves others (swap-and-pop)", "[Core.SlotMap]
     REQUIRE(*map.Get(h3) == 30);
 }
 
-TEST_CASE("Free last element (no swap needed)", "[Core.SlotMap]") {
+TEST_CASE("Free last element (no swap needed)", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(10);
     auto h2 = map.Emplace(20);
@@ -175,7 +176,7 @@ TEST_CASE("Free last element (no swap needed)", "[Core.SlotMap]") {
 // [Destructor] — Non-trivial types properly destroyed
 // =============================================================================
 
-TEST_CASE("Destructor called on Free", "[Core.SlotMap]") {
+TEST_CASE("Destructor called on Free", AUTO_TAG) {
     int dtorCount = 0;
     {
         ChunkedSlotMap<DtorTracker> map;
@@ -186,7 +187,7 @@ TEST_CASE("Destructor called on Free", "[Core.SlotMap]") {
     REQUIRE(dtorCount == 1); // no double destroy
 }
 
-TEST_CASE("Destructor called on map destruction", "[Core.SlotMap]") {
+TEST_CASE("Destructor called on map destruction", AUTO_TAG) {
     int dtorCount = 0;
     {
         ChunkedSlotMap<DtorTracker> map;
@@ -197,7 +198,7 @@ TEST_CASE("Destructor called on map destruction", "[Core.SlotMap]") {
     REQUIRE(dtorCount == 3);
 }
 
-TEST_CASE("Destructor called on Clear", "[Core.SlotMap]") {
+TEST_CASE("Destructor called on Clear", AUTO_TAG) {
     int dtorCount = 0;
     ChunkedSlotMap<DtorTracker> map;
     (void)map.Emplace(&dtorCount, 1);
@@ -211,14 +212,14 @@ TEST_CASE("Destructor called on Clear", "[Core.SlotMap]") {
 // [Lookup] — Get, operator[], IsAlive
 // =============================================================================
 
-TEST_CASE("Get returns nullptr for stale handle", "[Core.SlotMap]") {
+TEST_CASE("Get returns nullptr for stale handle", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     map.Free(h);
     REQUIRE(map.Get(h) == nullptr);
 }
 
-TEST_CASE("operator[] unchecked access", "[Core.SlotMap]") {
+TEST_CASE("operator[] unchecked access", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(77);
     REQUIRE(map[h] == 77);
@@ -226,7 +227,7 @@ TEST_CASE("operator[] unchecked access", "[Core.SlotMap]") {
     REQUIRE(*map.Get(h) == 88);
 }
 
-TEST_CASE("IsAlive true for live, false for dead", "[Core.SlotMap]") {
+TEST_CASE("IsAlive true for live, false for dead", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(1);
     REQUIRE(map.IsAlive(h));
@@ -238,7 +239,7 @@ TEST_CASE("IsAlive true for live, false for dead", "[Core.SlotMap]") {
 // [Generation] — Reuse of freed slots with incremented generation
 // =============================================================================
 
-TEST_CASE("Freed slot is reused with new generation", "[Core.SlotMap]") {
+TEST_CASE("Freed slot is reused with new generation", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(100);
     uint32_t oldIndex = h1.index;
@@ -255,7 +256,7 @@ TEST_CASE("Freed slot is reused with new generation", "[Core.SlotMap]") {
     REQUIRE(*map.Get(h2) == 200);
 }
 
-TEST_CASE("Multiple reuse cycles maintain correctness", "[Core.SlotMap]") {
+TEST_CASE("Multiple reuse cycles maintain correctness", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     std::vector<SlotHandle> staleHandles;
 
@@ -275,7 +276,7 @@ TEST_CASE("Multiple reuse cycles maintain correctness", "[Core.SlotMap]") {
 // [Dense iteration] — ForEach, Data()
 // =============================================================================
 
-TEST_CASE("ForEach iterates only live elements", "[Core.SlotMap]") {
+TEST_CASE("ForEach iterates only live elements", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     (void)map.Emplace(1);
     auto h2 = map.Emplace(2);
@@ -290,7 +291,7 @@ TEST_CASE("ForEach iterates only live elements", "[Core.SlotMap]") {
     REQUIRE(values == std::vector<int>{1, 3});
 }
 
-TEST_CASE("ForEach with handle+value signature", "[Core.SlotMap]") {
+TEST_CASE("ForEach with handle+value signature", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(10);
     auto h2 = map.Emplace(20);
@@ -303,14 +304,14 @@ TEST_CASE("ForEach with handle+value signature", "[Core.SlotMap]") {
     REQUIRE(sum == 30);
 }
 
-TEST_CASE("ForEach on empty map does nothing", "[Core.SlotMap]") {
+TEST_CASE("ForEach on empty map does nothing", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     int count = 0;
     map.ForEach([&](int&) { ++count; });
     REQUIRE(count == 0);
 }
 
-TEST_CASE("Data() returns pointer to first dense value", "[Core.SlotMap]") {
+TEST_CASE("Data() returns pointer to first dense value", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     REQUIRE(map.Data() == nullptr); // empty
 
@@ -323,7 +324,7 @@ TEST_CASE("Data() returns pointer to first dense value", "[Core.SlotMap]") {
 // [Chunk growth] — Multi-chunk allocation
 // =============================================================================
 
-TEST_CASE("Grows beyond single chunk", "[Core.SlotMap]") {
+TEST_CASE("Grows beyond single chunk", AUTO_TAG) {
     // Use small chunk (ChunkBits=2 → 4 slots/chunk, slot 0 reserved → 3 usable)
     ChunkedSlotMap<int, 2> map;
     std::vector<SlotHandle> handles;
@@ -343,7 +344,7 @@ TEST_CASE("Grows beyond single chunk", "[Core.SlotMap]") {
 // [Clear] — Bulk reset
 // =============================================================================
 
-TEST_CASE("Clear empties map but preserves capacity", "[Core.SlotMap]") {
+TEST_CASE("Clear empties map but preserves capacity", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     for (int i = 0; i < 100; ++i) (void)map.Emplace(i);
     uint32_t capBefore = map.Capacity();
@@ -358,7 +359,7 @@ TEST_CASE("Clear empties map but preserves capacity", "[Core.SlotMap]") {
     REQUIRE(*map.Get(h) == 999);
 }
 
-TEST_CASE("Clear invalidates all previous handles", "[Core.SlotMap]") {
+TEST_CASE("Clear invalidates all previous handles", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h1 = map.Emplace(1);
     auto h2 = map.Emplace(2);
@@ -371,7 +372,7 @@ TEST_CASE("Clear invalidates all previous handles", "[Core.SlotMap]") {
 // [Move semantics]
 // =============================================================================
 
-TEST_CASE("Move construction transfers ownership", "[Core.SlotMap]") {
+TEST_CASE("Move construction transfers ownership", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     auto map2 = std::move(map);
@@ -379,7 +380,7 @@ TEST_CASE("Move construction transfers ownership", "[Core.SlotMap]") {
     REQUIRE(*map2.Get(h) == 42);
 }
 
-TEST_CASE("Move assignment transfers ownership", "[Core.SlotMap]") {
+TEST_CASE("Move assignment transfers ownership", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     auto h = map.Emplace(42);
     ChunkedSlotMap<int> map2;
@@ -392,7 +393,7 @@ TEST_CASE("Move assignment transfers ownership", "[Core.SlotMap]") {
 // [Stress] — Large scale
 // =============================================================================
 
-TEST_CASE("Stress: 10000 insert/remove cycles", "[Core.SlotMap]") {
+TEST_CASE("Stress: 10000 insert/remove cycles", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     std::vector<SlotHandle> handles;
     handles.reserve(10000);
@@ -428,7 +429,7 @@ TEST_CASE("Stress: 10000 insert/remove cycles", "[Core.SlotMap]") {
     REQUIRE(map.Size() == 10000);
 }
 
-TEST_CASE("Stress: ForEach sum matches expected", "[Core.SlotMap]") {
+TEST_CASE("Stress: ForEach sum matches expected", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     int expected = 0;
     for (int i = 0; i < 1000; ++i) {
@@ -445,13 +446,13 @@ TEST_CASE("Stress: ForEach sum matches expected", "[Core.SlotMap]") {
 // [Edge cases]
 // =============================================================================
 
-TEST_CASE("Reserve does not change size", "[Core.SlotMap]") {
+TEST_CASE("Reserve does not change size", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     map.Reserve(1000);
     REQUIRE(map.Size() == 0);
 }
 
-TEST_CASE("Free all elements then re-insert", "[Core.SlotMap]") {
+TEST_CASE("Free all elements then re-insert", AUTO_TAG) {
     ChunkedSlotMap<int> map;
     std::vector<SlotHandle> handles;
     for (int i = 0; i < 50; ++i) handles.push_back(map.Emplace(i));
@@ -466,7 +467,7 @@ TEST_CASE("Free all elements then re-insert", "[Core.SlotMap]") {
     REQUIRE(map.Size() == 50);
 }
 
-TEST_CASE("kDenseStride is correct", "[Core.SlotMap]") {
+TEST_CASE("kDenseStride is correct", AUTO_TAG) {
     // DenseEntry = {T value, uint32_t sparseIndex}
     // For T=int: stride = sizeof(int) + sizeof(uint32_t) + padding
     REQUIRE(ChunkedSlotMap<int>::kDenseStride >= sizeof(int) + sizeof(uint32_t));

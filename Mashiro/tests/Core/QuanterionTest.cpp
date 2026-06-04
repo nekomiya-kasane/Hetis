@@ -1,7 +1,8 @@
 #include "Mashiro/Math/Quanterion.h"
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 
 #include <catch2/catch_approx.hpp>
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -42,7 +43,8 @@ namespace {
 
     // Compare orientations: q and -q represent the same rotation, so compare |dot| ~ 1.
     void RequireSameRotation(quat a, quat b, float margin = 1e-4f) {
-        REQUIRE(std::abs(Quat::Dot(Quat::Normalize(a), Quat::Normalize(b))) == Approx(1.0f).margin(margin));
+        REQUIRE(std::abs(Quat::Dot(Quat::Normalize(a), Quat::Normalize(b))) ==
+                Approx(1.0f).margin(margin));
     }
 
 } // namespace
@@ -51,14 +53,14 @@ namespace {
 // Layout / ABI
 // ---------------------------------------------------------------------------
 
-TEST_CASE("quat has GPU-compatible layout", "[Core.Quaternion]") {
+TEST_CASE("quat has GPU-compatible layout", AUTO_TAG) {
     STATIC_REQUIRE(sizeof(quat) == 16);
     STATIC_REQUIRE(alignof(quat) == 16);
     STATIC_REQUIRE(std::is_trivially_copyable_v<quat>);
     STATIC_REQUIRE(std::is_standard_layout_v<quat>);
 }
 
-TEST_CASE("quat default-constructs to identity", "[Core.Quaternion]") {
+TEST_CASE("quat default-constructs to identity", AUTO_TAG) {
     quat q{};
     REQUIRE(q.x == 0.0f);
     REQUIRE(q.y == 0.0f);
@@ -67,7 +69,7 @@ TEST_CASE("quat default-constructs to identity", "[Core.Quaternion]") {
     REQUIRE(q == Quat::Identity());
 }
 
-TEST_CASE("quat subscript matches members", "[Core.Quaternion]") {
+TEST_CASE("quat subscript matches members", AUTO_TAG) {
     quat q{.x = 1.0f, .y = 2.0f, .z = 3.0f, .w = 4.0f};
     REQUIRE(q[0] == 1.0f);
     REQUIRE(q[1] == 2.0f);
@@ -79,7 +81,7 @@ TEST_CASE("quat subscript matches members", "[Core.Quaternion]") {
 // Construction / extraction
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Quat::MakeAxisAngle round-trips through axis/angle", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeAxisAngle round-trips through axis/angle", AUTO_TAG) {
     vec3 axis = vec3{0.0f, 0.0f, 1.0f};
     quat q = Quat::MakeAxisAngle(axis, kPi * 0.5f);
 
@@ -88,7 +90,7 @@ TEST_CASE("Quat::MakeAxisAngle round-trips through axis/angle", "[Core.Quaternio
     REQUIRE(Quat::Norm2(q) == Approx(1.0f).margin(1e-6f));
 }
 
-TEST_CASE("Quat::MakeRotate{X,Y,Z} agree with axis-angle", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeRotate{X,Y,Z} agree with axis-angle", AUTO_TAG) {
     RequireSameRotation(Quat::MakeRotateX(0.7f), Quat::MakeAxisAngle({1, 0, 0}, 0.7f));
     RequireSameRotation(Quat::MakeRotateY(0.7f), Quat::MakeAxisAngle({0, 1, 0}, 0.7f));
     RequireSameRotation(Quat::MakeRotateZ(0.7f), Quat::MakeAxisAngle({0, 0, 1}, 0.7f));
@@ -98,14 +100,14 @@ TEST_CASE("Quat::MakeRotate{X,Y,Z} agree with axis-angle", "[Core.Quaternion]") 
 // Algebra
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Conjugate and inverse undo a unit rotation", "[Core.Quaternion]") {
+TEST_CASE("Conjugate and inverse undo a unit rotation", AUTO_TAG) {
     quat q = Quat::Normalize(Quat::MakeAxisAngle({1, 2, 3}, 1.1f));
 
     RequireSameRotation(Quat::Mul(q, Quat::Conjugate(q)), Quat::Identity());
     RequireSameRotation(Quat::Mul(q, Quat::Inverse(q)), Quat::Identity());
 }
 
-TEST_CASE("Quat::Mul composes rotations like matrix multiply", "[Core.Quaternion]") {
+TEST_CASE("Quat::Mul composes rotations like matrix multiply", AUTO_TAG) {
     quat a = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
     quat b = Quat::MakeAxisAngle({1, 0, 0}, kPi * 0.5f);
 
@@ -123,12 +125,12 @@ TEST_CASE("Quat::Mul composes rotations like matrix multiply", "[Core.Quaternion
 // Apply to vectors / matrix conversion
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Quat::Rotate turns +X into +Y under a 90deg Z rotation", "[Core.Quaternion]") {
+TEST_CASE("Quat::Rotate turns +X into +Y under a 90deg Z rotation", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
     RequireVecApprox(Quat::Rotate(q, vec3{1, 0, 0}), vec3{0, 1, 0});
 }
 
-TEST_CASE("Quat::Rotate matches Quat::ToMat3 application", "[Core.Quaternion]") {
+TEST_CASE("Quat::Rotate matches Quat::ToMat3 application", AUTO_TAG) {
     quat q = Quat::Normalize(Quat::MakeAxisAngle({0.3f, -0.6f, 0.8f}, 2.0f));
     mat3 m = Quat::ToMat3(q);
 
@@ -137,7 +139,7 @@ TEST_CASE("Quat::Rotate matches Quat::ToMat3 application", "[Core.Quaternion]") 
     }
 }
 
-TEST_CASE("Quat::ToMat4 embeds the 3x3 rotation with affine identity", "[Core.Quaternion]") {
+TEST_CASE("Quat::ToMat4 embeds the 3x3 rotation with affine identity", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 1, 0}, kPi * 0.25f);
     mat4 m = Quat::ToMat4(q);
 
@@ -146,7 +148,7 @@ TEST_CASE("Quat::ToMat4 embeds the 3x3 rotation with affine identity", "[Core.Qu
     REQUIRE((m[3, 0]) == Approx(0.0f));
 }
 
-TEST_CASE("Quat::MakeTransform builds a TRS matrix", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeTransform builds a TRS matrix", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
     mat4 m = Quat::MakeTransform(vec3{5, 6, 7}, q, vec3{2, 2, 2});
 
@@ -160,7 +162,7 @@ TEST_CASE("Quat::MakeTransform builds a TRS matrix", "[Core.Quaternion]") {
     REQUIRE((m[1, 0]) == Approx(2.0f).margin(1e-5f));
 }
 
-TEST_CASE("Quat::RotateMat3 equals matrix product of the rotation", "[Core.Quaternion]") {
+TEST_CASE("Quat::RotateMat3 equals matrix product of the rotation", AUTO_TAG) {
     quat q = Quat::Normalize(Quat::MakeAxisAngle({0.1f, 0.9f, -0.2f}, 1.3f));
     mat3 base = Quat::ToMat3(Quat::MakeAxisAngle({0, 0, 1}, 0.6f));
 
@@ -174,7 +176,7 @@ TEST_CASE("Quat::RotateMat3 equals matrix product of the rotation", "[Core.Quate
     }
 }
 
-TEST_CASE("Quat::RotateMat4 rotates basis and translation, keeps homogeneous row", "[Core.Quaternion]") {
+TEST_CASE("Quat::RotateMat4 rotates basis and translation, keeps homogeneous row", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
     mat4 m = Quat::MakeTransform(vec3{1, 0, 0}, Quat::Identity(), vec3{1, 1, 1});
 
@@ -191,14 +193,14 @@ TEST_CASE("Quat::RotateMat4 rotates basis and translation, keeps homogeneous row
 // Matrix -> quaternion
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Quat::MakeFromMat3 inverts Quat::ToMat3", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeFromMat3 inverts Quat::ToMat3", AUTO_TAG) {
     for (float angle : {0.1f, 1.0f, 2.5f, 3.0f}) {
         quat q = Quat::Normalize(Quat::MakeAxisAngle({0.2f, 0.5f, -0.84f}, angle));
         RequireSameRotation(Quat::MakeFromMat3(Quat::ToMat3(q)), q);
     }
 }
 
-TEST_CASE("Quat::MakeFromMat3 handles all Shepperd branches", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeFromMat3 handles all Shepperd branches", AUTO_TAG) {
     // Each 180-degree rotation makes a different diagonal element dominant.
     RequireSameRotation(Quat::MakeFromMat3(Quat::ToMat3(Quat::MakeAxisAngle({1, 0, 0}, kPi))),
                         Quat::MakeAxisAngle({1, 0, 0}, kPi));
@@ -212,7 +214,7 @@ TEST_CASE("Quat::MakeFromMat3 handles all Shepperd branches", "[Core.Quaternion]
 // Euler
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Euler round-trips away from gimbal lock", "[Core.Quaternion]") {
+TEST_CASE("Euler round-trips away from gimbal lock", AUTO_TAG) {
     quat q = Quat::MakeFromEuler(0.3f, 0.5f, -0.7f);
     vec3 e = Quat::ToEuler(q);
     RequireSameRotation(Quat::MakeFromEuler(e.x, e.y, e.z), q);
@@ -222,21 +224,21 @@ TEST_CASE("Euler round-trips away from gimbal lock", "[Core.Quaternion]") {
 // High-level builders
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Quat::MakeFromTo rotates one vector onto another", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeFromTo rotates one vector onto another", AUTO_TAG) {
     vec3 from = vec3{1, 0, 0};
     vec3 to = vec3{0, 0, 1};
     quat q = Quat::MakeFromTo(from, to);
     RequireVecApprox(Quat::Rotate(q, from), to);
 }
 
-TEST_CASE("Quat::MakeFromTo handles parallel and opposite vectors", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeFromTo handles parallel and opposite vectors", AUTO_TAG) {
     RequireSameRotation(Quat::MakeFromTo({0, 1, 0}, {0, 1, 0}), Quat::Identity());
 
     quat opp = Quat::MakeFromTo({0, 1, 0}, {0, -1, 0});
     RequireVecApprox(Quat::Rotate(opp, vec3{0, 1, 0}), vec3{0, -1, 0});
 }
 
-TEST_CASE("Quat::MakeLookRotation aligns forward with +Z", "[Core.Quaternion]") {
+TEST_CASE("Quat::MakeLookRotation aligns forward with +Z", AUTO_TAG) {
     vec3 forward = vec3{0, 0, 1};
     quat q = Quat::MakeLookRotation(forward, vec3{0, 1, 0});
     RequireVecApprox(Quat::GetForward(q), forward);
@@ -246,7 +248,7 @@ TEST_CASE("Quat::MakeLookRotation aligns forward with +Z", "[Core.Quaternion]") 
 // Interpolation
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Slerp and Nlerp hit the endpoints", "[Core.Quaternion]") {
+TEST_CASE("Slerp and Nlerp hit the endpoints", AUTO_TAG) {
     quat a = Quat::MakeAxisAngle({0, 0, 1}, 0.0f);
     quat b = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
 
@@ -256,7 +258,7 @@ TEST_CASE("Slerp and Nlerp hit the endpoints", "[Core.Quaternion]") {
     RequireSameRotation(Quat::Nlerp(a, b, 1.0f), b);
 }
 
-TEST_CASE("Slerp midpoint is half the angle", "[Core.Quaternion]") {
+TEST_CASE("Slerp midpoint is half the angle", AUTO_TAG) {
     quat a = Quat::MakeAxisAngle({0, 0, 1}, 0.0f);
     quat b = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
 
@@ -264,7 +266,7 @@ TEST_CASE("Slerp midpoint is half the angle", "[Core.Quaternion]") {
     RequireSameRotation(mid, Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.25f));
 }
 
-TEST_CASE("Slerp produces unit quaternions", "[Core.Quaternion]") {
+TEST_CASE("Slerp produces unit quaternions", AUTO_TAG) {
     quat a = Quat::Normalize(Quat::MakeAxisAngle({1, 1, 0}, 0.4f));
     quat b = Quat::Normalize(Quat::MakeAxisAngle({0, 1, 1}, 2.2f));
 
@@ -286,7 +288,7 @@ namespace {
 
 } // namespace
 
-TEST_CASE("Quaternion math folds at compile time", "[Core.Quaternion]") {
+TEST_CASE("Quaternion math folds at compile time", AUTO_TAG) {
     // Everything below is initialized in a constant-expression context, so it
     // forces the constexpr sin/cos/sqrt/atan2/asin/acos kernels (not the runtime
     // std:: path) and proves the API is usable in constant expressions.
@@ -316,14 +318,14 @@ TEST_CASE("Quaternion math folds at compile time", "[Core.Quaternion]") {
     STATIC_REQUIRE(Close(Quat::Norm2(Quat::MakeAxisAngle(vec3{1, 1, 1}, 1.3f)), 1.0f));
 
     // Euler round-trip exercises constexpr Sin/Cos (build) and Atan2/Asin (extract).
-    constexpr quat eq  = Quat::MakeFromEuler(0.3f, 0.5f, -0.7f);
+    constexpr quat eq = Quat::MakeFromEuler(0.3f, 0.5f, -0.7f);
     constexpr vec3 ea = Quat::ToEuler(eq);
     constexpr quat eq2 = Quat::MakeFromEuler(ea.x, ea.y, ea.z);
     STATIC_REQUIRE(Close(Quat::Dot(eq, eq2), 1.0f, 1e-3f));
 
     // Slerp midpoint exercises constexpr Acos/Sin and equals the half-angle rotation.
-    constexpr quat sa  = Quat::MakeAxisAngle(vec3{0, 0, 1}, 0.0f);
-    constexpr quat sb  = Quat::MakeAxisAngle(vec3{0, 0, 1}, kPi * 0.5f);
+    constexpr quat sa = Quat::MakeAxisAngle(vec3{0, 0, 1}, 0.0f);
+    constexpr quat sb = Quat::MakeAxisAngle(vec3{0, 0, 1}, kPi * 0.5f);
     constexpr quat mid = Quat::Slerp(sa, sb, 0.5f);
     constexpr quat ref = Quat::MakeAxisAngle(vec3{0, 0, 1}, kPi * 0.25f);
     STATIC_REQUIRE(Close(Quat::Dot(mid, ref), 1.0f, 1e-3f));
@@ -333,11 +335,11 @@ TEST_CASE("Quaternion math folds at compile time", "[Core.Quaternion]") {
 // Operators (hidden friends)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("quat operators match the named algebra functions", "[Core.Quaternion]") {
+TEST_CASE("quat operators match the named algebra functions", AUTO_TAG) {
     quat a = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
     quat b = Quat::MakeAxisAngle({1, 0, 0}, kPi * 0.5f);
 
-    REQUIRE(a * b == Quat::Mul(a, b));   // Hamilton product
+    REQUIRE(a * b == Quat::Mul(a, b)); // Hamilton product
     REQUIRE(a + b == Quat::Add(a, b));
     REQUIRE(a - b == Quat::Sub(a, b));
     REQUIRE(a * 2.0f == Quat::Scale(a, 2.0f));
@@ -356,19 +358,19 @@ TEST_CASE("quat operators match the named algebra functions", "[Core.Quaternion]
 // Exp / Log / Pow
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Exp inverts Log on the unit sphere", "[Core.Quaternion]") {
+TEST_CASE("Exp inverts Log on the unit sphere", AUTO_TAG) {
     quat q = Quat::Normalize(Quat::MakeAxisAngle({0.3f, -0.6f, 0.8f}, 1.7f));
     RequireSameRotation(Quat::Exp(Quat::Log(q)), q);
 }
 
-TEST_CASE("Pow behaves like repeated rotation", "[Core.Quaternion]") {
+TEST_CASE("Pow behaves like repeated rotation", AUTO_TAG) {
     quat q = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f);
 
     RequireSameRotation(Quat::Pow(q, 1.0f), q);
     RequireSameRotation(Quat::Pow(q, 0.0f), Quat::Identity());
 
-    quat half = Quat::Pow(q, 0.5f);             // half the rotation...
-    RequireSameRotation(half * half, q);        // ...applied twice is the whole
+    quat half = Quat::Pow(q, 0.5f);      // half the rotation...
+    RequireSameRotation(half * half, q); // ...applied twice is the whole
     RequireSameRotation(half, Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.25f));
 }
 
@@ -376,14 +378,14 @@ TEST_CASE("Pow behaves like repeated rotation", "[Core.Quaternion]") {
 // Lerp / RotateTowards / Squad
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Lerp hits the endpoints", "[Core.Quaternion]") {
+TEST_CASE("Lerp hits the endpoints", AUTO_TAG) {
     quat a = Quat::MakeAxisAngle({0, 0, 1}, 0.2f);
     quat b = Quat::MakeAxisAngle({0, 0, 1}, 1.2f);
     REQUIRE(Quat::Lerp(a, b, 0.0f) == a);
     REQUIRE(Quat::Lerp(a, b, 1.0f) == b);
 }
 
-TEST_CASE("RotateTowards clamps to the max step then reaches the target", "[Core.Quaternion]") {
+TEST_CASE("RotateTowards clamps to the max step then reaches the target", AUTO_TAG) {
     quat a = Quat::Identity();
     quat b = Quat::MakeAxisAngle({0, 0, 1}, kPi * 0.5f); // 90 degrees away
 
@@ -397,11 +399,11 @@ TEST_CASE("RotateTowards clamps to the max step then reaches the target", "[Core
     RequireSameRotation(Quat::RotateTowards(a, b, 0.0f), a);
 }
 
-TEST_CASE("Squad passes through its endpoints", "[Core.Quaternion]") {
+TEST_CASE("Squad passes through its endpoints", AUTO_TAG) {
     quat q0 = Quat::MakeAxisAngle({0, 0, 1}, 0.0f);
     quat q1 = Quat::MakeAxisAngle({0, 0, 1}, 1.0f);
-    quat a  = Quat::SquadTangent(Quat::MakeAxisAngle({0, 0, 1}, -0.5f), q0, q1);
-    quat b  = Quat::SquadTangent(q0, q1, Quat::MakeAxisAngle({0, 0, 1}, 1.5f));
+    quat a = Quat::SquadTangent(Quat::MakeAxisAngle({0, 0, 1}, -0.5f), q0, q1);
+    quat b = Quat::SquadTangent(q0, q1, Quat::MakeAxisAngle({0, 0, 1}, 1.5f));
 
     RequireSameRotation(Quat::Squad(q0, a, b, q1, 0.0f), q0);
     RequireSameRotation(Quat::Squad(q0, a, b, q1, 1.0f), q1);
@@ -411,19 +413,19 @@ TEST_CASE("Squad passes through its endpoints", "[Core.Quaternion]") {
 // Math::Quat alias
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Mashiro::Math::Quat aliases Mashiro::Quat", "[Core.Quaternion]") {
+TEST_CASE("Mashiro::Math::Quat aliases Mashiro::Quat", AUTO_TAG) {
     quat viaAlias = Math::Quat::MakeAxisAngle({0, 1, 0}, 0.9f);
-    quat viaQuat  = Quat::MakeAxisAngle({0, 1, 0}, 0.9f);
+    quat viaQuat = Quat::MakeAxisAngle({0, 1, 0}, 0.9f);
     REQUIRE(viaAlias == viaQuat);
     RequireSameRotation(Math::Quat::Slerp(viaAlias, viaQuat, 0.5f), viaQuat);
 }
 
-TEST_CASE("Exp/Log/Pow fold at compile time", "[Core.Quaternion]") {
-    constexpr quat q   = Quat::MakeAxisAngle(vec3{0, 0, 1}, kPi * 0.5f);
-    constexpr quat rt  = Quat::Exp(Quat::Log(q));
+TEST_CASE("Exp/Log/Pow fold at compile time", AUTO_TAG) {
+    constexpr quat q = Quat::MakeAxisAngle(vec3{0, 0, 1}, kPi * 0.5f);
+    constexpr quat rt = Quat::Exp(Quat::Log(q));
     STATIC_REQUIRE(Close(Quat::Dot(rt, q), 1.0f, 1e-3f));
 
-    constexpr quat hp  = Quat::Pow(q, 0.5f);
+    constexpr quat hp = Quat::Pow(q, 0.5f);
     constexpr quat ref = Quat::MakeAxisAngle(vec3{0, 0, 1}, kPi * 0.25f);
     STATIC_REQUIRE(Close(Quat::Dot(hp, ref), 1.0f, 1e-3f));
 }

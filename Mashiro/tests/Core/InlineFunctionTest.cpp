@@ -5,6 +5,7 @@
  */
 #include "Mashiro/Core/InlineFunction.h"
 
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
@@ -79,34 +80,34 @@ namespace {
 // [Construction] — Default, nullptr, callable, lambda
 // =============================================================================
 
-TEST_CASE("Default construction is empty", "[Core.InlineFunction]") {
+TEST_CASE("Default construction is empty", AUTO_TAG) {
     InlineFunction<int(int)> f;
     REQUIRE(!f);
     REQUIRE(f == nullptr);
 }
 
-TEST_CASE("nullptr construction is empty", "[Core.InlineFunction]") {
+TEST_CASE("nullptr construction is empty", AUTO_TAG) {
     InlineFunction<int(int)> f{nullptr};
     REQUIRE(!f);
 }
 
-TEST_CASE("Construct from stateless lambda", "[Core.InlineFunction]") {
+TEST_CASE("Construct from stateless lambda", AUTO_TAG) {
     InlineFunction<int(int, int)> f = [](int a, int b) { return a + b; };
     REQUIRE(f);
     REQUIRE(f(3, 4) == 7);
 }
 
-TEST_CASE("Construct from stateless struct", "[Core.InlineFunction]") {
+TEST_CASE("Construct from stateless struct", AUTO_TAG) {
     InlineFunction<int(int, int)> f{Adder{}};
     REQUIRE(f(10, 20) == 30);
 }
 
-TEST_CASE("Construct from trivially-copyable stateful struct", "[Core.InlineFunction]") {
+TEST_CASE("Construct from trivially-copyable stateful struct", AUTO_TAG) {
     InlineFunction<int(int) noexcept> f{Multiplier{5}};
     REQUIRE(f(7) == 35);
 }
 
-TEST_CASE("Construct from capturing lambda", "[Core.InlineFunction]") {
+TEST_CASE("Construct from capturing lambda", AUTO_TAG) {
     int captured = 100;
     InlineFunction<int()> f = [&captured]() { return captured; };
     REQUIRE(f() == 100);
@@ -114,7 +115,7 @@ TEST_CASE("Construct from capturing lambda", "[Core.InlineFunction]") {
     REQUIRE(f() == 200);
 }
 
-TEST_CASE("Construct from large callable (near capacity limit)", "[Core.InlineFunction]") {
+TEST_CASE("Construct from large callable (near capacity limit)", AUTO_TAG) {
     LargeCallable lc;
     lc.data[0] = 8;
     InlineFunction<int()> f{lc};
@@ -125,19 +126,19 @@ TEST_CASE("Construct from large callable (near capacity limit)", "[Core.InlineFu
 // [Invocation] — Various signatures
 // =============================================================================
 
-TEST_CASE("Void return type", "[Core.InlineFunction]") {
+TEST_CASE("Void return type", AUTO_TAG) {
     int result = 0;
     InlineFunction<void(int)> f{SideEffect{&result}};
     f(42);
     REQUIRE(result == 42);
 }
 
-TEST_CASE("Multi-arg with string return", "[Core.InlineFunction]") {
+TEST_CASE("Multi-arg with string return", AUTO_TAG) {
     InlineFunction<std::string(const char*, const char*)> f{Concatenator{}};
     REQUIRE(f("hello", " world") == "hello world");
 }
 
-TEST_CASE("noexcept signature variant", "[Core.InlineFunction]") {
+TEST_CASE("noexcept signature variant", AUTO_TAG) {
     InlineFunction<int(int) noexcept> f = [](int x) noexcept { return x * 3; };
     REQUIRE(f(4) == 12);
     static_assert(noexcept(f(4)));
@@ -147,7 +148,7 @@ TEST_CASE("noexcept signature variant", "[Core.InlineFunction]") {
 // [Move semantics] — Move construct, move assign, source becomes empty
 // =============================================================================
 
-TEST_CASE("Move construction transfers callable", "[Core.InlineFunction]") {
+TEST_CASE("Move construction transfers callable", AUTO_TAG) {
     InlineFunction<int(int)> f = [](int x) { return x + 1; };
     InlineFunction<int(int)> g{std::move(f)};
     REQUIRE(!f);
@@ -155,7 +156,7 @@ TEST_CASE("Move construction transfers callable", "[Core.InlineFunction]") {
     REQUIRE(g(5) == 6);
 }
 
-TEST_CASE("Move assignment transfers callable", "[Core.InlineFunction]") {
+TEST_CASE("Move assignment transfers callable", AUTO_TAG) {
     InlineFunction<int()> f = []() { return 1; };
     InlineFunction<int()> g = []() { return 2; };
     g = std::move(f);
@@ -163,7 +164,7 @@ TEST_CASE("Move assignment transfers callable", "[Core.InlineFunction]") {
     REQUIRE(g() == 1);
 }
 
-TEST_CASE("Move assignment to empty", "[Core.InlineFunction]") {
+TEST_CASE("Move assignment to empty", AUTO_TAG) {
     InlineFunction<int()> f = []() { return 99; };
     InlineFunction<int()> g;
     g = std::move(f);
@@ -171,7 +172,7 @@ TEST_CASE("Move assignment to empty", "[Core.InlineFunction]") {
     REQUIRE(g() == 99);
 }
 
-TEST_CASE("Move from empty to non-empty (destroys target)", "[Core.InlineFunction]") {
+TEST_CASE("Move from empty to non-empty (destroys target)", AUTO_TAG) {
     int dtorCount = 0;
     {
         InlineFunction<int(int)> f{DestructorTracker{&dtorCount}};
@@ -185,7 +186,7 @@ TEST_CASE("Move from empty to non-empty (destroys target)", "[Core.InlineFunctio
     REQUIRE(dtorCount == 1);
 }
 
-TEST_CASE("Self move-assignment is safe", "[Core.InlineFunction]") {
+TEST_CASE("Self move-assignment is safe", AUTO_TAG) {
     InlineFunction<int()> f = []() { return 42; };
     auto& ref = f;
     f = std::move(ref);
@@ -197,7 +198,7 @@ TEST_CASE("Self move-assignment is safe", "[Core.InlineFunction]") {
 // [Destructor] — Non-trivial callables are properly destroyed
 // =============================================================================
 
-TEST_CASE("Destructor is called on destruction", "[Core.InlineFunction]") {
+TEST_CASE("Destructor is called on destruction", AUTO_TAG) {
     int dtorCount = 0;
     {
         InlineFunction<int(int)> f{DestructorTracker{&dtorCount}};
@@ -206,7 +207,7 @@ TEST_CASE("Destructor is called on destruction", "[Core.InlineFunction]") {
     REQUIRE(dtorCount == 1);
 }
 
-TEST_CASE("Destructor is called on reassignment", "[Core.InlineFunction]") {
+TEST_CASE("Destructor is called on reassignment", AUTO_TAG) {
     int dtorCount = 0;
     InlineFunction<int(int)> f{DestructorTracker{&dtorCount}};
     f = nullptr;
@@ -214,7 +215,7 @@ TEST_CASE("Destructor is called on reassignment", "[Core.InlineFunction]") {
     REQUIRE(!f);
 }
 
-TEST_CASE("Destructor is called when overwritten by move-assign", "[Core.InlineFunction]") {
+TEST_CASE("Destructor is called when overwritten by move-assign", AUTO_TAG) {
     int dtor1 = 0, dtor2 = 0;
     InlineFunction<int(int)> f{DestructorTracker{&dtor1}};
     InlineFunction<int(int)> g{DestructorTracker{&dtor2}};
@@ -227,7 +228,7 @@ TEST_CASE("Destructor is called when overwritten by move-assign", "[Core.InlineF
 // [Trivial fast-path] — Trivially copyable callables use memcpy, no ops
 // =============================================================================
 
-TEST_CASE("Trivial callable: no destructor overhead on move", "[Core.InlineFunction]") {
+TEST_CASE("Trivial callable: no destructor overhead on move", AUTO_TAG) {
     // Multiplier is trivially copyable — moves should be memcpy
     InlineFunction<int(int) noexcept> f{Multiplier{3}};
     InlineFunction<int(int) noexcept> g{std::move(f)};
@@ -235,7 +236,7 @@ TEST_CASE("Trivial callable: no destructor overhead on move", "[Core.InlineFunct
     REQUIRE(g(10) == 30);
 }
 
-TEST_CASE("Trivial callable: destruction is no-op", "[Core.InlineFunction]") {
+TEST_CASE("Trivial callable: destruction is no-op", AUTO_TAG) {
     // Just verify it doesn't crash — Multiplier has trivial destructor
     {
         InlineFunction<int(int) noexcept> f{Multiplier{7}};
@@ -248,7 +249,7 @@ TEST_CASE("Trivial callable: destruction is no-op", "[Core.InlineFunction]") {
 // [Swap] — ADL swap and member Swap
 // =============================================================================
 
-TEST_CASE("Swap two non-empty functions", "[Core.InlineFunction]") {
+TEST_CASE("Swap two non-empty functions", AUTO_TAG) {
     InlineFunction<int()> f = []() { return 1; };
     InlineFunction<int()> g = []() { return 2; };
     swap(f, g);
@@ -256,7 +257,7 @@ TEST_CASE("Swap two non-empty functions", "[Core.InlineFunction]") {
     REQUIRE(g() == 1);
 }
 
-TEST_CASE("Swap non-empty with empty", "[Core.InlineFunction]") {
+TEST_CASE("Swap non-empty with empty", AUTO_TAG) {
     InlineFunction<int()> f = []() { return 42; };
     InlineFunction<int()> g;
     swap(f, g);
@@ -264,7 +265,7 @@ TEST_CASE("Swap non-empty with empty", "[Core.InlineFunction]") {
     REQUIRE(g() == 42);
 }
 
-TEST_CASE("Swap two trivial callables (memcpy path)", "[Core.InlineFunction]") {
+TEST_CASE("Swap two trivial callables (memcpy path)", AUTO_TAG) {
     InlineFunction<int(int) noexcept> f{Multiplier{2}};
     InlineFunction<int(int) noexcept> g{Multiplier{5}};
     swap(f, g);
@@ -272,7 +273,7 @@ TEST_CASE("Swap two trivial callables (memcpy path)", "[Core.InlineFunction]") {
     REQUIRE(g(10) == 20);
 }
 
-TEST_CASE("Swap two empty is no-op", "[Core.InlineFunction]") {
+TEST_CASE("Swap two empty is no-op", AUTO_TAG) {
     InlineFunction<int()> f;
     InlineFunction<int()> g;
     swap(f, g);
@@ -284,7 +285,7 @@ TEST_CASE("Swap two empty is no-op", "[Core.InlineFunction]") {
 // [Nullptr assignment] — Reset stored callable
 // =============================================================================
 
-TEST_CASE("Assign nullptr clears function", "[Core.InlineFunction]") {
+TEST_CASE("Assign nullptr clears function", AUTO_TAG) {
     InlineFunction<int()> f = []() { return 1; };
     REQUIRE(f);
     f = nullptr;
@@ -296,13 +297,13 @@ TEST_CASE("Assign nullptr clears function", "[Core.InlineFunction]") {
 // [Edge cases]
 // =============================================================================
 
-TEST_CASE("Function pointer as callable", "[Core.InlineFunction]") {
+TEST_CASE("Function pointer as callable", AUTO_TAG) {
     auto* fp = +[](int x) -> int { return x * x; };
     InlineFunction<int(int)> f{fp};
     REQUIRE(f(5) == 25);
 }
 
-TEST_CASE("Mutable lambda (non-const invocation)", "[Core.InlineFunction]") {
+TEST_CASE("Mutable lambda (non-const invocation)", AUTO_TAG) {
     int counter = 0;
     InlineFunction<int()> f = [counter]() mutable { return ++counter; };
     REQUIRE(f() == 1);
@@ -310,7 +311,7 @@ TEST_CASE("Mutable lambda (non-const invocation)", "[Core.InlineFunction]") {
     REQUIRE(f() == 3);
 }
 
-TEST_CASE("Custom capacity", "[Core.InlineFunction]") {
+TEST_CASE("Custom capacity", AUTO_TAG) {
     // 128-byte capacity for larger captures
     struct HugeCapture {
         char data[120] = {};
@@ -320,7 +321,7 @@ TEST_CASE("Custom capacity", "[Core.InlineFunction]") {
     REQUIRE(f() == 1);
 }
 
-TEST_CASE("Move tracker counts moves correctly", "[Core.InlineFunction]") {
+TEST_CASE("Move tracker counts moves correctly", AUTO_TAG) {
     int moves = 0;
     {
         InlineFunction<int()> f{MoveTracker{&moves}};
@@ -334,7 +335,7 @@ TEST_CASE("Move tracker counts moves correctly", "[Core.InlineFunction]") {
     }
 }
 
-TEST_CASE("Implicit conversion from compatible callable", "[Core.InlineFunction]") {
+TEST_CASE("Implicit conversion from compatible callable", AUTO_TAG) {
     // int return should work for callable returning short (implicit conversion)
     InlineFunction<int()> f = []() -> short { return 7; };
     REQUIRE(f() == 7);
@@ -344,7 +345,7 @@ TEST_CASE("Implicit conversion from compatible callable", "[Core.InlineFunction]
 // [noexcept specialisation constraints]
 // =============================================================================
 
-TEST_CASE("noexcept variant rejects throwing callable", "[Core.InlineFunction]") {
+TEST_CASE("noexcept variant rejects throwing callable", AUTO_TAG) {
     // This should NOT compile if uncommented — the concept rejects non-noexcept callables:
     // InlineFunction<int() noexcept> f = []() { return 1; }; // would fail requires
     // We just verify a noexcept callable works:

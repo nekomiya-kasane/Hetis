@@ -10,9 +10,10 @@
  */
 #include "Mashiro/Math/Algebra.h"
 #include "Mashiro/Math/Quanterion.h"
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 
 #include <catch2/catch_approx.hpp>
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 using namespace Mashiro;
@@ -27,7 +28,7 @@ namespace {
 // Concept satisfaction (compile-time)
 // ===========================================================================
 
-TEST_CASE("Vec types satisfy the full concept hierarchy", "[Algebra.Concepts]") {
+TEST_CASE("Vec types satisfy the full concept hierarchy", AUTO_TAG) {
     STATIC_REQUIRE(AdditiveGroup<vec2>);
     STATIC_REQUIRE(AdditiveGroup<vec3>);
     STATIC_REQUIRE(AdditiveGroup<vec4>);
@@ -49,7 +50,7 @@ TEST_CASE("Vec types satisfy the full concept hierarchy", "[Algebra.Concepts]") 
     STATIC_REQUIRE(MetricSpace<vec4>);
 }
 
-TEST_CASE("quat satisfies InnerProductSpace / NormedSpace / MetricSpace", "[Algebra.Concepts]") {
+TEST_CASE("quat satisfies InnerProductSpace / NormedSpace / MetricSpace", AUTO_TAG) {
     STATIC_REQUIRE(AdditiveGroup<quat>);
     STATIC_REQUIRE(VectorSpace<quat>);
     STATIC_REQUIRE(InnerProductSpace<quat>);
@@ -57,7 +58,7 @@ TEST_CASE("quat satisfies InnerProductSpace / NormedSpace / MetricSpace", "[Alge
     STATIC_REQUIRE(MetricSpace<quat>);
 }
 
-TEST_CASE("Integer vectors satisfy InnerProductSpace (Dot works on int)", "[Algebra.Concepts]") {
+TEST_CASE("Integer vectors satisfy InnerProductSpace (Dot works on int)", AUTO_TAG) {
     STATIC_REQUIRE(AdditiveGroup<ivec2>);
     STATIC_REQUIRE(VectorSpace<ivec2>);
     STATIC_REQUIRE(InnerProductSpace<ivec2>);
@@ -70,7 +71,7 @@ TEST_CASE("Integer vectors satisfy InnerProductSpace (Dot works on int)", "[Alge
 // FieldOf type extraction
 // ===========================================================================
 
-TEST_CASE("FieldOf extracts correct scalar types", "[Algebra.FieldOf]") {
+TEST_CASE("FieldOf extracts correct scalar types", AUTO_TAG) {
     STATIC_REQUIRE(std::same_as<FieldOf<vec2>, float>);
     STATIC_REQUIRE(std::same_as<FieldOf<vec3>, float>);
     STATIC_REQUIRE(std::same_as<FieldOf<vec4>, float>);
@@ -83,19 +84,19 @@ TEST_CASE("FieldOf extracts correct scalar types", "[Algebra.FieldOf]") {
 // Math::Dot — inner product
 // ===========================================================================
 
-TEST_CASE("Math::Dot matches Math::Dot for vec3", "[Algebra.Dot]") {
+TEST_CASE("Math::Dot matches Math::Dot for vec3", AUTO_TAG) {
     vec3 a{1, 2, 3};
     vec3 b{4, 5, 6};
     REQUIRE(Dot(a, b) == Approx(Math::Dot(a, b)));
 }
 
-TEST_CASE("Math::Dot works on vec4", "[Algebra.Dot]") {
+TEST_CASE("Math::Dot works on vec4", AUTO_TAG) {
     vec4 a{1, 2, 3, 4};
     vec4 b{5, 6, 7, 8};
     REQUIRE(Dot(a, b) == Approx(Math::Dot(a, b)));
 }
 
-TEST_CASE("Math::Dot works on quat", "[Algebra.Dot]") {
+TEST_CASE("Math::Dot works on quat", AUTO_TAG) {
     quat a{.x = 1, .y = 2, .z = 3, .w = 4};
     quat b{.x = 5, .y = 6, .z = 7, .w = 8};
     REQUIRE(Dot(a, b) == Approx(Quat::Dot(a, b)));
@@ -106,19 +107,19 @@ TEST_CASE("Math::Dot works on quat", "[Algebra.Dot]") {
 // Math::NormSq / Norm
 // ===========================================================================
 
-TEST_CASE("Math::NormSq matches Math::Norm2Sq for vec3", "[Algebra.Norm]") {
+TEST_CASE("Math::NormSq matches Math::Norm2Sq for vec3", AUTO_TAG) {
     vec3 v{3, 4, 0};
     REQUIRE(NormSq(v) == Approx(Math::Norm2Sq(v)));
     REQUIRE(NormSq(v) == Approx(25.0f));
 }
 
-TEST_CASE("Math::Norm matches Math::Norm2 for vec3", "[Algebra.Norm]") {
+TEST_CASE("Math::Norm matches Math::Norm2 for vec3", AUTO_TAG) {
     vec3 v{3, 4, 0};
     REQUIRE(Norm(v) == Approx(Math::Norm2(v)));
     REQUIRE(Norm(v) == Approx(5.0f));
 }
 
-TEST_CASE("Math::Norm works on quat", "[Algebra.Norm]") {
+TEST_CASE("Math::Norm works on quat", AUTO_TAG) {
     quat q{.x = 1, .y = 0, .z = 0, .w = 0};
     REQUIRE(Norm(q) == Approx(1.0f));
 
@@ -130,7 +131,7 @@ TEST_CASE("Math::Norm works on quat", "[Algebra.Norm]") {
 // Math::Normalize
 // ===========================================================================
 
-TEST_CASE("Math::Normalize matches Math::Normalize for vec3", "[Algebra.Normalize]") {
+TEST_CASE("Math::Normalize matches Math::Normalize for vec3", AUTO_TAG) {
     vec3 v{3, 4, 0};
     vec3 n = Normalize(v);
     REQUIRE(n.x == Approx(0.6f));
@@ -139,7 +140,7 @@ TEST_CASE("Math::Normalize matches Math::Normalize for vec3", "[Algebra.Normaliz
     REQUIRE(Norm(n) == Approx(1.0f).margin(kEps));
 }
 
-TEST_CASE("Math::Normalize works on quat", "[Algebra.Normalize]") {
+TEST_CASE("Math::Normalize works on quat", AUTO_TAG) {
     quat q{.x = 1, .y = 2, .z = 3, .w = 4};
     quat n = Normalize(q);
     REQUIRE(Norm(n) == Approx(1.0f).margin(kEps));
@@ -156,7 +157,7 @@ TEST_CASE("Math::Normalize works on quat", "[Algebra.Normalize]") {
 // Math::Distance / DistanceSq
 // ===========================================================================
 
-TEST_CASE("Math::Distance matches Math::Distance for vec3", "[Algebra.Distance]") {
+TEST_CASE("Math::Distance matches Math::Distance for vec3", AUTO_TAG) {
     vec3 a{1, 2, 3};
     vec3 b{4, 6, 3};
     REQUIRE(Distance(a, b) == Approx(Math::Distance(a, b)));
@@ -164,7 +165,7 @@ TEST_CASE("Math::Distance matches Math::Distance for vec3", "[Algebra.Distance]"
     REQUIRE(DistanceSq(a, b) == Approx(25.0f));
 }
 
-TEST_CASE("Math::Distance works on quat", "[Algebra.Distance]") {
+TEST_CASE("Math::Distance works on quat", AUTO_TAG) {
     quat a{.x = 0, .y = 0, .z = 0, .w = 1};
     quat b{.x = 1, .y = 0, .z = 0, .w = 0};
     // |a - b| = |(−1, 0, 0, 1)| = √2
@@ -175,7 +176,7 @@ TEST_CASE("Math::Distance works on quat", "[Algebra.Distance]") {
 // Math::Lerp
 // ===========================================================================
 
-TEST_CASE("Math::Lerp matches Math::Lerp for vec3", "[Algebra.Lerp]") {
+TEST_CASE("Math::Lerp matches Math::Lerp for vec3", AUTO_TAG) {
     vec3 a{0, 0, 0};
     vec3 b{10, 20, 30};
     vec3 mid = Lerp(a, b, 0.5f);
@@ -184,7 +185,7 @@ TEST_CASE("Math::Lerp matches Math::Lerp for vec3", "[Algebra.Lerp]") {
     REQUIRE(mid.z == Approx(15.0f));
 }
 
-TEST_CASE("Math::Lerp works on quat (linear, not slerp)", "[Algebra.Lerp]") {
+TEST_CASE("Math::Lerp works on quat (linear, not slerp)", AUTO_TAG) {
     quat a{.x = 0, .y = 0, .z = 0, .w = 1};
     quat b{.x = 1, .y = 0, .z = 0, .w = 0};
     quat mid = Lerp(a, b, 0.5f);
@@ -196,7 +197,7 @@ TEST_CASE("Math::Lerp works on quat (linear, not slerp)", "[Algebra.Lerp]") {
 // Math::Reflect
 // ===========================================================================
 
-TEST_CASE("Math::Reflect matches Math::Reflect for vec3", "[Algebra.Reflect]") {
+TEST_CASE("Math::Reflect matches Math::Reflect for vec3", AUTO_TAG) {
     vec3 v{1, -1, 0};
     vec3 n{0, 1, 0};
     vec3 r = Reflect(v, n);
@@ -209,7 +210,7 @@ TEST_CASE("Math::Reflect matches Math::Reflect for vec3", "[Algebra.Reflect]") {
 // Math::Project / Reject
 // ===========================================================================
 
-TEST_CASE("Project gives the component along n", "[Algebra.Project]") {
+TEST_CASE("Project gives the component along n", AUTO_TAG) {
     vec3 v{3, 4, 0};
     vec3 n{1, 0, 0};
     vec3 p = Project(v, n);
@@ -218,7 +219,7 @@ TEST_CASE("Project gives the component along n", "[Algebra.Project]") {
     REQUIRE(p.z == Approx(0.0f));
 }
 
-TEST_CASE("Reject gives the component orthogonal to n", "[Algebra.Project]") {
+TEST_CASE("Reject gives the component orthogonal to n", AUTO_TAG) {
     vec3 v{3, 4, 0};
     vec3 n{1, 0, 0};
     vec3 r = Reject(v, n);
@@ -227,7 +228,7 @@ TEST_CASE("Reject gives the component orthogonal to n", "[Algebra.Project]") {
     REQUIRE(r.z == Approx(0.0f));
 }
 
-TEST_CASE("Project + Reject reconstructs the original vector", "[Algebra.Project]") {
+TEST_CASE("Project + Reject reconstructs the original vector", AUTO_TAG) {
     vec3 v{2.5f, -1.3f, 0.7f};
     vec3 n{1, 1, 0}; // not unit, should still work
     vec3 sum = Project(v, n) + Reject(v, n);
@@ -240,7 +241,7 @@ TEST_CASE("Project + Reject reconstructs the original vector", "[Algebra.Project
 // Constexpr verification
 // ===========================================================================
 
-TEST_CASE("Algebra algorithms fold at compile time", "[Algebra.Constexpr]") {
+TEST_CASE("Algebra algorithms fold at compile time", AUTO_TAG) {
     constexpr vec3 a{3, 4, 0};
     constexpr vec3 b{0, 0, 5};
 
@@ -255,7 +256,7 @@ TEST_CASE("Algebra algorithms fold at compile time", "[Algebra.Constexpr]") {
     STATIC_REQUIRE(lerped.y == 4.0f);
 }
 
-TEST_CASE("Math::Dot on quat folds at compile time", "[Algebra.Constexpr]") {
+TEST_CASE("Math::Dot on quat folds at compile time", AUTO_TAG) {
     constexpr quat a{.x = 1, .y = 0, .z = 0, .w = 0};
     constexpr quat b{.x = 0, .y = 1, .z = 0, .w = 0};
     constexpr float d = Dot(a, b);

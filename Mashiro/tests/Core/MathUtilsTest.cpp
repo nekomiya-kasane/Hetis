@@ -1,7 +1,8 @@
 #include "Mashiro/Math/MathUtils.h"
-#include "Mashiro/Core/Types.h"
+#include "Mashiro/Math/Types.h"
 
 #include <catch2/catch_approx.hpp>
+#include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
 using namespace Mashiro;
@@ -51,7 +52,7 @@ namespace {
 // Vector functions
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Dot / Norm2 / Normalize agree with hand math", "[Core.MathUtils]") {
+TEST_CASE("Dot / Norm2 / Normalize agree with hand math", AUTO_TAG) {
     REQUIRE(Math::Dot(vec3{1, 2, 3}, vec3{4, 5, 6}) == Approx(32.0f));
     REQUIRE(Math::Dot(vec2{1, 0}, vec2{0, 1}) == Approx(0.0f));
     REQUIRE(Math::Dot(vec4{1, 2, 3, 4}, vec4{1, 1, 1, 1}) == Approx(10.0f));
@@ -64,12 +65,12 @@ TEST_CASE("Dot / Norm2 / Normalize agree with hand math", "[Core.MathUtils]") {
     REQUIRE(Math::Norm2(n) == Approx(1.0f).margin(1e-6f));
 }
 
-TEST_CASE("Cross follows the right-hand rule", "[Core.MathUtils]") {
+TEST_CASE("Cross follows the right-hand rule", AUTO_TAG) {
     RequireVecApprox(Math::Cross(vec3{1, 0, 0}, vec3{0, 1, 0}), vec3{0, 0, 1});
     REQUIRE(Math::Cross(vec2{1, 0}, vec2{0, 1}) == Approx(1.0f));
 }
 
-TEST_CASE("Min / Max / Clamp / Lerp / Reflect are component-wise", "[Core.MathUtils]") {
+TEST_CASE("Min / Max / Clamp / Lerp / Reflect are component-wise", AUTO_TAG) {
     RequireVecApprox(Math::Min(vec3{1, 5, 3}, vec3{4, 2, 6}), vec3{1, 2, 3});
     RequireVecApprox(Math::Max(vec3{1, 5, 3}, vec3{4, 2, 6}), vec3{4, 5, 6});
     RequireVecApprox(Math::Clamp(vec3{-1, 0.5f, 9}, vec3{0, 0, 0}, vec3{1, 1, 1}), vec3{0, 0.5f, 1});
@@ -77,14 +78,14 @@ TEST_CASE("Min / Max / Clamp / Lerp / Reflect are component-wise", "[Core.MathUt
     RequireVecApprox(Math::Reflect(vec3{1, -1, 0}, vec3{0, 1, 0}), vec3{1, 1, 0});
 }
 
-TEST_CASE("Min / Max accept one or more vectors", "[Core.MathUtils]") {
+TEST_CASE("Min / Max accept one or more vectors", AUTO_TAG) {
     RequireVecApprox(Math::Min(vec3{1, 5, 3}), vec3{1, 5, 3}); // single arg is identity
     RequireVecApprox(Math::Max(vec3{1, 5, 3}), vec3{1, 5, 3});
     RequireVecApprox(Math::Min(vec3{1, 5, 3}, vec3{4, 2, 6}, vec3{0, 9, 2}), vec3{0, 2, 2});
     RequireVecApprox(Math::Max(vec3{1, 5, 3}, vec3{4, 2, 6}, vec3{0, 9, 2}), vec3{4, 9, 6});
 }
 
-TEST_CASE("Norm1 / Norm2 / NormInf; Distance uses L2", "[Core.MathUtils]") {
+TEST_CASE("Norm1 / Norm2 / NormInf; Distance uses L2", AUTO_TAG) {
     vec3 v{3, -4, 12}; // |v|_1 = 19, |v|_2 = 13, |v|_inf = 12
     REQUIRE(Math::Norm1(v) == Approx(19.0f));
     REQUIRE(Math::Norm2(v) == Approx(13.0f));
@@ -102,7 +103,7 @@ TEST_CASE("Norm1 / Norm2 / NormInf; Distance uses L2", "[Core.MathUtils]") {
 // Operators (hidden friends from Types.h)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Vector operators are component-wise with scalar broadcast", "[Core.MathUtils]") {
+TEST_CASE("Vector operators are component-wise with scalar broadcast", AUTO_TAG) {
     vec3 a{1, 2, 3};
     vec3 b{4, 5, 6};
     RequireVecApprox(a + b, vec3{5, 7, 9});
@@ -121,7 +122,7 @@ TEST_CASE("Vector operators are component-wise with scalar broadcast", "[Core.Ma
     REQUIRE(vec3{1, 2, 3} != vec3{1, 2, 4});
 }
 
-TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", "[Core.MathUtils]") {
+TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", AUTO_TAG) {
     mat4 t = Math::MakeTranslation(vec3{10, 20, 30});
     vec4 p = t * vec4{1, 2, 3, 1};
     REQUIRE(p.x == Approx(11.0f));
@@ -139,14 +140,14 @@ TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", "[Cor
 // Matrix builders / transpose / inverse
 // ---------------------------------------------------------------------------
 
-TEST_CASE("MakeRotateZ turns +X toward +Y", "[Core.MathUtils]") {
+TEST_CASE("MakeRotateZ turns +X toward +Y", AUTO_TAG) {
     mat4 m = Math::MakeRotateZ(kPi * 0.5f);
     vec4 r = m * vec4{1, 0, 0, 0};
     REQUIRE(r.x == Approx(0.0f).margin(1e-6f));
     REQUIRE(r.y == Approx(1.0f).margin(1e-6f));
 }
 
-TEST_CASE("Transpose swaps rows and columns", "[Core.MathUtils]") {
+TEST_CASE("Transpose swaps rows and columns", AUTO_TAG) {
     mat4 m = Math::MakeTranslation(vec3{1, 2, 3});
     mat4 mt = Math::Transpose(m);
     for (int row = 0; row < 4; ++row) {
@@ -156,7 +157,7 @@ TEST_CASE("Transpose swaps rows and columns", "[Core.MathUtils]") {
     }
 }
 
-TEST_CASE("Transpose of a non-square matrix swaps its shape", "[Core.MathUtils]") {
+TEST_CASE("Transpose of a non-square matrix swaps its shape", AUTO_TAG) {
     mat2x3 a{};
     a[0, 0] = 1.0f; a[0, 1] = 2.0f; a[0, 2] = 3.0f;
     a[1, 0] = 4.0f; a[1, 1] = 5.0f; a[1, 2] = 6.0f;
@@ -169,7 +170,7 @@ TEST_CASE("Transpose of a non-square matrix swaps its shape", "[Core.MathUtils]"
     }
 }
 
-TEST_CASE("Det for mat2 / mat3 / mat4", "[Core.MathUtils]") {
+TEST_CASE("Det for mat2 / mat3 / mat4", AUTO_TAG) {
     mat2 m2{};
     m2[0, 0] = 3.0f; m2[0, 1] = 8.0f;
     m2[1, 0] = 4.0f; m2[1, 1] = 6.0f;
@@ -186,7 +187,7 @@ TEST_CASE("Det for mat2 / mat3 / mat4", "[Core.MathUtils]") {
     REQUIRE(Math::Det(rotScale) == Approx(2.0f * 0.5f * 1.5f).margin(1e-4f));
 }
 
-TEST_CASE("Inverse for mat2 and mat3", "[Core.MathUtils]") {
+TEST_CASE("Inverse for mat2 and mat3", AUTO_TAG) {
     mat2 m2{};
     m2[0, 0] = 3.0f; m2[0, 1] = 8.0f;
     m2[1, 0] = 4.0f; m2[1, 1] = 6.0f;
@@ -206,7 +207,7 @@ TEST_CASE("Inverse for mat2 and mat3", "[Core.MathUtils]") {
             REQUIRE((id3[i, j]) == Approx(i == j ? 1.0f : 0.0f).margin(1e-4f));
 }
 
-TEST_CASE("Inverse undoes a TRS transform (mat4)", "[Core.MathUtils]") {
+TEST_CASE("Inverse undoes a TRS transform (mat4)", AUTO_TAG) {
     mat4 trs = Math::MakeTranslation(vec3{5, -3, 2})
                    * Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
                    * Math::MakeScale(vec3{2, 0.5f, 1.5f});
@@ -214,7 +215,7 @@ TEST_CASE("Inverse undoes a TRS transform (mat4)", "[Core.MathUtils]") {
     RequireMatApprox(Math::Inverse(trs) * trs, Math::Identity());
 }
 
-TEST_CASE("InverseAffine undoes a compact affine transform", "[Core.MathUtils]") {
+TEST_CASE("InverseAffine undoes a compact affine transform", AUTO_TAG) {
     // Build an affine3 from a rotation + translation
     mat3 rot{};
     {
@@ -254,7 +255,7 @@ TEST_CASE("InverseAffine undoes a compact affine transform", "[Core.MathUtils]")
     REQUIRE(tResult[2] == Approx(0.0f).margin(1e-4f));
 }
 
-TEST_CASE("MakeLookAt places the eye at the origin of view space", "[Core.MathUtils]") {
+TEST_CASE("MakeLookAt places the eye at the origin of view space", AUTO_TAG) {
     vec3 eye{0, 0, 5};
     mat4 view = Math::MakeLookAt(eye, vec3{0, 0, 0}, vec3{0, 1, 0});
     vec4 origin = view * vec4{eye.x, eye.y, eye.z, 1.0f};
@@ -263,7 +264,7 @@ TEST_CASE("MakeLookAt places the eye at the origin of view space", "[Core.MathUt
     REQUIRE(origin.z == Approx(0.0f).margin(1e-5f));
 }
 
-TEST_CASE("MakePerspective maps the near plane to Vulkan Z = 0", "[Core.MathUtils]") {
+TEST_CASE("MakePerspective maps the near plane to Vulkan Z = 0", AUTO_TAG) {
     float nearZ = 0.1f;
     float farZ  = 100.0f;
     mat4 p  = Math::MakePerspective(kPi * 0.25f, 16.0f / 9.0f, nearZ, farZ);
@@ -278,7 +279,7 @@ TEST_CASE("MakePerspective maps the near plane to Vulkan Z = 0", "[Core.MathUtil
 // Compile-time evaluation (constexpr kernels via `if consteval`)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("MathUtils folds at compile time", "[Core.MathUtils]") {
+TEST_CASE("MathUtils folds at compile time", AUTO_TAG) {
     constexpr vec3 n = Math::Normalize(vec3{0, 3, 4});
     STATIC_REQUIRE(Close(n.y, 0.6f));
     STATIC_REQUIRE(Close(n.z, 0.8f));
