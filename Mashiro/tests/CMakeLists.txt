@@ -2,6 +2,7 @@ function(add_mashiro_test CATEGORY TEST_NAME)
     set(TEST_TARGET Test.${CATEGORY}.${TEST_NAME})
 
     add_executable(${TEST_TARGET} ${CATEGORY}/${TEST_NAME}.cpp)
+    target_include_directories(${TEST_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(${TEST_TARGET} PRIVATE Mashiro Catch2::Catch2WithMain ${ARGN})
     set_target_properties(${TEST_TARGET} PROPERTIES
         CXX_STANDARD 26
@@ -22,6 +23,7 @@ add_mashiro_test(Core MathUtilsTest)
 add_mashiro_test(Core AlgebraTest)
 add_mashiro_test(Core ScalarMathTest)
 add_mashiro_test(Core GeometryTest)
+add_mashiro_test(Core GeomOpsTest)
 add_mashiro_test(Core AlgebraApproxTest)
 add_mashiro_test(Core HashTest)
 add_mashiro_test(Core InlineFunctionTest)

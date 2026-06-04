@@ -277,7 +277,7 @@ namespace Mashiro {
 
         /// @brief Stride between consecutive values in the dense array (in bytes).
         /// Useful for interleaved access patterns.
-        static constexpr std::size_t kDenseStride = sizeof(DenseEntry);
+        static constexpr size_t kDenseStride = sizeof(DenseEntry);
 
         /// @}
 

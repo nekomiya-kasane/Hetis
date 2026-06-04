@@ -1,8 +1,8 @@
 /**
  * @file GeometryTest.cpp
- * @brief Tests for GeometryUtils.h: AABB, Ray, Frustum operations.
+ * @brief Tests for Geom.h: AABB, Ray, Frustum operations.
  */
-#include "Mashiro/Geom/GeometryUtils.h"
+#include "Mashiro/Geom/Geom.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

@@ -75,7 +75,7 @@ namespace Mashiro::Hashing {
 
     /// @brief Result size in bits.
     template <AnyAlgo A>
-    inline constexpr std::size_t kResultBits = sizeof(ResultOf<A>) * 8;
+    inline constexpr size_t kResultBits = sizeof(ResultOf<A>) * 8;
 
     /// @}
 
@@ -393,11 +393,11 @@ namespace Mashiro::Hashing {
                 result.push_back(m);
             }
             // Stable insertion sort by Anno::Order priority
-            for (std::size_t i = 1; i < result.size(); ++i) {
+            for (size_t i = 1; i < result.size(); ++i) {
                 auto key = result[i];
                 auto ok = GetAnnotation<Anno::Order>(key);
                 int pk = ok.has_value() ? ok.value().priority : 0x7FFFFFFF;
-                std::size_t j = i;
+                size_t j = i;
                 while (j > 0) {
                     auto oj = GetAnnotation<Anno::Order>(result[j - 1]);
                     int pj = oj.has_value() ? oj.value().priority : 0x7FFFFFFF;
@@ -586,12 +586,12 @@ namespace Mashiro::Hashing {
     namespace Literals {
 
         /// @brief Compile-time 64-bit string hash: `"hello"_hash`.
-        [[nodiscard]] consteval uint64_t operator""_hash(const char* str, std::size_t len) noexcept {
+        [[nodiscard]] consteval uint64_t operator""_hash(const char* str, size_t len) noexcept {
             return Detail::HashString(Fnv1a64{}, std::string_view{str, len});
         }
 
         /// @brief Compile-time 32-bit string hash: `"hello"_hash32`.
-        [[nodiscard]] consteval uint32_t operator""_hash32(const char* str, std::size_t len) noexcept {
+        [[nodiscard]] consteval uint32_t operator""_hash32(const char* str, size_t len) noexcept {
             return Detail::HashString(Fnv1a32{}, std::string_view{str, len});
         }
 
@@ -609,11 +609,11 @@ template <typename T>
               !std::is_arithmetic_v<T> &&
               !std::convertible_to<T, std::string_view>)
 struct std::hash<T> {
-    [[nodiscard]] constexpr std::size_t operator()(const T& value) const noexcept {
-        if constexpr (sizeof(std::size_t) == 8) {
-            return static_cast<std::size_t>(Mashiro::Hashing::Hash(value));
+    [[nodiscard]] constexpr size_t operator()(const T& value) const noexcept {
+        if constexpr (sizeof(size_t) == 8) {
+            return static_cast<size_t>(Mashiro::Hashing::Hash(value));
         } else {
-            return static_cast<std::size_t>(
+            return static_cast<size_t>(
                 Mashiro::Hashing::Hash(value, Mashiro::Hashing::Fnv1a32{}));
         }
     }

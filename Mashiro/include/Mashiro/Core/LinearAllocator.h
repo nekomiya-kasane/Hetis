@@ -42,7 +42,7 @@ namespace Mashiro {
 
     /// @brief Opaque position marker within a LinearAllocator.
     struct ArenaSavepoint {
-        std::size_t offset = 0; ///< Byte offset at the time of Save().
+        size_t offset = 0; ///< Byte offset at the time of Save().
     };
 
     // =========================================================================
@@ -68,7 +68,7 @@ namespace Mashiro {
          *
          * @param capacityBytes Size of the arena in bytes.
          */
-        constexpr explicit LinearAllocator(std::size_t capacityBytes) : capacity_(capacityBytes) {
+        constexpr explicit LinearAllocator(size_t capacityBytes) : capacity_(capacityBytes) {
             if consteval {
                 buffer_ = new std::byte[capacityBytes];
             } else {
@@ -130,8 +130,8 @@ namespace Mashiro {
          * @return Pointer to allocated memory, or nullptr if exhausted.
          */
         [[nodiscard]] constexpr void*
-        Allocate(std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) noexcept {
-            std::size_t aligned = AlignUp(offset_, alignment);
+        Allocate(size_t bytes, size_t alignment = alignof(std::max_align_t)) noexcept {
+            size_t aligned = AlignUp(offset_, alignment);
             if (aligned + bytes > capacity_) [[unlikely]] {
                 return nullptr;
             }
@@ -153,7 +153,7 @@ namespace Mashiro {
          * @return Span over the allocated region, or empty span on failure.
          */
         template<typename T>
-        [[nodiscard]] constexpr std::span<T> AllocateArray(std::size_t count) noexcept {
+        [[nodiscard]] constexpr std::span<T> AllocateArray(size_t count) noexcept {
             if (count == 0) {
                 return {};
             }
@@ -188,7 +188,7 @@ namespace Mashiro {
             auto dst = AllocateArray<T>(src.size());
             if (!dst.empty()) {
                 if consteval {
-                    for (std::size_t i = 0; i < src.size(); ++i)
+                    for (size_t i = 0; i < src.size(); ++i)
                         dst[i] = src[i];
                 } else {
                     std::memcpy(dst.data(), src.data(), src.size_bytes());
@@ -269,13 +269,13 @@ namespace Mashiro {
         /// @{
 
         /// @brief Number of bytes currently allocated.
-        [[nodiscard]] constexpr std::size_t GetUsedBytes() const noexcept { return offset_; }
+        [[nodiscard]] constexpr size_t GetUsedBytes() const noexcept { return offset_; }
 
         /// @brief Total arena capacity in bytes.
-        [[nodiscard]] constexpr std::size_t GetCapacity() const noexcept { return capacity_; }
+        [[nodiscard]] constexpr size_t GetCapacity() const noexcept { return capacity_; }
 
         /// @brief Remaining unallocated bytes.
-        [[nodiscard]] constexpr std::size_t GetRemainingBytes() const noexcept {
+        [[nodiscard]] constexpr size_t GetRemainingBytes() const noexcept {
             return capacity_ - offset_;
         }
 
@@ -290,7 +290,7 @@ namespace Mashiro {
 #ifndef NDEBUG
         /// @brief Debug statistics (only available in debug builds).
         struct Stats {
-            std::size_t peakUsage = 0;    ///< High-water mark of bytes used.
+            size_t peakUsage = 0;    ///< High-water mark of bytes used.
             uint32_t allocationCount = 0; ///< Total number of Allocate() calls.
         };
 
@@ -303,16 +303,16 @@ namespace Mashiro {
         /// @}
 
     private:
-        static constexpr std::size_t kPageSize = 4096;
+        static constexpr size_t kPageSize = 4096;
 
-        [[nodiscard]] static constexpr std::size_t AlignUp(std::size_t value,
-                                                           std::size_t alignment) noexcept {
+        [[nodiscard]] static constexpr size_t AlignUp(size_t value,
+                                                           size_t alignment) noexcept {
             return (value + alignment - 1) & ~(alignment - 1);
         }
 
         std::byte* buffer_ = nullptr;
-        std::size_t capacity_ = 0;
-        std::size_t offset_ = 0;
+        size_t capacity_ = 0;
+        size_t offset_ = 0;
 
 #ifndef NDEBUG
         Stats stats_{};

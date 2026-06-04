@@ -46,7 +46,7 @@ TEST_CASE("Allocate raw bytes", "[Core.Arena]") {
 TEST_CASE("Allocate respects alignment", "[Core.Arena]") {
     LinearAllocator arena(256);
     // Allocate 1 byte first to offset
-    arena.Allocate(1, 1);
+    (void)arena.Allocate(1, 1);
     // Next allocation with 16-byte alignment should be aligned
     void* p = arena.Allocate(16, 16);
     REQUIRE(p != nullptr);
@@ -141,7 +141,7 @@ TEST_CASE("AllocateArray returns empty span when exhausted", "[Core.Arena]") {
 
 TEST_CASE("Alignment padding can cause OOM", "[Core.Arena]") {
     LinearAllocator arena(20);
-    arena.Allocate(1, 1); // offset=1
+    (void)arena.Allocate(1, 1); // offset=1
     // Need 16 bytes at 16-align: aligned offset=16, end=32 > capacity=20
     void* p = arena.Allocate(16, 16);
     REQUIRE(p == nullptr);
@@ -153,12 +153,12 @@ TEST_CASE("Alignment padding can cause OOM", "[Core.Arena]") {
 
 TEST_CASE("Save and Restore rewinds allocations", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1);
+    (void)arena.Emplace<int>(1);
     auto mark = arena.Save();
-    std::size_t savedOffset = arena.GetUsedBytes();
+    size_t savedOffset = arena.GetUsedBytes();
 
-    arena.Emplace<int>(2);
-    arena.Emplace<int>(3);
+    (void)arena.Emplace<int>(2);
+    (void)arena.Emplace<int>(3);
     REQUIRE(arena.GetUsedBytes() > savedOffset);
 
     arena.Restore(mark);
@@ -168,20 +168,20 @@ TEST_CASE("Save and Restore rewinds allocations", "[Core.Arena]") {
 TEST_CASE("Restore to beginning (offset=0)", "[Core.Arena]") {
     LinearAllocator arena(256);
     auto mark = arena.Save(); // offset=0
-    arena.Emplace<int>(42);
+    (void)arena.Emplace<int>(42);
     arena.Restore(mark);
     REQUIRE(arena.GetUsedBytes() == 0);
 }
 
 TEST_CASE("Multiple save/restore nested", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1);
+    (void)arena.Emplace<int>(1);
     auto mark1 = arena.Save();
 
-    arena.Emplace<int>(2);
+    (void)arena.Emplace<int>(2);
     auto mark2 = arena.Save();
 
-    arena.Emplace<int>(3);
+    (void)arena.Emplace<int>(3);
     arena.Restore(mark2);
     REQUIRE(arena.GetUsedBytes() == mark2.offset);
 
@@ -195,12 +195,12 @@ TEST_CASE("Multiple save/restore nested", "[Core.Arena]") {
 
 TEST_CASE("ScopeGuard auto-restores on destruction", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1);
-    std::size_t before = arena.GetUsedBytes();
+    (void)arena.Emplace<int>(1);
+    size_t before = arena.GetUsedBytes();
     {
         auto scope = arena.MakeScope();
-        arena.Emplace<int>(2);
-        arena.Emplace<int>(3);
+        (void)arena.Emplace<int>(2);
+        (void)arena.Emplace<int>(3);
         REQUIRE(arena.GetUsedBytes() > before);
     }
     REQUIRE(arena.GetUsedBytes() == before);
@@ -208,10 +208,10 @@ TEST_CASE("ScopeGuard auto-restores on destruction", "[Core.Arena]") {
 
 TEST_CASE("ScopeGuard Release commits allocations", "[Core.Arena]") {
     LinearAllocator arena(256);
-    std::size_t after;
+    size_t after;
     {
         auto scope = arena.MakeScope();
-        arena.Emplace<int>(42);
+        (void)arena.Emplace<int>(42);
         after = arena.GetUsedBytes();
         scope.Release(); // don't restore
     }
@@ -220,28 +220,28 @@ TEST_CASE("ScopeGuard Release commits allocations", "[Core.Arena]") {
 
 TEST_CASE("ScopeGuard move construction", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1);
-    std::size_t before = arena.GetUsedBytes();
+    (void)arena.Emplace<int>(1);
+    size_t before = arena.GetUsedBytes();
     {
         auto scope = arena.MakeScope();
-        arena.Emplace<int>(2);
+        (void)arena.Emplace<int>(2);
         auto scope2 = std::move(scope); // transfer ownership
-        arena.Emplace<int>(3);
+        (void)arena.Emplace<int>(3);
     } // scope2 destructs, restores to 'before'
     REQUIRE(arena.GetUsedBytes() == before);
 }
 
 TEST_CASE("Nested ScopeGuards", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1);
-    std::size_t level0 = arena.GetUsedBytes();
+    (void)arena.Emplace<int>(1);
+    size_t level0 = arena.GetUsedBytes();
     {
         auto outer = arena.MakeScope();
-        arena.Emplace<int>(2);
-        std::size_t level1 = arena.GetUsedBytes();
+        (void)arena.Emplace<int>(2);
+        size_t level1 = arena.GetUsedBytes();
         {
             auto inner = arena.MakeScope();
-            arena.Emplace<int>(3);
+            (void)arena.Emplace<int>(3);
             REQUIRE(arena.GetUsedBytes() > level1);
         }
         REQUIRE(arena.GetUsedBytes() == level1); // inner restored
@@ -255,9 +255,9 @@ TEST_CASE("Nested ScopeGuards", "[Core.Arena]") {
 
 TEST_CASE("Reset rewinds to zero", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1);
-    arena.Emplace<int>(2);
-    arena.Emplace<int>(3);
+    (void)arena.Emplace<int>(1);
+    (void)arena.Emplace<int>(2);
+    (void)arena.Emplace<int>(3);
     REQUIRE(arena.GetUsedBytes() > 0);
     arena.Reset();
     REQUIRE(arena.GetUsedBytes() == 0);
@@ -266,7 +266,7 @@ TEST_CASE("Reset rewinds to zero", "[Core.Arena]") {
 
 TEST_CASE("Can allocate after Reset", "[Core.Arena]") {
     LinearAllocator arena(64);
-    arena.Allocate(64);
+    (void)arena.Allocate(64);
     REQUIRE(arena.Allocate(1) == nullptr); // full
     arena.Reset();
     void* p = arena.Allocate(64);
@@ -279,8 +279,8 @@ TEST_CASE("Can allocate after Reset", "[Core.Arena]") {
 
 TEST_CASE("Move construction transfers arena", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(42);
-    std::size_t used = arena.GetUsedBytes();
+    (void)arena.Emplace<int>(42);
+    size_t used = arena.GetUsedBytes();
     auto* buf = arena.GetBuffer();
 
     auto arena2 = std::move(arena);
@@ -291,7 +291,7 @@ TEST_CASE("Move construction transfers arena", "[Core.Arena]") {
 
 TEST_CASE("Move assignment transfers arena", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(42);
+    (void)arena.Emplace<int>(42);
 
     LinearAllocator arena2(64);
     arena2 = std::move(arena);
@@ -305,13 +305,13 @@ TEST_CASE("Move assignment transfers arena", "[Core.Arena]") {
 #ifndef NDEBUG
 TEST_CASE("Debug stats: peak usage tracks high-water mark", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Emplace<int>(1); // ~4 bytes
-    arena.Emplace<int>(2); // ~8 bytes
+    (void)arena.Emplace<int>(1); // ~4 bytes
+    (void)arena.Emplace<int>(2); // ~8 bytes
     auto peak1 = arena.GetStats().peakUsage;
     REQUIRE(peak1 > 0);
 
     auto mark = arena.Save();
-    arena.Allocate(64);
+    (void)arena.Allocate(64);
     auto peak2 = arena.GetStats().peakUsage;
     REQUIRE(peak2 > peak1);
 
@@ -322,15 +322,15 @@ TEST_CASE("Debug stats: peak usage tracks high-water mark", "[Core.Arena]") {
 TEST_CASE("Debug stats: allocation count", "[Core.Arena]") {
     LinearAllocator arena(256);
     arena.ResetStats();
-    arena.Allocate(4);
-    arena.Allocate(8);
-    arena.Allocate(16);
+    (void)arena.Allocate(4);
+    (void)arena.Allocate(8);
+    (void)arena.Allocate(16);
     REQUIRE(arena.GetStats().allocationCount == 3);
 }
 
 TEST_CASE("Debug stats: ResetStats clears counters", "[Core.Arena]") {
     LinearAllocator arena(256);
-    arena.Allocate(4);
+    (void)arena.Allocate(4);
     arena.ResetStats();
     REQUIRE(arena.GetStats().allocationCount == 0);
     REQUIRE(arena.GetStats().peakUsage == 0);

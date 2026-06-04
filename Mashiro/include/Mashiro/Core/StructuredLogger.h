@@ -163,7 +163,7 @@ namespace Mashiro {
             template for (constexpr auto e : std::define_static_array(
                 std::meta::enumerators_of(^^LogCategory))) {
                 constexpr auto cat = [:e:];
-                levels[static_cast<std::size_t>(cat)] =
+                levels[static_cast<size_t>(cat)] =
                     static_cast<uint8_t>(LogCategoryTraits<cat>::defaultLevel);
             }
             return levels;
@@ -177,7 +177,7 @@ namespace Mashiro {
             template for (constexpr auto e : std::define_static_array(
                 std::meta::enumerators_of(^^LogLevel))) {
                 constexpr auto lvl = [:e:];
-                colors[static_cast<std::size_t>(lvl)] = LogLevelTraits<lvl>::color;
+                colors[static_cast<size_t>(lvl)] = LogLevelTraits<lvl>::color;
             }
             return colors;
         }
@@ -363,7 +363,7 @@ namespace Mashiro {
             auto result = std::format_to_n(buf, sizeof(buf) - 1, fmt, std::forward<Args>(args)...);
             *result.out = '\0';
             Submit(level, cat, caller.loc,
-                   std::string_view{buf, static_cast<std::size_t>(result.out - buf)});
+                   std::string_view{buf, static_cast<size_t>(result.out - buf)});
         }
 
         /// @brief Non-template entry point (exported from DLL). Called by Log/LogAt.

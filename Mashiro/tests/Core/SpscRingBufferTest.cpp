@@ -191,7 +191,7 @@ TEST_CASE("SpscQueue: interleaved push/pop maintains FIFO", "[Core.Spsc]") {
     while (q.TryPop(v)) results.push_back(v);
 
     // All should be in order
-    for (std::size_t i = 1; i < results.size(); ++i) {
+    for (size_t i = 1; i < results.size(); ++i) {
         REQUIRE(results[i] > results[i - 1]);
     }
 }
@@ -330,7 +330,7 @@ TEST_CASE("SpscByteRing: mixed message sizes", "[Core.Spsc]") {
 
     int msgIndex = 1;
     ring.ReadAll([&](std::span<const std::byte> data) {
-        REQUIRE(data.size() == static_cast<std::size_t>(msgIndex * 4));
+        REQUIRE(data.size() == static_cast<size_t>(msgIndex * 4));
         for (auto b : data) REQUIRE(b == std::byte{static_cast<unsigned char>(msgIndex)});
         ++msgIndex;
     });

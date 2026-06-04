@@ -252,7 +252,7 @@ namespace Mashiro {
 
     StructuredLogger::StructuredLogger() {
         // Initialize per-category levels from [[=LogAnno::DefaultLevel{N}]] annotations.
-        for (std::size_t i = 0; i < categoryLevels_.size(); ++i) {
+        for (size_t i = 0; i < categoryLevels_.size(); ++i) {
             uint8_t defaultLvl = (i < std::size(Detail::Log::kDefaultCategoryLevels))
                 ? Detail::Log::kDefaultCategoryLevels[i]
                 : 0; // Trace for user-extended categories
@@ -278,13 +278,13 @@ namespace Mashiro {
     }
 
     void StructuredLogger::SetCategoryLevel(LogCategory cat, LogLevel level) {
-        auto idx = static_cast<std::size_t>(cat);
+        auto idx = static_cast<size_t>(cat);
         if (idx < categoryLevels_.size())
             categoryLevels_[idx].store(static_cast<uint8_t>(level), std::memory_order_relaxed);
     }
 
     LogLevel StructuredLogger::GetCategoryLevel(LogCategory cat) const {
-        auto idx = static_cast<std::size_t>(cat);
+        auto idx = static_cast<size_t>(cat);
         if (idx < categoryLevels_.size())
             return static_cast<LogLevel>(categoryLevels_[idx].load(std::memory_order_relaxed));
         return LogLevel::Trace;
@@ -338,9 +338,9 @@ namespace Mashiro {
         hdr.line = line;
         hdr.timestampNs = timestampNs;
         hdr.threadId = GetCurrentThreadIdHash();
-        hdr.fileLen = static_cast<uint16_t>(std::min<std::size_t>(file.size(), 0xFFFF));
-        hdr.funcLen = static_cast<uint16_t>(std::min<std::size_t>(func.size(), 0xFFFF));
-        hdr.msgLen = static_cast<uint16_t>(std::min<std::size_t>(message.size(), 0xFFFF));
+        hdr.fileLen = static_cast<uint16_t>(std::min<size_t>(file.size(), 0xFFFF));
+        hdr.funcLen = static_cast<uint16_t>(std::min<size_t>(func.size(), 0xFFFF));
+        hdr.msgLen = static_cast<uint16_t>(std::min<size_t>(message.size(), 0xFFFF));
 
         uint32_t totalPayload = sizeof(SerializedHeader) + hdr.fileLen + hdr.funcLen + hdr.msgLen;
 

@@ -181,7 +181,7 @@ namespace Mashiro {
     std::string StackTrace::FormatCompact(const StackFrame& frame, uint32_t index) {
         std::string sym = frame.symbol.empty() ? "<unknown>" : frame.symbol;
 
-        constexpr std::size_t kMaxSymLen = 80;
+        constexpr size_t kMaxSymLen = 80;
         if (sym.size() > kMaxSymLen) {
             sym.resize(kMaxSymLen - 1);
             sym += "\u2026"; // …

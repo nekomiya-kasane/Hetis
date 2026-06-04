@@ -249,7 +249,7 @@ concept DrawSurface = requires(Sf& s, FieldId id, std::string_view label) {
     // 结构原语:返回容器是否展开,后端负责 ID 栈 push/pop
     { s.begin_group(id, label, GroupStyle{}) } -> std::convertible_to<bool>;
     s.end_group();
-    { s.begin_array(id, label, std::declval<std::size_t&>()) } -> std::convertible_to<bool>;
+    { s.begin_array(id, label, std::declval<size_t&>()) } -> std::convertible_to<bool>;
     s.end_array();
     // 动作原语 (按钮 / 命令)
     { s.action(id, label) } -> std::convertible_to<bool>;
@@ -415,7 +415,7 @@ template <Optic Outer, Optic Inner>
 constexpr auto operator|(Outer, Inner) { return Composed<Outer, Inner>{}; }
 
 // prism:聚焦 variant 的活动支,聚焦可能失败
-template <class V, std::size_t I>
+template <class V, size_t I>
 struct Prism { static constexpr auto* focus(V& v) { return std::get_if<I>(&v); } };
 
 // traversal:聚焦容器全部元素
@@ -623,8 +623,8 @@ TypeAdapter 仍以 DrawSurface 为参数，不直接调 ImGui，因此自定义�
 
 ```cpp
 struct SetField   { OpticPath path; std::any before, after; };
-struct InsertElem { OpticPath path; std::size_t at; std::any value; };
-struct RemoveElem { OpticPath path; std::size_t at; std::any removed; };
+struct InsertElem { OpticPath path; size_t at; std::any value; };
+struct RemoveElem { OpticPath path; size_t at; std::any removed; };
 using Intent = std::variant<SetField, InsertElem, RemoveElem /* ... */>;
 
 DocState& reduce(DocState&, Intent const&);   // 唯一可变 DocState 的入口

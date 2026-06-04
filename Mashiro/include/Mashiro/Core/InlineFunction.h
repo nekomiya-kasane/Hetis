@@ -30,7 +30,7 @@
 namespace Mashiro {
 
     // Forward declaration
-    template <typename Sig, std::size_t Cap = 64>
+    template <typename Sig, size_t Cap = 64>
     class InlineFunction;
 
     // =========================================================================
@@ -75,7 +75,7 @@ namespace Mashiro {
     // InlineFunction<R(Args...), Cap> — non-noexcept signature
     // =========================================================================
 
-    template <typename R, typename... Args, std::size_t Cap>
+    template <typename R, typename... Args, size_t Cap>
     class InlineFunction<R(Args...), Cap> {
         static_assert(Cap >= sizeof(void*), "Cap must be at least pointer-sized.");
         static_assert(Cap % alignof(std::max_align_t) == 0,
@@ -234,7 +234,7 @@ namespace Mashiro {
     // InlineFunction<R(Args...) noexcept, Cap> — noexcept signature
     // =========================================================================
 
-    template <typename R, typename... Args, std::size_t Cap>
+    template <typename R, typename... Args, size_t Cap>
     class InlineFunction<R(Args...) noexcept, Cap> {
         static_assert(Cap >= sizeof(void*), "Cap must be at least pointer-sized.");
         static_assert(Cap % alignof(std::max_align_t) == 0,

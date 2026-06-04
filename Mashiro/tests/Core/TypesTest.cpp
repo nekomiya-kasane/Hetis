@@ -1,5 +1,5 @@
 #include "Mashiro/Core/Types.h"
-#include "Mashiro/Geom/GeometryUtils.h"
+#include "Mashiro/Geom/Geom.h"
 
 #include <catch2/catch_test_macros.hpp>
 

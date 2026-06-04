@@ -59,7 +59,8 @@ namespace Mashiro {
      */
     template<typename T>
     concept ColumnMajorMat =
-        Traits::Homogeneous<T> && requires(T m) {
+        Traits::Homogeneous<T> &&
+        requires(T m) {
             { m.columns };
         } && std::is_array_v<std::remove_cvref_t<decltype(std::declval<T&>().columns)>> &&
         requires(T m, int i, int j) {
@@ -77,8 +78,8 @@ namespace Mashiro {
 
     /** @brief Column count C (number of stored columns). */
     template<ColumnMajorMat M>
-    inline constexpr int MatCols = static_cast<int>(
-        std::extent_v<std::remove_cvref_t<decltype(std::declval<M&>().columns)>>);
+    inline constexpr int MatCols =
+        static_cast<int>(std::extent_v<std::remove_cvref_t<decltype(std::declval<M&>().columns)>>);
 
     /** @brief Square dimension N; only defined when the matrix is square. */
     template<ColumnMajorMat M>
@@ -94,32 +95,40 @@ namespace Mashiro {
     template<typename T, int R, int C>
         requires std::is_signed_v<T>
     [[nodiscard]] constexpr Mat<T, R, C> operator-(const Mat<T, R, C>& a) {
-        Mat<T, R, C> r{};
-        for (int c = 0; c < C; ++c) r.columns[c] = -a.columns[c];
+        Mat<T, R, C> r;
+        for (int c = 0; c < C; ++c) {
+            r.columns[c] = -a.columns[c];
+        }
         return r;
     }
 
     /** @brief Element-wise matrix addition. */
     template<typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, R, C> operator+(const Mat<T, R, C>& a, const Mat<T, R, C>& b) {
-        Mat<T, R, C> r{};
-        for (int c = 0; c < C; ++c) r.columns[c] = a.columns[c] + b.columns[c];
+        Mat<T, R, C> r;
+        for (int c = 0; c < C; ++c) {
+            r.columns[c] = a.columns[c] + b.columns[c];
+        }
         return r;
     }
 
     /** @brief Element-wise matrix subtraction. */
     template<typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, R, C> operator-(const Mat<T, R, C>& a, const Mat<T, R, C>& b) {
-        Mat<T, R, C> r{};
-        for (int c = 0; c < C; ++c) r.columns[c] = a.columns[c] - b.columns[c];
+        Mat<T, R, C> r;
+        for (int c = 0; c < C; ++c) {
+            r.columns[c] = a.columns[c] - b.columns[c];
+        }
         return r;
     }
 
     /** @brief Matrix scaled by scalar (right). */
     template<typename T, int R, int C>
     [[nodiscard]] constexpr Mat<T, R, C> operator*(const Mat<T, R, C>& a, T s) {
-        Mat<T, R, C> r{};
-        for (int c = 0; c < C; ++c) r.columns[c] = a.columns[c] * s;
+        Mat<T, R, C> r;
+        for (int c = 0; c < C; ++c) {
+            r.columns[c] = a.columns[c] * s;
+        }
         return r;
     }
 
@@ -135,8 +144,10 @@ namespace Mashiro {
         if constexpr (std::floating_point<T>) {
             return a * (T(1) / s);
         } else {
-            Mat<T, R, C> r{};
-            for (int c = 0; c < C; ++c) r.columns[c] = a.columns[c] / s;
+            Mat<T, R, C> r;
+            for (int c = 0; c < C; ++c) {
+                r.columns[c] = a.columns[c] / s;
+            }
             return r;
         }
     }
@@ -146,7 +157,9 @@ namespace Mashiro {
     [[nodiscard]] constexpr Vec<T, R> operator*(const Mat<T, R, C>& a, const Vec<T, C, A>& v) {
         // r = v[0]*col[0] + v[1]*col[1] + ... — cache-friendly column access.
         Vec<T, R> r = a.columns[0] * v[0];
-        for (int k = 1; k < C; ++k) r += a.columns[k] * v[k];
+        for (int k = 1; k < C; ++k) {
+            r += a.columns[k] * v[k];
+        }
         return r;
     }
 
@@ -157,7 +170,9 @@ namespace Mashiro {
         Vec<T, C> r;
         for (int col = 0; col < C; ++col) {
             T sum = v[0] * a[0, col];
-            for (int row = 1; row < R; ++row) sum += v[row] * a[row, col];
+            for (int row = 1; row < R; ++row) {
+                sum += v[row] * a[row, col];
+            }
             r[col] = sum;
         }
         return r;
@@ -168,26 +183,34 @@ namespace Mashiro {
     [[nodiscard]] constexpr Mat<T, R, C> operator*(const Mat<T, R, K>& a, const Mat<T, K, C>& b) {
         // r.col[c] = a * b.col[c]  — each column of result is mat*vec.
         Mat<T, R, C> r;
-        for (int col = 0; col < C; ++col) r.columns[col] = a * b.columns[col];
+        for (int col = 0; col < C; ++col) {
+            r.columns[col] = a * b.columns[col];
+        }
         return r;
     }
 
     /** @brief Compound addition. */
     template<typename T, int R, int C>
     constexpr Mat<T, R, C>& operator+=(Mat<T, R, C>& a, const Mat<T, R, C>& b) {
-        for (int c = 0; c < C; ++c) a.columns[c] += b.columns[c];
+        for (int c = 0; c < C; ++c) {
+            a.columns[c] += b.columns[c];
+        }
         return a;
     }
     /** @brief Compound subtraction. */
     template<typename T, int R, int C>
     constexpr Mat<T, R, C>& operator-=(Mat<T, R, C>& a, const Mat<T, R, C>& b) {
-        for (int c = 0; c < C; ++c) a.columns[c] -= b.columns[c];
+        for (int c = 0; c < C; ++c) {
+            a.columns[c] -= b.columns[c];
+        }
         return a;
     }
     /** @brief Compound scalar multiplication. */
     template<typename T, int R, int C>
     constexpr Mat<T, R, C>& operator*=(Mat<T, R, C>& a, T s) {
-        for (int c = 0; c < C; ++c) a.columns[c] *= s;
+        for (int c = 0; c < C; ++c) {
+            a.columns[c] *= s;
+        }
         return a;
     }
     /** @brief Compound scalar division. Uses reciprocal for floating-point. */
@@ -196,7 +219,9 @@ namespace Mashiro {
         if constexpr (std::floating_point<T>) {
             a *= (T(1) / s);
         } else {
-            for (int c = 0; c < C; ++c) a.columns[c] /= s;
+            for (int c = 0; c < C; ++c) {
+                a.columns[c] /= s;
+            }
         }
         return a;
     }

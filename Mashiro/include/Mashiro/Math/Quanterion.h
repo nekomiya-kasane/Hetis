@@ -54,13 +54,20 @@ namespace Mashiro {
          * constant evaluation selects the member directly.
          */
         [[nodiscard]] constexpr auto&& operator[](this auto&& self, int i) {
-            if !consteval { return (&self.x)[i]; }
+            if !consteval {
+                return (&self.x)[i];
+            }
             switch (i) {
-                case 0: return self.x;
-                case 1: return self.y;
-                case 2: return self.z;
-                case 3: return self.w;
-                default: __builtin_unreachable();
+            case 0:
+                return self.x;
+            case 1:
+                return self.y;
+            case 2:
+                return self.z;
+            case 3:
+                return self.w;
+            default:
+                __builtin_unreachable();
             }
         }
 
@@ -93,11 +100,26 @@ namespace Mashiro {
         [[nodiscard]] friend constexpr quat operator/(quat q, float s) {
             return quat{.x = q.x / s, .y = q.y / s, .z = q.z / s, .w = q.w / s};
         }
-        friend constexpr quat& operator+=(quat& a, quat b) { a = a + b; return a; }
-        friend constexpr quat& operator-=(quat& a, quat b) { a = a - b; return a; }
-        friend constexpr quat& operator*=(quat& a, quat b) { a = a * b; return a; }
-        friend constexpr quat& operator*=(quat& a, float s) { a = a * s; return a; }
-        friend constexpr quat& operator/=(quat& a, float s) { a = a / s; return a; }
+        friend constexpr quat& operator+=(quat& a, quat b) {
+            a = a + b;
+            return a;
+        }
+        friend constexpr quat& operator-=(quat& a, quat b) {
+            a = a - b;
+            return a;
+        }
+        friend constexpr quat& operator*=(quat& a, quat b) {
+            a = a * b;
+            return a;
+        }
+        friend constexpr quat& operator*=(quat& a, float s) {
+            a = a * s;
+            return a;
+        }
+        friend constexpr quat& operator/=(quat& a, float s) {
+            a = a / s;
+            return a;
+        }
         /// @}
     };
     static_assert(alignof(quat) == 16);
@@ -159,20 +181,34 @@ namespace Mashiro {
         /// @{
 
         /// @brief Dot product of two quaternions (ℝ⁴ inner product).
-        [[nodiscard]] constexpr float Dot(quat a, quat b) { return InnerProduct(a, b); }
+        [[nodiscard]] constexpr float Dot(quat a, quat b) {
+            return InnerProduct(a, b);
+        }
         /// @brief Squared norm (sum of squares of all four components).
-        [[nodiscard]] constexpr float Norm2Sq(quat q) { return Math::NormSq(q); }
+        [[nodiscard]] constexpr float Norm2Sq(quat q) {
+            return Math::NormSq(q);
+        }
         /// @brief Euclidean norm (L2).
-        [[nodiscard]] constexpr float Norm2(quat q) { return Math::Norm(q); }
+        [[nodiscard]] constexpr float Norm2(quat q) {
+            return Math::Norm(q);
+        }
 
         /// @brief Component-wise addition.
-        [[nodiscard]] constexpr quat Add(quat a, quat b) { return a + b; }
+        [[nodiscard]] constexpr quat Add(quat a, quat b) {
+            return a + b;
+        }
         /// @brief Component-wise subtraction.
-        [[nodiscard]] constexpr quat Sub(quat a, quat b) { return a - b; }
+        [[nodiscard]] constexpr quat Sub(quat a, quat b) {
+            return a - b;
+        }
         /// @brief Scalar multiplication.
-        [[nodiscard]] constexpr quat Scale(quat q, float s) { return q * s; }
+        [[nodiscard]] constexpr quat Scale(quat q, float s) {
+            return q * s;
+        }
         /// @brief Negation.
-        [[nodiscard]] constexpr quat Neg(quat q) { return -q; }
+        [[nodiscard]] constexpr quat Neg(quat q) {
+            return -q;
+        }
 
         /** @brief Conjugate q* = (-x, -y, -z, w). Inverse of a unit quaternion. */
         [[nodiscard]] constexpr quat Conjugate(quat q) {
@@ -198,7 +234,9 @@ namespace Mashiro {
          *
          * Stored scalar-last; matches ToMat3(Mul(a, b)) == ToMat3(a) * ToMat3(b).
          */
-        [[nodiscard]] constexpr quat Mul(quat a, quat b) { return a * b; }
+        [[nodiscard]] constexpr quat Mul(quat a, quat b) {
+            return a * b;
+        }
 
         /// @name Exponential map / logarithm (unit-quaternion tangent space)
         /// @{
@@ -237,7 +275,9 @@ namespace Mashiro {
         }
 
         /** @brief Unit quaternion raised to a real power: exp(t * log(q)). */
-        [[nodiscard]] constexpr quat Pow(quat q, float t) { return Exp(t * Log(q)); }
+        [[nodiscard]] constexpr quat Pow(quat q, float t) {
+            return Exp(t * Log(q));
+        }
 
         /// @}
 
@@ -263,11 +303,17 @@ namespace Mashiro {
         }
 
         /// @brief Local right-axis (+X rotated by @p q).
-        [[nodiscard]] constexpr vec3 GetRight(quat q) { return Rotate(q, vec3{1.0f, 0.0f, 0.0f}); }
+        [[nodiscard]] constexpr vec3 GetRight(quat q) {
+            return Rotate(q, vec3{1.0f, 0.0f, 0.0f});
+        }
         /// @brief Local up-axis (+Y rotated by @p q).
-        [[nodiscard]] constexpr vec3 GetUp(quat q) { return Rotate(q, vec3{0.0f, 1.0f, 0.0f}); }
+        [[nodiscard]] constexpr vec3 GetUp(quat q) {
+            return Rotate(q, vec3{0.0f, 1.0f, 0.0f});
+        }
         /// @brief Local forward-axis (+Z rotated by @p q).
-        [[nodiscard]] constexpr vec3 GetForward(quat q) { return Rotate(q, vec3{0.0f, 0.0f, 1.0f}); }
+        [[nodiscard]] constexpr vec3 GetForward(quat q) {
+            return Rotate(q, vec3{0.0f, 0.0f, 1.0f});
+        }
 
         /// @}
 
@@ -310,15 +356,19 @@ namespace Mashiro {
         [[nodiscard]] constexpr mat4 MakeTransform(vec3 translation, quat rotation, vec3 scale) {
             mat3 r = ToMat3(rotation);
             mat4 m{};
-            m[0] = vec4{.x = r[0].x * scale.x, .y = r[0].y * scale.x, .z = r[0].z * scale.x, .w = 0.0f};
-            m[1] = vec4{.x = r[1].x * scale.y, .y = r[1].y * scale.y, .z = r[1].z * scale.y, .w = 0.0f};
-            m[2] = vec4{.x = r[2].x * scale.z, .y = r[2].y * scale.z, .z = r[2].z * scale.z, .w = 0.0f};
+            m[0] = vec4{
+                .x = r[0].x * scale.x, .y = r[0].y * scale.x, .z = r[0].z * scale.x, .w = 0.0f};
+            m[1] = vec4{
+                .x = r[1].x * scale.y, .y = r[1].y * scale.y, .z = r[1].z * scale.y, .w = 0.0f};
+            m[2] = vec4{
+                .x = r[2].x * scale.z, .y = r[2].y * scale.z, .z = r[2].z * scale.z, .w = 0.0f};
             m[3] = vec4{.x = translation.x, .y = translation.y, .z = translation.z, .w = 1.0f};
             return m;
         }
 
         /** @brief Compact affine TRS: translate * rotate(quat) * scale → mat3x4. */
-        [[nodiscard]] constexpr affine3 MakeTransformAffine(vec3 translation, quat rotation, vec3 scale) {
+        [[nodiscard]] constexpr affine3 MakeTransformAffine(vec3 translation, quat rotation,
+                                                            vec3 scale) {
             mat3 r = ToMat3(rotation);
             affine3 m{};
             m[0] = vec3{.x = r[0].x * scale.x, .y = r[0].y * scale.x, .z = r[0].z * scale.x};
@@ -329,7 +379,9 @@ namespace Mashiro {
         }
 
         /** @brief Apply the rotation to a 3x3 matrix in parent space: returns ToMat3(q) * m. */
-        [[nodiscard]] constexpr mat3 RotateMat3(quat q, const mat3& m) { return ToMat3(q) * m; }
+        [[nodiscard]] constexpr mat3 RotateMat3(quat q, const mat3& m) {
+            return ToMat3(q) * m;
+        }
 
         /**
          * @brief Apply the rotation to a 4x4 transform: returns ToMat4(q) * m.
@@ -338,7 +390,9 @@ namespace Mashiro {
          * about the origin in its parent/world space. The pure rotation never touches
          * m's homogeneous row, so it is copied through verbatim.
          */
-        [[nodiscard]] constexpr mat4 RotateMat4(quat q, const mat4& m) { return ToMat4(q) * m; }
+        [[nodiscard]] constexpr mat4 RotateMat4(quat q, const mat4& m) {
+            return ToMat4(q) * m;
+        }
 
         /**
          * @brief Extract rotation quaternion from a 3×3 matrix (Shepperd's method).
@@ -403,8 +457,8 @@ namespace Mashiro {
 
         /** @brief Rotation axis (normalized); returns +X for the identity (angle 0). */
         [[nodiscard]] constexpr vec3 GetAxis(quat q) {
-            vec3 u   = GetVec(q);
-            float  len = Math::Norm2(u);
+            vec3 u = GetVec(q);
+            float len = Math::Norm2(u);
             return (len < 1e-8f) ? vec3{.x = 1.0f, .y = 0.0f, .z = 0.0f} : u * (1.0f / len);
         }
 
@@ -419,14 +473,17 @@ namespace Mashiro {
             vec3 e{};
             float sinp = 2.0f * (q.w * q.y - q.z * q.x);
             if (Math::Abs(sinp) >= 1.0f) {
-                e.y = Math::Copysign(std::numbers::pi_v<float> * 0.5f, sinp); // gimbal lock
+                e.y = Math::CopySign(std::numbers::pi_v<float> * 0.5f, sinp); // gimbal lock
                 e.x = 0.0f;
-                e.z = Math::Atan2(2.0f * (q.x * q.y + q.w * q.z), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
+                e.z = Math::Atan2(2.0f * (q.x * q.y + q.w * q.z),
+                                  1.0f - 2.0f * (q.y * q.y + q.z * q.z));
                 return e;
             }
-            e.x = Math::Atan2(2.0f * (q.w * q.x + q.y * q.z), 1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+            e.x =
+                Math::Atan2(2.0f * (q.w * q.x + q.y * q.z), 1.0f - 2.0f * (q.x * q.x + q.y * q.y));
             e.y = Math::Asin(sinp);
-            e.z = Math::Atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
+            e.z =
+                Math::Atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
             return e;
         }
 
@@ -492,7 +549,9 @@ namespace Mashiro {
         /// @{
 
         /** @brief Component-wise linear interpolation (does NOT renormalize). */
-        [[nodiscard]] constexpr quat Lerp(quat a, quat b, float t) { return a + (b - a) * t; }
+        [[nodiscard]] constexpr quat Lerp(quat a, quat b, float t) {
+            return a + (b - a) * t;
+        }
 
         /** @brief Normalized linear interpolation (cheap, constant-speed-approximate). */
         [[nodiscard]] constexpr quat Nlerp(quat a, quat b, float t) {
@@ -526,12 +585,12 @@ namespace Mashiro {
          * space (the angle of the relative rotation), not quaternion arc length.
          */
         [[nodiscard]] constexpr quat RotateTowards(quat from, quat to, float maxRadians) {
-            float d  = Dot(Normalize(from), Normalize(to));
+            float d = Dot(Normalize(from), Normalize(to));
             float ad = Math::Abs(d);
             if (ad > 1.0f - 1e-6f) {
                 return to; // already aligned
             }
-            float angle    = 2.0f * Math::Acos(ad); // full angle between the rotations
+            float angle = 2.0f * Math::Acos(ad); // full angle between the rotations
             float fraction = Math::Min(1.0f, maxRadians / angle);
             return Slerp(from, to, fraction);
         }
@@ -543,7 +602,7 @@ namespace Mashiro {
          * (and the next key's tangent) into Squad as the control points.
          */
         [[nodiscard]] constexpr quat SquadTangent(quat prev, quat cur, quat next) {
-            quat invCur  = Inverse(cur);
+            quat invCur = Inverse(cur);
             quat tangent = Log(invCur * next) + Log(invCur * prev);
             return cur * Exp(tangent * -0.25f);
         }

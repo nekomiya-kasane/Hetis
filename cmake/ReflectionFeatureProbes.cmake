@@ -73,6 +73,95 @@ int main() {
 }
 " HAVE_ANNOTATIONS)
 
+# --- P3385: attribute reflection (^^[[attr]], is_attribute) -------------------
+check_cxx_source_compiles("
+#include <meta>
+int main() {
+    static_assert(std::meta::is_attribute(^^[[nodiscard]]));
+    static_assert(!std::meta::is_attribute(^^int));
+    return 0;
+}
+" HAVE_ATTRIBUTE_REFLECTION)
+
+# --- P3385: attributes_of(entity) --------------------------------------------
+check_cxx_source_compiles("
+#include <meta>
+enum class [[nodiscard]] HetisProbeError { ok };
+int main() {
+    constexpr auto attrs = std::meta::attributes_of(^^HetisProbeError);
+    static_assert(attrs.size() == 1);
+    static_assert(std::meta::is_attribute(attrs[0]));
+    return 0;
+}
+" HAVE_ATTRIBUTES_OF)
+
+# --- P3385: has_attribute(entity, attribute) ---------------------------------
+check_cxx_source_compiles("
+#include <meta>
+struct [[deprecated]] HetisDeprecated {};
+int main() {
+    static_assert(std::meta::has_attribute(^^HetisDeprecated, ^^[[deprecated]]));
+    return 0;
+}
+" HAVE_HAS_ATTRIBUTE)
+
+# --- P3385: attribute_comparison::ignore_argument ----------------------------
+check_cxx_source_compiles("
+#include <meta>
+[[deprecated(\"hetis\")]] void hetisDeprecated();
+int main() {
+    static_assert(std::meta::has_attribute(
+        ^^hetisDeprecated,
+        ^^[[deprecated]],
+        std::meta::attribute_comparison::ignore_argument));
+    return 0;
+}
+" HAVE_ATTRIBUTE_COMPARISON_IGNORE_ARGUMENT)
+
+# --- P3385: identifier_of(attribute) -----------------------------------------
+check_cxx_source_compiles("
+#include <meta>
+#include <string_view>
+using namespace std::literals;
+int main() {
+    static_assert(std::meta::identifier_of(^^[[nodiscard]]) == \"nodiscard\"sv);
+    return 0;
+}
+" HAVE_ATTRIBUTE_IDENTIFIER)
+
+# --- P3385: data_member_spec(... .attributes = {...}) ------------------------
+check_cxx_source_compiles("
+#include <meta>
+struct HetisEmpty {};
+struct HetisGenerated;
+consteval {
+    std::meta::define_aggregate(^^HetisGenerated, {
+        std::meta::data_member_spec(^^int, {.name = \"x\"}),
+        std::meta::data_member_spec(
+            ^^HetisEmpty,
+            {.name = \"tag\", .attributes = {^^[[maybe_unused]]}})
+    });
+}
+int main() {
+    HetisGenerated obj{};
+    (void)obj;
+    return 0;
+}
+" HAVE_DATA_MEMBER_SPEC_ATTRIBUTES)
+
+# --- P3394: annotation structural value --------------------------------------
+check_cxx_source_compiles("
+#include <meta>
+struct HetisConfig { int value; };
+constexpr HetisConfig hetisConfig{2};
+struct [[=hetisConfig]] HetisAnnotated {};
+int main() {
+    static_assert(
+        std::meta::annotations_of(^^HetisAnnotated, ^^HetisConfig).size() == 1);
+    return 0;
+}
+" HAVE_STRUCTURAL_ANNOTATION_VALUE)
+
 set(CMAKE_CXX_STANDARD "${_hetis_saved_cxx_standard}")
 unset(_hetis_saved_cxx_standard)
 
@@ -88,7 +177,7 @@ if(NOT HAVE_DEFINE_STATIC_ARRAY)
         "[Hetis] std::define_static_array (P3491) is required but the compiler probe failed.")
 endif()
 
-if(NOT HAVE_ANNOTATIONS)
+if(NOT HAVE_ANNOTATIONS OR NOT HAVE_STRUCTURAL_ANNOTATION_VALUE)
     message(FATAL_ERROR
         "[Hetis] C++26 annotations (P3394) are required but the compiler probe failed.\n"
         "        P3394 is part of the C++26 IS; upgrade or repair the toolchain\n"

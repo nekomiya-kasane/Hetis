@@ -182,7 +182,7 @@ namespace Mashiro {
     template<HomogeneousVec V>
     inline constexpr int VecDim = static_cast<int>(Traits::GetHomogeneousMemberCount<V>());
 
-    /** @brief Scalar element type of a homogeneous vector. */
+    /** @brief Scalar element type of homogeneous vectors. */
     template<HomogeneousVec V>
     using ScalarOf = std::remove_cvref_t<decltype(std::declval<V>()[0])>;
 
@@ -201,7 +201,9 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator+(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] + b[i];
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = a[i] + b[i];
+        }
         return r;
     }
 
@@ -209,7 +211,9 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator-(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] - b[i];
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = a[i] - b[i];
+        }
         return r;
     }
 
@@ -217,7 +221,9 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator*(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] * b[i];
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = a[i] * b[i];
+        }
         return r;
     }
 
@@ -225,7 +231,9 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator/(V a, V b) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] / b[i];
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = a[i] / b[i];
+        }
         return r;
     }
 
@@ -233,7 +241,9 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator*(V a, ScalarOf<V> s) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] * s;
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = a[i] * s;
+        }
         return r;
     }
 
@@ -247,7 +257,9 @@ namespace Mashiro {
     template<HomogeneousVec V>
     [[nodiscard]] constexpr V operator/(V a, ScalarOf<V> s) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = a[i] / s;
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = a[i] / s;
+        }
         return r;
     }
 
@@ -256,18 +268,38 @@ namespace Mashiro {
         requires std::is_signed_v<ScalarOf<V>>
     [[nodiscard]] constexpr V operator-(V a) {
         V r;
-        for (int i = 0; i < VecDim<V>; ++i) r[i] = -a[i];
+        for (int i = 0; i < VecDim<V>; ++i) {
+            r[i] = -a[i];
+        }
         return r;
     }
 
     /// @name Compound-assignment operators
     /// @{
-    template<HomogeneousVec V> constexpr V& operator+=(V& a, V b)          { return a = a + b; }
-    template<HomogeneousVec V> constexpr V& operator-=(V& a, V b)          { return a = a - b; }
-    template<HomogeneousVec V> constexpr V& operator*=(V& a, V b)          { return a = a * b; }
-    template<HomogeneousVec V> constexpr V& operator/=(V& a, V b)          { return a = a / b; }
-    template<HomogeneousVec V> constexpr V& operator*=(V& a, ScalarOf<V> s){ return a = a * s; }
-    template<HomogeneousVec V> constexpr V& operator/=(V& a, ScalarOf<V> s){ return a = a / s; }
+    template<HomogeneousVec V>
+    constexpr V& operator+=(V& a, V b) {
+        return a = a + b;
+    }
+    template<HomogeneousVec V>
+    constexpr V& operator-=(V& a, V b) {
+        return a = a - b;
+    }
+    template<HomogeneousVec V>
+    constexpr V& operator*=(V& a, V b) {
+        return a = a * b;
+    }
+    template<HomogeneousVec V>
+    constexpr V& operator/=(V& a, V b) {
+        return a = a / b;
+    }
+    template<HomogeneousVec V>
+    constexpr V& operator*=(V& a, ScalarOf<V> s) {
+        return a = a * s;
+    }
+    template<HomogeneousVec V>
+    constexpr V& operator/=(V& a, ScalarOf<V> s) {
+        return a = a / s;
+    }
     /// @}
 
     /// @}
