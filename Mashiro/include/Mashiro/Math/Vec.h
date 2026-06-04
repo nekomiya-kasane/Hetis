@@ -25,6 +25,7 @@
 #include <ranges>
 
 #include "Mashiro/Core/TypeTraits.h"
+#include "Mashiro/Math/ScalarMath.h"
 
 namespace Mashiro {
 
@@ -173,14 +174,14 @@ namespace Mashiro {
      */
     template<typename T>
     concept HomogeneousVec =
-        Traits::Homogeneous<T> && Traits::GetHomogeneousMemberCount<T>() >= 2 &&
+        Traits::Homogeneous<T> && Traits::Members<T>.size() >= 2 &&
         requires(T v, int i) {
             { v[i] };
         } && std::is_arithmetic_v<std::remove_cvref_t<decltype(std::declval<T>()[0])>>;
 
     /** @brief Component count of a homogeneous vector. */
     template<HomogeneousVec V>
-    inline constexpr int VecDim = static_cast<int>(Traits::GetHomogeneousMemberCount<V>());
+    inline constexpr int VecDim = static_cast<int>(Traits::Members<V>.size());
 
     /** @brief Scalar element type of homogeneous vectors. */
     template<HomogeneousVec V>

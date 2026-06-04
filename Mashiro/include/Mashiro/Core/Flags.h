@@ -21,61 +21,11 @@
 #pragma once
 
 #include <bit>
-#include <concepts>
 #include <generator>
-#include <meta>
-#include <type_traits>
+
+#include "Mashiro/Core/TypeTraits.h"
 
 namespace Mashiro {
-
-    namespace Traits {
-
-        /** @cond INTERNAL */
-        namespace Detail {
-
-            /// @brief Unsigned version of an enum's underlying type.
-            template <typename E> requires std::is_enum_v<E>
-            using UnsignedUnderlying = std::make_unsigned_t<std::underlying_type_t<E>>;
-
-            /// @brief Compile-time check: every enumerator is 0 or a power of 2.
-            template <typename E>
-            consteval bool AllPowerOfTwo() {
-                for (auto e : std::meta::enumerators_of(^^E)) {
-                    auto v = static_cast<UnsignedUnderlying<E>>([:e:]);
-                    if (v != 0 && !std::has_single_bit(v))
-                        return false;
-                }
-                return true;
-            }
-
-            /// @brief Compile-time OR of all enumerators — the valid-bit mask.
-            template <typename E>
-            consteval UnsignedUnderlying<E> AllBitsMask() {
-                UnsignedUnderlying<E> mask{};
-                for (auto e : std::meta::enumerators_of(^^E)) {
-                    mask |= static_cast<UnsignedUnderlying<E>>([:e:]);
-                }
-                return mask;
-            }
-
-        } // namespace Detail
-        /** @endcond */
-
-        /**
-         * @brief A scoped enum whose enumerators are all 0 or exact powers of two.
-         *
-         * Validated at compile time via P2996 static reflection. Any `enum class`
-         * satisfying this concept automatically gets bitwise operators and query
-         * functions — zero opt-in required.
-         */
-        template <typename E>
-        concept BitfieldEnum = std::is_enum_v<E> && Detail::AllPowerOfTwo<E>();
-        
-        /// @brief All-valid-bits mask for a BitfieldEnum (OR of all enumerators).
-        template <BitfieldEnum E>
-        inline constexpr auto BitfieldMask = static_cast<E>(Detail::AllBitsMask<E>());
-
-    }
 
     // =========================================================================
     // Bitwise operators — return E, not a wrapper

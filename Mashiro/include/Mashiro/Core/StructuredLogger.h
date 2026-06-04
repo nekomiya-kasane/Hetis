@@ -158,7 +158,7 @@ namespace Mashiro {
 
         /// @brief Build default-level array from traits at compile time.
         consteval auto BuildDefaultLevels() {
-            constexpr auto N = Traits::EnumEnumeratorsCount<LogCategory>;
+            constexpr auto N = Traits::EnumeratorsCount<LogCategory>;
             std::array<uint8_t, N> levels{};
             template for (constexpr auto e : std::define_static_array(
                 std::meta::enumerators_of(^^LogCategory))) {
@@ -172,7 +172,7 @@ namespace Mashiro {
 
         /// @brief Build color array from traits at compile time.
         consteval auto BuildLevelColors() {
-            constexpr auto N = Traits::EnumEnumeratorsCount<LogLevel>;
+            constexpr auto N = Traits::EnumeratorsCount<LogLevel>;
             std::array<LogAnno::LevelColor, N> colors{};
             template for (constexpr auto e : std::define_static_array(
                 std::meta::enumerators_of(^^LogLevel))) {
@@ -420,7 +420,7 @@ namespace Mashiro {
 
         // --- Per-category runtime level filter (cache-line aligned, lock-free) ---
         alignas(Platform::kCacheLineSize)
-            std::array<std::atomic<uint8_t>, Traits::EnumEnumeratorsCount<LogCategory>> categoryLevels_;
+            std::array<std::atomic<uint8_t>, Traits::EnumeratorsCount<LogCategory>> categoryLevels_;
 
         // --- Configuration (lock-free atomics) ---
         std::atomic<BackpressurePolicy> policy_{BackpressurePolicy::Drop};

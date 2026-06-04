@@ -174,4 +174,28 @@ namespace Mashiro {
 
     /// @}
 
+    /// @name Rectangular double matrices
+    /// @{
+    using dmat2x3 = Mat<double, 2, 3>; ///< 2 rows × 3 cols.
+    using dmat2x4 = Mat<double, 2, 4>; ///< 2 rows × 4 cols.
+    using dmat3x2 = Mat<double, 3, 2>; ///< 3 rows × 2 cols.
+    using dmat3x4 = Mat<double, 3, 4>; ///< 3 rows × 4 cols.
+    using dmat4x2 = Mat<double, 4, 2>; ///< 4 rows × 2 cols.
+    using dmat4x3 = Mat<double, 4, 3>; ///< 4 rows × 3 cols.
+
+    static_assert(sizeof(dmat2x3) == 48);
+    static_assert(alignof(dmat2x3) == 16);
+    static_assert(sizeof(dmat2x4) == 64);
+    static_assert(alignof(dmat2x4) == 16);
+    static_assert(sizeof(dmat3x2) == 64);
+    static_assert(alignof(dmat3x2) == 32);
+    static_assert(sizeof(dmat3x4) == 128);
+    static_assert(alignof(dmat3x4) == 32);
+    static_assert(sizeof(dmat4x2) == 64);
+    static_assert(alignof(dmat4x2) == 32);
+    static_assert(sizeof(dmat4x3) == 96);
+    static_assert(alignof(dmat4x3) == 32);
+
+    /// @}
+
 }  // namespace Mashiro
