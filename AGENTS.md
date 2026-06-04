@@ -127,6 +127,47 @@ constexpr V operator+(V a, V b) {
 
 C++26 进一步放宽 constexpr 限制：constexpr 异常（可在常量求值中 throw/catch）、constexpr placement new、`<cmath>` 多数函数 constexpr 化。这意味着过去因 `std::vector`、异常、placement new 而无法 constexpr 的代码现在可以前移到编译期。审查代码时应主动识别这类可前移逻辑。
 
+### 2.5 Consteval Blocks (P3289)
+
+`consteval { }` 是 namespace/class scope 的即时求值块，块内代码在编译期执行，可以调用任何 consteval 函数（包括 `define_aggregate`、`define_enum`、反射查询、`static_assert` 替代性断言等）。它由 `-freflection-latest` 启用，是 COCA clang-p2996 已实现的特性。
+
+**consteval blocks 是反射驱动代码生成的首选载体。** 任何需要在编译期生成类型、校验不变量、或执行反射查询的场景，都应优先使用 consteval block 而非 consteval 函数 + 模板特化组合。
+
+典型用途：
+
+| 场景 | 写法 |
+|------|------|
+| 生成聚合类型 | `struct S; consteval { define_aggregate(^^S, {...}); }` |
+| 生成枚举 | `enum class E; consteval { define_enum(^^E, {...}); }` |
+| 编译期不变量校验 | `consteval { if (members.size() != 3) throw "layout broken"; }` |
+| 编译期注册/收集 | `consteval { for (auto m : nonstatic_data_members_of(^^T, ...)) { ... } }` |
+
+示例——在 class scope 中生成成员：
+
+```cpp
+struct Generated;
+consteval {
+    std::meta::define_aggregate(^^Generated, {
+        std::meta::data_member_spec(^^int,   {.name = "id"}),
+        std::meta::data_member_spec(^^float, {.name = "value"}),
+    });
+}
+static_assert(sizeof(Generated) == 8);
+```
+
+示例——编译期不变量校验（替代 `static_assert` 对反射结果的检查）：
+
+```cpp
+consteval {
+    auto members = std::meta::nonstatic_data_members_of(^^MyConfig,
+                       std::meta::access_context::unchecked());
+    if (members.size() == 0)
+        throw "MyConfig must have at least one data member";
+}
+```
+
+**注意**：P3294（token sequence 代码注入）**不在** C++26，COCA fork 亦未实现。需要注入任意代码时，改用 `define_aggregate` / `define_enum` + consteval block 组合。
+
 ---
 
 ## 3. Concepts 与约束
