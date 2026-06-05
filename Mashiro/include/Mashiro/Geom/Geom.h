@@ -192,8 +192,6 @@ namespace Mashiro {
 
     // Legacy / convenience names.
     using AABB          = Box3;    ///< Legacy: 3-D axis-aligned bounding box.
-    using Box2D         = Box2;    ///< Legacy: 2-D axis-aligned box.
-    using Ray           = Ray3;    ///< Legacy: 3-D ray.
     using FrustumPlanes = Frustum; ///< Legacy: view frustum (6 planes).
     using BoundingBox    = Box3;   ///< Bounding box used in spatial queries.
     using BoundingSphere = Sphere; ///< Bounding sphere used in spatial queries.
@@ -205,20 +203,6 @@ namespace Mashiro {
     static_assert(sizeof(Plane) == 16 && alignof(Plane) == 16);
     static_assert(sizeof(Frustum) == 96 && alignof(Frustum) == 16);
 
-    // Compile-time invariant: all 3-D float bounded primitives must be 16-byte aligned
-    // (GPU buffer binding requirement). Validated via reflection over annotations.
-    consteval {
-        auto check = [](std::meta::info type, size_t expectedAlign) {
-            if (std::meta::alignment_of(type) < expectedAlign)
-                throw "Geom primitive violates GPU alignment contract (must be >= 16B aligned)";
-        };
-        check(^^Box3,    16);
-        check(^^Sphere,  16);
-        check(^^Ray3,    16);
-        check(^^Plane,   16);
-        check(^^Frustum, 16);
-    }
-
     namespace Geom {
 
         // =====================================================================
@@ -227,6 +211,7 @@ namespace Mashiro {
 
         /** @cond INTERNAL */
         namespace Detail {
+
             /// @brief True if @p P is a class carrying a `Geom::Shape` annotation.
             template <typename P>
             consteval bool HasShape() {
@@ -236,6 +221,7 @@ namespace Mashiro {
                 }
                 return false;
             }
+
         } // namespace Detail
         /** @endcond */
 

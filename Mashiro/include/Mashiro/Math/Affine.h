@@ -62,16 +62,16 @@ namespace Mashiro {
     template<std::floating_point T, int N, AffineStorage S = AffineStorage::Compact>
         requires(N == 2 || N == 3)
     struct Affine {
-        using ScalarType = T;                                    ///< Scalar field.
-        static constexpr int Dim               = N;              ///< Spatial dimension.
-        static constexpr AffineStorage Storage = S;              ///< Storage policy.
+        using ScalarType = T;                       ///< Scalar field.
+        static constexpr int Dim = N;               ///< Spatial dimension.
+        static constexpr AffineStorage Storage = S; ///< Storage policy.
         static constexpr int Rows = (S == AffineStorage::Compact) ? N : N + 1; ///< Backing rows.
-        static constexpr int Cols = N + 1;                       ///< Backing columns (linear + translation).
+        static constexpr int Cols = N + 1; ///< Backing columns (linear + translation).
 
         using MatrixType = Mat<T, Rows, Cols>; ///< Backing matrix type.
         using LinearType = Mat<T, N>;          ///< N×N linear-part type.
-        using FullType   = Mat<T, N + 1>;      ///< Full homogeneous matrix type.
-        using PointType  = Vec<T, N>;          ///< Point / translation vector type.
+        using FullType = Mat<T, N + 1>;        ///< Full homogeneous matrix type.
+        using PointType = Vec<T, N>;           ///< Point / translation vector type.
 
         MatrixType m{}; ///< Backing storage: columns 0…N-1 = linear basis, column N = translation.
 
@@ -107,7 +107,11 @@ namespace Mashiro {
             return t;
         }
 
-        /// @brief To matrix
+        /// @brief As matrix
+        [[nodiscard]] constexpr const MatrixType& AsMat() const { return m; }
+
+        /// @brief As matrix
+        [[nodiscard]] constexpr MatrixType& AsMat() { return m; }
 
         /// @brief Full homogeneous matrix `Mat<T, N+1>` with the `[0 … 0 1]` row materialised.
         [[nodiscard]] constexpr FullType ToMat() const {
@@ -166,18 +170,12 @@ namespace Mashiro {
         [[nodiscard]] friend constexpr bool operator==(const Affine&, const Affine&) = default;
     };
 
-    /** @cond INTERNAL */
-    namespace Detail {
-        template<typename>
-        inline constexpr bool IsAffineV = false;
-        template<std::floating_point T, int N, AffineStorage S>
-        inline constexpr bool IsAffineV<Affine<T, N, S>> = true;
-    } // namespace Detail
-    /** @endcond */
-
     /// @brief Any instantiation of @ref Affine.
     template<typename A>
-    concept AffineTransform = Detail::IsAffineV<std::remove_cvref_t<A>>;
+    concept AffineTransform =
+        []<std::floating_point T, int N, AffineStorage S>(std::type_identity<Affine<T, N, S>>) {
+            return true;
+        }(std::type_identity<std::remove_cvref_t<A>>{});
 
     /// @name Affine operators (namespace-scope, found via ADL)
     /// @{
@@ -219,8 +217,8 @@ namespace Mashiro {
     /// @name Affine type aliases
     /// @{
 
-    using affine2 = Affine<float, 2>;  ///< Compact 2D affine (backing `mat2x3`).
-    using affine3 = Affine<float, 3>;  ///< Compact 3D affine (backing `mat3x4`).
+    using affine2 = Affine<float, 2>; ///< Compact 2D affine (backing `mat2x3`).
+    using affine3 = Affine<float, 3>; ///< Compact 3D affine (backing `mat3x4`).
 
     /// @}
 
@@ -229,7 +227,8 @@ namespace Mashiro {
         /// @name Affine inverse
         /// @{
 
-        /** @brief Inverse of an affine transform: `[A⁻¹ | −A⁻¹·t]`. Assumes the linear part is invertible. */
+        /** @brief Inverse of an affine transform: `[A⁻¹ | −A⁻¹·t]`. Assumes the linear part is
+         * invertible. */
         template<std::floating_point T, int N, AffineStorage S>
         [[nodiscard]] constexpr Affine<T, N, S> Inverse(const Affine<T, N, S>& a) {
             Mat<T, N> li = Inverse(a.Linear());

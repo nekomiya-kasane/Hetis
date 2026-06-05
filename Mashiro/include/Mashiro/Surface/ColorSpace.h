@@ -37,7 +37,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace Mashiro::Color {
+namespace Mashiro::Coloring {
 
     namespace Detail {
 
@@ -118,7 +118,7 @@ namespace Mashiro::Color {
         Chromaticity white;
 
         TransferFn transfer;
-        
+
         FixedString<32> name;
 
         [[nodiscard]] constexpr ColorSpaceDesc WithTransfer(TransferFn tf) const {
@@ -282,21 +282,33 @@ namespace Mashiro::Color {
         // Bradford cone-response matrix (row-major semantic, stored as Mat column-major)
         [[nodiscard]] consteval mat3 MakeBradford() {
             mat3 m{};
-            m[0, 0] =  0.8951f; m[0, 1] =  0.2664f; m[0, 2] = -0.1614f;
-            m[1, 0] = -0.7502f; m[1, 1] =  1.7135f; m[1, 2] =  0.0367f;
-            m[2, 0] =  0.0389f; m[2, 1] = -0.0685f; m[2, 2] =  1.0296f;
+            m[0, 0] = 0.8951f;
+            m[0, 1] = 0.2664f;
+            m[0, 2] = -0.1614f;
+            m[1, 0] = -0.7502f;
+            m[1, 1] = 1.7135f;
+            m[1, 2] = 0.0367f;
+            m[2, 0] = 0.0389f;
+            m[2, 1] = -0.0685f;
+            m[2, 2] = 1.0296f;
             return m;
         }
 
         [[nodiscard]] consteval mat3 MakeBradfordInv() {
             mat3 m{};
-            m[0, 0] =  0.9869929f; m[0, 1] = -0.1470543f; m[0, 2] =  0.1599627f;
-            m[1, 0] =  0.4323053f; m[1, 1] =  0.5183603f; m[1, 2] =  0.0492912f;
-            m[2, 0] = -0.0085287f; m[2, 1] =  0.0400428f; m[2, 2] =  0.9684867f;
+            m[0, 0] = 0.9869929f;
+            m[0, 1] = -0.1470543f;
+            m[0, 2] = 0.1599627f;
+            m[1, 0] = 0.4323053f;
+            m[1, 1] = 0.5183603f;
+            m[1, 2] = 0.0492912f;
+            m[2, 0] = -0.0085287f;
+            m[2, 1] = 0.0400428f;
+            m[2, 2] = 0.9684867f;
             return m;
         }
 
-        inline constexpr mat3 kBradford    = MakeBradford();
+        inline constexpr mat3 kBradford = MakeBradford();
         inline constexpr mat3 kBradfordInv = MakeBradfordInv();
 
         [[nodiscard]] constexpr mat3 BradfordAdaptation(Chromaticity src, Chromaticity dst) {
@@ -333,7 +345,7 @@ namespace Mashiro::Color {
             return r;
         }
 
-        [[nodiscard]] constexpr mat3 NPM(const ColorSpaceDesc& cs) {
+        [[nodiscard]] constexpr mat3 NPMCS(const ColorSpaceDesc& cs) {
             mat3 p = PrimariesMatrix(cs);
             mat3 pInv = Math::Inverse(p);
             vec3 w = WhiteXYZ(cs.white);
@@ -347,22 +359,27 @@ namespace Mashiro::Color {
         return Detail::BradfordAdaptation(src, dst);
     }
 
-    [[nodiscard]] constexpr mat3 NPM(const ColorSpaceDesc& cs) { return Detail::NPM(cs); }
+    [[nodiscard]] constexpr mat3 NPM(const ColorSpaceDesc& cs) {
+        return Detail::NPMCS(cs);
+    }
 
     [[nodiscard]] constexpr mat3 InverseNPM(const ColorSpaceDesc& cs) {
-        return Math::Inverse(Detail::NPM(cs));
+        return Math::Inverse(Detail::NPMCS(cs));
     }
 
     // =====================================================================
     //  RGB ↔ XYZ Conversion Matrices
     // =====================================================================
 
-    [[nodiscard]] constexpr mat3 RGBtoXYZ(const ColorSpaceDesc& cs) { return NPM(cs); }
-    [[nodiscard]] constexpr mat3 XYZtoRGB(const ColorSpaceDesc& cs) { return InverseNPM(cs); }
+    [[nodiscard]] constexpr mat3 RGBtoXYZ(const ColorSpaceDesc& cs) {
+        return NPM(cs);
+    }
+    [[nodiscard]] constexpr mat3 XYZtoRGB(const ColorSpaceDesc& cs) {
+        return InverseNPM(cs);
+    }
 
     [[nodiscard]] constexpr mat3 RGBtoRGB(const ColorSpaceDesc& src, const ColorSpaceDesc& dst) {
-        return Math::Inverse(Detail::NPM(dst)) * Detail::BradfordAdaptation(src.white, dst.white) *
-               Detail::NPM(src);
+        return InverseNPM(dst) * Detail::BradfordAdaptation(src.white, dst.white) * NPM(src);
     }
 
     // =====================================================================
@@ -375,41 +392,45 @@ namespace Mashiro::Color {
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T sRGB_EOTF(T v) {
-            return (v <= T(0.04045)) ? v / T(12.92) : Pow(((v + T(0.055)) / T(1.055)), T(2.4));
+            return (v <= T(0.04045)) ? v / T(12.92)
+                                     : Math::Pow(((v + T(0.055)) / T(1.055)), T(2.4));
         }
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T sRGB_OETF(T v) {
-            return (v <= T(0.0031308)) ? v * T(12.92) : T(1.055) * Pow(v, T(1) / T(2.4)) - T(0.055);
+            return (v <= T(0.0031308)) ? v * T(12.92)
+                                       : T(1.055) * Math::Pow(v, T(1) / T(2.4)) - T(0.055);
         }
 
         // ----- BT.709 / BT.2020 -----
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T BT709_EOTF(T v) {
-            return (v < T(0.081)) ? v / T(4.5) : Pow((v + T(0.099)) / T(1.099), T(1) / T(0.45));
+            return (v < T(0.081)) ? v / T(4.5)
+                                  : Math::Pow((v + T(0.099)) / T(1.099), T(1) / T(0.45));
         }
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T BT709_OETF(T v) {
-            return (v < T(0.018)) ? v * T(4.5) : T(1.099) * Pow(v, T(0.45)) - T(0.099);
+            return (v < T(0.018)) ? v * T(4.5) : T(1.099) * Math::Pow(v, T(0.45)) - T(0.099);
         }
 
         // ----- Pure gamma -----
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T GammaEncode(T v, T gamma) {
-            return (v <= T(0)) ? T(0) : Pow(v, T(1) / gamma);
+            return (v <= T(0)) ? T(0) : Math::Pow(v, T(1) / gamma);
         }
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T GammaDecode(T v, T gamma) {
-            return (v <= T(0)) ? T(0) : Pow(v, gamma);
+            return (v <= T(0)) ? T(0) : Math::Pow(v, gamma);
         }
 
         // ----- PQ (SMPTE ST 2084) -----
 
         namespace PQConst {
+
             template<std::floating_point T>
             inline constexpr T m1 = T(0.1593017578125);
             template<std::floating_point T>
@@ -420,56 +441,61 @@ namespace Mashiro::Color {
             inline constexpr T c2 = T(18.8515625);
             template<std::floating_point T>
             inline constexpr T c3 = T(18.6875);
+
         } // namespace PQConst
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T PQ_EOTF(T v) {
-            T Vm1 = Pow(v, T(1) / PQConst::m2<T>);
+            T Vm1 = Math::Pow(v, T(1) / PQConst::m2<T>);
             T num = Vm1 - PQConst::c1<T>;
             if (num < T(0)) {
                 num = T(0);
             }
             T den = PQConst::c2<T> - PQConst::c3<T> * Vm1;
-            return Pow(num / den, T(1) / PQConst::m1<T>) * T(10000);
+            return Math::Pow(num / den, T(1) / PQConst::m1<T>) * T(10000);
         }
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T PQ_OETF(T v) {
             T Y = v / T(10000);
-            T Ym1 = Pow(Y, PQConst::m1<T>);
+            T Ym1 = Math::Pow(Y, PQConst::m1<T>);
             T num = PQConst::c1<T> + PQConst::c2<T> * Ym1;
             T den = T(1) + PQConst::c3<T> * Ym1;
-            return Pow(num / den, PQConst::m2<T>);
+            return Math::Pow(num / den, PQConst::m2<T>);
         }
 
         // ----- HLG (ARIB STD-B67) -----
 
         namespace HLGConst {
+
             template<std::floating_point T>
             inline constexpr T a = T(0.17883277);
             template<std::floating_point T>
             inline constexpr T b = T(0.28466892);
             template<std::floating_point T>
             inline constexpr T c = T(0.55991073);
+
         } // namespace HLGConst
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T HLG_OETF(T v) {
             return (v <= T(1) / T(12))
-                       ? Sqrt(T(3) * v)
-                       : HLGConst::a<T> * Log(T(12) * v - HLGConst::b<T>) + HLGConst::c<T>;
+                       ? Math::Sqrt(T(3) * v)
+                       : HLGConst::a<T> * Math::Log(T(12) * v - HLGConst::b<T>) + HLGConst::c<T>;
         }
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T HLG_EOTF(T v) {
             return (v <= T(0.5))
                        ? v * v / T(3)
-                       : (Exp((v - HLGConst::c<T>) / HLGConst::a<T>) + HLGConst::b<T>) / T(12);
+                       : (Math::Exp((v - HLGConst::c<T>) / HLGConst::a<T>) + HLGConst::b<T>) /
+                             T(12);
         }
 
         // ----- ACEScct -----
 
         namespace ACEScctConst {
+
             template<std::floating_point T>
             inline constexpr T cutLin = T(0.0078125);
             template<std::floating_point T>
@@ -478,18 +504,20 @@ namespace Mashiro::Color {
             inline constexpr T A = T(10.5402377416545);
             template<std::floating_point T>
             inline constexpr T B = T(0.0729055341958355);
+
         } // namespace ACEScctConst
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T ACEScct_Encode(T v) {
-            return (v <= ACEScctConst::cutLin<T>) ? (v + ACEScctConst::B<T>)*ACEScctConst::A<T>
-                                                  : (Log(v) / Log(T(2)) + T(9.72)) / T(17.52);
+            return (v <= ACEScctConst::cutLin<T>)
+                       ? (v + ACEScctConst::B<T>)*ACEScctConst::A<T>
+                       : (Math::Log(v) / Math::Log(T(2)) + T(9.72)) / T(17.52);
         }
 
         template<std::floating_point T = float>
         [[nodiscard]] constexpr T ACEScct_Decode(T v) {
             return (v <= ACEScctConst::cutLog<T>) ? v / ACEScctConst::A<T> - ACEScctConst::B<T>
-                                                  : Pow(T(2), v * T(17.52) - T(9.72));
+                                                  : Math::Pow(T(2), v * T(17.52) - T(9.72));
         }
 
     } // namespace TF
@@ -609,7 +637,7 @@ namespace Mashiro::Color {
             return src;
         } else {
             vec3 linear = Decode(Src.transfer, src.v);
-            constexpr mat3 srcNPM = Detail::NPM(Src);
+            constexpr mat3 srcNPM = NPM(Src);
             vec3 xyz = srcNPM * linear;
 
             if constexpr (!(Src.white == Dst.white)) {
@@ -617,7 +645,7 @@ namespace Mashiro::Color {
                 xyz = adapt * xyz;
             }
 
-            constexpr mat3 dstNPMInv = Math::Inverse(Detail::NPM(Dst));
+            constexpr mat3 dstNPMInv = Math::Inverse(NPM(Dst));
             vec3 dstLinear = dstNPMInv * xyz;
             return Color<Dst>{Encode(Dst.transfer, dstLinear)};
         }
@@ -626,8 +654,8 @@ namespace Mashiro::Color {
     template<ColorSpaceDesc Dst>
     [[nodiscard]] constexpr vec3 ConvertVec3(const ColorSpaceDesc& src, vec3 v) {
         vec3 linear = Decode(src.transfer, v);
-        mat3 combined = Math::Inverse(Detail::NPM(Dst)) *
-                        Detail::BradfordAdaptation(src.white, Dst.white) * Detail::NPM(src);
+        mat3 combined =
+            InverseNPM(Dst) * Detail::BradfordAdaptation(src.white, Dst.white) * NPM(src);
         return Encode(Dst.transfer, combined * linear);
     }
 
@@ -636,15 +664,15 @@ namespace Mashiro::Color {
     // =====================================================================
 
     [[nodiscard]] constexpr vec3 ToXYZ(const ColorSpaceDesc& cs, vec3 rgb) {
-        return Detail::NPM(cs) * Decode(cs.transfer, rgb);
+        return NPM(cs) * Decode(cs.transfer, rgb);
     }
 
     [[nodiscard]] constexpr vec3 FromXYZ(const ColorSpaceDesc& cs, vec3 xyz) {
-        return Encode(cs.transfer, Math::Inverse(Detail::NPM(cs)) * xyz);
+        return Encode(cs.transfer, InverseNPM(cs) * xyz);
     }
 
     [[nodiscard]] constexpr float Luminance(const ColorSpaceDesc& cs, vec3 rgb) {
-        vec3 xyz = Detail::NPM(cs) * Decode(cs.transfer, rgb);
+        vec3 xyz = NPM(cs) * Decode(cs.transfer, rgb);
         return xyz.y;
     }
 
@@ -737,7 +765,7 @@ namespace Mashiro::Color {
             float up = u / (13.0f * L) + upn;
             float vp = v / (13.0f * L) + vpn;
 
-            float Y = (L > 8.0f) ? Pow((L + 16.0f) / 116.0f, 3.0f) : L / 903.3f;
+            float Y = (L > 8.0f) ? Math::Pow((L + 16.0f) / 116.0f, 3.0f) : L / 903.3f;
             float X = Y * 9.0f * up / (4.0f * vp);
             float Z = Y * (12.0f - 3.0f * up - 20.0f * vp) / (4.0f * vp);
             return {X, Y, Z};
@@ -755,37 +783,61 @@ namespace Mashiro::Color {
 
             [[nodiscard]] consteval mat3 MakeM1() {
                 mat3 m{};
-                m[0,0]= 0.8189330101f; m[0,1]= 0.3618667424f; m[0,2]=-0.1288597137f;
-                m[1,0]= 0.0329845436f; m[1,1]= 0.9293118715f; m[1,2]= 0.0361456387f;
-                m[2,0]= 0.0482003018f; m[2,1]= 0.2643662691f; m[2,2]= 0.6338517070f;
+                m[0, 0] = 0.8189330101f;
+                m[0, 1] = 0.3618667424f;
+                m[0, 2] = -0.1288597137f;
+                m[1, 0] = 0.0329845436f;
+                m[1, 1] = 0.9293118715f;
+                m[1, 2] = 0.0361456387f;
+                m[2, 0] = 0.0482003018f;
+                m[2, 1] = 0.2643662691f;
+                m[2, 2] = 0.6338517070f;
                 return m;
             }
             [[nodiscard]] consteval mat3 MakeM2() {
                 mat3 m{};
-                m[0,0]= 0.2104542553f; m[0,1]= 0.7936177850f; m[0,2]=-0.0040720468f;
-                m[1,0]= 1.9779984951f; m[1,1]=-2.4285922050f; m[1,2]= 0.4505937099f;
-                m[2,0]= 0.0259040371f; m[2,1]= 0.7827717662f; m[2,2]=-0.8086757660f;
+                m[0, 0] = 0.2104542553f;
+                m[0, 1] = 0.7936177850f;
+                m[0, 2] = -0.0040720468f;
+                m[1, 0] = 1.9779984951f;
+                m[1, 1] = -2.4285922050f;
+                m[1, 2] = 0.4505937099f;
+                m[2, 0] = 0.0259040371f;
+                m[2, 1] = 0.7827717662f;
+                m[2, 2] = -0.8086757660f;
                 return m;
             }
             [[nodiscard]] consteval mat3 MakeM1Inv() {
                 mat3 m{};
-                m[0,0]= 1.2270138511f; m[0,1]=-0.5577999807f; m[0,2]= 0.2812561490f;
-                m[1,0]=-0.0405801784f; m[1,1]= 1.1122568696f; m[1,2]=-0.0716766787f;
-                m[2,0]=-0.0763812845f; m[2,1]=-0.4214819784f; m[2,2]= 1.5861632204f;
+                m[0, 0] = 1.2270138511f;
+                m[0, 1] = -0.5577999807f;
+                m[0, 2] = 0.2812561490f;
+                m[1, 0] = -0.0405801784f;
+                m[1, 1] = 1.1122568696f;
+                m[1, 2] = -0.0716766787f;
+                m[2, 0] = -0.0763812845f;
+                m[2, 1] = -0.4214819784f;
+                m[2, 2] = 1.5861632204f;
                 return m;
             }
             [[nodiscard]] consteval mat3 MakeM2Inv() {
                 mat3 m{};
-                m[0,0]= 1.0f; m[0,1]= 0.3963377774f; m[0,2]= 0.2158037573f;
-                m[1,0]= 1.0f; m[1,1]=-0.1055613458f; m[1,2]=-0.0638541728f;
-                m[2,0]= 1.0f; m[2,1]=-0.0894841775f; m[2,2]=-1.2914855480f;
+                m[0, 0] = 1.0f;
+                m[0, 1] = 0.3963377774f;
+                m[0, 2] = 0.2158037573f;
+                m[1, 0] = 1.0f;
+                m[1, 1] = -0.1055613458f;
+                m[1, 2] = -0.0638541728f;
+                m[2, 0] = 1.0f;
+                m[2, 1] = -0.0894841775f;
+                m[2, 2] = -1.2914855480f;
                 return m;
             }
 
         } // namespace Detail
 
-        inline constexpr mat3 kM1    = Detail::MakeM1();
-        inline constexpr mat3 kM2    = Detail::MakeM2();
+        inline constexpr mat3 kM1 = Detail::MakeM1();
+        inline constexpr mat3 kM2 = Detail::MakeM2();
         inline constexpr mat3 kM1Inv = Detail::MakeM1Inv();
         inline constexpr mat3 kM2Inv = Detail::MakeM2Inv();
 
@@ -839,7 +891,7 @@ namespace Mashiro::Color {
     namespace Oklch {
 
         [[nodiscard]] constexpr vec3 FromOklab(vec3 lab) {
-            float C = Sqrt(lab.y * lab.y + lab.z * lab.z);
+            float C = Math::Sqrt(lab.y * lab.y + lab.z * lab.z);
             float h = Math::Atan2(lab.z, lab.y);
             return {lab.x, C, h};
         }
@@ -870,14 +922,14 @@ namespace Mashiro::Color {
             float dL = lab2.x - lab1.x;
             float da = lab2.y - lab1.y;
             float db = lab2.z - lab1.z;
-            return Sqrt(dL * dL + da * da + db * db);
+            return Math::Sqrt(dL * dL + da * da + db * db);
         }
 
         [[nodiscard]] constexpr float CIE94(vec3 lab1, vec3 lab2, float kL = 1.0f,
                                             float K1 = 0.045f, float K2 = 0.015f) {
             float dL = lab1.x - lab2.x;
-            float C1 = Sqrt(lab1.y * lab1.y + lab1.z * lab1.z);
-            float C2 = Sqrt(lab2.y * lab2.y + lab2.z * lab2.z);
+            float C1 = Math::Sqrt(lab1.y * lab1.y + lab1.z * lab1.z);
+            float C2 = Math::Sqrt(lab2.y * lab2.y + lab2.z * lab2.z);
             float dC = C1 - C2;
             float da = lab1.y - lab2.y;
             float db = lab1.z - lab2.z;
@@ -894,25 +946,25 @@ namespace Mashiro::Color {
             float t2 = dC / SC;
             float t3sq = dH2 / (SH * SH);
 
-            return Sqrt(t1 * t1 + t2 * t2 + t3sq);
+            return Math::Sqrt(t1 * t1 + t2 * t2 + t3sq);
         }
 
         [[nodiscard]] constexpr float CIEDE2000(vec3 lab1, vec3 lab2) {
             float L1 = lab1.x, a1 = lab1.y, b1 = lab1.z;
             float L2 = lab2.x, a2 = lab2.y, b2 = lab2.z;
 
-            float Cab1 = Sqrt(a1 * a1 + b1 * b1);
-            float Cab2 = Sqrt(a2 * a2 + b2 * b2);
+            float Cab1 = Math::Sqrt(a1 * a1 + b1 * b1);
+            float Cab2 = Math::Sqrt(a2 * a2 + b2 * b2);
             float CabAvg = (Cab1 + Cab2) * 0.5f;
 
             float CabAvg7 = CabAvg * CabAvg * CabAvg * CabAvg * CabAvg * CabAvg * CabAvg;
-            float G = 0.5f * (1.0f - Sqrt(CabAvg7 / (CabAvg7 + 6103515625.0f))); // 25^7
+            float G = 0.5f * (1.0f - Math::Sqrt(CabAvg7 / (CabAvg7 + 6103515625.0f))); // 25^7
 
             float ap1 = a1 * (1.0f + G);
             float ap2 = a2 * (1.0f + G);
 
-            float Cp1 = Sqrt(ap1 * ap1 + b1 * b1);
-            float Cp2 = Sqrt(ap2 * ap2 + b2 * b2);
+            float Cp1 = Math::Sqrt(ap1 * ap1 + b1 * b1);
+            float Cp2 = Math::Sqrt(ap2 * ap2 + b2 * b2);
 
             float hp1 = Math::Atan2(b1, ap1);
             float hp2 = Math::Atan2(b2, ap2);
@@ -927,13 +979,13 @@ namespace Mashiro::Color {
             float dCp = Cp2 - Cp1;
 
             float dhp = hp2 - hp1;
-            if (Abs(dhp) > Math::Const::kPi<float>) {
+            if (Math::Abs(dhp) > Math::Const::kPi<float>) {
                 dhp += (dhp < 0.0f) ? Math::Const::kTau<float> : -Math::Const::kTau<float>;
             }
             if (Cp1 * Cp2 == 0.0f) {
                 dhp = 0.0f;
             }
-            float dHp = 2.0f * Sqrt(Cp1 * Cp2) * Math::Sin(dhp * 0.5f);
+            float dHp = 2.0f * Math::Sqrt(Cp1 * Cp2) * Math::Sin(dhp * 0.5f);
 
             float Lp = (L1 + L2) * 0.5f;
             float Cp = (Cp1 + Cp2) * 0.5f;
@@ -941,7 +993,7 @@ namespace Mashiro::Color {
             float hpAvg;
             if (Cp1 * Cp2 == 0.0f) {
                 hpAvg = hp1 + hp2;
-            } else if (Abs(hp1 - hp2) <= Math::Const::kPi<float>) {
+            } else if (Math::Abs(hp1 - hp2) <= Math::Const::kPi<float>) {
                 hpAvg = (hp1 + hp2) * 0.5f;
             } else if (hp1 + hp2 < Math::Const::kTau<float>) {
                 hpAvg = (hp1 + hp2 + Math::Const::kTau<float>)*0.5f;
@@ -955,33 +1007,33 @@ namespace Mashiro::Color {
                       0.20f * Math::Cos(4.0f * hpAvg - Math::Radians(63.0f));
 
             float Lp50sq = (Lp - 50.0f) * (Lp - 50.0f);
-            float SL = 1.0f + 0.015f * Lp50sq / Sqrt(20.0f + Lp50sq);
+            float SL = 1.0f + 0.015f * Lp50sq / Math::Sqrt(20.0f + Lp50sq);
             float SC = 1.0f + 0.045f * Cp;
             float SH = 1.0f + 0.015f * Cp * T;
 
             float Cp7 = Cp * Cp * Cp * Cp * Cp * Cp * Cp;
-            float RC = 2.0f * Sqrt(Cp7 / (Cp7 + 6103515625.0f));
+            float RC = 2.0f * Math::Sqrt(Cp7 / (Cp7 + 6103515625.0f));
 
             float hpDeg = Math::Degrees(hpAvg);
             if (hpDeg < 0.0f) {
                 hpDeg += 360.0f;
             }
             float dTheta = Math::Radians(30.0f) *
-                           Exp(-((hpDeg - 275.0f) / 25.0f) * ((hpDeg - 275.0f) / 25.0f));
+                           Math::Exp(-((hpDeg - 275.0f) / 25.0f) * ((hpDeg - 275.0f) / 25.0f));
             float RT = -Math::Sin(2.0f * dTheta) * RC;
 
             float t1 = dLp / SL;
             float t2 = dCp / SC;
             float t3 = dHp / SH;
 
-            return Sqrt(t1 * t1 + t2 * t2 + t3 * t3 + RT * t2 * t3);
+            return Math::Sqrt(t1 * t1 + t2 * t2 + t3 * t3 + RT * t2 * t3);
         }
 
         [[nodiscard]] constexpr float OklabDE(vec3 oklab1, vec3 oklab2) {
             float dL = oklab2.x - oklab1.x;
             float da = oklab2.y - oklab1.y;
             float db = oklab2.z - oklab1.z;
-            return Sqrt(dL * dL + da * da + db * db);
+            return Math::Sqrt(dL * dL + da * da + db * db);
         }
 
     } // namespace DeltaE
@@ -996,7 +1048,8 @@ namespace Mashiro::Color {
     }
 
     [[nodiscard]] constexpr vec3 ClampGamut(vec3 rgb) {
-        return {Clamp(rgb.x, 0.0f, 1.0f), Clamp(rgb.y, 0.0f, 1.0f), Clamp(rgb.z, 0.0f, 1.0f)};
+        return {Math::Clamp(rgb.x, 0.0f, 1.0f), Math::Clamp(rgb.y, 0.0f, 1.0f),
+                Math::Clamp(rgb.z, 0.0f, 1.0f)};
     }
 
     [[nodiscard]] constexpr vec3 GamutMapOklab(vec3 linearSrcRGB, const ColorSpaceDesc& src,
@@ -1005,12 +1058,12 @@ namespace Mashiro::Color {
         vec3 srcXYZ = ToXYZ(src.WithTransfer(TransferFn::Linear), linearSrcRGB);
         vec3 oklabSrc = Oklab::FromXYZ(srcXYZ);
         float L = oklabSrc.x;
-        float C = Sqrt(oklabSrc.y * oklabSrc.y + oklabSrc.z * oklabSrc.z);
+        float C = Math::Sqrt(oklabSrc.y * oklabSrc.y + oklabSrc.z * oklabSrc.z);
         float h = Math::Atan2(oklabSrc.z, oklabSrc.y);
 
         if (C < 1e-6f) {
             // Achromatic — just clamp lightness
-            vec3 grey = {Clamp(L, 0.0f, 1.0f), 0.0f, 0.0f};
+            vec3 grey = {Math::Clamp(L, 0.0f, 1.0f), 0.0f, 0.0f};
             return Oklab::ToLinearSRGB(grey);
         }
 
@@ -1036,11 +1089,11 @@ namespace Mashiro::Color {
     // Simplified overload that works in Oklab space for sRGB directly
     [[nodiscard]] constexpr vec3 GamutMapToSRGB(vec3 oklabColor) {
         float L = oklabColor.x;
-        float C = Sqrt(oklabColor.y * oklabColor.y + oklabColor.z * oklabColor.z);
+        float C = Math::Sqrt(oklabColor.y * oklabColor.y + oklabColor.z * oklabColor.z);
         float h = Math::Atan2(oklabColor.z, oklabColor.y);
 
         if (C < 1e-6f) {
-            return Oklab::ToLinearSRGB({Clamp(L, 0.0f, 1.0f), 0.0f, 0.0f});
+            return Oklab::ToLinearSRGB({Math::Clamp(L, 0.0f, 1.0f), 0.0f, 0.0f});
         }
 
         float lo = 0.0f, hi = C;
@@ -1084,7 +1137,7 @@ namespace Mashiro::Color {
 
     [[nodiscard]] constexpr vec3 BlackbodyXYZ(float T) {
         // Approximate: use CIE daylight locus for chromaticity, scale Y=1
-        Chromaticity c = CCTtoXY(Clamp(T, 1667.0f, 25000.0f));
+        Chromaticity c = CCTtoXY(Math::Clamp(T, 1667.0f, 25000.0f));
         return {c.x / c.y, 1.0f, (1.0f - c.x - c.y) / c.y};
     }
 
@@ -1304,16 +1357,11 @@ namespace Mashiro::Color {
         constexpr ColorA() = default;
         constexpr ColorA(float r, float g, float b, float alpha = 1.0f)
             : Color<CS>{{r, g, b}}, a{alpha} {}
-        constexpr ColorA(vec3 rgb, float alpha = 1.0f)
-            : Color<CS>{rgb}, a{alpha} {}
-        constexpr ColorA(Color<CS> rgb, float alpha = 1.0f)
-            : Color<CS>{rgb}, a{alpha} {}
+        constexpr ColorA(Color<CS> rgb, float alpha = 1.0f) : Color<CS>{rgb}, a{alpha} {}
 
         [[nodiscard]] friend constexpr bool operator==(const ColorA&, const ColorA&) = default;
 
-        [[nodiscard]] constexpr ColorA operator*(float s) const {
-            return {this->v * s, a * s};
-        }
+        [[nodiscard]] constexpr ColorA operator*(float s) const { return {this->v * s, a * s}; }
         [[nodiscard]] constexpr ColorA operator/(float s) const {
             float inv = 1.0f / s;
             return {this->v * inv, a * inv};
@@ -1429,4 +1477,4 @@ namespace Mashiro::Color {
     using sRGBA16 = PackedColorA<CS::sRGB, uint16_t>;
     /// @}
 
-} // namespace Mashiro::Color
+} // namespace Mashiro::Coloring
