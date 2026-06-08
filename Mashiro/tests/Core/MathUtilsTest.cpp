@@ -1,4 +1,4 @@
-#include "Mashiro/Math/Affine.h"
+#include "Mashiro/Math/AffineOps.h"
 #include "Mashiro/Math/MatOps.h"
 #include "Mashiro/Math/Types.h"
 
@@ -132,8 +132,8 @@ TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", AUTO_
 
     auto a = Math::MakeRotateZ(0.5f);
     auto b = Math::MakeTranslation(vec3{1, 2, 3});
-    RequireMatApprox((a * b).ToMat(), RefMul(a.ToMat(), b.ToMat()));
-    RequireMatApprox((a * affine3::Identity()).ToMat(), a.ToMat());
+    RequireMatApprox(Math::ToFull(Math::ComposeAffine(a, b)), RefMul(Math::ToFull(a), Math::ToFull(b)));
+    RequireMatApprox(Math::ToFull(Math::ComposeAffine(a, Math::IdentityAffine<float,3>())), Math::ToFull(a));
 }
 
 // ---------------------------------------------------------------------------
@@ -142,13 +142,13 @@ TEST_CASE("Matrix * vector transforms; matrix * matrix matches reference", AUTO_
 
 TEST_CASE("MakeRotateZ turns +X toward +Y", AUTO_TAG) {
     auto m = Math::MakeRotateZ(kPi * 0.5f);
-    vec3 r = m.TransformVector(vec3{1, 0, 0});
+    vec3 r = Math::TransformVector(m, vec3{1, 0, 0});
     REQUIRE(r.x == Approx(0.0f).margin(1e-6f));
     REQUIRE(r.y == Approx(1.0f).margin(1e-6f));
 }
 
 TEST_CASE("Transpose swaps rows and columns", AUTO_TAG) {
-    mat4 m = Math::MakeTranslation(vec3{1, 2, 3}).ToMat();
+    mat4 m = Math::ToFull(Math::MakeTranslation(vec3{1, 2, 3}));
     mat4 mt = Math::Transpose(m);
     for (int row = 0; row < 4; ++row) {
         for (int col = 0; col < 4; ++col) {
@@ -182,8 +182,8 @@ TEST_CASE("Det for mat2 / mat3 / mat4", AUTO_TAG) {
     m3[2, 0] = 2.0f; m3[2, 1] = 8.0f; m3[2, 2] = 7.0f;
     REQUIRE(Math::Det(m3) == Approx(-306.0f));
 
-    mat4 rotScale = (Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
-                        * Math::MakeScale(vec3{2, 0.5f, 1.5f})).ToMat();
+    mat4 rotScale = Math::ToFull(Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
+                        * Math::MakeScale(vec3{2, 0.5f, 1.5f}));
     REQUIRE(Math::Det(rotScale) == Approx(2.0f * 0.5f * 1.5f).margin(1e-4f));
 }
 
@@ -211,19 +211,19 @@ TEST_CASE("Inverse undoes a TRS transform (mat4)", AUTO_TAG) {
     auto trs = Math::MakeTranslation(vec3{5, -3, 2})
                    * Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f)
                    * Math::MakeScale(vec3{2, 0.5f, 1.5f});
-    RequireMatApprox((trs * Math::Inverse(trs)).ToMat(), Math::Identity());
-    RequireMatApprox((Math::Inverse(trs) * trs).ToMat(), Math::Identity());
+    RequireMatApprox(Math::ToFull(Math::ComposeAffine(trs, Math::InverseAffine(trs))), Math::Identity());
+    RequireMatApprox(Math::ToFull(Math::ComposeAffine(Math::InverseAffine(trs), trs)), Math::Identity());
 }
 
 TEST_CASE("Inverse(Affine) round-trips to identity", AUTO_TAG) {
-    affine3 a = Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f);
-    a.m[0, 3] = 5.0f;
-    a.m[1, 3] = -3.0f;
-    a.m[2, 3] = 2.0f;
+    affine3<> a = Math::MakeRotateAxis(vec3{0.3f, 0.8f, -0.5f}, 1.1f);
+    a[0, 3] = 5.0f;
+    a[1, 3] = -3.0f;
+    a[2, 3] = 2.0f;
 
-    affine3 ai = Math::Inverse(a);
-    RequireMatApprox((a * ai).ToMat(), Math::Identity());
-    RequireMatApprox((ai * a).ToMat(), Math::Identity());
+    affine3<> ai = Math::InverseAffine(a);
+    RequireMatApprox(Math::ToFull(Math::ComposeAffine(a, ai)), Math::Identity());
+    RequireMatApprox(Math::ToFull(Math::ComposeAffine(ai, a)), Math::Identity());
 
     // Round-trip a point through the transform and its inverse.
     vec3 p{1.0f, 2.0f, 3.0f};
@@ -264,8 +264,8 @@ TEST_CASE("MathUtils folds at compile time", AUTO_TAG) {
 
     // operator* and MakeRotateZ fold; column 0 of Rz(90) is (0, 1, 0).
     constexpr auto m = Math::MakeRotateZ(kPi * 0.5f);
-    STATIC_REQUIRE(Close(m.m[0].x, 0.0f));
-    STATIC_REQUIRE(Close(m.m[0].y, 1.0f));
+    STATIC_REQUIRE(Close(m[0, 0], 0.0f));
+    STATIC_REQUIRE(Close(m[1, 0], 1.0f));
 
     // Perspective is a constant expression (exercises constexpr Tan).
     constexpr mat4 proj = Math::MakePerspective(kPi * 0.25f, 1.0f, 0.1f, 100.0f);

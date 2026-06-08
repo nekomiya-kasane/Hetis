@@ -198,44 +198,44 @@ TEST_CASE("Interval: Expand and Clamp", AUTO_TAG) {
 }
 
 // ===========================================================================
-// Box2D operations — constexpr
+// Box2 operations — constexpr
 // ===========================================================================
 
-TEST_CASE("Box2D: Union of two boxes", AUTO_TAG) {
-    constexpr Box2D a{.min={.x=0,.y=0}, .max={.x=2,.y=2}};
-    constexpr Box2D b{.min={.x=1,.y=1}, .max={.x=4,.y=3}};
+TEST_CASE("Box2: Union of two boxes", AUTO_TAG) {
+    constexpr Box2 a{.min={.x=0,.y=0}, .max={.x=2,.y=2}};
+    constexpr Box2 b{.min={.x=1,.y=1}, .max={.x=4,.y=3}};
     constexpr auto u = Union(a, b);
     STATIC_REQUIRE(u.min.x == 0.0f);
     STATIC_REQUIRE(u.max.x == 4.0f);
     STATIC_REQUIRE(u.max.y == 3.0f);
 }
 
-TEST_CASE("Box2D: Union with point", AUTO_TAG) {
-    constexpr Box2D box{.min={.x=0,.y=0}, .max={.x=1,.y=1}};
+TEST_CASE("Box2: Union with point", AUTO_TAG) {
+    constexpr Box2 box{.min={.x=0,.y=0}, .max={.x=1,.y=1}};
     constexpr auto grown = Union(box, vec2{5.0f, -1.0f});
     STATIC_REQUIRE(grown.min.y == -1.0f);
     STATIC_REQUIRE(grown.max.x == 5.0f);
 }
 
-TEST_CASE("Box2D: Area and Perimeter", AUTO_TAG) {
-    constexpr Box2D box{.min={.x=0,.y=0}, .max={.x=3,.y=4}};
+TEST_CASE("Box2: Area and Perimeter", AUTO_TAG) {
+    constexpr Box2 box{.min={.x=0,.y=0}, .max={.x=3,.y=4}};
     STATIC_REQUIRE(Area(box) == 12.0f);
     STATIC_REQUIRE(Perimeter(box) == 14.0f);
 }
 
-TEST_CASE("Box2D: Contains and Intersects", AUTO_TAG) {
-    constexpr Box2D a{.min={.x=0,.y=0}, .max={.x=4,.y=4}};
-    constexpr Box2D b{.min={.x=3,.y=3}, .max={.x=6,.y=6}};
-    constexpr Box2D c{.min={.x=5,.y=5}, .max={.x=7,.y=7}};
+TEST_CASE("Box2: Contains and Intersects", AUTO_TAG) {
+    constexpr Box2 a{.min={.x=0,.y=0}, .max={.x=4,.y=4}};
+    constexpr Box2 b{.min={.x=3,.y=3}, .max={.x=6,.y=6}};
+    constexpr Box2 c{.min={.x=5,.y=5}, .max={.x=7,.y=7}};
     STATIC_REQUIRE(Contains(a, vec2{2.0f, 2.0f}));
     STATIC_REQUIRE(!Contains(a, vec2{5.0f, 5.0f}));
     STATIC_REQUIRE(Intersects(a, b));
     STATIC_REQUIRE(!Intersects(a, c));
 }
 
-TEST_CASE("Box2D: Intersection region", AUTO_TAG) {
-    constexpr Box2D a{.min={.x=0,.y=0}, .max={.x=4,.y=4}};
-    constexpr Box2D b{.min={.x=2,.y=2}, .max={.x=6,.y=6}};
+TEST_CASE("Box2: Intersection region", AUTO_TAG) {
+    constexpr Box2 a{.min={.x=0,.y=0}, .max={.x=4,.y=4}};
+    constexpr Box2 b{.min={.x=2,.y=2}, .max={.x=6,.y=6}};
     constexpr auto i = Intersection(a, b);
     STATIC_REQUIRE(i.min.x == 2.0f);
     STATIC_REQUIRE(i.min.y == 2.0f);

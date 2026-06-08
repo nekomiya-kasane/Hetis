@@ -19,7 +19,7 @@
  */
 #pragma once
 
-#include "Mashiro/Math/Affine.h"
+#include "Mashiro/Math/AffineOps.h"
 #include "Mashiro/Math/MatOps.h"
 #include "Mashiro/Math/Quanterion.h"
 #include "Mashiro/Math/Types.h"
@@ -87,11 +87,11 @@ namespace Mashiro::Testing {
         return e;
     }
 
-    /** @brief Convert any Affine to its full homogeneous Eigen matrix `(N+1)×(N+1)`. */
-    template <std::floating_point T, int N, AffineStorage S>
-    [[nodiscard]] auto ToEigen(const Affine<T, N, S>& a)
-        -> Detail::EigenMat<T, N + 1, N + 1> {
-        return ToEigen(a.ToMat());
+    /** @brief Convert any compact affine (mat3x4, mat2x3) to its full Eigen matrix. */
+    template <AffineCompact M>
+    [[nodiscard]] auto ToEigen(const M& a)
+        -> Detail::EigenMat<ScalarOf<MatColType<M>>, MatRows<M> + 1, MatRows<M> + 1> {
+        return ToEigen(Math::ToFull(a));
     }
 
     /** @brief Convert Mashiro quat {x,y,z,w} to Eigen::Quaternionf {w,x,y,z}. */
@@ -117,14 +117,11 @@ namespace Mashiro::Testing {
     }
 
     /**
-     * @brief Convert any 3D Affine (compact or full) to Eigen::Affine3f.
-     *
-     * Materialises the full homogeneous matrix via `ToMat()`.
+     * @brief Convert any 3D compact affine (mat3x4) to Eigen::Affine3f.
      */
-    template <AffineStorage S>
-    [[nodiscard]] auto ToEigenAffine(const Affine<float, 3, S>& a) -> Eigen::Affine3f {
+    [[nodiscard]] inline auto ToEigenAffine(const mat3x4& a) -> Eigen::Affine3f {
         Eigen::Affine3f aff;
-        aff.matrix() = ToEigen(a.ToMat());
+        aff.matrix() = ToEigen(Math::ToFull(a));
         return aff;
     }
 

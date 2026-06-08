@@ -1,21 +1,23 @@
-// nekomiya-mixed4: Modern UI Engine
-// Platform Window - Cross-platform window abstraction
-
 #pragma once
 
-#include "neko/common/Geometry.h"
-#include "neko/platform/Event.h"
-#include "neko/platform/Surface.h"
+#include "Mashiro/Core/TypeTraits.h"
+#include "Mashiro/Core/Flags.h"
 
 #include <functional>
 #include <memory>
-#include <optional>
-#include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace Mashiro {
+
+    /// @brief 2D point with integer coordinates (screen/pixel space).
+    struct PointI { int32_t x = 0, y = 0; };
+
+    /// @brief 2D size with unsigned dimensions (pixels).
+    struct SizeU { uint32_t w = 0, h = 0; };
+
+    /// @brief Placeholder event type (forward declaration for the event system).
+    struct Event {};
 
     namespace Platform {
 
@@ -32,7 +34,7 @@ namespace Mashiro {
                 Borderless = 1 << 5,
                 Transparent = 1 << 6,
             };
-            static_assert(BitfieldEnum<Style>);
+            static_assert(Mashiro::Traits::BitfieldEnum<Style>);
 
             // Window display mode
             enum class DisplayMode : uint8_t {
@@ -93,14 +95,14 @@ namespace Mashiro {
                 uint32_t height = 720;
 
                 // Position (nullopt = system default / centered)
-                std::optional<::PointI> position = std::nullopt;
+                std::optional<Mashiro::PointI> position = std::nullopt;
 
                 // Size constraints
-                std::optional<::SizeU> minSize = std::nullopt;
-                std::optional<::SizeU> maxSize = std::nullopt;
+                std::optional<Mashiro::SizeU> minSize = std::nullopt;
+                std::optional<Mashiro::SizeU> maxSize = std::nullopt;
 
                 // Style and behavior
-                WindowStyle style = WindowStyle::Default;
+                Style style = Style::Titled | Style::Closable | Style::Minimizable | Style::Resizable;
                 DisplayMode displayMode = DisplayMode::Windowed;
                 VisibilityState initialState = VisibilityState::Visible;
 
@@ -149,6 +151,7 @@ namespace Mashiro {
 
     class Window;
     class EventLoop;
+    class Surface;
 
     using WindowPtr = std::unique_ptr<Window>;
 
@@ -160,7 +163,7 @@ namespace Mashiro {
         std::string title = "Window";
         uint32_t width = 800;
         uint32_t height = 600;
-        std::optional<::PointI> position = std::nullopt;
+        std::optional<Mashiro::PointI> position = std::nullopt;
         bool resizable = true;
         bool decorated = true;
         bool transparent = false;
@@ -168,8 +171,8 @@ namespace Mashiro {
         bool maximized = false;
         bool minimized = false;
         bool visible = true;
-        std::optional<::SizeU> minSize = std::nullopt;
-        std::optional<::SizeU> maxSize = std::nullopt;
+        std::optional<Mashiro::SizeU> minSize = std::nullopt;
+        std::optional<Mashiro::SizeU> maxSize = std::nullopt;
         Window* ownerWindow = nullptr; // Owner window for cascading destruction
 
         // Optional custom event callback (if not set, events go to EventPump)
@@ -185,7 +188,7 @@ namespace Mashiro {
             return *this;
         }
         WindowConfig& WithPosition(int32_t iX, int32_t iY) {
-            position = ::PointI{iX, iY};
+            position = Mashiro::PointI{iX, iY};
             return *this;
         }
         WindowConfig& WithResizable(bool iValue) {
@@ -213,11 +216,11 @@ namespace Mashiro {
             return *this;
         }
         WindowConfig& WithMinSize(uint32_t iWidth, uint32_t iHeight) {
-            minSize = ::SizeU{iWidth, iHeight};
+            minSize = Mashiro::SizeU{iWidth, iHeight};
             return *this;
         }
         WindowConfig& WithMaxSize(uint32_t iWidth, uint32_t iHeight) {
-            maxSize = ::SizeU{iWidth, iHeight};
+            maxSize = Mashiro::SizeU{iWidth, iHeight};
             return *this;
         }
         WindowConfig& WithOwnerWindow(Window* iOwner) {
@@ -279,16 +282,16 @@ namespace Mashiro {
         [[nodiscard]] virtual std::string GetTitle() const = 0;
 
         // Size
-        virtual void SetSize(::SizeU iSize) = 0;
-        [[nodiscard]] virtual ::SizeU GetSize() const = 0;
+        virtual void SetSize(Mashiro::SizeU iSize) = 0;
+        [[nodiscard]] virtual Mashiro::SizeU GetSize() const = 0;
 
         // Position
-        virtual void SetPosition(::PointI iPosition) = 0;
-        [[nodiscard]] virtual ::PointI GetPosition() const = 0;
+        virtual void SetPosition(Mashiro::PointI iPosition) = 0;
+        [[nodiscard]] virtual Mashiro::PointI GetPosition() const = 0;
 
         // Size constraints
-        virtual void SetMinSize(std::optional<::SizeU> iSize) = 0;
-        virtual void SetMaxSize(std::optional<::SizeU> iSize) = 0;
+        virtual void SetMinSize(std::optional<Mashiro::SizeU> iSize) = 0;
+        virtual void SetMaxSize(std::optional<Mashiro::SizeU> iSize) = 0;
 
         // Visibility
         virtual void SetVisible(bool iVisible) = 0;
@@ -318,11 +321,11 @@ namespace Mashiro {
         virtual void SetCursorGrab(bool iGrab) = 0;
         [[nodiscard]] virtual bool IsCursorGrabbed() const = 0;
 
-        virtual void SetCursorPosition(::PointI iPosition) = 0;
-        [[nodiscard]] virtual ::PointI GetCursorPosition() const = 0;
+        virtual void SetCursorPosition(Mashiro::PointI iPosition) = 0;
+        [[nodiscard]] virtual Mashiro::PointI GetCursorPosition() const = 0;
 
-        virtual void SetCursorScreenPosition(::PointI iPosition) = 0;
-        [[nodiscard]] virtual ::PointI GetCursorScreenPosition() const = 0;
+        virtual void SetCursorScreenPosition(Mashiro::PointI iPosition) = 0;
+        [[nodiscard]] virtual Mashiro::PointI GetCursorScreenPosition() const = 0;
 
         // Focus
         virtual void Focus() = 0;
@@ -344,7 +347,7 @@ namespace Mashiro {
         [[nodiscard]] virtual float GetOpacity() const = 0;
 
         // Icon
-        virtual void SetIcon(std::span<const uint32_t> iPixels, ::SizeU iSize) = 0;
+        virtual void SetIcon(std::span<const uint32_t> iPixels, Mashiro::SizeU iSize) = 0;
 
         // Utilities
         virtual void BringToFront() = 0;
@@ -353,13 +356,13 @@ namespace Mashiro {
         virtual void CenterOnScreen() = 0;
 
         // Screen info
-        [[nodiscard]] virtual ::PointI GetScreenSize() const = 0;
-        [[nodiscard]] virtual ::PointI ClientToScreen(::PointI iClientPos) const = 0;
-        [[nodiscard]] virtual ::PointI ScreenToClient(::PointI iScreenPos) const = 0;
+        [[nodiscard]] virtual Mashiro::PointI GetScreenSize() const = 0;
+        [[nodiscard]] virtual Mashiro::PointI ClientToScreen(Mashiro::PointI iClientPos) const = 0;
+        [[nodiscard]] virtual Mashiro::PointI ScreenToClient(Mashiro::PointI iScreenPos) const = 0;
 
         // IME (Input Method Editor) support
         // Set the position where IME candidate window should appear (in client coordinates)
-        virtual void SetIMEPosition(::PointI iPosition) = 0;
+        virtual void SetIMEPosition(Mashiro::PointI iPosition) = 0;
 
         // Native handle
         [[nodiscard]] virtual void* GetNativeHandle() const = 0;

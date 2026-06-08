@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ninja -C build/x64-asan)",
+      "Bash(./build/x64-asan/bin/Test.Core.QuanterionTest.exe)",
+      "Bash(./build/x64-asan/bin/Test.Core.ToStringTest.exe)",
+      "Bash(./build/x64-asan/bin/Test.Math.MatTest.exe)",
+      "Bash(./build/x64-asan/bin/Test.Math.MathStressTest.exe)",
+      "Bash(./build/x64-asan/bin/Test.Math.MathUtilsXform3DTest.exe)",
+      "Bash(./build/x64-asan/bin/Test.Math.MathUtilsXform2DTest.exe)",
+      "Bash(T:/toolchains/coca-toolchain-p2996/bin/clang++.exe --target=x86_64-pc-windows-msvc -std=gnu++26 -freflection-latest -nostdinc++ -isystem \"T:/toolchains/coca-toolchain-p2996/include/c++/v1\" -isystem \"T:/toolchains/coca-toolchain-p2996/lib/clang/21/include\" -isystem \"T:/toolchains/coca-toolchain-p2996/sysroots/x86_64-windows-msvc/msvc/include\" -isystem \"T:/toolchains/coca-toolchain-p2996/sysroots/x86_64-windows-msvc/sdk/Include/10.0.26100.0/ucrt\" -I Mashiro/include -fsyntax-only /tmp/test_affineops.cpp)",
+      "Bash(ninja -C build/x64-asan Test.Core.GeomOpsTest Test.Core.QuanterionTest Test.Core.MathUtilsTest Test.Math.MathStressTest Test.Math.MatTest Test.Math.MathUtilsXform3DTest Test.Math.MathUtilsXform2DTest)",
+      "Bash(./build/x64-asan/bin/Test.Core.GeomOpsTest.exe)"
+    ]
+  }
+}

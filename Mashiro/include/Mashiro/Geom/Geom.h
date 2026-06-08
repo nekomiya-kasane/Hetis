@@ -192,6 +192,7 @@ namespace Mashiro {
 
     // Legacy / convenience names.
     using AABB          = Box3;    ///< Legacy: 3-D axis-aligned bounding box.
+    using Ray           = Ray3;    ///< Legacy: 3-D ray.
     using FrustumPlanes = Frustum; ///< Legacy: view frustum (6 planes).
     using BoundingBox    = Box3;   ///< Bounding box used in spatial queries.
     using BoundingSphere = Sphere; ///< Bounding sphere used in spatial queries.

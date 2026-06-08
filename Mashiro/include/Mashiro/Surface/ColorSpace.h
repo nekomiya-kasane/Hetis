@@ -28,6 +28,7 @@
 
 #include "Mashiro/Core/FixedString.h"
 #include "Mashiro/Math/MatOps.h"
+#include "Mashiro/Math/ScalarMath.h"
 
 #include <array>
 #include <bit>
@@ -137,7 +138,7 @@ namespace Mashiro::Coloring {
     };
 
     // =====================================================================
-    //  §4  Standard Color Spaces
+    //  Standard Color Spaces
     // =====================================================================
 
     namespace CS {
@@ -383,7 +384,7 @@ namespace Mashiro::Coloring {
     }
 
     // =====================================================================
-    //  §9  Transfer Functions (OETF / EOTF)
+    //  Transfer Functions (OETF / EOTF)
     // =====================================================================
 
     namespace TF {
@@ -579,7 +580,7 @@ namespace Mashiro::Coloring {
     }
 
     // =====================================================================
-    //  §10  Strongly-Typed Color<CS>
+    //  Strongly-Typed Color<CS>
     // =====================================================================
 
     template<ColorSpaceDesc CS>
@@ -628,7 +629,7 @@ namespace Mashiro::Coloring {
     };
 
     // =====================================================================
-    //  §11  Conversion Between Color Spaces
+    //  Conversion Between Color Spaces
     // =====================================================================
 
     template<ColorSpaceDesc Dst, ColorSpaceDesc Src>
@@ -682,7 +683,7 @@ namespace Mashiro::Coloring {
     }
 
     // =====================================================================
-    //  §13  CIE L*a*b* (CIELAB)
+    //  CIE L*a*b* (CIELAB)
     // =====================================================================
 
     namespace Lab {
@@ -722,7 +723,7 @@ namespace Mashiro::Coloring {
     } // namespace Lab
 
     // =====================================================================
-    //  §14  CIE L*u*v* (CIELUV)
+    //  CIE L*u*v* (CIELUV)
     // =====================================================================
 
     namespace Luv {
@@ -774,7 +775,7 @@ namespace Mashiro::Coloring {
     } // namespace Luv
 
     // =====================================================================
-    //  §15  Oklab (Björn Ottosson 2020)
+    //  Oklab (Björn Ottosson 2020)
     // =====================================================================
 
     namespace Oklab {
@@ -885,7 +886,7 @@ namespace Mashiro::Coloring {
     } // namespace Oklab
 
     // =====================================================================
-    //  §16  Oklch (Oklab in cylindrical form)
+    //  Oklch (Oklab in cylindrical form)
     // =====================================================================
 
     namespace Oklch {
@@ -913,7 +914,7 @@ namespace Mashiro::Coloring {
     } // namespace Oklch
 
     // =====================================================================
-    //  §17  Delta E Color Differences
+    //  Delta E Color Differences
     // =====================================================================
 
     namespace DeltaE {
@@ -1039,7 +1040,7 @@ namespace Mashiro::Coloring {
     } // namespace DeltaE
 
     // =====================================================================
-    //  §18  Gamut Operations
+    //  Gamut Operations
     // =====================================================================
 
     [[nodiscard]] constexpr bool InGamut(vec3 rgb, float tolerance = 0.0f) {
@@ -1110,7 +1111,7 @@ namespace Mashiro::Coloring {
     }
 
     // =====================================================================
-    //  §19  Correlated Color Temperature (CCT)
+    //  Correlated Color Temperature (CCT)
     // =====================================================================
 
     [[nodiscard]] constexpr float CCTFromXY(Chromaticity c) {
@@ -1132,7 +1133,7 @@ namespace Mashiro::Coloring {
     }
 
     // =====================================================================
-    //  §20  Blackbody Spectrum (Planckian Locus)
+    //  Blackbody Spectrum (Planckian Locus)
     // =====================================================================
 
     [[nodiscard]] constexpr vec3 BlackbodyXYZ(float T) {
@@ -1154,7 +1155,7 @@ namespace Mashiro::Coloring {
     }
 
     // =====================================================================
-    //  §21  HSV / HSL (sRGB-native convenience)
+    //  HSV / HSL (sRGB-native convenience)
     // =====================================================================
 
     namespace HSV {
@@ -1266,7 +1267,7 @@ namespace Mashiro::Coloring {
     } // namespace HSL
 
     // =====================================================================
-    //  §22  Color Constants
+    //  Color Constants
     // =====================================================================
 
     namespace Named {
@@ -1298,7 +1299,7 @@ namespace Mashiro::Coloring {
     } // namespace Named
 
     // =====================================================================
-    //  §23  Compile-time Verification & Static Assertions
+    //  Compile-time Verification & Static Assertions
     // =====================================================================
 
     namespace Detail {
@@ -1370,16 +1371,16 @@ namespace Mashiro::Coloring {
 
     template<ColorSpaceDesc CS>
     [[nodiscard]] constexpr ColorA<CS> Premultiply(ColorA<CS> c) {
-        return {c.v * c.a, c.a};
+        return {Color<CS>{c.v * c.a}, c.a};
     }
 
     template<ColorSpaceDesc CS>
     [[nodiscard]] constexpr ColorA<CS> Unpremultiply(ColorA<CS> c) {
         if (c.a <= 0.0f) {
-            return {vec3{0.0f, 0.0f, 0.0f}, 0.0f};
+            return {Color<CS>{vec3{0.0f, 0.0f, 0.0f}}, 0.0f};
         }
         float inv = 1.0f / c.a;
-        return {c.v * inv, c.a};
+        return {Color<CS>{c.v * inv}, c.a};
     }
 
     template<ColorSpaceDesc Dst, ColorSpaceDesc Src>
@@ -1419,9 +1420,9 @@ namespace Mashiro::Coloring {
         }
 
         [[nodiscard]] static constexpr PackedColor fromFloat(Color<CS> c) {
-            float er = Clamp(Encode(CS.transfer, c.v.x), 0.0f, 1.0f);
-            float eg = Clamp(Encode(CS.transfer, c.v.y), 0.0f, 1.0f);
-            float eb = Clamp(Encode(CS.transfer, c.v.z), 0.0f, 1.0f);
+            float er = Math::Clamp(Encode(CS.transfer, c.v.x), 0.0f, 1.0f);
+            float eg = Math::Clamp(Encode(CS.transfer, c.v.y), 0.0f, 1.0f);
+            float eb = Math::Clamp(Encode(CS.transfer, c.v.z), 0.0f, 1.0f);
             return {static_cast<U>(er * float(kMax) + 0.5f),
                     static_cast<U>(eg * float(kMax) + 0.5f),
                     static_cast<U>(eb * float(kMax) + 0.5f)};
@@ -1452,10 +1453,10 @@ namespace Mashiro::Coloring {
         }
 
         [[nodiscard]] static constexpr PackedColorA fromFloat(ColorA<CS> c) {
-            float er = Clamp(Encode(CS.transfer, c.r), 0.0f, 1.0f);
-            float eg = Clamp(Encode(CS.transfer, c.g), 0.0f, 1.0f);
-            float eb = Clamp(Encode(CS.transfer, c.b), 0.0f, 1.0f);
-            float ea = Clamp(c.a, 0.0f, 1.0f);
+            float er = Math::Clamp(Encode(CS.transfer, c.v.x), 0.0f, 1.0f);
+            float eg = Math::Clamp(Encode(CS.transfer, c.v.y), 0.0f, 1.0f);
+            float eb = Math::Clamp(Encode(CS.transfer, c.v.z), 0.0f, 1.0f);
+            float ea = Math::Clamp(c.a, 0.0f, 1.0f);
             return {
                 static_cast<U>(er * float(kMax) + 0.5f), static_cast<U>(eg * float(kMax) + 0.5f),
                 static_cast<U>(eb * float(kMax) + 0.5f), static_cast<U>(ea * float(kMax) + 0.5f)};

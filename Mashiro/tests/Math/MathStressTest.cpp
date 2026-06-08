@@ -40,7 +40,7 @@ TEST_CASE("Constexpr matrix ops fold correctly", AUTO_TAG) {
     STATIC_REQUIRE(id[1,1] == 1.0f);
     STATIC_REQUIRE(id[0,1] == 0.0f);
 
-    constexpr mat4 t = Math::MakeTranslation(vec3{1,2,3}).ToMat();
+    constexpr mat4 t = Math::ToFull(Math::MakeTranslation(vec3{1,2,3}));
     STATIC_REQUIRE(t[0,3] == 1.0f);
     STATIC_REQUIRE(t[1,3] == 2.0f);
     STATIC_REQUIRE(t[2,3] == 3.0f);
@@ -58,7 +58,7 @@ TEST_CASE("Constexpr Det folds at compile time", AUTO_TAG) {
 }
 
 TEST_CASE("Constexpr 2D rotation folds at compile time", AUTO_TAG) {
-    constexpr mat3 r = Math::MakeRotate2D(0.0f).ToMat();
+    constexpr mat3 r = Math::ToFull(Math::MakeRotate2D(0.0f));
     STATIC_REQUIRE(r[0,0] == 1.0f);
     STATIC_REQUIRE(r[1,1] == 1.0f);
     STATIC_REQUIRE(r[0,1] == 0.0f);
@@ -78,9 +78,9 @@ TEST_CASE("Inverse is left and right inverse (multiple TRS)", AUTO_TAG) {
         {{100,-50,25}, {1,1,1}, 3.0f,  {0.5f,0.5f,0.5f}},
     };
     for (auto& [t,axis,angle,s] : cases) {
-        mat4 m = (Math::MakeTranslation(t)
+        mat4 m = Math::ToFull(Math::MakeTranslation(t)
                  * Math::MakeRotateAxis(axis, angle)
-                 * Math::MakeScale(s)).ToMat();
+                 * Math::MakeScale(s));
         mat4 mi = Math::Inverse(m);
         RequireCloseEigen(m * mi, Eigen::Matrix4f::Identity().eval(), 1e-3f);
         RequireCloseEigen(mi * m, Eigen::Matrix4f::Identity().eval(), 1e-3f);
@@ -95,17 +95,17 @@ TEST_CASE("InverseAffine matches full Inverse upper rows", AUTO_TAG) {
         {{1,1,1}, 2.5f,  {0,0,100}},
     };
     for (auto& [axis,angle,t] : cases) {
-        affine3 a = Math::MakeRotateAxis(axis, angle);
-        a.m[0,3]=t.x; a.m[1,3]=t.y; a.m[2,3]=t.z;
-        affine3 ai = Math::Inverse(a);
+        affine3<> a = Math::MakeRotateAxis(axis, angle);
+        a[0,3]=t.x; a[1,3]=t.y; a[2,3]=t.z;
+        affine3<> ai = Math::InverseAffine(a);
 
         mat4 full = Math::Identity();
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c)
-                full[r,c] = a.m[r,c];
+                full[r,c] = a[r,c];
         mat4 fullInv = Math::Inverse(full);
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c)
-                RequireClose(ai.m[r,c], fullInv[r,c], 1e-4f);
+                RequireClose(ai[r,c], fullInv[r,c], 1e-4f);
     }
 }

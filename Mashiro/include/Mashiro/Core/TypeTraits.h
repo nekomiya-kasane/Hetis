@@ -165,8 +165,7 @@ namespace Mashiro {
 
         /// @brief Static reflection array of @p T's enumerators.
         template<typename T>
-        inline constexpr auto Enumerators = std::define_static_array(
-            std::meta::enumerators_of(^^T));
+        inline constexpr auto Enumerators = std::define_static_array(std::meta::enumerators_of(^^T));
 
         /// @brief Number of enumerators in @p T.
         template<typename T>
@@ -182,7 +181,7 @@ namespace Mashiro {
             /// @brief Compile-time check: every enumerator is 0 or a power of 2.
             template <typename E>
             consteval bool AllPowerOfTwo() {
-                for (auto e : Enumerators<E>) {
+                template for (constexpr auto e : Enumerators<E>) {
                     auto v = static_cast<UnsignedUnderlying<E>>([:e:]);
                     if (v != 0 && !std::has_single_bit(v) && (std::meta::display_string_of(e) != "None"))
                         return false;
@@ -210,7 +209,7 @@ namespace Mashiro {
             template <typename E>
             consteval UnsignedUnderlying<E> AllBitsMask() {
                 UnsignedUnderlying<E> mask{};
-                for (auto e : Enumerators<E>) {
+                template for (constexpr auto e : Enumerators<E>) {
                     mask |= static_cast<UnsignedUnderlying<E>>([:e:]);
                 }
                 return mask;

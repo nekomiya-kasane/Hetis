@@ -25,35 +25,35 @@ TEST_CASE("MakeTranslation matches Eigen", AUTO_TAG) {
     vec3 t{10,-20,30};
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.translate(ToEigen(t));
-    RequireCloseEigen(Math::MakeTranslation(t).ToMat(), ea.matrix());
+    RequireCloseEigen(Math::ToFull(Math::MakeTranslation(t)), ea.matrix());
 }
 
 TEST_CASE("MakeScale matches Eigen", AUTO_TAG) {
     vec3 s{2,3,4};
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.scale(ToEigen(s));
-    RequireCloseEigen(Math::MakeScale(s).ToMat(), ea.matrix());
+    RequireCloseEigen(Math::ToFull(Math::MakeScale(s)), ea.matrix());
 }
 
 TEST_CASE("MakeRotateX matches Eigen", AUTO_TAG) {
     float angle = 1.2f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitX()));
-    RequireCloseEigen(Math::MakeRotateX(angle).ToMat(), ea.matrix());
+    RequireCloseEigen(Math::ToFull(Math::MakeRotateX(angle)), ea.matrix());
 }
 
 TEST_CASE("MakeRotateY matches Eigen", AUTO_TAG) {
     float angle = -0.7f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitY()));
-    RequireCloseEigen(Math::MakeRotateY(angle).ToMat(), ea.matrix());
+    RequireCloseEigen(Math::ToFull(Math::MakeRotateY(angle)), ea.matrix());
 }
 
 TEST_CASE("MakeRotateZ matches Eigen", AUTO_TAG) {
     float angle = 2.1f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ()));
-    RequireCloseEigen(Math::MakeRotateZ(angle).ToMat(), ea.matrix());
+    RequireCloseEigen(Math::ToFull(Math::MakeRotateZ(angle)), ea.matrix());
 }
 
 TEST_CASE("MakeRotateAxis matches Eigen", AUTO_TAG) {
@@ -61,19 +61,19 @@ TEST_CASE("MakeRotateAxis matches Eigen", AUTO_TAG) {
     float angle = 1.1f;
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, ToEigen(axis).normalized()));
-    RequireCloseEigen(Math::MakeRotateAxis(axis, angle).ToMat(), ea.matrix(), 1e-4f);
+    RequireCloseEigen(Math::ToFull(Math::MakeRotateAxis(axis, angle)), ea.matrix(), 1e-4f);
 }
 
 TEST_CASE("Rotation matrices have det = 1", AUTO_TAG) {
-    RequireClose(Math::Det(Math::MakeRotateX(0.5f).Linear()), 1.0f);
-    RequireClose(Math::Det(Math::MakeRotateY(1.2f).Linear()), 1.0f);
-    RequireClose(Math::Det(Math::MakeRotateZ(-0.3f).Linear()), 1.0f);
-    RequireClose(Math::Det(Math::MakeRotateAxis(vec3{1,1,1}, 2.0f).Linear()), 1.0f);
+    RequireClose(Math::Det(Math::Linear(Math::MakeRotateX(0.5f))), 1.0f);
+    RequireClose(Math::Det(Math::Linear(Math::MakeRotateY(1.2f))), 1.0f);
+    RequireClose(Math::Det(Math::Linear(Math::MakeRotateZ(-0.3f))), 1.0f);
+    RequireClose(Math::Det(Math::Linear(Math::MakeRotateAxis(vec3{1,1,1}, 2.0f))), 1.0f);
 }
 
 TEST_CASE("MakeLookAt matches manual Eigen construction", AUTO_TAG) {
     vec3 eye{0,0,5}, target{0,0,0}, up{0,1,0};
-    mat4 view = Math::MakeLookAt(eye, target, up).ToMat();
+    mat4 view = Math::ToFull(Math::MakeLookAt(eye, target, up));
 
     auto eEye = ToEigen(eye), eTarget = ToEigen(target), eUp = ToEigen(up);
     Eigen::Vector3f f = (eTarget - eEye).normalized();
@@ -95,11 +95,11 @@ TEST_CASE("MakeLookAt matches manual Eigen construction", AUTO_TAG) {
 // ===========================================================================
 
 TEST_CASE("IdentityAffine is upper 3 rows of Identity()", AUTO_TAG) {
-    affine3 a = affine3::Identity();
+    affine3<> a = Math::IdentityAffine<float,3>();
     mat4 full = Math::Identity();
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 4; ++c)
-            RequireClose(a.m[r,c], full[r,c]);
+            RequireClose(a[r,c], full[r,c]);
 }
 
 TEST_CASE("Affine3D builders match upper rows of 4x4", AUTO_TAG) {
@@ -108,31 +108,31 @@ TEST_CASE("Affine3D builders match upper rows of 4x4", AUTO_TAG) {
         auto f = fullFn();
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c)
-                RequireClose(a.m[r,c], f[r,c]);
+                RequireClose(a[r,c], f[r,c]);
     };
 
     check([]{return Math::MakeTranslation(vec3{5,-3,7});},
-          []{return Math::MakeTranslation(vec3{5,-3,7}).ToMat();});
+          []{return Math::ToFull(Math::MakeTranslation(vec3{5,-3,7}));});
     check([]{return Math::MakeScale(vec3{2,0.5f,3});},
-          []{return Math::MakeScale(vec3{2,0.5f,3}).ToMat();});
+          []{return Math::ToFull(Math::MakeScale(vec3{2,0.5f,3}));});
     check([]{return Math::MakeRotateX(0.9f);},
-          []{return Math::MakeRotateX(0.9f).ToMat();});
+          []{return Math::ToFull(Math::MakeRotateX(0.9f));});
     check([]{return Math::MakeRotateY(-1.3f);},
-          []{return Math::MakeRotateY(-1.3f).ToMat();});
+          []{return Math::ToFull(Math::MakeRotateY(-1.3f));});
     check([]{return Math::MakeRotateZ(2.0f);},
-          []{return Math::MakeRotateZ(2.0f).ToMat();});
+          []{return Math::ToFull(Math::MakeRotateZ(2.0f));});
     check([]{return Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f);},
-          []{return Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f).ToMat();});
+          []{return Math::ToFull(Math::MakeRotateAxis(vec3{0.3f,0.8f,-0.5f}, 1.1f));});
     check([]{return Math::MakeLookAt(vec3{3,4,5},vec3{0,0,0},vec3{0,1,0});},
-          []{return Math::MakeLookAt(vec3{3,4,5},vec3{0,0,0},vec3{0,1,0}).ToMat();});
+          []{return Math::ToFull(Math::MakeLookAt(vec3{3,4,5},vec3{0,0,0},vec3{0,1,0}));});
 }
 
 TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", AUTO_TAG) {
     vec3 axis{0.3f,0.8f,-0.5f}, t{5,-3,2};
     float angle = 1.1f;
-    affine3 a = Math::MakeRotateAxis(axis, angle);
-    a.m[0,3]=t.x; a.m[1,3]=t.y; a.m[2,3]=t.z;
-    affine3 ai = Math::Inverse(a);
+    affine3<> a = Math::MakeRotateAxis(axis, angle);
+    a[0,3]=t.x; a[1,3]=t.y; a[2,3]=t.z;
+    affine3<> ai = Math::InverseAffine(a);
 
     Eigen::Affine3f ea = Eigen::Affine3f::Identity();
     ea.rotate(Eigen::AngleAxisf(angle, ToEigen(axis).normalized()));
@@ -140,7 +140,7 @@ TEST_CASE("InverseAffine matches Eigen Affine3f .inverse()", AUTO_TAG) {
     Eigen::Affine3f eai = ea.inverse();
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 4; ++c)
-            RequireClose(ai.m[r,c], eai.matrix()(r,c), 1e-4f);
+            RequireClose(ai[r,c], eai.matrix()(r,c), 1e-4f);
 }
 
 // ===========================================================================

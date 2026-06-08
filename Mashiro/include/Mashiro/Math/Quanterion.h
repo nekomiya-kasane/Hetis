@@ -28,7 +28,7 @@
  */
 #pragma once
 
-#include "Mashiro/Math/Affine.h"
+#include "Mashiro/Math/AffineOps.h"
 #include "Mashiro/Math/Types.h"
 #include "Mashiro/Math/VecOps.h"
 
@@ -353,26 +353,25 @@ namespace Mashiro {
          *
          * The most common "quaternion acting on a transform" in a renderer: the linear
          * block is the quaternion matrix scaled per-axis, with translation in column N.
-         * Defaults to compact storage; pass `AffineStorage::Full` for a `mat4`-backed
-         * result, or call `.ToMat()` on the returned value.
+         * Defaults to compact storage; pass `AffineForm::Full` for a `mat4` result.
          */
-        template<AffineStorage S = AffineStorage::Compact>
-        [[nodiscard]] constexpr Affine<float, 3, S> MakeTransform(vec3 translation, quat rotation,
-                                                                 vec3 scale) {
+        template<AffineForm F = AffineForm::Compact>
+        [[nodiscard]] constexpr affine<float, 3, F> MakeTransform(vec3 translation, quat rotation,
+                                                                   vec3 scale) {
             mat3 r = ToMat3(rotation);
-            Affine<float, 3, S> m = Affine<float, 3, S>::Identity();
-            m.m[0, 0] = r[0].x * scale.x;
-            m.m[1, 0] = r[0].y * scale.x;
-            m.m[2, 0] = r[0].z * scale.x;
-            m.m[0, 1] = r[1].x * scale.y;
-            m.m[1, 1] = r[1].y * scale.y;
-            m.m[2, 1] = r[1].z * scale.y;
-            m.m[0, 2] = r[2].x * scale.z;
-            m.m[1, 2] = r[2].y * scale.z;
-            m.m[2, 2] = r[2].z * scale.z;
-            m.m[0, 3] = translation.x;
-            m.m[1, 3] = translation.y;
-            m.m[2, 3] = translation.z;
+            auto m = Math::IdentityAffine<float, 3, F>();
+            m[0, 0] = r[0].x * scale.x;
+            m[1, 0] = r[0].y * scale.x;
+            m[2, 0] = r[0].z * scale.x;
+            m[0, 1] = r[1].x * scale.y;
+            m[1, 1] = r[1].y * scale.y;
+            m[2, 1] = r[1].z * scale.y;
+            m[0, 2] = r[2].x * scale.z;
+            m[1, 2] = r[2].y * scale.z;
+            m[2, 2] = r[2].z * scale.z;
+            m[0, 3] = translation.x;
+            m[1, 3] = translation.y;
+            m[2, 3] = translation.z;
             return m;
         }
 

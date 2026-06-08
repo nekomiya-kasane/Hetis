@@ -21,7 +21,6 @@
 #pragma once
 
 #include <bit>
-#include <generator>
 
 #include "Mashiro/Core/TypeTraits.h"
 
