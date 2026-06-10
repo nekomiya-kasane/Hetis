@@ -92,7 +92,9 @@ namespace Mashiro {
             if (tail - cachedHead_ == Capacity) {
                 // Re-read actual head
                 cachedHead_ = head_.load(std::memory_order_acquire);
-                if (tail - cachedHead_ == Capacity) return false; // truly full
+                if (tail - cachedHead_ == Capacity) {
+                    return false; // truly full
+                }
             }
             ::new (&slots_[tail & kMask]) T(std::forward<U>(value));
             tail_.store(tail + 1, std::memory_order_release);
@@ -103,8 +105,9 @@ namespace Mashiro {
         template<typename U>
             requires std::constructible_from<T, U&&>
         void Push(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
-            while (!TryPush(std::forward<U>(value)))
+            while (!TryPush(std::forward<U>(value))) {
                 std::this_thread::yield();
+            }
         }
 
         /// @brief Emplace an element in-place.
@@ -115,7 +118,9 @@ namespace Mashiro {
             uint32_t tail = tail_.load(std::memory_order_relaxed);
             if (tail - cachedHead_ == Capacity) {
                 cachedHead_ = head_.load(std::memory_order_acquire);
-                if (tail - cachedHead_ == Capacity) return false;
+                if (tail - cachedHead_ == Capacity) {
+                    return false;
+                }
             }
             ::new (&slots_[tail & kMask]) T(std::forward<Args>(args)...);
             tail_.store(tail + 1, std::memory_order_release);
@@ -132,7 +137,9 @@ namespace Mashiro {
             uint32_t head = head_.load(std::memory_order_relaxed);
             if (head == cachedTail_) {
                 cachedTail_ = tail_.load(std::memory_order_acquire);
-                if (head == cachedTail_) return false; // truly empty
+                if (head == cachedTail_) {
+                    return false; // truly empty
+                }
             }
             auto* ptr = std::launder(reinterpret_cast<T*>(&slots_[head & kMask]));
             out = std::move(*ptr);
@@ -146,7 +153,9 @@ namespace Mashiro {
             uint32_t head = head_.load(std::memory_order_relaxed);
             if (head == cachedTail_) {
                 cachedTail_ = tail_.load(std::memory_order_acquire);
-                if (head == cachedTail_) return std::nullopt;
+                if (head == cachedTail_) {
+                    return std::nullopt;
+                }
             }
             auto* ptr = std::launder(reinterpret_cast<T*>(&slots_[head & kMask]));
             std::optional<T> result{std::move(*ptr)};
@@ -158,7 +167,9 @@ namespace Mashiro {
         /// @brief Pop, spinning until data is available. Yields between attempts.
         [[nodiscard]] T Pop() noexcept(std::is_nothrow_move_constructible_v<T>) {
             while (true) {
-                if (auto val = TryPop()) return std::move(*val);
+                if (auto val = TryPop()) {
+                    return std::move(*val);
+                }
                 std::this_thread::yield();
             }
         }

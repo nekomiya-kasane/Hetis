@@ -36,16 +36,26 @@ namespace {
         MoveOnly(const MoveOnly&) = delete;
         MoveOnly& operator=(const MoveOnly&) = delete;
         MoveOnly(MoveOnly&& o) noexcept : value(o.value) { o.value = -1; }
-        MoveOnly& operator=(MoveOnly&& o) noexcept { value = o.value; o.value = -1; return *this; }
+        MoveOnly& operator=(MoveOnly&& o) noexcept {
+            value = o.value;
+            o.value = -1;
+            return *this;
+        }
     };
 
     struct DtorCounter {
         int* counter;
         explicit DtorCounter(int* c) : counter(c) {}
-        ~DtorCounter() { if (counter) ++(*counter); }
+        ~DtorCounter() {
+            if (counter) {
+                ++(*counter);
+            }
+        }
         DtorCounter(DtorCounter&& o) noexcept : counter(o.counter) { o.counter = nullptr; }
         DtorCounter& operator=(DtorCounter&& o) noexcept {
-            counter = o.counter; o.counter = nullptr; return *this;
+            counter = o.counter;
+            o.counter = nullptr;
+            return *this;
         }
     };
 
@@ -80,7 +90,9 @@ TEST_CASE("SpscQueue: fill to capacity", AUTO_TAG) {
 
 TEST_CASE("SpscQueue: pop empties then refill", AUTO_TAG) {
     SpscQueue<int, 4> q;
-    for (int i = 0; i < 4; ++i) (void)q.TryPush(i);
+    for (int i = 0; i < 4; ++i) {
+        (void)q.TryPush(i);
+    }
 
     int v;
     for (int i = 0; i < 4; ++i) {
@@ -90,7 +102,9 @@ TEST_CASE("SpscQueue: pop empties then refill", AUTO_TAG) {
     REQUIRE(q.Empty());
 
     // Refill (tests wrap-around)
-    for (int i = 10; i < 14; ++i) REQUIRE(q.TryPush(i));
+    for (int i = 10; i < 14; ++i) {
+        REQUIRE(q.TryPush(i));
+    }
     for (int i = 10; i < 14; ++i) {
         REQUIRE(q.TryPop(v));
         REQUIRE(v == i);
@@ -184,12 +198,16 @@ TEST_CASE("SpscQueue: interleaved push/pop maintains FIFO", AUTO_TAG) {
         (void)q.TryPush(i);
         if (i % 3 == 0) {
             int v;
-            if (q.TryPop(v)) results.push_back(v);
+            if (q.TryPop(v)) {
+                results.push_back(v);
+            }
         }
     }
     // Drain remaining
     int v;
-    while (q.TryPop(v)) results.push_back(v);
+    while (q.TryPop(v)) {
+        results.push_back(v);
+    }
 
     // All should be in order
     for (size_t i = 1; i < results.size(); ++i) {
@@ -208,18 +226,24 @@ TEST_CASE("SpscQueue: producer-consumer across threads", AUTO_TAG) {
     received.reserve(kCount);
 
     std::thread producer([&] {
-        for (int i = 0; i < kCount; ++i) q.Push(i);
+        for (int i = 0; i < kCount; ++i) {
+            q.Push(i);
+        }
     });
 
     std::thread consumer([&] {
-        for (int i = 0; i < kCount; ++i) received.push_back(q.Pop());
+        for (int i = 0; i < kCount; ++i) {
+            received.push_back(q.Pop());
+        }
     });
 
     producer.join();
     consumer.join();
 
     REQUIRE(received.size() == kCount);
-    for (int i = 0; i < kCount; ++i) REQUIRE(received[i] == i);
+    for (int i = 0; i < kCount; ++i) {
+        REQUIRE(received[i] == i);
+    }
 }
 
 // =============================================================================
@@ -255,7 +279,9 @@ TEST_CASE("SpscByteRing: write multiple messages", AUTO_TAG) {
         results.push_back(v);
     });
     REQUIRE(results.size() == 10);
-    for (int i = 0; i < 10; ++i) REQUIRE(results[i] == i);
+    for (int i = 0; i < 10; ++i) {
+        REQUIRE(results[i] == i);
+    }
 }
 
 TEST_CASE("SpscByteRing: write from span", AUTO_TAG) {
@@ -278,8 +304,8 @@ TEST_CASE("SpscByteRing: full ring rejects write", AUTO_TAG) {
     SpscByteRing<64> ring; // 64 bytes total
     // Each write = 4 (header) + payload. Fill up.
     char big[50] = {};
-    REQUIRE(ring.TryWrite(big, sizeof(big)));     // 4+50=54 bytes used
-    REQUIRE(!ring.TryWrite(big, sizeof(big)));    // no room for another 54
+    REQUIRE(ring.TryWrite(big, sizeof(big)));  // 4+50=54 bytes used
+    REQUIRE(!ring.TryWrite(big, sizeof(big))); // no room for another 54
 }
 
 TEST_CASE("SpscByteRing: zero-length message", AUTO_TAG) {
@@ -332,7 +358,9 @@ TEST_CASE("SpscByteRing: mixed message sizes", AUTO_TAG) {
     int msgIndex = 1;
     ring.ReadAll([&](std::span<const std::byte> data) {
         REQUIRE(data.size() == static_cast<size_t>(msgIndex * 4));
-        for (auto b : data) REQUIRE(b == std::byte{static_cast<unsigned char>(msgIndex)});
+        for (auto b : data) {
+            REQUIRE(b == std::byte{static_cast<unsigned char>(msgIndex)});
+        }
         ++msgIndex;
     });
     REQUIRE(msgIndex == 21); // read all 20 messages
@@ -367,8 +395,9 @@ TEST_CASE("SpscByteRing: producer-consumer across threads", AUTO_TAG) {
 
     std::thread producer([&] {
         for (int i = 0; i < kCount; ++i) {
-            while (!ring.TryWrite(&i, sizeof(i)))
+            while (!ring.TryWrite(&i, sizeof(i))) {
                 std::this_thread::yield();
+            }
         }
         done.store(true, std::memory_order_release);
     });
@@ -380,8 +409,9 @@ TEST_CASE("SpscByteRing: producer-consumer across threads", AUTO_TAG) {
                 std::memcpy(&v, data.data(), sizeof(int));
                 received.push_back(v);
             });
-            if (received.size() < kCount)
+            if (received.size() < kCount) {
                 std::this_thread::yield();
+            }
         }
     });
 
@@ -389,7 +419,9 @@ TEST_CASE("SpscByteRing: producer-consumer across threads", AUTO_TAG) {
     consumer.join();
 
     REQUIRE(received.size() == kCount);
-    for (int i = 0; i < kCount; ++i) REQUIRE(received[i] == i);
+    for (int i = 0; i < kCount; ++i) {
+        REQUIRE(received[i] == i);
+    }
 }
 
 // =============================================================================
