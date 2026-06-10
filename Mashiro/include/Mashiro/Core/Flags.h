@@ -143,6 +143,45 @@ namespace Mashiro {
     // Iteration — yields each set bit as its enumerator (lowest first)
     // =========================================================================
 
+    namespace Detail {
+
+        /// @brief Lightweight input range over the set bits of a bitfield enum.
+        template <Traits::BitfieldEnum E>
+        class FlagRange {
+            using U = Traits::Detail::UnsignedUnderlying<E>;
+            U bits_;
+
+        public:
+            constexpr explicit FlagRange(E flags) noexcept
+                : bits_{static_cast<U>(flags)} {}
+
+            struct Sentinel {};
+
+            struct Iterator {
+                using difference_type = std::ptrdiff_t;
+                using value_type      = E;
+
+                U bits;
+
+                constexpr E operator*() const noexcept {
+                    return static_cast<E>(bits & static_cast<U>(-bits));
+                }
+                constexpr Iterator& operator++() noexcept {
+                    bits &= bits - 1; // clear lowest set bit
+                    return *this;
+                }
+                constexpr void operator++(int) noexcept { ++*this; }
+                friend constexpr bool operator==(Iterator it, Sentinel) noexcept {
+                    return it.bits == 0;
+                }
+            };
+
+            [[nodiscard]] constexpr Iterator begin() const noexcept { return {bits_}; }
+            [[nodiscard]] constexpr Sentinel end()   const noexcept { return {}; }
+        };
+
+    } // namespace Detail
+
     /**
      * @brief Lazily yields each set flag bit as its enumerator, lowest first.
      *
@@ -151,13 +190,8 @@ namespace Mashiro {
      * @endcode
      */
     template <Traits::BitfieldEnum E>
-    std::generator<E> EachFlag(E flags) {
-        auto bits = static_cast<Traits::Detail::UnsignedUnderlying<E>>(flags);
-        while (bits != 0) {
-            auto lowest = bits & static_cast<decltype(bits)>(-bits);
-            co_yield static_cast<E>(lowest);
-            bits &= ~lowest;
-        }
+    [[nodiscard]] constexpr Detail::FlagRange<E> EachFlag(E flags) noexcept {
+        return Detail::FlagRange<E>{flags};
     }
 
 }  // namespace Mashiro
