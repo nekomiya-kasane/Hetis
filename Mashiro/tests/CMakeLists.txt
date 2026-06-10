@@ -42,5 +42,7 @@ add_mashiro_test(Math MathUtilsXform3DTest eigen)
 add_mashiro_test(Math MathUtilsXform2DTest eigen)
 add_mashiro_test(Math MathStressTest eigen)
 
+add_mashiro_test(Schedular GeneratorTest)
+
 add_mashiro_test(Surface ColorSpaceTest)
 add_mashiro_test(Surface WindowTest)
