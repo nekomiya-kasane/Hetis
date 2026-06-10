@@ -302,25 +302,32 @@ TEST_CASE("SpscByteRing: write from span", AUTO_TAG) {
 
 TEST_CASE("SpscByteRing: full ring rejects write", AUTO_TAG) {
     SpscByteRing<64> ring; // 64 bytes total
-    // Each write = 4 (header) + payload. Fill up.
-    char big[50] = {};
-    REQUIRE(ring.TryWrite(big, sizeof(big)));  // 4+50=54 bytes used
-    REQUIRE(!ring.TryWrite(big, sizeof(big))); // no room for another 54
+    // Each write = 4 (header) + 28 payload bytes. Two writes fill the ring.
+    char payload[28] = {};
+    REQUIRE(ring.TryWrite(payload, sizeof(payload)));
+    REQUIRE(ring.TryWrite(payload, sizeof(payload)));
+    REQUIRE(!ring.TryWrite(payload, sizeof(payload)));
 }
 
 TEST_CASE("SpscByteRing: zero-length message", AUTO_TAG) {
     SpscByteRing<256> ring;
-    // Zero-length write: header only (4 bytes)
-    REQUIRE(ring.TryWrite(nullptr, 0));
+    REQUIRE(!ring.TryWrite(nullptr, 0));
+    REQUIRE(!ring.HasData());
+}
 
-    uint32_t count = ring.ReadAll([](std::span<const std::byte> data) {
-        // Zero-length message reads as entrySize=0 which triggers corruption guard.
-        // Actually this is a design question — let's see what happens.
-        (void)data;
-    });
-    // entrySize=0 is treated as corruption and skipped
-    // This documents the behavior: zero-length messages are NOT supported.
-    REQUIRE(count == 0);
+TEST_CASE("SpscByteRing: null non-empty write is rejected", AUTO_TAG) {
+    SpscByteRing<256> ring;
+    REQUIRE(!ring.TryWrite(nullptr, 4));
+    REQUIRE(!ring.HasData());
+}
+
+TEST_CASE("SpscByteRing: oversized message is rejected before staging overflow", AUTO_TAG) {
+    SpscByteRing<65536> ring;
+    std::vector<std::byte> maxPayload(8192, std::byte{0x7F});
+    std::vector<std::byte> oversized(8193, std::byte{0x7F});
+
+    REQUIRE(ring.TryWrite(maxPayload.data(), static_cast<uint32_t>(maxPayload.size())));
+    REQUIRE(!ring.TryWrite(oversized.data(), static_cast<uint32_t>(oversized.size())));
 }
 
 // =============================================================================

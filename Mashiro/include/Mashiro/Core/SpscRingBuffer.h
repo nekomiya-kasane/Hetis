@@ -72,7 +72,7 @@ namespace Mashiro {
             uint32_t head = head_.load(std::memory_order_relaxed);
             uint32_t tail = tail_.load(std::memory_order_relaxed);
             while (head != tail) {
-                std::destroy_at(std::launder(reinterpret_cast<T*>(&slots_[head & kMask])));
+                std::destroy_at(SlotPtr(head));
                 ++head;
             }
         }
@@ -96,7 +96,7 @@ namespace Mashiro {
                     return false; // truly full
                 }
             }
-            ::new (&slots_[tail & kMask]) T(std::forward<U>(value));
+            ::new (SlotStorage(tail)) T(std::forward<U>(value));
             tail_.store(tail + 1, std::memory_order_release);
             return true;
         }
@@ -122,7 +122,7 @@ namespace Mashiro {
                     return false;
                 }
             }
-            ::new (&slots_[tail & kMask]) T(std::forward<Args>(args)...);
+            ::new (SlotStorage(tail)) T(std::forward<Args>(args)...);
             tail_.store(tail + 1, std::memory_order_release);
             return true;
         }
@@ -141,7 +141,7 @@ namespace Mashiro {
                     return false; // truly empty
                 }
             }
-            auto* ptr = std::launder(reinterpret_cast<T*>(&slots_[head & kMask]));
+            auto* ptr = SlotPtr(head);
             out = std::move(*ptr);
             std::destroy_at(ptr);
             head_.store(head + 1, std::memory_order_release);
@@ -157,7 +157,7 @@ namespace Mashiro {
                     return std::nullopt;
                 }
             }
-            auto* ptr = std::launder(reinterpret_cast<T*>(&slots_[head & kMask]));
+            auto* ptr = SlotPtr(head);
             std::optional<T> result{std::move(*ptr)};
             std::destroy_at(ptr);
             head_.store(head + 1, std::memory_order_release);
@@ -193,6 +193,14 @@ namespace Mashiro {
         /// @}
 
     private:
+        [[nodiscard]] void* SlotStorage(uint32_t position) noexcept {
+            return &slots_[(position & kMask) * sizeof(T)];
+        }
+
+        [[nodiscard]] T* SlotPtr(uint32_t position) noexcept {
+            return std::launder(reinterpret_cast<T*>(SlotStorage(position)));
+        }
+
         // --- Producer state (own cache line) ---
         alignas(Platform::kCacheLineSize) std::atomic<uint32_t> tail_{0};
         uint32_t cachedHead_ = 0; ///< Producer's local copy of head_ (avoids cross-core read).
@@ -224,6 +232,8 @@ namespace Mashiro {
         requires(std::has_single_bit(Capacity) && Capacity >= 64)
     class SpscByteRing {
         static constexpr uint32_t kMask = Capacity - 1;
+        static constexpr uint32_t kHeaderSize = sizeof(uint32_t);
+        static constexpr uint32_t kMaxMessageSize = (Capacity / 2 < 8192) ? Capacity / 2 : 8192;
 
     public:
         /// @name Construction
@@ -242,8 +252,12 @@ namespace Mashiro {
          * @return true if written, false if insufficient space.
          */
         [[nodiscard]] bool TryWrite(std::span<const std::byte> data) noexcept {
+            if (data.empty() || data.size() > kMaxMessageSize) [[unlikely]] {
+                return false;
+            }
+
             auto size = static_cast<uint32_t>(data.size());
-            uint32_t totalSize = size + sizeof(uint32_t); // length prefix
+            uint32_t totalSize = size + kHeaderSize; // length prefix
             uint32_t wp = writePos_.load(std::memory_order_relaxed);
             uint32_t avail = Capacity - (wp - cachedReadPos_);
             if (totalSize > avail) {
@@ -254,14 +268,18 @@ namespace Mashiro {
                 }
             }
 
-            WriteRaw(&size, sizeof(uint32_t), wp);
-            WriteRaw(data.data(), size, wp + sizeof(uint32_t));
+            WriteRaw(&size, kHeaderSize, wp);
+            WriteRaw(data.data(), size, wp + kHeaderSize);
             writePos_.store(wp + totalSize, std::memory_order_release);
             return true;
         }
 
         /// @brief Convenience: write from raw pointer + size.
         [[nodiscard]] bool TryWrite(const void* data, uint32_t size) noexcept {
+            if (data == nullptr) [[unlikely]] {
+                return false;
+            }
+
             return TryWrite(std::span<const std::byte>{static_cast<const std::byte*>(data), size});
         }
 
@@ -296,25 +314,32 @@ namespace Mashiro {
             uint32_t count = 0;
 
             while (rp != wp) {
-                uint32_t entrySize = 0;
-                ReadRaw(&entrySize, sizeof(uint32_t), rp);
+                uint32_t available = wp - rp;
+                if (available < kHeaderSize) [[unlikely]] {
+                    rp = wp;
+                    break;
+                }
 
-                if (entrySize == 0 || entrySize > Capacity / 2) [[unlikely]] {
+                uint32_t entrySize = 0;
+                ReadRaw(&entrySize, kHeaderSize, rp);
+
+                if (entrySize == 0 ||
+                    entrySize > kMaxMessageSize ||
+                    entrySize + kHeaderSize > available) [[unlikely]] {
                     // Corrupted — skip to write pos
-                    readPos_.store(wp, std::memory_order_release);
+                    rp = wp;
                     break;
                 }
 
                 // Read into staging buffer, then invoke
-                ReadRaw(staging_, entrySize, rp + sizeof(uint32_t));
+                ReadRaw(staging_, entrySize, rp + kHeaderSize);
                 fn(std::span<const std::byte>{staging_, entrySize});
 
-                rp += sizeof(uint32_t) + entrySize;
+                rp += kHeaderSize + entrySize;
                 ++count;
             }
 
             readPos_.store(rp, std::memory_order_release);
-            cachedWritePos_ = wp;
             return count;
         }
 
@@ -325,7 +350,8 @@ namespace Mashiro {
 
         /// @brief Discard all pending data.
         void Reset() noexcept {
-            readPos_.store(writePos_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            auto wp = writePos_.load(std::memory_order_acquire);
+            readPos_.store(wp, std::memory_order_release);
         }
 
         /// @brief Check if there is pending data.
@@ -375,10 +401,8 @@ namespace Mashiro {
 
         // --- Consumer state (own cache line) ---
         alignas(Platform::kCacheLineSize) std::atomic<uint32_t> readPos_{0};
-        uint32_t cachedWritePos_ = 0; ///< Consumer's cached write position.
 
         // --- Staging buffer for reads (max single message = min(Capacity/2, 8KB)) ---
-        static constexpr uint32_t kMaxMessageSize = (Capacity / 2 < 8192) ? Capacity / 2 : 8192;
         alignas(Platform::kCacheLineSize) std::byte staging_[kMaxMessageSize]{};
 
         // --- Ring buffer storage ---
