@@ -196,9 +196,10 @@ namespace Mashiro {
                 if (EnumeratorsCount<T> == 0) {
                     return false;
                 }
+                using U = std::underlying_type_t<T>;
                 for (size_t i = 0; i < EnumeratorsCount<T>; ++i) {
-                    if (std::meta::constant_of(Enumerators<T>[i]) !=
-                        static_cast<std::underlying_type_t<T>>(i)) {
+                    if (static_cast<U>(std::meta::extract<T>(Enumerators<T>[i])) !=
+                        static_cast<U>(i)) {
                         return false;
                     }
                 }
