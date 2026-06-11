@@ -31,6 +31,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "Mashiro/Core/TypeTraits.h"
+
 namespace Mashiro::Hashing {
 
     // =========================================================================
@@ -332,18 +334,18 @@ namespace Mashiro::Hashing {
         }
 
         /// @brief Check if an entity has a specific annotation type.
+        ///
+        /// Thin alias for @ref Mashiro::Traits::Anno::Has — kept locally so
+        /// existing call sites read naturally.
         template <typename Ann>
         consteval bool HasAnnotation(std::meta::info entity) {
-            return std::meta::annotations_of(entity, ^^Ann).size() > 0;
+            return ::Mashiro::Traits::Anno::Has<Ann>(entity);
         }
 
-        /// @brief Extract annotation value of type Ann from entity.
+        /// @brief Extract annotation value of type Ann from entity, or `nullopt`.
         template <typename Ann>
         consteval std::optional<Ann> GetAnnotation(std::meta::info entity) {
-            auto annots = std::meta::annotations_of(entity, ^^Ann);
-            if (annots.size() > 0)
-                return std::meta::extract<Ann>(annots[0]);
-            return std::nullopt;
+            return ::Mashiro::Traits::Anno::Get<Ann>(entity);
         }
 
         /// @brief Check if entity has an Anno::With<X> annotation (any specialisation).
@@ -366,14 +368,6 @@ namespace Mashiro::Hashing {
             return defaultAlgo;
         }
 
-        /// @brief Check if any member of T has the Anno::Key annotation.
-        template <typename T>
-        consteval bool IsKeyMode() {
-            for (auto m : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()))
-                if (HasAnnotation<Anno::Key>(m)) return true;
-            return false;
-        }
-
         /**
          * @brief Get filtered and sorted non-static data members of T for hashing.
          *
@@ -381,33 +375,14 @@ namespace Mashiro::Hashing {
          * 1. `[[=Anno::Ignore{}]]` — member excluded.
          * 2. `[[=Anno::Key{}]]` whitelist — if any member has it, only those participate.
          * 3. `[[=Anno::Order{.priority=N}]]` — stable sort by ascending priority.
+         *
+         * Implemented in terms of @ref Mashiro::Traits::Anno::SelectMembers, the
+         * subsystem-agnostic selector — the three policy tags are passed in as
+         * template arguments.
          */
         template <typename T>
         consteval auto HashableMembers() {
-            auto all = std::meta::nonstatic_data_members_of(^^T,
-                std::meta::access_context::unchecked());
-            std::vector<std::meta::info> result;
-            for (auto m : all) {
-                if (HasAnnotation<Anno::Ignore>(m)) continue;
-                if (IsKeyMode<T>() && !HasAnnotation<Anno::Key>(m)) continue;
-                result.push_back(m);
-            }
-            // Stable insertion sort by Anno::Order priority
-            for (size_t i = 1; i < result.size(); ++i) {
-                auto key = result[i];
-                auto ok = GetAnnotation<Anno::Order>(key);
-                int pk = ok.has_value() ? ok.value().priority : 0x7FFFFFFF;
-                size_t j = i;
-                while (j > 0) {
-                    auto oj = GetAnnotation<Anno::Order>(result[j - 1]);
-                    int pj = oj.has_value() ? oj.value().priority : 0x7FFFFFFF;
-                    if (pj <= pk) break;
-                    result[j] = result[j - 1];
-                    --j;
-                }
-                result[j] = key;
-            }
-            return result;
+            return ::Mashiro::Traits::Anno::SelectMembers<T, Anno::Ignore, Anno::Key, Anno::Order>();
         }
 
     } // namespace Detail

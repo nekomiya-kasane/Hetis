@@ -7,19 +7,30 @@
  * - `Homogeneous<T>` — all non-static data members share the same type.
  * - `TupleLike<T>` / `VariantLike<T>` — structural duck-type detection.
  * - `Overload` — lambda-overload-set builder for `std::visit`.
+ * - `Anno::*` — annotation probing + member filtering/ordering driven by
+ *   user-supplied `Ignore` / `Key` / `Order` annotation tag types.
+ * - Standard-library categorisation: `StdOptional`, `StdVariant`,
+ *   `ChronoDuration`, `ChronoTimePoint`, `FilesystemPath`, `ByteRange`,
+ *   `StringViewConvertible`, `StringKeyedAssociative`.
  *
  * @ingroup Core
  */
 #pragma once
 
 #include <bit>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
+#include <filesystem>
 #include <meta>
 #include <new>
+#include <optional>
+#include <ranges>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace Mashiro {
 
@@ -440,6 +451,176 @@ namespace Mashiro {
         /// @brief Reflection bridge: a `TypeList` of @p T's data-member types.
         template<typename T>
         using ToTypeList = [:Detail::TypeListReflOf<T>():];
+
+        // =====================================================================
+        // Annotation helpers
+        // =====================================================================
+
+        /**
+         * @brief Generic helpers for probing and extracting C++26 annotations.
+         *
+         * Subsystems define their own annotation tag types (e.g.
+         * `Hashing::Anno::Ignore`, `Json::Anno::Ignore`) and parameterise these
+         * helpers with them; the helpers themselves are entirely subsystem-
+         * agnostic. All operations are `consteval` so they fold to immediate
+         * values at the call site.
+         *
+         * @code
+         * struct MyIgnore {};
+         * struct My { [[=MyIgnore{}]] int hidden; int kept; };
+         * static_assert( Mashiro::Traits::Anno::Has<MyIgnore>(My's hidden member) );
+         * @endcode
+         */
+        namespace Anno {
+
+            /// @brief `true` if @p ent carries any annotation of type @p A.
+            template <typename A>
+            consteval bool Has(std::meta::info ent) {
+                return std::meta::annotations_of(ent, ^^A).size() > 0;
+            }
+
+            /// @brief Extract the first annotation of type @p A on @p ent, or `nullopt`.
+            template <typename A>
+            consteval std::optional<A> Get(std::meta::info ent) {
+                auto annots = std::meta::annotations_of(ent, ^^A);
+                if (annots.size() > 0) return std::meta::extract<A>(annots[0]);
+                return std::nullopt;
+            }
+
+            /// @brief `true` if any non-static data member of @p T carries
+            ///        annotation @p A (the "whitelist" / Key-mode trigger).
+            template <typename T, typename A>
+            consteval bool AnyMemberHas() {
+                for (auto m : std::meta::nonstatic_data_members_of(
+                                  ^^T, std::meta::access_context::unchecked()))
+                    if (Has<A>(m)) return true;
+                return false;
+            }
+
+            /**
+             * @brief Filter and stably re-order @p T's non-static data members
+             *        for serialisation-style traversal.
+             *
+             * @tparam T Reflectable class.
+             * @tparam Ignore Tag type whose presence excludes a member.
+             * @tparam Key   Tag type whose presence on *any* member engages
+             *               whitelist mode (only Key-tagged members survive).
+             * @tparam Order Tag type with a `priority` member (`int`) used to
+             *               sort the surviving members in ascending order;
+             *               members without `Order` sort after those with it
+             *               (priority = INT_MAX), preserving declaration
+             *               order within each tier.
+             *
+             * @return A `std::vector<std::meta::info>` of selected members in
+             *         emission order. The result is intended to be wrapped in
+             *         `std::define_static_array(...)` at the call site for use
+             *         with `template for`.
+             */
+            template <typename T, typename Ignore, typename Key, typename Order>
+            consteval std::vector<std::meta::info> SelectMembers() {
+                auto all = std::meta::nonstatic_data_members_of(
+                    ^^T, std::meta::access_context::unchecked());
+                const bool keyMode = AnyMemberHas<T, Key>();
+                std::vector<std::meta::info> result;
+                for (auto m : all) {
+                    if (Has<Ignore>(m)) continue;
+                    if (keyMode && !Has<Key>(m)) continue;
+                    result.push_back(m);
+                }
+                constexpr int kSentinel = 0x7FFFFFFF;
+                auto priorityOf = [](std::meta::info m) -> int {
+                    auto o = Get<Order>(m);
+                    return o ? o->priority : kSentinel;
+                };
+                for (size_t i = 1; i < result.size(); ++i) {
+                    auto key = result[i];
+                    int  pk  = priorityOf(key);
+                    size_t j = i;
+                    while (j > 0 && priorityOf(result[j - 1]) > pk) {
+                        result[j] = result[j - 1];
+                        --j;
+                    }
+                    result[j] = key;
+                }
+                return result;
+            }
+
+            /**
+             * @brief Extract a typed payload from a templated annotation
+             *        (e.g. `Rename<FixedString>`).
+             *
+             * Specialise the primary template on the user's templated annotation
+             * to expose `value = true` and a `static constexpr` payload — see
+             * the @ref Mashiro::Json::Detail::RenameTrait pattern for a worked
+             * example. This trait is provided here as a convenience anchor for
+             * subsystems that all share the same NTTP-as-annotation pattern.
+             */
+            template <typename T>
+            struct PayloadTrait {
+                static constexpr bool value = false;
+            };
+
+        } // namespace Anno
+
+        // =====================================================================
+        // Standard-library categorisation
+        // =====================================================================
+
+        /// @brief A `std::optional<U>` specialisation.
+        template <typename T> struct IsStdOptionalT : std::false_type {};
+        template <typename U> struct IsStdOptionalT<std::optional<U>> : std::true_type {};
+        template <typename T> concept StdOptional =
+            IsStdOptionalT<std::remove_cvref_t<T>>::value;
+
+        /// @brief A `std::variant<...>` specialisation.
+        template <typename T> struct IsStdVariantT : std::false_type {};
+        template <typename... U> struct IsStdVariantT<std::variant<U...>> : std::true_type {};
+        template <typename T> concept StdVariant =
+            IsStdVariantT<std::remove_cvref_t<T>>::value;
+
+        /// @brief A `std::chrono::duration<Rep, Period>`.
+        template <typename T>
+        concept ChronoDuration = requires {
+            typename T::rep; typename T::period;
+            requires std::same_as<std::remove_cvref_t<T>,
+                std::chrono::duration<typename T::rep, typename T::period>>;
+        };
+
+        /// @brief A `std::chrono::time_point<Clock, Duration>`.
+        template <typename T>
+        concept ChronoTimePoint = requires {
+            typename T::clock; typename T::duration;
+            requires std::same_as<std::remove_cvref_t<T>,
+                std::chrono::time_point<typename T::clock, typename T::duration>>;
+        };
+
+        /// @brief A `std::filesystem::path`.
+        template <typename T>
+        concept FilesystemPath =
+            std::same_as<std::remove_cvref_t<T>, std::filesystem::path>;
+
+        /// @brief A range whose element type is `std::byte` (binary blob).
+        template <typename T>
+        concept ByteRange = std::ranges::range<T> &&
+                            std::same_as<std::ranges::range_value_t<T>, std::byte>;
+
+        /// @brief Convertible to `std::string_view` and not a path.
+        ///
+        /// `filesystem::path` is convertible-to-string-view on libstdc++ but
+        /// has its own dedicated path; exclude it here so dispatchers can
+        /// reach the path branch first.
+        template <typename T>
+        concept StringViewConvertible =
+            std::convertible_to<std::remove_cvref_t<T>, std::string_view> &&
+            !std::same_as<std::remove_cvref_t<T>, std::filesystem::path>;
+
+        /// @brief An associative range whose key type is convertible to
+        ///        `std::string_view` (i.e. encodes naturally as a JSON object).
+        template <typename T>
+        concept StringKeyedAssociative = std::ranges::range<T> &&
+            requires { typename std::remove_cvref_t<T>::key_type; } &&
+            std::convertible_to<typename std::remove_cvref_t<T>::key_type,
+                                std::string_view>;
 
     }
 

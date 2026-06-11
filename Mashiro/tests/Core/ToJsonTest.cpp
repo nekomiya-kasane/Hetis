@@ -5,7 +5,7 @@
 
 #include "Mashiro/Core/Flags.h"
 #include "Mashiro/Core/ToJson.h"
-#include "Meta.h"
+#include "Support/Meta.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -410,6 +410,7 @@ TEST_CASE("nlohmann adl_serializer specialisation lets json j = v;", AUTO_TAG) {
 
 TEST_CASE("dump → parse round-trip preserves content", AUTO_TAG) {
     Person p{"C", 1, Color::Red, {"a", "b"}};
+    auto j = ToJson(p);
     auto text = j.dump();
     auto reparsed = json::parse(text);
     auto back = FromJson<Person>(reparsed);
