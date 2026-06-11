@@ -275,6 +275,30 @@ namespace Mashiro {
         template <BitfieldEnum E>
         inline constexpr auto kBitfieldMask = static_cast<E>(Detail::AllBitsMask<E>());
 
+        /**
+         * @brief Source identifier of an enumerator value, or empty if not found.
+         *
+         * Walks the enum's reflected enumerator list at compile time and
+         * returns the matching enumerator's identifier. Used by serialisation
+         * helpers (`ToJson`, `ToString`) and event-stream dispatchers
+         * (`SystemEvent::EventKindName`) to render values as their source
+         * names.
+         *
+         * @tparam E Scoped enum type.
+         * @tparam V Enumerator value to look up.
+         * @return The matching enumerator identifier, or `""` if @p V is not a
+         *         declared enumerator (e.g. a synthetic bitmask combination).
+         */
+        template <typename E, E V>
+            requires std::is_enum_v<E>
+        consteval std::string_view EnumeratorName() {
+            template for (constexpr auto en : Enumerators<E>) {
+                if (std::meta::extract<E>(en) == V)
+                    return std::meta::identifier_of(en);
+            }
+            return {};
+        }
+
     } // namespace Traits
 
     namespace Platform {

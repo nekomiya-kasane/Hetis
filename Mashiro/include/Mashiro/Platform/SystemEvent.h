@@ -342,15 +342,14 @@ namespace Mashiro {
          *
          * @note Evaluated lazily during instantiation of the NSDMI, i.e. when
          *       `Derived` has its full annotation set defined. Calls fail at
-         *       compile time if the annotation is missing or duplicated.
+         *       compile time if the annotation is missing.
          */
         template<typename Derived>
         consteval EventKind KindFromAnnotation() {
-            constexpr auto annots =
-                std::define_static_array(std::meta::annotations_of(^^Derived, ^^PayloadFor));
-            static_assert(annots.size() == 1,
+            constexpr auto bound = Traits::Anno::Get<PayloadFor>(^^Derived);
+            static_assert(bound.has_value(),
                           "Payload type must carry exactly one [[=PayloadFor{...}]] annotation");
-            return std::meta::extract<PayloadFor>(annots[0]).kind;
+            return bound->kind;
         }
 
     } // namespace Detail
@@ -749,12 +748,12 @@ namespace Mashiro {
     };
 
     /// @brief OS-synthesised gesture from the trackpad / touch driver.
-    struct [[=PayloadFor{EventKind::InputTouchGesture}]] 
+    struct [[=PayloadFor{EventKind::InputTouchGesture}]]
     TouchGestureEvent : EventPayload<TouchGestureEvent> {
         enum class Kind : uint8_t { Pinch, Rotate, Swipe, Pan, Tap, LongPress };
-        Kind  kind = Kind::Pinch;
+        Kind  gesture  = Kind::Pinch; ///< Renamed from `kind` to avoid shadowing the EventPayload discriminator.
         vec2  position{};
-        vec2  delta{};      ///< Pan/swipe direction in pixels.
+        vec2  delta;      ///< Pan/swipe direction in pixels.
         float scale = 1;    ///< Pinch scale factor.
         float rotation = 0; ///< Rotation in radians.
     };
@@ -866,13 +865,13 @@ namespace Mashiro {
         vec2 position{};
     };
 
-    struct [[=PayloadFor{EventKind::DragDrop}]] 
+    struct [[=PayloadFor{EventKind::DragDrop}]]
     DragDropEvent : EventPayload<DragDropEvent> {
         vec2                      position{};
-        std::vector<std::string>  paths;   ///< For `Files` payloads, decoded local paths.
-        std::string               text;    ///< For `Text` payloads.
-        std::vector<std::byte>    blob;    ///< For `Custom` / `Image` payloads, raw bytes.
-        DragKind                  kind = DragKind::None;
+        std::vector<std::string>  paths;       ///< For `Files` payloads, decoded local paths.
+        std::string               text;        ///< For `Text` payloads.
+        std::vector<std::byte>    blob;        ///< For `Custom` / `Image` payloads, raw bytes.
+        DragKind                  drag = DragKind::None; ///< Renamed from `kind` to avoid shadowing the discriminator.
     };
 
     struct [[=PayloadFor{EventKind::DragLeave}]] 
@@ -1076,7 +1075,9 @@ namespace Mashiro {
 
     namespace Traits {
 
-        /** @brief Concept: `T` is a system-event payload (derives from @ref Mashiro::Detail::EventPayloadBase).*/
+        /** @brief Concept: `T` is a system-event payload (derives from
+         *         @ref Mashiro::Detail::EventPayloadBase).
+         */
         template<typename T>
         concept SystemEventPayload = std::is_base_of_v<::Mashiro::Detail::EventPayloadBase, T>;
 
@@ -1086,34 +1087,26 @@ namespace Mashiro {
          * @tparam T A payload struct annotated with exactly one @ref PayloadFor.
          * @return The bound `EventKind`.
          *
-         * Compile-time. Asserts that exactly one binding annotation exists.
+         * Compile-time. Asserts that the binding annotation exists.
          */
         template<SystemEventPayload T>
         consteval EventKind KindOf() {
-            constexpr auto annots =
-                std::define_static_array(std::meta::annotations_of(^^T, ^^PayloadFor));
-            static_assert(annots.size() == 1,
-                          "Payload must have exactly one PayloadFor annotation");
-            return std::meta::extract<PayloadFor>(annots[0]).kind;
+            constexpr auto bound = ::Mashiro::Traits::Anno::Get<PayloadFor>(^^T);
+            static_assert(bound.has_value(),
+                          "Payload must carry a PayloadFor annotation");
+            return bound->kind;
         }
 
         /**
          * @brief Recover a payload's supported @ref PlatformBit set.
          *
-         * Returns @ref kPlatformBit_All when the payload carries no
+         * Returns @ref PlatformBit_All when the payload carries no
          * @ref Platform::OnPlatform annotation (i.e. portable).
          */
         template<SystemEventPayload T>
         consteval PlatformBit PlatformsOf() {
-            constexpr auto annots = std::define_static_array(
-                std::meta::annotations_of(^^T, ^^Platform::OnPlatform));
-            if constexpr (annots.size() == 0) {
-                return PlatformBit_All;
-            } else {
-                static_assert(annots.size() == 1,
-                              "Payload must have at most one OnPlatform annotation");
-                return std::meta::extract<Platform::OnPlatform>(annots[0]).set;
-            }
+            constexpr auto on = ::Mashiro::Traits::Anno::Get<Platform::OnPlatform>(^^T);
+            return on ? on->set : PlatformBit_All;
         }
 
         /**
@@ -1123,8 +1116,7 @@ namespace Mashiro {
          * @tparam P Single-bit platform (e.g. `PlatformBit::Windows`).
          */
         template<SystemEventPayload T, PlatformBit P>
-        inline constexpr bool AvailableOn =
-            (static_cast<uint16_t>(PlatformsOf<T>()) & static_cast<uint16_t>(P)) != 0;
+        inline constexpr bool AvailableOn = (PlatformsOf<T>() & P) != PlatformBit::None;
 
         /// @brief The unqualified type name of payload `T` (`"WindowResizeEvent"` etc.).
         template<SystemEventPayload T>
@@ -1135,12 +1127,7 @@ namespace Mashiro {
         /// @brief The textual name of an @ref EventKind enumerator.
         template<EventKind K>
         consteval std::string_view EventKindName() {
-            template for (constexpr auto en :
-                          std::define_static_array(std::meta::enumerators_of(^^EventKind))) {
-                if (std::meta::extract<EventKind>(en) == K)
-                    return std::meta::identifier_of(en);
-            }
-            return {};
+            return ::Mashiro::Traits::EnumeratorName<EventKind, K>();
         }
 
     } // namespace Traits
@@ -1152,17 +1139,29 @@ namespace Mashiro {
     /// @cond DOXYGEN_INTERNAL
     namespace Detail {
 
-        /// @brief `true` for entities that carry exactly one @ref PayloadFor annotation.
+        /// @brief `true` for class / struct types that carry a @ref PayloadFor
+        ///        annotation. Function / variable templates and other
+        ///        non-class members of `Mashiro` are skipped — `annotations_of`
+        ///        cannot be applied to template entities or non-types.
         consteval bool IsBoundPayload(std::meta::info m) {
+            if (std::meta::is_template(m)) return false;
             if (!std::meta::is_type(m)) return false;
+            if (!std::meta::is_class_type(m)) return false;
             if (!std::meta::is_complete_type(m)) return false;
-            return std::meta::annotations_of(m, ^^PayloadFor).size() == 1;
+            return ::Mashiro::Traits::Anno::Has<PayloadFor>(m);
         }
 
         /**
          * @brief Build a histogram (one entry per @ref EventKind) of how many
          *        payload structs claim each kind. Should be all-ones at the
          *        end of the header.
+         *
+         * The `is_template / is_type / is_class_type / is_complete_type`
+         * cascade screens out non-class members of `Mashiro` (free functions,
+         * function templates such as `MakePoint<T,N>` from Geom.h, variable
+         * templates, namespaces, etc.). `annotations_of` cannot be applied to
+         * those entities; the cascade is what makes the namespace-wide sweep
+         * portable.
          */
         consteval std::array<uint8_t, kEventKindCount> BuildKindCoverage() {
             std::array<uint8_t, kEventKindCount> seen{};
@@ -1170,10 +1169,15 @@ namespace Mashiro {
                           std::define_static_array(
                               std::meta::members_of(^^Mashiro,
                                                     std::meta::access_context::unchecked()))) {
-                if constexpr (IsBoundPayload(m)) {
-                    constexpr auto k = std::meta::extract<PayloadFor>(
-                        std::meta::annotations_of(m, ^^PayloadFor)[0]).kind;
-                    ++seen[static_cast<size_t>(k)];
+                if constexpr (!std::meta::is_template(m) &&
+                               std::meta::is_type(m) &&
+                               std::meta::is_class_type(m) &&
+                               std::meta::is_complete_type(m)) {
+                    if constexpr (::Mashiro::Traits::Anno::Has<PayloadFor>(m)) {
+                        constexpr auto bound =
+                            ::Mashiro::Traits::Anno::Get<PayloadFor>(m);
+                        ++seen[static_cast<size_t>(bound->kind)];
+                    }
                 }
             }
             return seen;
