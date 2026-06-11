@@ -25,6 +25,20 @@ namespace Mashiro {
 
     namespace Traits {
 
+        namespace Detail {
+
+            /// @brief Compile-time human-readable name of @p T.
+            template<typename T>
+            [[nodiscard]] consteval std::string_view GetTypeName() {
+                return std::meta::display_string_of(^^T);
+            }
+
+        }
+
+        /// @brief string_view name of a type.
+        template<typename T>
+        inline constexpr auto TypeName = Detail::GetTypeName<T>();
+
         /// @brief Static reflection array of @p T's non-static data members.
         template<typename T>
         inline constexpr auto Members = std::define_static_array(

@@ -48,12 +48,6 @@ namespace Mashiro {
     template<typename T>
     [[nodiscard]] constexpr T FromString(std::string_view iString);
 
-    /// @brief Compile-time human-readable name of @p T (via P2996 reflection).
-    template<typename T>
-    [[nodiscard]] std::string_view TypeName() {
-        return std::meta::display_string_of(^^T);
-    }
-
     /// @brief Annotation: when placed on a pointer member, ToString will dereference
     /// and recursively print the pointee instead of printing the raw address.
     ///
@@ -161,232 +155,232 @@ namespace Mashiro {
                                  std::same_as<std::remove_cvref_t<T>, bool> ||
                                  std::is_enum_v<std::remove_cvref_t<T>>;
 
-    /// @brief Core dispatch: value → owning `std::string`.
-    template <typename T>
-    [[nodiscard]] constexpr std::string ToStringImpl(T&& iValue) {
-        using U = std::remove_cvref_t<T>;
+        /// @brief Core dispatch: value → owning `std::string`.
+        template <typename T>
+        [[nodiscard]] constexpr std::string ToStringImpl(T&& iValue) {
+            using U = std::remove_cvref_t<T>;
 
-        // 1. free ToString(...) via ADL
-        if constexpr (Detail::ADL::FreeToString::Available<U>) {
-            return Detail::ADL::FreeToString::Invoke(std::forward<T>(iValue));
-        } 
-        // 2. object.ToString()
-        else if constexpr (Detail::HasMemberToString<U>) {
-            return MakeString(std::forward<T>(iValue).ToString());
-        } 
-        // 3. nullptr
-        else if constexpr (std::is_null_pointer_v<U>) {
-            return "nullptr";
-        } 
-        // 4. bool
-        else if constexpr (std::same_as<U, bool>) {
-            return iValue ? "true" : "false";
-        }
-        // 5. char
-        else if constexpr (std::same_as<U, char>) {
-            return std::string(1, iValue);
-        }
-        // 6. string-like types
-        else if constexpr (std::is_convertible_v<U, std::string> || std::is_convertible_v<U, std::string_view>) {
-            return MakeString(std::forward<T>(iValue));
-        } 
-        // 7. enum
-        else if constexpr (std::is_enum_v<U>) {
-            static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
-            using Underlying = std::underlying_type_t<U>;
-
-            // a. exact match
-            template for (constexpr auto e : std::define_static_array(std::meta::enumerators_of(std::meta::dealias(^^U)))) {
-                if ([:e:] == iValue) {
-                    return std::string(std::meta::display_string_of(e));
-                }
+            // 1. free ToString(...) via ADL
+            if constexpr (Detail::ADL::FreeToString::Available<U>) {
+                return Detail::ADL::FreeToString::Invoke(std::forward<T>(iValue));
+            } 
+            // 2. object.ToString()
+            else if constexpr (Detail::HasMemberToString<U>) {
+                return MakeString(std::forward<T>(iValue).ToString());
+            } 
+            // 3. nullptr
+            else if constexpr (std::is_null_pointer_v<U>) {
+                return "nullptr";
+            } 
+            // 4. bool
+            else if constexpr (std::same_as<U, bool>) {
+                return iValue ? "true" : "false";
             }
+            // 5. char
+            else if constexpr (std::same_as<U, char>) {
+                return std::string(1, iValue);
+            }
+            // 6. string-like types
+            else if constexpr (std::is_convertible_v<U, std::string> || std::is_convertible_v<U, std::string_view>) {
+                return MakeString(std::forward<T>(iValue));
+            } 
+            // 7. enum
+            else if constexpr (std::is_enum_v<U>) {
+                static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
+                using Underlying = std::underlying_type_t<U>;
 
-            // b. bitmask decomposition
-            std::stringstream ss;
-            bool first = true;
-            auto remaining = static_cast<Underlying>(iValue);
-
-            template for (constexpr auto e : std::define_static_array(std::meta::enumerators_of(std::meta::dealias(^^U)))) {
-                constexpr auto flag = static_cast<Underlying>([:e:]);
-                if constexpr (flag != Underlying{0}) {
-                    if ((remaining & flag) == flag) {
-                        ss << (first ? "" : " | ") << std::meta::display_string_of(e);
-                        first = false;
-                        remaining &= static_cast<Underlying>(~flag);
+                // a. exact match
+                template for (constexpr auto e : std::define_static_array(std::meta::enumerators_of(std::meta::dealias(^^U)))) {
+                    if ([:e:] == iValue) {
+                        return std::string(std::meta::display_string_of(e));
                     }
                 }
-            }
 
-            if (!first && remaining == Underlying{0}) {
+                // b. bitmask decomposition
+                std::stringstream ss;
+                bool first = true;
+                auto remaining = static_cast<Underlying>(iValue);
+
+                template for (constexpr auto e : std::define_static_array(std::meta::enumerators_of(std::meta::dealias(^^U)))) {
+                    constexpr auto flag = static_cast<Underlying>([:e:]);
+                    if constexpr (flag != Underlying{0}) {
+                        if ((remaining & flag) == flag) {
+                            ss << (first ? "" : " | ") << std::meta::display_string_of(e);
+                            first = false;
+                            remaining &= static_cast<Underlying>(~flag);
+                        }
+                    }
+                }
+
+                if (!first && remaining == Underlying{0}) {
+                    return ss.str();
+                }
+
+                // c. fallback
+                return std::format("{}(unknown:{})", Traits::TypeName<U>, static_cast<Underlying>(iValue));
+            }
+            // 8. range
+            else if constexpr (std::ranges::range<U>) {
+                std::stringstream ss;
+                ss << "[";
+
+                bool first = true;
+
+                for (auto&& item : iValue) {
+                    ss << (first ? "" : ", ") << ToStringImpl(item);
+                    first = false;
+                }
+
+                ss << "]";
                 return ss.str();
             }
+            // 9. tuple
+            else if constexpr (Traits::TupleLike<U>) {
+                static_assert(!std::ranges::range<U>);
 
-            // c. fallback
-            return std::format("{}(unknown:{})", TypeName<U>(), static_cast<Underlying>(iValue));
-        }
-        // 8. range
-        else if constexpr (std::ranges::range<U>) {
-            std::stringstream ss;
-            ss << "[";
+                std::stringstream ss;
+                ss << "(";
 
-            bool first = true;
+                bool first = false;
 
-            for (auto&& item : iValue) {
-                ss << (first ? "" : ", ") << ToStringImpl(item);
-                first = false;
+                std::apply([&]<typename... Ts>(Ts&&... args) {
+                    ((ss << (first ? ", " : "") << ToStringImpl(std::forward<decltype(args)>(args)), first = true), ...);
+                }, iValue);
+
+                ss << ")";
+                return ss.str();
             }
-
-            ss << "]";
-            return ss.str();
-        }
-        // 9. tuple
-        else if constexpr (Traits::TupleLike<U>) {
-            static_assert(!std::ranges::range<U>);
-
-            std::stringstream ss;
-            ss << "(";
-
-            bool first = false;
-
-            std::apply([&]<typename... Ts>(Ts&&... args) {
-                ((ss << (first ? ", " : "") << ToStringImpl(std::forward<decltype(args)>(args)), first = true), ...);
-            }, iValue);
-
-            ss << ")";
-            return ss.str();
-        }
-        // 10. variant
-        else if constexpr (Traits::VariantLike<U>) {
-            if (iValue.valueless_by_exception()) {
-                return std::format("{}(valueless)", TypeName<U>());
-            }
-
-            return std::visit(
-                [](auto&& iAlternative) -> std::string {
-                    return ToStringImpl(std::forward<decltype(iAlternative)>(iAlternative));
-                },
-                std::forward<T>(iValue));
-        }
-        // 11. pointer
-        else if constexpr (std::is_pointer_v<U>) {
-            if (iValue == nullptr) {
-                return std::format("{}*(nullptr)", TypeName<std::remove_pointer_t<U>>());
-            } else {
-                return std::format("{}*({:p})", TypeName<std::remove_pointer_t<U>>(), static_cast<const void*>(iValue));
-            }
-        }
-        // 12. std::to_string(A)
-        else if constexpr (requires(T&& iValue) { std::to_string(iValue); }) {
-            return std::to_string(std::forward<T>(iValue));
-        }
-        // 13. ostream operator
-        else if constexpr (requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
-            std::stringstream ss;
-            ss << std::forward<T>(iValue);
-            return ss.str();
-        }
-        // 14. complete class
-        else if constexpr (std::is_class_v<U> && !std::is_union_v<U> && requires { sizeof(U); }) {
-            std::stringstream ss;
-            ss << TypeName<U>() << " {";
-
-            template for (bool first = true; constexpr auto m : std::define_static_array(
-                std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::unchecked())
-            )) {
-                if (!first) {
-                    ss << ", ";
-                }
-                first = false;
-
-                if constexpr (std::meta::has_identifier(m)) {
-                    ss << std::meta::identifier_of(m);
-                }
-                else {
-                    ss << std::meta::display_string_of(m);
+            // 10. variant
+            else if constexpr (Traits::VariantLike<U>) {
+                if (iValue.valueless_by_exception()) {
+                    return std::format("{}(valueless)", Traits::TypeName<U>);
                 }
 
-                if constexpr (std::meta::is_bit_field(m)) {
-                    ss << "=" << ToStringImpl(auto(iValue.[:m:]));
-                } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(m):]> &&
-                                     std::meta::annotations_of(m, ^^DerefPrint).size() > 0) {
-                    auto* ptr = iValue.[:m:];
-                    if (ptr == nullptr) {
-                        ss << "=nullptr";
-                    } else {
-                        ss << "=" << ToStringImpl(*ptr);
-                    }
+                return std::visit(
+                    [](auto&& iAlternative) -> std::string {
+                        return ToStringImpl(std::forward<decltype(iAlternative)>(iAlternative));
+                    },
+                    std::forward<T>(iValue));
+            }
+            // 11. pointer
+            else if constexpr (std::is_pointer_v<U>) {
+                if (iValue == nullptr) {
+                    return std::format("{}*(nullptr)", Traits::TypeName<std::remove_pointer_t<U>>);
                 } else {
-                    ss << "=" << ToStringImpl(iValue.[:m:]);
+                    return std::format("{}*({:p})", Traits::TypeName<std::remove_pointer_t<U>>, static_cast<const void*>(iValue));
                 }
             }
-
-            ss << "}";
-            return ss.str();
-        }
-        // 15. fallback
-        else {
-            return std::format("<{} at {:p}>", TypeName<U>(), static_cast<const void*>(std::addressof(iValue)));
-        }
-    }
-
-    /// @brief Core dispatch: value → non-owning `std::string_view` (limited types).
-    template <typename T>
-    [[nodiscard]] constexpr std::string_view ToStringViewImpl(T&& iValue) {
-        using U = std::remove_cvref_t<T>;
-
-        // 1. free ToStringView(...) via ADL
-        if constexpr (Detail::ADL::FreeToStringView::Available<U>) {
-            return Detail::ADL::FreeToStringView::Invoke(std::forward<T>(iValue));
-        } 
-        // 2. object.ToStringView()
-        else if constexpr (Detail::HasMemberToStringView<U>) {
-            return std::forward<T>(iValue).ToStringView();
-        } 
-        // 3. nullptr
-        else if constexpr (std::is_null_pointer_v<U>) {
-            return "nullptr";
-        } 
-        // 4. bool
-        else if constexpr (std::same_as<U, bool>) {
-            return iValue ? "true" : "false";
-        }
-        // 5. enum
-        else if constexpr (std::is_enum_v<U>) {
-            static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
-            using Underlying = std::underlying_type_t<U>;
-
-            // a. exact match
-            template for (constexpr auto e : std::define_static_array(std::meta::enumerators_of(std::meta::dealias(^^U)))) {
-                if ([:e:] == iValue) {
-                    return std::string_view(std::meta::display_string_of(e));
-                }
+            // 12. std::to_string(A)
+            else if constexpr (requires(T&& iValue) { std::to_string(iValue); }) {
+                return std::to_string(std::forward<T>(iValue));
             }
+            // 13. ostream operator
+            else if constexpr (requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
+                std::stringstream ss;
+                ss << std::forward<T>(iValue);
+                return ss.str();
+            }
+            // 14. complete class
+            else if constexpr (std::is_class_v<U> && !std::is_union_v<U> && requires { sizeof(U); }) {
+                std::stringstream ss;
+                ss << Traits::TypeName<U> << " {";
 
-            // b. fallback
-            return TypeName<U>();
-        }
-        // 6. fallback
-        else {
-            static_assert(false, "Unsupported type for ToStringView");
-        }
-    }
-    
-    /// @brief CPO functor: `ToString(v)` → `std::string`.
-    struct ToStringFn {
-        template <typename T>
-        [[nodiscard]] constexpr std::string operator()(T&& iValue) const {
-            return ToStringImpl(std::forward<T>(iValue));
-        }
-    };
+                template for (bool first = true; constexpr auto m : std::define_static_array(
+                    std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::unchecked())
+                )) {
+                    if (!first) {
+                        ss << ", ";
+                    }
+                    first = false;
 
-    /// @brief CPO functor: `ToStringView(v)` → `std::string_view`.
-    struct ToStringViewFn {
-        template <typename T>
-        [[nodiscard]] constexpr std::string_view operator()(T&& iValue) const {
-            return ToStringViewImpl(std::forward<T>(iValue));
+                    if constexpr (std::meta::has_identifier(m)) {
+                        ss << std::meta::identifier_of(m);
+                    }
+                    else {
+                        ss << std::meta::display_string_of(m);
+                    }
+
+                    if constexpr (std::meta::is_bit_field(m)) {
+                        ss << "=" << ToStringImpl(auto(iValue.[:m:]));
+                    } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(m):]> &&
+                                         std::meta::annotations_of(m, ^^DerefPrint).size() > 0) {
+                        auto* ptr = iValue.[:m:];
+                        if (ptr == nullptr) {
+                            ss << "=nullptr";
+                        } else {
+                            ss << "=" << ToStringImpl(*ptr);
+                        }
+                    } else {
+                        ss << "=" << ToStringImpl(iValue.[:m:]);
+                    }
+                }
+
+                ss << "}";
+                return ss.str();
+            }
+            // 15. fallback
+            else {
+                return std::format("<{} at {:p}>", Traits::TypeName<U>, static_cast<const void*>(std::addressof(iValue)));
+            }
         }
-    };
+
+        /// @brief Core dispatch: value → non-owning `std::string_view` (limited types).
+        template <typename T>
+        [[nodiscard]] constexpr std::string_view ToStringViewImpl(T&& iValue) {
+            using U = std::remove_cvref_t<T>;
+
+            // 1. free ToStringView(...) via ADL
+            if constexpr (Detail::ADL::FreeToStringView::Available<U>) {
+                return Detail::ADL::FreeToStringView::Invoke(std::forward<T>(iValue));
+            } 
+            // 2. object.ToStringView()
+            else if constexpr (Detail::HasMemberToStringView<U>) {
+                return std::forward<T>(iValue).ToStringView();
+            } 
+            // 3. nullptr
+            else if constexpr (std::is_null_pointer_v<U>) {
+                return "nullptr";
+            } 
+            // 4. bool
+            else if constexpr (std::same_as<U, bool>) {
+                return iValue ? "true" : "false";
+            }
+            // 5. enum
+            else if constexpr (std::is_enum_v<U>) {
+                static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
+                using Underlying = std::underlying_type_t<U>;
+
+                // a. exact match
+                template for (constexpr auto e : std::define_static_array(std::meta::enumerators_of(std::meta::dealias(^^U)))) {
+                    if ([:e:] == iValue) {
+                        return std::string_view(std::meta::display_string_of(e));
+                    }
+                }
+
+                // b. fallback
+                return Traits::TypeName<U>;
+            }
+            // 6. fallback
+            else {
+                static_assert(false, "Unsupported type for ToStringView");
+            }
+        }
+        
+        /// @brief CPO functor: `ToString(v)` → `std::string`.
+        struct ToStringFn {
+            template <typename T>
+            [[nodiscard]] constexpr std::string operator()(T&& iValue) const {
+                return ToStringImpl(std::forward<T>(iValue));
+            }
+        };
+
+        /// @brief CPO functor: `ToStringView(v)` → `std::string_view`.
+        struct ToStringViewFn {
+            template <typename T>
+            [[nodiscard]] constexpr std::string_view operator()(T&& iValue) const {
+                return ToStringViewImpl(std::forward<T>(iValue));
+            }
+        };
 
     } // namespace Detail
     /** @endcond */
