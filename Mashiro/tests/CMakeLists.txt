@@ -33,6 +33,7 @@ add_mashiro_test(Core SpscRingBufferTest)
 add_mashiro_test(Core StructuredLoggerTest)
 add_mashiro_test(Core FixedStringTest)
 add_mashiro_test(Core SOATest)
+add_mashiro_test(Core ToJsonTest)
 
 add_mashiro_test(Math FunctionalTest)
 add_mashiro_test(Math VecTest eigen)

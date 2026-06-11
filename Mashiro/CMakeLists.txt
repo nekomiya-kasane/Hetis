@@ -15,6 +15,7 @@ target_include_directories(Mashiro PUBLIC
     "$<INSTALL_INTERFACE:include>"
 )
 target_link_libraries(Mashiro PRIVATE tapioca)
+target_link_libraries(Mashiro PUBLIC nlohmann_json::nlohmann_json)
 if(WIN32)
     target_link_libraries(Mashiro PRIVATE dbghelp)
 endif()
