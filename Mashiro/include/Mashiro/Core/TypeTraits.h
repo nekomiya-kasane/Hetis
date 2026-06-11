@@ -50,6 +50,15 @@ namespace Mashiro {
         template<typename T>
         inline constexpr auto TypeName = Detail::GetTypeName<T>();
 
+        consteval auto DisplayStringOf(std::meta::info iMeta) {
+            return std::meta::display_string_of(iMeta);
+        }
+
+        /// @brief identifier of
+        consteval auto IdentifierOf(std::meta::info iMeta) {
+            return std::meta::identifier_of(iMeta);
+        }
+
         /// @brief Static reflection array of @p T's non-static data members.
         template<typename T>
         inline constexpr auto Members = std::define_static_array(

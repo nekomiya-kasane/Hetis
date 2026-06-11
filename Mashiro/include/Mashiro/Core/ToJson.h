@@ -156,11 +156,13 @@ namespace Mashiro {
 // =========================================================================
 
 namespace Mashiro::Traits::Anno {
+
     template <FixedString S>
-    struct PayloadTrait<::Mashiro::Json::Anno::Rename<S>> {
+    struct PayloadTrait<Json::Anno::Rename<S>> {
         static constexpr bool             value = true;
         static constexpr std::string_view payload = S.view();
     };
+
 } // namespace Mashiro::Traits::Anno
 
 namespace Mashiro {
@@ -171,14 +173,6 @@ namespace Mashiro {
         // -------------------------------------------------------------------
         // Annotation aliases — keep call sites concise.
         // -------------------------------------------------------------------
-
-        template <typename A> consteval bool Has(std::meta::info m) {
-            return Traits::Anno::Has<A>(m);
-        }
-
-        template <typename A> consteval auto Get(std::meta::info m) {
-            return Traits::Anno::Get<A>(m);
-        }
 
         /// @brief Members participating in JSON, filtered + sorted by Order.
         template <typename T>
@@ -192,7 +186,7 @@ namespace Mashiro {
 
         template <std::meta::info M>
         consteval std::string_view FieldNameOf() {
-            std::string_view ret = std::meta::identifier_of(M);
+            std::string_view ret = Traits::IdentifierOf(M);
             template for (constexpr auto a :
                           std::define_static_array(std::meta::annotations_of(M))) {
                 using TA = typename [:std::meta::type_of(a):];
@@ -208,6 +202,7 @@ namespace Mashiro {
         // -------------------------------------------------------------------
 
         namespace ADL {
+
             void ToJson() = delete;   ///< Poison pill.
             void FromJson() = delete; ///< Poison pill.
 
@@ -220,6 +215,7 @@ namespace Mashiro {
             concept HasFreeFromJson = requires(const json& j) {
                 { FromJson(j, std::declval<T&>()) };
             };
+
         } // namespace ADL
 
         template <typename T>
@@ -276,7 +272,7 @@ namespace Mashiro {
         template <typename E>
         [[nodiscard]] json EnumToJson(E iValue) {
             using U = std::underlying_type_t<E>;
-            if constexpr (Has<Anno::AsInt>(^^E)) {
+            if constexpr (Traits::Anno::Has<Anno::AsInt>(^^E)) {
                 return json(static_cast<U>(iValue));
             } else if constexpr (Traits::BitfieldEnum<E>) {
                 auto remaining = static_cast<U>(iValue);
@@ -286,7 +282,7 @@ namespace Mashiro {
                     if constexpr (flag != U{0}) {
                         if ((remaining & flag) == flag) {
                             if (!out.empty()) out += '|';
-                            out += std::meta::identifier_of(e);
+                            out += Traits::IdentifierOf(e);
                             remaining &= static_cast<U>(~flag);
                         }
                     }
@@ -295,7 +291,7 @@ namespace Mashiro {
                 return json(out);
             } else {
                 template for (constexpr auto e : Traits::Enumerators<E>) {
-                    if ([:e:] == iValue) return json(std::string(std::meta::identifier_of(e)));
+                    if ([:e:] == iValue) return json(std::string(Traits::IdentifierOf(e)));
                 }
                 return json(static_cast<U>(iValue));
             }
@@ -325,7 +321,7 @@ namespace Mashiro {
                     if (!tok.empty() && tok != "0") {
                         bool matched = false;
                         template for (constexpr auto e : Traits::Enumerators<E>) {
-                            if (!matched && tok == std::meta::identifier_of(e)) {
+                            if (!matched && tok == Traits::IdentifierOf(e)) {
                                 acc |= static_cast<U>([:e:]);
                                 matched = true;
                             }
@@ -341,7 +337,7 @@ namespace Mashiro {
             } else {
                 bool matched = false;
                 template for (constexpr auto e : Traits::Enumerators<E>) {
-                    if (!matched && sv == std::meta::identifier_of(e)) {
+                    if (!matched && sv == Traits::IdentifierOf(e)) {
                         oValue  = [:e:];
                         matched = true;
                     }
@@ -358,7 +354,7 @@ namespace Mashiro {
 
         template <typename T>
         consteval bool TypeEmitsDefaults() {
-            auto a = Get<Anno::EmitDefault>(^^T);
+            auto a = Traits::Anno::Get<Anno::EmitDefault>(^^T);
             return a ? a->emit : true;
         }
 
@@ -370,7 +366,7 @@ namespace Mashiro {
                 using MemberT = typename [:std::meta::type_of(m):];
                 const auto& field = iValue.[:m:];
 
-                if constexpr (Has<Anno::Flatten>(m)) {
+                if constexpr (Traits::Anno::Has<Anno::Flatten>(m)) {
                     json sub = ToJsonImpl(field);
                     if (sub.is_object()) {
                         for (auto it = sub.begin(); it != sub.end(); ++it)
@@ -380,14 +376,14 @@ namespace Mashiro {
                     }
                 } else {
                     constexpr bool memberEmitDefault =
-                        Get<Anno::EmitDefault>(m).value_or(
+                        Traits::Anno::Get<Anno::EmitDefault>(m).value_or(
                             Anno::EmitDefault{TypeEmitsDefaults<T>()}).emit;
                     if constexpr (!memberEmitDefault) {
                         if constexpr (std::equality_comparable<MemberT>) {
                             if (field == MemberT{}) continue;
                         }
                     }
-                    if constexpr (std::is_enum_v<MemberT> && Has<Anno::AsInt>(m)) {
+                    if constexpr (std::is_enum_v<MemberT> && Traits::Anno::Has<Anno::AsInt>(m)) {
                         using U = std::underlying_type_t<MemberT>;
                         obj[std::string(FieldNameOf<m>())] = static_cast<U>(field);
                     } else {
@@ -407,16 +403,16 @@ namespace Mashiro {
                 using MemberT = typename [:std::meta::type_of(m):];
                 MemberT& field = oValue.[:m:];
 
-                if constexpr (Has<Anno::Flatten>(m)) {
+                if constexpr (Traits::Anno::Has<Anno::Flatten>(m)) {
                     FromJsonImpl(iJson, field);
                 } else {
                     auto key = std::string(FieldNameOf<m>());
                     auto it  = iJson.find(key);
                     if (it == iJson.end()) {
-                        if constexpr (Has<Anno::Required>(m))
+                        if constexpr (Traits::Anno::Has<Anno::Required>(m))
                             throw nlohmann::json::out_of_range::create(
                                 403, "missing required key '" + key + "'", &iJson);
-                    } else if constexpr (std::is_enum_v<MemberT> && Has<Anno::AsInt>(m)) {
+                    } else if constexpr (std::is_enum_v<MemberT> && Traits::Anno::Has<Anno::AsInt>(m)) {
                         using U = std::underlying_type_t<MemberT>;
                         field = static_cast<MemberT>(it->template get<U>());
                     } else {
