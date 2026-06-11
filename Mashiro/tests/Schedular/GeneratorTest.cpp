@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "Support/Meta.h"
+
 using namespace Mashiro;
 
 // =====================================================================
@@ -76,42 +78,42 @@ Generator<int> BinaryCountdown(int n) {
 // Tests
 // =====================================================================
 
-TEST_CASE("Generator basic iota", "[Schedular.Generator]") {
+TEST_CASE("Generator basic iota", AUTO_TAG) {
     std::vector<int> result;
     for (int v : Iota(0, 5))
         result.push_back(v);
     REQUIRE(result == std::vector{0, 1, 2, 3, 4});
 }
 
-TEST_CASE("Generator fibonacci", "[Schedular.Generator]") {
+TEST_CASE("Generator fibonacci", AUTO_TAG) {
     std::vector<int> result;
     for (int v : Fibonacci(8))
         result.push_back(v);
     REQUIRE(result == std::vector{0, 1, 1, 2, 3, 5, 8, 13});
 }
 
-TEST_CASE("Generator empty", "[Schedular.Generator]") {
+TEST_CASE("Generator empty", AUTO_TAG) {
     std::vector<int> result;
     for (int v : Empty())
         result.push_back(v);
     REQUIRE(result.empty());
 }
 
-TEST_CASE("Generator single value", "[Schedular.Generator]") {
+TEST_CASE("Generator single value", AUTO_TAG) {
     std::vector<int> result;
     for (int v : SingleValue(42))
         result.push_back(v);
     REQUIRE(result == std::vector{42});
 }
 
-TEST_CASE("Generator reference semantics", "[Schedular.Generator]") {
+TEST_CASE("Generator reference semantics", AUTO_TAG) {
     std::vector<std::string> result;
     for (const auto& s : StringSeq())
         result.emplace_back(s);
     REQUIRE(result == std::vector<std::string>{"hello", "world"});
 }
 
-TEST_CASE("Generator move-only", "[Schedular.Generator]") {
+TEST_CASE("Generator move-only", AUTO_TAG) {
     auto gen = Iota(0, 3);
     auto gen2 = std::move(gen);
     REQUIRE_FALSE(static_cast<bool>(gen));
@@ -123,14 +125,14 @@ TEST_CASE("Generator move-only", "[Schedular.Generator]") {
     REQUIRE(result == std::vector{0, 1, 2});
 }
 
-TEST_CASE("Generator recursive delegation - chain", "[Schedular.Generator]") {
+TEST_CASE("Generator recursive delegation - chain", AUTO_TAG) {
     std::vector<int> result;
     for (int v : ChainTwo(3, 2))
         result.push_back(v);
     REQUIRE(result == std::vector{0, 1, 2, 100, 101});
 }
 
-TEST_CASE("Generator recursive delegation - deep", "[Schedular.Generator]") {
+TEST_CASE("Generator recursive delegation - deep", AUTO_TAG) {
     std::vector<int> result;
     for (int v : BinaryCountdown(5))
         result.push_back(v);
@@ -142,14 +144,14 @@ Generator<int> ThrowingGen() {
     throw std::runtime_error("test error");
 }
 
-TEST_CASE("Generator exception propagation", "[Schedular.Generator]") {
+TEST_CASE("Generator exception propagation", AUTO_TAG) {
     auto gen = ThrowingGen();
     auto it = gen.begin();
     REQUIRE(*it == 1);
     REQUIRE_THROWS_AS(++it, std::runtime_error);
 }
 
-TEST_CASE("Generator early destruction", "[Schedular.Generator]") {
+TEST_CASE("Generator early destruction", AUTO_TAG) {
     // Ensure destroying a partially-consumed generator doesn't leak.
     {
         auto gen = Iota(0, 1000);
@@ -162,7 +164,7 @@ TEST_CASE("Generator early destruction", "[Schedular.Generator]") {
     SUCCEED("No leak/crash on early destruction");
 }
 
-TEST_CASE("Generator range-for with structured binding proxy", "[Schedular.Generator]") {
+TEST_CASE("Generator range-for with structured binding proxy", AUTO_TAG) {
     auto pairs = []() -> Generator<int> {
         for (int i = 0; i < 5; ++i)
             co_yield i * i;

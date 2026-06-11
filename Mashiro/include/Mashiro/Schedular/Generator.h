@@ -1,31 +1,27 @@
 /**
  * @file Generator.h
- * @brief Synchronous coroutine generator for ranges — a feature-complete, zero-overhead
- *        replacement for std::generator (P2502) built on C++26.
+ * @brief Synchronous coroutine generator for ranges.
+ * @details Provides a move-only, lazy coroutine range modelled after
+ * @c std::generator (P2502), with recursive delegation and optional coroutine
+ * frame allocation support.
  *
- * Capabilities:
- * - **Lazy evaluation**: initial_suspend = suspend_always.
- * - **Recursive delegation**: co_yield ElementsOf(gen) with O(1) per-element symmetric
- *   transfer via intrusive root/leaf promise chain (no std::stack heap allocation).
- * - **Allocator support**: template parameter, allocator_arg_t function parameter, or both.
- * - **Reference/value type control**: Generator<Ref, V, Alloc> — Ref controls dereference,
- *   V controls range_value_t (avoids dangling views like string_view→string).
- * - **Move-only**: coroutine state is a unique resource.
- * - **Exception propagation**: unhandled_exception stores exception_ptr, rethrown on resume.
- * - **Ranges integration**: models input_range.
- * - **C++26 consteval validation**: compile-time constraint checks on template parameters.
- * - **HALO-friendly**: minimal promise size (4 pointers + exception_ptr).
+ * @par Capabilities
+ * @li Lazy evaluation through @c initial_suspend returning @c std::suspend_always.
+ * @li Recursive delegation through @c co_yield @c ElementsOf(gen).
+ * @li Allocator support through the template parameter and
+ *     @c std::allocator_arg_t coroutine function parameters.
+ * @li Separate reference and value type control via @c Generator<Ref,V,Allocator>.
+ * @li Move-only ownership of the coroutine state.
+ * @li Exception capture in @c unhandled_exception and rethrow on iterator resume.
+ * @li Ranges integration as an input range.
  *
- * Design notes (recursive delegation):
- *
- *   std::generator maintains a stack<coroutine_handle<>> externally. We use an intrusive
- *   approach: every promise stores root_ (outermost promise) and parent_ (enclosing promise).
- *   The root promise stores active_ — the coroutine_handle of the innermost leaf that the
- *   iterator should resume next. When a generator delegates via co_yield ElementsOf(child),
- *   the DelegationAwaiter wires the child's root_/parent_ and updates root_->active_.
- *   When the child finishes, FinalAwaiter restores root_->active_ to the parent and does
- *   symmetric transfer back to the parent coroutine body. The iterator always resumes
- *   root_->active_ and reads root_->value_.
+ * @par Recursive Delegation Model
+ * @c std::generator maintains an external stack of coroutine handles. This
+ * implementation uses an intrusive chain: each promise stores @c root_ for the
+ * outermost promise and @c parent_ for the enclosing promise. The root promise
+ * stores @c active_, the handle of the innermost coroutine resumed by the
+ * iterator. Delegation wires the child promise into this chain and updates
+ * @c root_->active_. Completion restores the active handle to the parent.
  *
  * @ingroup Schedular
  */
@@ -44,235 +40,343 @@
 
 namespace Mashiro {
 
-    // =========================================================================
-    // ElementsOf — tag for recursive generator delegation
-    // =========================================================================
+    /** @name Recursive Delegation Tags @{ ————————————————————————————————————— */
 
     /**
      * @brief Tag wrapper indicating that the elements of a range should be yielded
      *        individually rather than the range itself.
      *
-     * Analogous to std::ranges::elements_of (which may be absent in this libc++).
+     * @details Analogous to @c std::ranges::elements_of, which may be absent in
+     * the active standard library.
      *
-     * @tparam Rng   The range type.
-     * @tparam Alloc Allocator to use for the nested coroutine frame (default = void).
+     * @tparam Rng The range type.
+     * @tparam Alloc Allocator type to use for a nested coroutine frame, or
+     * @c void for the default path.
      */
-    template <std::ranges::range Rng, typename Alloc = void>
+    template<std::ranges::range Rng, typename Alloc = void>
     struct ElementsOf {
+        /** @brief Range whose elements are delegated. */
         Rng range;
 
-        constexpr explicit ElementsOf(Rng&& rng) noexcept
-            : range(std::forward<Rng>(rng)) {}
+        /**
+         * @brief Construct a delegation wrapper from a range.
+         * @param[in] rng Range object or reference to delegate.
+         */
+        constexpr explicit ElementsOf(Rng&& rng) noexcept : range(std::forward<Rng>(rng)) {}
     };
 
-    template <std::ranges::range Rng, typename Alloc>
-        requires (!std::is_void_v<Alloc>)
+    /**
+     * @brief Delegation wrapper carrying an explicit allocator object.
+     * @tparam Rng The range type.
+     * @tparam Alloc Allocator type for nested coroutine allocation.
+     */
+    template<std::ranges::range Rng, typename Alloc>
+        requires(!std::is_void_v<Alloc>)
     struct ElementsOf<Rng, Alloc> {
+        /** @brief Range whose elements are delegated. */
         Rng range;
+
+        /** @brief Allocator object associated with the delegated range. */
         Alloc allocator;
 
+        /**
+         * @brief Construct a delegation wrapper from a range and allocator.
+         * @param[in] rng Range object or reference to delegate.
+         * @param[in] alloc Allocator object for nested coroutine state.
+         */
         constexpr ElementsOf(Rng&& rng, Alloc alloc) noexcept
             : range(std::forward<Rng>(rng)), allocator(std::move(alloc)) {}
     };
 
-    template <std::ranges::range Rng>
+    /**
+     * @brief Deduce @c ElementsOf without an explicit allocator.
+     * @tparam Rng The range type.
+     */
+    template<std::ranges::range Rng>
     ElementsOf(Rng&&) -> ElementsOf<Rng>;
 
-    template <std::ranges::range Rng, typename Alloc>
+    /**
+     * @brief Deduce @c ElementsOf with an explicit allocator.
+     * @tparam Rng The range type.
+     * @tparam Alloc Allocator type.
+     */
+    template<std::ranges::range Rng, typename Alloc>
     ElementsOf(Rng&&, Alloc) -> ElementsOf<Rng, Alloc>;
 
-    // =========================================================================
-    // Forward declarations
-    // =========================================================================
+    /** @} ————————————————————————————————————————————————————————————————————— */
 
-    template <typename Ref, typename V = void, typename Allocator = void>
+    /** @name Forward Declarations @{ —————————————————————————————————————————— */
+
+    /**
+     * @brief Synchronous coroutine generator for ranges.
+     * @tparam Ref Reference type exposed by iterator dereference.
+     * @tparam V Value type exposed through range traits, or @c void to derive it.
+     * @tparam Allocator Allocator type for the coroutine frame, or @c void.
+     */
+    template<typename Ref, typename V = void, typename Allocator = void>
     class Generator;
 
-    /// @cond INTERNAL
+    /** @} ————————————————————————————————————————————————————————————————————— */
+
+    /** @cond INTERNAL */
     namespace Detail::Gen {
 
-        // ---------------------------------------------------------------------
-        // Type computation (matches std::generator semantics exactly)
-        // ---------------------------------------------------------------------
+        /** @name Type Computation @{ —————————————————————————————————————————— */
 
-        template <typename Ref, typename V>
-        using ValueType = std::conditional_t<std::is_void_v<V>,
-            std::remove_cvref_t<Ref>, V>;
+        /**
+         * @brief Range value type for a generator parameter set.
+         * @tparam Ref Reference parameter.
+         * @tparam V Explicit value parameter, or @c void.
+         */
+        template<typename Ref, typename V>
+        using ValueType = std::conditional_t<std::is_void_v<V>, std::remove_cvref_t<Ref>, V>;
 
-        template <typename Ref, typename V>
-        using ReferenceType = std::conditional_t<std::is_void_v<V>,
-            Ref&&, Ref>;
+        /**
+         * @brief Iterator reference type for a generator parameter set.
+         * @tparam Ref Reference parameter.
+         * @tparam V Explicit value parameter, or @c void.
+         */
+        template<typename Ref, typename V>
+        using ReferenceType = std::conditional_t<std::is_void_v<V>, Ref&&, Ref>;
 
-        template <typename Reference>
-        using YieldedType = std::conditional_t<std::is_reference_v<Reference>,
-            Reference, const Reference&>;
+        /**
+         * @brief Type accepted by @c yield_value for directly yielded objects.
+         * @tparam Reference Generator reference type.
+         */
+        template<typename Reference>
+        using YieldedType =
+            std::conditional_t<std::is_reference_v<Reference>, Reference, const Reference&>;
 
-        template <typename Reference>
+        /**
+         * @brief Rvalue-reference form used by generator common-reference checks.
+         * @tparam Reference Generator reference type.
+         */
+        template<typename Reference>
         using RRefType = std::conditional_t<std::is_reference_v<Reference>,
-            std::remove_reference_t<Reference>&&, Reference>;
+                                            std::remove_reference_t<Reference>&&, Reference>;
 
-        // ---------------------------------------------------------------------
-        // Concept: valid Generator parameter combination
-        // (mirrors [coro.generator.class]/2 ill-formed clauses)
-        // ---------------------------------------------------------------------
+        /**
+         * @brief True when @c Ref and @c V satisfy the generator parameter rules.
+         * @details Mirrors the common-reference constraints from
+         * [coro.generator.class].
+         * @tparam Ref Reference parameter.
+         * @tparam V Explicit value parameter, or @c void.
+         */
+        template<typename Ref, typename V>
+        concept ValidGeneratorParams =
+            requires {
+                typename ValueType<Ref, V>;
+                typename ReferenceType<Ref, V>;
+            } && std::common_reference_with<ReferenceType<Ref, V>&&, ValueType<Ref, V>&> &&
+            std::common_reference_with<ReferenceType<Ref, V>&&,
+                                       RRefType<ReferenceType<Ref, V>>&&> &&
+            std::common_reference_with<RRefType<ReferenceType<Ref, V>>&&, const ValueType<Ref, V>&>;
 
-        template <typename Ref, typename V>
-        concept ValidGeneratorParams = requires {
-            typename ValueType<Ref, V>;
-            typename ReferenceType<Ref, V>;
-        } && std::common_reference_with<ReferenceType<Ref, V>&&, ValueType<Ref, V>&>
-          && std::common_reference_with<ReferenceType<Ref, V>&&, RRefType<ReferenceType<Ref, V>>&&>
-          && std::common_reference_with<RRefType<ReferenceType<Ref, V>>&&, const ValueType<Ref, V>&>;
+        /** @} ————————————————————————————————————————————————————————————————— */
 
-        // =====================================================================
-        // Allocator-aware operator new/delete for promise_type
-        //
-        // The allocator (rebound to std::byte) is stored immediately before
-        // the compiler-allocated coroutine frame at max_align_t alignment.
-        // =====================================================================
+        /** @name Allocator Support @{ ————————————————————————————————————————— */
 
-        template <typename Allocator>
-        struct AllocatorSupport {};  // void / non-allocator: default new/delete
+        /**
+         * @brief Empty allocation hook for @c void or non-custom allocation.
+         * @tparam Allocator Allocator parameter.
+         */
+        template<typename Allocator>
+        struct AllocatorSupport {};
 
-        template <typename Allocator>
-            requires (!std::is_void_v<Allocator>)
+        /**
+         * @brief Coroutine-frame allocation hook for non-void allocators.
+         * @details The allocator is rebound to @c std::byte and stored
+         * immediately before the compiler-allocated coroutine frame.
+         * @tparam Allocator Allocator parameter.
+         */
+        template<typename Allocator>
+            requires(!std::is_void_v<Allocator>)
         struct AllocatorSupport<Allocator> {
         private:
-            using ByteAlloc  = typename std::allocator_traits<Allocator>::template rebind_alloc<std::byte>;
+            /** @brief Byte allocator used to reserve raw coroutine-frame storage. */
+            using ByteAlloc =
+                typename std::allocator_traits<Allocator>::template rebind_alloc<std::byte>;
+
+            /** @brief Traits type for @c ByteAlloc. */
             using ByteTraits = std::allocator_traits<ByteAlloc>;
 
+            /** @brief Offset from the stored allocator object to the coroutine frame. */
             static constexpr size_t kAllocOffset =
-                (sizeof(ByteAlloc) + alignof(std::max_align_t) - 1)
-                    & ~(alignof(std::max_align_t) - 1);
+                (sizeof(ByteAlloc) + alignof(std::max_align_t) - 1) &
+                ~(alignof(std::max_align_t) - 1);
 
+            /**
+             * @brief Allocate and initialise raw storage for a coroutine frame.
+             * @param[in] alloc Byte allocator object.
+             * @param[in] frameSize Compiler-requested coroutine frame size.
+             * @return Pointer to the coroutine frame region.
+             */
             static void* AllocFrame(ByteAlloc alloc, size_t frameSize) {
                 size_t total = kAllocOffset + frameSize;
-                auto*  mem   = ByteTraits::allocate(alloc, total);
+                auto* mem = ByteTraits::allocate(alloc, total);
                 ::new (static_cast<void*>(mem)) ByteAlloc(std::move(alloc));
                 return mem + kAllocOffset;
             }
 
         public:
+            /**
+             * @brief Allocate a coroutine frame using a default-constructed allocator.
+             * @param[in] frameSize Compiler-requested coroutine frame size.
+             * @return Pointer to the coroutine frame region.
+             */
             static void* operator new(size_t frameSize)
                 requires std::default_initializable<ByteAlloc>
             {
                 return AllocFrame(ByteAlloc{}, frameSize);
             }
 
-            template <typename... Args>
-            static void* operator new(size_t frameSize,
-                                       std::allocator_arg_t, const Allocator& a, Args&&...) {
+            /**
+             * @brief Allocate a coroutine frame using an allocator argument.
+             * @param[in] frameSize Compiler-requested coroutine frame size.
+             * @param[in] a Allocator object supplied by the coroutine function.
+             * @return Pointer to the coroutine frame region.
+             */
+            template<typename... Args>
+            static void* operator new(size_t frameSize, std::allocator_arg_t, const Allocator& a,
+                                      Args&&...) {
                 return AllocFrame(ByteAlloc{a}, frameSize);
             }
 
-            template <typename This, typename... Args>
-            static void* operator new(size_t frameSize,
-                                       This&, std::allocator_arg_t,
-                                       const Allocator& a, Args&&...) {
+            /**
+             * @brief Allocate a member-coroutine frame using an allocator argument.
+             * @param[in] frameSize Compiler-requested coroutine frame size.
+             * @param[in] a Allocator object supplied by the coroutine function.
+             * @return Pointer to the coroutine frame region.
+             */
+            template<typename This, typename... Args>
+            static void* operator new(size_t frameSize, This&, std::allocator_arg_t,
+                                      const Allocator& a, Args&&...) {
                 return AllocFrame(ByteAlloc{a}, frameSize);
             }
 
+            /**
+             * @brief Destroy the stored allocator and release the coroutine frame.
+             * @param[in] ptr Pointer previously returned by @c operator new.
+             * @param[in] frameSize Compiler-requested coroutine frame size.
+             */
             static void operator delete(void* ptr, size_t frameSize) noexcept {
-                auto*  mem  = static_cast<std::byte*>(ptr) - kAllocOffset;
-                auto&  a    = *reinterpret_cast<ByteAlloc*>(mem);
+                auto* mem = static_cast<std::byte*>(ptr) - kAllocOffset;
+                auto& a = *reinterpret_cast<ByteAlloc*>(mem);
                 ByteAlloc tmp(std::move(a));
                 a.~ByteAlloc();
                 ByteTraits::deallocate(tmp, mem, kAllocOffset + frameSize);
             }
         };
 
-        // void allocator: no custom operator new/delete — use default.
-        // The compiler will use global ::operator new for the coroutine frame.
-        template <>
+        /**
+         * @brief Allocation hook for @c void allocator, using global allocation.
+         */
+        template<>
         struct AllocatorSupport<void> {};
 
-        // =====================================================================
-        // Promise type
-        // =====================================================================
+        /** @} ————————————————————————————————————————————————————————————————— */
 
-        template <typename Ref, typename V, typename Allocator>
+        /** @name Promise Type @{ —————————————————————————————————————————————— */
+
+        /**
+         * @brief Coroutine promise backing @c Generator.
+         * @tparam Ref Reference parameter.
+         * @tparam V Explicit value parameter, or @c void.
+         * @tparam Allocator Allocator parameter.
+         */
+        template<typename Ref, typename V, typename Allocator>
         class PromiseType : public AllocatorSupport<Allocator> {
         public:
+            /** @brief Public generator type associated with this promise. */
             using generator_type = Generator<Ref, V, Allocator>;
-            using reference      = ReferenceType<Ref, V>;
-            using yielded        = YieldedType<reference>;
-            using value_type     = ValueType<Ref, V>;
+
+            /** @brief Iterator reference type produced by this promise. */
+            using reference = ReferenceType<Ref, V>;
+
+            /** @brief Type accepted by direct @c co_yield expressions. */
+            using yielded = YieldedType<reference>;
+
+            /** @brief Range value type associated with this promise. */
+            using value_type = ValueType<Ref, V>;
 
         private:
-            // Currently-yielded value. All yields (including nested) write to
-            // root_->value_ so the iterator always reads from the root promise.
+            /**
+             * @brief Pointer to the currently yielded value.
+             * @details All yields, including nested yields, write to
+             * @c root_->value_ so the iterator always reads from the root promise.
+             */
             std::add_pointer_t<yielded> value_ = nullptr;
 
-            // Exception propagation — nested generators store here via root_.
+            /** @brief Captured exception propagated through the root promise. */
             std::exception_ptr except_{};
 
-            // Intrusive recursive delegation chain:
-            //   root_   → outermost promise (iterator reads root_->value_)
-            //   parent_ → enclosing promise (for unwinding on finish)
-            //   active_ → (root only) handle of the innermost leaf coroutine
-            //              that the iterator should resume next.
-            PromiseType*                       root_   = this;
-            PromiseType*                       parent_ = nullptr;
+            /** @brief Outermost promise in the recursive delegation chain. */
+            PromiseType* root_ = this;
+
+            /** @brief Enclosing promise in the recursive delegation chain. */
+            PromiseType* parent_ = nullptr;
+
+            /** @brief Root-only handle of the innermost coroutine resumed next. */
             std::coroutine_handle<PromiseType> active_{};
 
             friend generator_type;
 
-            template <typename, typename, typename>
+            template<typename, typename, typename>
             friend class PromiseType;
 
         public:
+            /** @brief Construct a promise with an empty delegation chain. */
             PromiseType() = default;
-            PromiseType(PromiseType&&)            = delete;
-            PromiseType(const PromiseType&)       = delete;
+
+            /** @brief Promise objects are not movable. */
+            PromiseType(PromiseType&&) = delete;
+
+            /** @brief Promise objects are not copyable. */
+            PromiseType(const PromiseType&) = delete;
+
+            /** @brief Promise objects are not move-assignable. */
             PromiseType& operator=(PromiseType&&) = delete;
+
+            /** @brief Promise objects are not copy-assignable. */
             PromiseType& operator=(const PromiseType&) = delete;
 
-            // -----------------------------------------------------------------
-            // Coroutine interface
-            // -----------------------------------------------------------------
+            /** @name Coroutine Interface @{ —————————————————————————————————— */
 
+            /**
+             * @brief Create the public generator object for this coroutine.
+             * @return Generator owning this coroutine handle.
+             */
             generator_type get_return_object() noexcept {
                 auto h = std::coroutine_handle<PromiseType>::from_promise(*this);
-                active_ = h;  // root's initial active is itself
+                /** @brief The root coroutine starts as the active coroutine. */
+                active_ = h;
                 return generator_type{h};
             }
 
+            /**
+             * @brief Lazily suspend before executing the coroutine body.
+             * @return Always-suspend awaiter.
+             */
             std::suspend_always initial_suspend() noexcept { return {}; }
 
+            /** @brief Complete a generator that reaches @c co_return. */
             void return_void() noexcept {}
 
-            void unhandled_exception() {
-                if (root_ != this)
-                    root_->except_ = std::current_exception();
-                else
-                    except_ = std::current_exception();
-            }
+            /** @brief Capture an unhandled coroutine exception in the root promise. */
+            void unhandled_exception() noexcept { root_->except_ = std::current_exception(); }
 
-            // -----------------------------------------------------------------
-            // yield_value — single element
-            //
-            // Three overloads mirror [coro.generator.promise]/5-7:
-            // (1) yielded is a reference type → accept yielded directly.
-            // (2) yielded is const T& (non-reference reference type) →
-            //     accept by value, store pointer to the parameter
-            //     (the parameter lives across the suspension).
-            // (3) Universal-ref fallback for convertible types.
-            //
-            // For Generator<int>:  reference = int&&, yielded = int&&.
-            //   co_yield lvalue → overload (3) with U=int&, converts via
-            //   Element{} to yielded. But int& is not convertible to int&&.
-            //   The standard solves this: "An expression e is yielded as
-            //   if by yield_value(e)" where yield_value(yielded) is the
-            //   primary overload.  For prvalues, yielded=int&& binds.
-            //   For lvalues, the standard's wording uses an additional
-            //   overload accepting `reference` (see [coro.generator.promise]).
-            //
-            // We unify with a single template overload that materializes
-            // the value on the coroutine frame side.
-            // -----------------------------------------------------------------
+            /** @} ————————————————————————————————————————————————————————————— */
 
-            // Primary: yielded is a reference → binds to lvalue or rvalue
-            // that already matches the reference type.
+            /** @name Element Yielding @{ ————————————————————————————————————— */
+
+            /**
+             * @brief Yield a value whose type already matches @c yielded.
+             * @details This overload stores the address of the yielded object in
+             * the root promise. The yielded object is required to remain alive
+             * across the suspension point according to coroutine yield semantics.
+             * @param[in] val Yielded object.
+             * @return Always-suspend awaiter.
+             */
             std::suspend_always yield_value(yielded val) noexcept
                 requires std::is_reference_v<yielded>
             {
@@ -280,164 +384,232 @@ namespace Mashiro {
                 return {};
             }
 
-            // When reference is an rvalue reference (e.g. Generator<int> →
-            // reference = int&&, yielded = int&&), lvalues can't bind to
-            // yielded. This overload accepts any convertible type by
-            // forwarding reference and stores the result in a temporary
-            // that persists across the suspension point.
-            //
-            // The standard achieves this via an internal wrapper type.
-            // We use a nested awaitable that stores the converted value.
+            /**
+             * @brief Awaiter that owns a materialised yielded value.
+             * @details Used when the source expression cannot bind directly to
+             * @c yielded and must be converted into coroutine-frame storage.
+             */
             struct ValueAwaiter {
+                /** @brief Materialised value kept alive across suspension. */
                 std::remove_cvref_t<yielded> stored;
+
+                /** @brief Root promise receiving @c stored as the current value. */
                 PromiseType* root;
 
+                /** @brief The awaiter always suspends at a yield point. */
                 bool await_ready() noexcept { return false; }
+
+                /**
+                 * @brief Publish the materialised value to the root promise.
+                 * @param[in] Awaiting coroutine handle, unused.
+                 */
                 void await_suspend(std::coroutine_handle<>) noexcept {
                     root->value_ = std::addressof(stored);
                 }
+
+                /** @brief Resume without producing an additional result. */
                 void await_resume() noexcept {}
             };
 
-            template <typename U>
-                requires (!std::same_as<std::remove_cvref_t<U>, PromiseType>)
-                      && (!std::is_reference_v<yielded> || !std::same_as<U, yielded>)
-                      && std::constructible_from<std::remove_cvref_t<yielded>, U>
+            /**
+             * @brief Yield a value after materialising a converted temporary.
+             * @tparam U Source expression type.
+             * @param[in] val Source value.
+             * @return Awaiter that owns the converted value across suspension.
+             */
+            template<typename U>
+                requires(!std::same_as<std::remove_cvref_t<U>, PromiseType>) &&
+                        (!std::is_reference_v<yielded> || !std::same_as<U, yielded>) &&
+                        std::constructible_from<std::remove_cvref_t<yielded>, U>
             ValueAwaiter yield_value(U&& val) noexcept(
-                std::is_nothrow_constructible_v<std::remove_cvref_t<yielded>, U>)
-            {
+                std::is_nothrow_constructible_v<std::remove_cvref_t<yielded>, U>) {
                 return {std::remove_cvref_t<yielded>(std::forward<U>(val)), root_};
             }
 
-            // -----------------------------------------------------------------
-            // yield_value — recursive delegation (ElementsOf)
-            //
-            // The awaiter does symmetric transfer to the nested coroutine.
-            // The nested coroutine's promise is wired into the chain so that:
-            //   - Its root_ points to our root_.
-            //   - Its parent_ points to us.
-            //   - root_->active_ is updated to the nested handle.
-            // When the nested finishes, FinalAwaiter restores root_->active_
-            // to the parent handle and symmetric-transfers back to us.
-            // -----------------------------------------------------------------
+            /** @} ————————————————————————————————————————————————————————————— */
 
-            template <typename Gen>
+            /** @name Recursive Delegation @{ ————————————————————————————————— */
+
+            /**
+             * @brief Awaiter that transfers execution to a nested generator.
+             * @tparam Gen Nested generator type.
+             */
+            template<typename Gen>
             struct DelegationAwaiter {
+                /** @brief Nested generator being delegated. */
                 Gen nested;
 
+                /** @brief Parent promise suspended by this delegation awaiter. */
+                PromiseType* parentPromise = nullptr;
+
+                /** @brief Delegation always suspends the parent coroutine. */
                 constexpr bool await_ready() noexcept { return false; }
 
+                /**
+                 * @brief Wire the nested promise and transfer execution to it.
+                 * @param[in] parent Parent coroutine handle.
+                 * @return Coroutine handle to resume via symmetric transfer.
+                 */
                 std::coroutine_handle<>
                 await_suspend(std::coroutine_handle<PromiseType> parent) noexcept {
-                    auto  childHandle  = nested.coroutine_;
+                    auto childHandle = nested.coroutine_;
                     auto& childPromise = childHandle.promise();
-                    auto& parentPromise = parent.promise();
+                    auto& parentPromiseRef = parent.promise();
+                    parentPromise = &parentPromiseRef;
 
-                    // Wire the chain.
-                    childPromise.root_   = parentPromise.root_;
-                    childPromise.parent_ = &parentPromise;
+                    /** @brief Attach the child promise to the parent's root chain. */
+                    childPromise.root_ = parentPromiseRef.root_;
+                    childPromise.parent_ = &parentPromiseRef;
 
-                    // Update root's active to the new leaf.
-                    parentPromise.root_->active_ = childHandle;
+                    /** @brief Make the child the active leaf coroutine. */
+                    parentPromiseRef.root_->active_ = childHandle;
 
-                    // Transfer ownership from the Generator object to us:
-                    // the nested generator's destructor won't destroy the handle.
-                    nested.coroutine_ = nullptr;
-
-                    // Symmetric transfer: resume the child coroutine.
+                    /** @brief Resume the child coroutine via symmetric transfer. */
                     return childHandle;
                 }
 
+                /** @brief Continue the parent, rethrowing delegated exceptions first. */
                 void await_resume() {
-                    // After the nested generator is fully consumed, we resume here.
-                    // Exceptions from nested were stored in root_->except_ by
-                    // unhandled_exception() and will be rethrown by the iterator.
+                    if (parentPromise) {
+                        auto& root = *parentPromise->root_;
+                        if (auto ex = std::exchange(root.except_, {})) {
+                            std::rethrow_exception(ex);
+                        }
+                    }
                 }
             };
 
-            template <typename R2, typename V2, typename A2>
-            DelegationAwaiter<Generator<R2, V2, A2>>
-            yield_value(ElementsOf<Generator<R2, V2, A2>> eo) noexcept {
+            /**
+             * @brief Delegate directly to another generator of the same type.
+             * @param[in] eo Delegation wrapper.
+             * @return Awaiter that transfers execution to the nested generator.
+             */
+            DelegationAwaiter<generator_type> yield_value(ElementsOf<generator_type> eo) noexcept {
                 return {std::move(eo.range)};
             }
 
-            template <std::ranges::range Rng, typename Alloc>
-                requires (!std::same_as<std::remove_cvref_t<Rng>, generator_type>)
-            DelegationAwaiter<generator_type>
-            yield_value(ElementsOf<Rng, Alloc> eo) {
-                auto adapt = [](auto rng) -> generator_type {
+            /**
+             * @brief Delegate directly to a same-typed generator with an ignored allocator tag.
+             * @tparam Alloc Allocator tag carried by @c ElementsOf.
+             * @param[in] eo Delegation wrapper.
+             * @return Awaiter that transfers execution to the nested generator.
+             */
+            template<typename Alloc>
+            DelegationAwaiter<generator_type> yield_value(ElementsOf<generator_type, Alloc> eo) noexcept {
+                return {std::move(eo.range)};
+            }
+
+            /**
+             * @brief Adapt an arbitrary range into a same-typed generator and delegate it.
+             * @tparam Rng Delegated range type.
+             * @tparam Alloc Optional allocator type carried by @c ElementsOf.
+             * @param[in] eo Delegation wrapper.
+             * @return Awaiter that transfers execution to the adapted generator.
+             */
+            template<std::ranges::range Rng, typename Alloc>
+                requires(!std::same_as<std::remove_cvref_t<Rng>, generator_type>)
+            DelegationAwaiter<generator_type> yield_value(ElementsOf<Rng, Alloc> eo) {
+                auto adapt = []<typename Range>(Range&& rng) -> generator_type {
                     for (auto&& elem : rng) {
                         co_yield static_cast<decltype(elem)>(elem);
                     }
                 };
-                return {adapt(std::move(eo.range))};
+
+                if constexpr (std::is_void_v<Alloc>) {
+                    return {adapt(std::forward<Rng>(eo.range))};
+                } else if constexpr (!std::is_void_v<Allocator> &&
+                                     std::constructible_from<Allocator, const Alloc&>) {
+                    auto adaptWithAllocator =
+                        []<typename Range>(std::allocator_arg_t, Allocator, Range&& rng) -> generator_type {
+                        for (auto&& elem : rng) {
+                            co_yield static_cast<decltype(elem)>(elem);
+                        }
+                    };
+                    return {adaptWithAllocator(
+                        std::allocator_arg, Allocator{eo.allocator}, std::forward<Rng>(eo.range))};
+                } else {
+                    static_assert(!std::is_void_v<Allocator> &&
+                                      std::constructible_from<Allocator, const Alloc&>,
+                                  "ElementsOf(range, alloc) requires the parent Generator "
+                                  "Allocator to be constructible from alloc.");
+                }
             }
 
+            /** @brief Disable arbitrary @c co_await inside generator coroutines. */
             void await_transform() = delete;
 
-            // -----------------------------------------------------------------
-            // final_suspend — symmetric transfer back to parent
-            //
-            // For nested coroutines: destroy our frame, restore root_->active_
-            // to parent, and symmetric-transfer to parent (which resumes at
-            // DelegationAwaiter::await_resume).
-            //
-            // For root coroutine: return noop_coroutine so the iterator's
-            // .resume() returns and the iterator can detect .done().
-            // -----------------------------------------------------------------
+            /** @} ————————————————————————————————————————————————————————————— */
 
+            /** @name Final Suspension @{ ————————————————————————————————————— */
+
+            /**
+             * @brief Awaiter used at final suspension.
+             * @details Nested coroutines restore the root active handle to their
+             * parent and symmetric-transfer back to that parent. The root
+             * coroutine returns @c std::noop_coroutine so iterator resumption
+             * returns to the caller.
+             */
             struct FinalAwaiter {
+                /** @brief Final suspension always suspends. */
                 constexpr bool await_ready() noexcept { return false; }
 
+                /**
+                 * @brief Restore delegation state and choose the continuation.
+                 * @param[in] h Coroutine finishing final suspension.
+                 * @return Continuation handle for symmetric transfer.
+                 */
                 std::coroutine_handle<>
                 await_suspend(std::coroutine_handle<PromiseType> h) noexcept {
                     auto& promise = h.promise();
-                    auto* parent  = promise.parent_;
+                    auto* parent = promise.parent_;
 
                     if (parent) {
-                        // Restore root's active to the parent.
+                        /** @brief Restore the parent as the active coroutine. */
                         auto parentHandle =
                             std::coroutine_handle<PromiseType>::from_promise(*parent);
                         promise.root_->active_ = parentHandle;
 
-                        // Destroy the nested coroutine frame.
-                        h.destroy();
-
-                        // Symmetric transfer back to parent (resumes at await_resume
-                        // of DelegationAwaiter, then parent body continues).
+                        /** @brief Resume the parent at the delegation awaiter. */
                         return parentHandle;
                     }
 
-                    // Top-level: return to caller (iterator::operator++ / begin).
+                    /** @brief Return control to the iterator resume caller. */
                     return std::noop_coroutine();
                 }
 
+                /** @brief Final suspension produces no result. */
                 void await_resume() noexcept {}
             };
 
+            /**
+             * @brief Suspend at coroutine completion.
+             * @return Final-suspend awaiter.
+             */
             FinalAwaiter final_suspend() noexcept { return {}; }
         };
 
-    } // namespace Detail::Gen
-    /// @endcond
+        /** @} ———————————————————————————————————————————————————————————————— */
 
-    // =========================================================================
-    // Generator
-    // =========================================================================
+    }
+    /** @endcond */
+
+    /** @name Generator Range @{ ——————————————————————————————————————————————— */
 
     /**
      * @brief Synchronous coroutine generator for ranges.
      *
-     * A feature-complete, zero-overhead replacement for `std::generator` (P2502)
-     * targeting C++26 with COCA clang-p2996.
+     * @details A move-only coroutine range modelled after @c std::generator
+     * (P2502), targeting the project's C++26 toolchain.
      *
-     * @tparam Ref       The reference type yielded by the generator. Controls what
-     *                   `*it` returns. If `V` is `void`, `reference = Ref&&`.
-     * @tparam V         The value type. If `void`, deduced as `remove_cvref_t<Ref>`.
-     *                   Use to avoid dangling (e.g. `Generator<string_view, string>`).
-     * @tparam Allocator Custom allocator for the coroutine frame. `void` = default.
+     * @tparam Ref The reference type yielded by the generator. This controls
+     * what @c *it returns. If @p V is @c void, @c reference is @c Ref&&.
+     * @tparam V The value type. If @c void, it is deduced as
+     * @c std::remove_cvref_t<Ref>. Use this to avoid dangling views, such as
+     * @c Generator<std::string_view,std::string>.
+     * @tparam Allocator Custom allocator for the coroutine frame, or @c void
+     * for global allocation.
      *
-     * @code
+     * @code{.cpp}
      * Generator<int> fibonacci() {
      *     int a = 0, b = 1;
      *     while (true) {
@@ -448,7 +620,6 @@ namespace Mashiro {
      *     }
      * }
      *
-     * // Recursive delegation:
      * Generator<const int&> tree_inorder(const Tree& t) {
      *     if (t.left)  co_yield ElementsOf(tree_inorder(*t.left));
      *     co_yield t.value;
@@ -456,143 +627,228 @@ namespace Mashiro {
      * }
      * @endcode
      */
-    template <typename Ref, typename V, typename Allocator>
+    template<typename Ref, typename V, typename Allocator>
     class Generator {
         static_assert(Detail::Gen::ValidGeneratorParams<Ref, V>,
-            "Generator<Ref, V>: invalid parameter combination. "
-            "Ref/V must satisfy the common_reference_with constraints.");
+                      "Generator<Ref, V>: invalid parameter combination. "
+                      "Ref/V must satisfy the common_reference_with constraints.");
+
     public:
-        // -----------------------------------------------------------------
-        // Public type aliases (match std::generator interface)
-        // -----------------------------------------------------------------
+        /** @name Public Types @{ ————————————————————————————————————————————— */
+
+        /** @brief Coroutine promise type associated with this generator. */
         using promise_type = Detail::Gen::PromiseType<Ref, V, Allocator>;
-        using value_type   = Detail::Gen::ValueType<Ref, V>;
-        using reference    = Detail::Gen::ReferenceType<Ref, V>;
-        using yielded      = Detail::Gen::YieldedType<reference>;
+
+        /** @brief Range value type associated with this generator. */
+        using value_type = Detail::Gen::ValueType<Ref, V>;
+
+        /** @brief Iterator dereference type associated with this generator. */
+        using reference = Detail::Gen::ReferenceType<Ref, V>;
+
+        /** @brief Type accepted by direct @c co_yield expressions. */
+        using yielded = Detail::Gen::YieldedType<reference>;
+
+        /** @} ——————————————————————————————————————————————————————————————— */
 
     private:
+        /** @brief Owned root coroutine handle. */
         std::coroutine_handle<promise_type> coroutine_ = nullptr;
 
         friend promise_type;
 
-        template <typename, typename, typename>
+        template<typename, typename, typename>
         friend class Detail::Gen::PromiseType;
 
-        explicit Generator(std::coroutine_handle<promise_type> h) noexcept
-            : coroutine_(h) {}
+        /**
+         * @brief Construct from an already-created coroutine handle.
+         * @param[in] h Coroutine handle to own.
+         */
+        explicit Generator(std::coroutine_handle<promise_type> h) noexcept : coroutine_(h) {}
 
     public:
+        /** @brief Construct an empty generator. */
         Generator() noexcept = default;
 
+        /**
+         * @brief Move-construct by transferring coroutine ownership.
+         * @param[in,out] other Source generator.
+         */
         Generator(Generator&& other) noexcept
             : coroutine_(std::exchange(other.coroutine_, nullptr)) {}
 
+        /**
+         * @brief Move-assign by destroying the current coroutine and taking ownership.
+         * @param[in,out] other Source generator.
+         * @return This generator.
+         */
         Generator& operator=(Generator&& other) noexcept {
             if (this != &other) {
-                if (coroutine_) coroutine_.destroy();
+                if (coroutine_) {
+                    coroutine_.destroy();
+                }
                 coroutine_ = std::exchange(other.coroutine_, nullptr);
             }
             return *this;
         }
 
+        /** @brief Generators are move-only. */
         Generator(const Generator&) = delete;
+
+        /** @brief Generators are move-only. */
         Generator& operator=(const Generator&) = delete;
 
+        /** @brief Destroy the owned coroutine frame, if any. */
         ~Generator() {
-            if (coroutine_) coroutine_.destroy();
+            if (coroutine_) {
+                coroutine_.destroy();
+            }
         }
 
-        // -----------------------------------------------------------------
-        // Iterator
-        //
-        // The iterator holds the root coroutine handle. For resume it uses
-        // root.promise().active_ (the innermost leaf). For dereference it
-        // reads root.promise().value_ (all yields write there).
-        // -----------------------------------------------------------------
+        /** @name Iterator Types @{ ——————————————————————————————————————————— */
 
+        /** @brief Sentinel for the end of the generator range. */
         struct Sentinel {};
 
+        /**
+         * @brief Move-only input iterator over the generator.
+         * @details The iterator stores the root coroutine handle. Resumption uses
+         * @c root.promise().active_, while dereference reads @c root.promise().value_.
+         */
         class Iterator {
         public:
+            /** @brief Iterator category used by C++20 ranges. */
             using iterator_concept = std::input_iterator_tag;
-            using difference_type  = std::ptrdiff_t;
-            using value_type       = Generator::value_type;
+
+            /** @brief Difference type for iterator traits. */
+            using difference_type = std::ptrdiff_t;
+
+            /** @brief Value type for iterator traits. */
+            using value_type = Generator::value_type;
 
         private:
+            /** @brief Root coroutine handle observed by this iterator. */
             std::coroutine_handle<promise_type> coroutine_ = nullptr;
 
             friend Generator;
 
-            explicit Iterator(std::coroutine_handle<promise_type> h) noexcept
-                : coroutine_(h) {}
+            /**
+             * @brief Construct an iterator from a root coroutine handle.
+             * @param[in] h Root coroutine handle.
+             */
+            explicit Iterator(std::coroutine_handle<promise_type> h) noexcept : coroutine_(h) {}
 
+            /** @brief Rethrow and clear any exception captured by the root promise. */
             void ThrowIfException() {
                 if (coroutine_) {
                     auto& p = coroutine_.promise();
-                    if (p.except_)
-                        std::rethrow_exception(std::move(p.except_));
+                    if (auto ex = std::exchange(p.except_, {})) {
+                        std::rethrow_exception(ex);
+                    }
                 }
             }
 
+            /** @brief Resume the active coroutine and propagate any exception. */
+            void ResumeActive() {
+                if (!coroutine_) {
+                    return;
+                }
+
+                try {
+                    coroutine_.promise().active_.resume();
+                } catch (...) {
+                    coroutine_.promise().except_ = std::current_exception();
+                }
+
+                ThrowIfException();
+            }
+
         public:
+            /** @brief Construct a default end-like iterator. */
             Iterator() noexcept = default;
 
+            /**
+             * @brief Move-construct by transferring the observed handle.
+             * @param[in,out] other Source iterator.
+             */
             Iterator(Iterator&& other) noexcept
                 : coroutine_(std::exchange(other.coroutine_, nullptr)) {}
+
+            /**
+             * @brief Move-assign by transferring the observed handle.
+             * @param[in,out] other Source iterator.
+             * @return This iterator.
+             */
             Iterator& operator=(Iterator&& other) noexcept {
                 coroutine_ = std::exchange(other.coroutine_, nullptr);
                 return *this;
             }
 
+            /**
+             * @brief Access the currently yielded value.
+             * @return Current yielded reference.
+             */
             [[nodiscard]] reference operator*() const noexcept {
                 return static_cast<reference>(*coroutine_.promise().value_);
             }
 
+            /**
+             * @brief Resume the active coroutine to produce the next value.
+             * @return This iterator.
+             */
             Iterator& operator++() {
-                // Resume the active (innermost) coroutine.
-                auto& active = coroutine_.promise().active_;
-                active.resume();
-
-                // After resume, check for exceptions propagated from nested generators.
-                ThrowIfException();
-
+                ResumeActive();
                 return *this;
             }
 
+            /** @brief Post-increment for input-iterator syntax. */
             void operator++(int) { ++*this; }
 
+            /**
+             * @brief Test whether an iterator has reached the sentinel.
+             * @param[in] it Iterator to test.
+             * @return True when @p it is empty or the root coroutine is done.
+             */
             [[nodiscard]] friend bool operator==(const Iterator& it, Sentinel) noexcept {
                 return !it.coroutine_ || it.coroutine_.done();
             }
         };
 
-        // -----------------------------------------------------------------
-        // Range interface
-        // -----------------------------------------------------------------
+        /** @} ——————————————————————————————————————————————————————————————— */
 
+        /** @name Range Interface @{ —————————————————————————————————————————— */
+
+        /**
+         * @brief Start generator iteration and produce the first value.
+         * @return Iterator positioned at the first value, or at end if complete.
+         */
         [[nodiscard]] Iterator begin() {
             if (coroutine_) {
-                // Resume the root coroutine to produce the first value.
-                // active_ starts as the root handle itself (set in get_return_object).
-                coroutine_.promise().active_.resume();
-
-                // Check for immediate completion or exception.
                 Iterator it{coroutine_};
-                it.ThrowIfException();
+                it.ResumeActive();
                 return it;
             }
             return Iterator{nullptr};
         }
 
+        /**
+         * @brief Return the generator sentinel.
+         * @return End sentinel.
+         */
         [[nodiscard]] static constexpr Sentinel end() noexcept { return {}; }
 
-        // -----------------------------------------------------------------
-        // Utility
-        // -----------------------------------------------------------------
+        /** @} ——————————————————————————————————————————————————————————————— */
 
-        [[nodiscard]] explicit operator bool() const noexcept {
-            return coroutine_ != nullptr;
-        }
+        /** @name Utility @{ —————————————————————————————————————————————————— */
+
+        /**
+         * @brief Test whether this generator owns a coroutine handle.
+         * @return True if the generator is non-empty.
+         */
+        [[nodiscard]] explicit operator bool() const noexcept { return coroutine_ != nullptr; }
+
+        /** @} ——————————————————————————————————————————————————————————————— */
     };
 
-} // namespace Mashiro
+    /** @} ————————————————————————————————————————————————————————————————————— */
+
+}
