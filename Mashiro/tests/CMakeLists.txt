@@ -47,3 +47,6 @@ add_mashiro_test(Schedular GeneratorTest)
 
 add_mashiro_test(Surface ColorSpaceTest)
 add_mashiro_test(Surface WindowTest)
+
+add_mashiro_test(Platform SystemEventTest)
+add_mashiro_test(Platform ThreadContractTest)

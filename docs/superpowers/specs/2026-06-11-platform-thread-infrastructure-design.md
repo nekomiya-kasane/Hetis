@@ -165,13 +165,21 @@ Annotations are applied to Manager classes (`[[=kOnPlatformThread]]`) and method
 
 ### 6.2 `Mashiro/Platform/SystemEvent.h`
 
-A trivially-copyable, fixed-size canonical event. Sized to one cache line so emission is one `memcpy`.
+The canonical event is a **`std::variant` of strongly-typed event structs**. Each event kind is its own struct that carries the common header (`EventHeader`) plus exactly the data that kind needs; `SystemEvent` is the variant of all of them. Consumers dispatch with `std::visit` over an overload set — the type system, not a `switch (kind)`, enforces that every alternative is handled.
 
-**Why union, not `std::variant<...>`:** the union form gives precise control over alignment, size (`static_assert(sizeof(SystemEvent) == 64)`), and stable layout across stdlib versions. `std::variant<30+ alternatives>` cannot share an outer header (kind/flags/sequence/timestamp), and its discriminator + alignment depend on libc++ implementation details. The only thing variant gives that the union does not is type-safe accessors — and we recover that with a P2996-reflection-generated accessor (`event.As<EventKind::WindowResize>()`) plus a `consteval` schema check that every `EventKind` enumerator is bound to exactly one `Payload` member.
+**Why `std::variant`, not a tagged union:** the variant *is* the discriminated type, so there is no `kind`-to-payload discipline to keep in sync and no unchecked downcast. `std::visit` over a well-formed overload set is a compile error if any alternative is unhandled, which makes adding a new event a *driven* change (the build breaks until every visitor is updated). The active alternative, copy/move, and lifetime are all handled by the standard library, so variable-length data (IME strings, file paths, clipboard blobs) can be owned **in-place** by the event struct (`std::u16string`, `FixedString<N>`, `std::vector<std::byte>`); an event is self-contained, with no side-channel offset/length to manage.
+
+`EventKind` is **kept** as a compile-time routing key (one enumerator per alternative), bridged to the variant by `KindOf<T>()`. It is used by producer-side coalescing (§6.3) and the `BookkeepFor{EventKind}` dispatch table (§6.7) — both of which are compile-time tables, not runtime tag reads.
+
+> The previous **fixed-size POD/union transport** design (`sizeof(SystemEvent) == 64`, `union Payload`, reflection-generated `As<K>()`, side `SpscByteRing` for variable-length data) is **archived** in §6.2.1. It is retained only as rationale for the layout/throughput trade-offs; it is **not** the active design.
 
 ```cpp
 namespace Mashiro::Platform {
 
+    using WindowId = uint32_t;
+
+    // Compile-time routing key: one enumerator per event alternative.
+    // Order MUST match the SystemEvent variant alternative order.
     enum class EventKind : uint16_t {
         WindowCreate, WindowResize, WindowClose, WindowFocus,
         WindowDpiChange, WindowMove, WindowThemeChange,
@@ -187,7 +195,69 @@ namespace Mashiro::Platform {
     };
     static_assert(Traits::SequentialEnum<EventKind>);
 
-    using WindowId = uint32_t;
+    // Common header carried by every event. Stamped by EventPump on emission.
+    struct EventHeader {
+        WindowId window   = 0;   // 0 = not window-scoped
+        uint32_t sequence = 0;   // monotonic per EventPump
+        uint64_t timestamp= 0;   // QPC ticks
+        uint16_t flags    = 0;   // kind-agnostic bits (synthetic, coalesced, ...)
+    };
+
+    // One struct per event kind. Each embeds the header and owns its own data.
+    struct WindowResizeEvent  { EventHeader header; uint32_t width, height; };
+    struct WindowCloseEvent   { EventHeader header; };
+    struct KeyDownEvent       { EventHeader header; KeyCode code; Modifiers mods; bool repeat; };
+    struct KeyUpEvent         { EventHeader header; KeyCode code; Modifiers mods; };
+    struct ImeCompositionEvent{ EventHeader header; std::u16string text; uint32_t caret; };
+    struct FileRenamedEvent   { EventHeader header; FixedString<260> oldPath, newPath; };
+    // ... one struct per EventKind enumerator
+
+    // The canonical event: a variant of all event structs. The active
+    // alternative is the source of truth; there is no separate `kind` field.
+    using SystemEvent = std::variant<
+        WindowCreateEvent, WindowResizeEvent, WindowCloseEvent, WindowFocusEvent,
+        WindowDpiChangeEvent, WindowMoveEvent, WindowThemeChangeEvent,
+        KeyDownEvent, KeyUpEvent, CharEvent,
+        MouseMoveEvent, MouseButtonEvent, ScrollEvent,
+        TouchEvent, PenEvent,
+        ImeCompositionEvent, ImeCommitEvent, ImeCandidateListEvent,
+        ClipboardUpdateEvent,
+        DragEnterEvent, DragOverEvent, DragDropEvent, DragLeaveEvent,
+        DisplayChangeEvent, PowerStateChangeEvent, AppearanceChangeEvent,
+        GamepadConnectEvent, GamepadDisconnectEvent, GamepadStateEvent,
+        FileCreatedEvent, FileModifiedEvent, FileDeletedEvent, FileRenamedEvent
+    >;
+
+    // Compile-time bridge: alternative type -> EventKind (and the reverse via
+    // std::variant_alternative_t<size_t(K), SystemEvent>). KindOf is consteval
+    // so it folds away; nothing reads a runtime tag on the hot path.
+    template<class T>
+    [[nodiscard]] consteval EventKind KindOf() noexcept;            // index_of<T> in SystemEvent
+    [[nodiscard]] inline    EventKind KindOf(const SystemEvent& e) noexcept  // = EventKind(e.index())
+    { return static_cast<EventKind>(e.index()); }
+
+    // Access an event's header regardless of the active alternative.
+    [[nodiscard]] const EventHeader& HeaderOf(const SystemEvent& e) noexcept; // std::visit -> .header
+
+    // Consteval schema check: the variant alternative order matches the
+    // EventKind enumerator order, every alternative embeds EventHeader, and
+    // every EventKind maps to exactly one alternative. Failure = compile error.
+    consteval { Detail::VerifyEventSchema(); }
+
+} // namespace Mashiro::Platform
+```
+
+Variable-length data (IME composition strings, file paths, clipboard blobs) is owned directly by the corresponding event struct (`std::u16string`, `FixedString<N>`, `std::vector<std::byte>`), so each event is self-contained. There is no side `SpscByteRing`: the SPSC queue stores moved `SystemEvent` values, and `EventChannel` (§6.3) moves events through the ring rather than `memcpy`-ing fixed-size POD.
+
+#### 6.2.1 Archived: fixed-size POD/union transport (superseded)
+
+> Retained for rationale only. **Not** the active design — superseded by the `std::variant` model in §6.2.
+
+The original transport was a trivially-copyable, fixed-size canonical event sized to one cache line so emission was a single `memcpy`. The union form gave precise control over alignment and size (`static_assert(sizeof(SystemEvent) == 64)`) and a stable layout across stdlib versions; a `std::variant` of 30+ alternatives could not share an outer header and its discriminator + alignment depended on libc++ implementation details. Type-safe access was recovered with a P2996-reflection-generated accessor (`event.As<EventKind::WindowResize>()`) plus a `consteval` schema check that every `EventKind` was bound to exactly one `Payload` member. Variable-length data was stored in a side `SpscByteRing` per channel; the event carried an offset + length into that ring.
+
+```cpp
+// ARCHIVED — superseded by the std::variant model in §6.2.
+namespace Mashiro::Platform {
 
     // Annotation binding an EventKind enumerator to a Payload member.
     struct PayloadFor { EventKind kind; constexpr bool operator==(const PayloadFor&) const = default; };
@@ -218,15 +288,10 @@ namespace Mashiro::Platform {
     static_assert(std::is_trivially_copyable_v<SystemEvent>);
     static_assert(sizeof(SystemEvent) == 64);
 
-    // Consteval schema check: every EventKind enumerator must be reachable
-    // through a unique annotated Payload member; every annotated member must
-    // be trivially copyable. Failure = compile error in this TU.
     consteval { Detail::VerifyEventSchema(); }
 
 } // namespace Mashiro::Platform
 ```
-
-Variable-length data (IME composition strings, file paths, clipboard blobs) is stored in a side `SpscByteRing` per channel; the event carries an offset + length into that ring.
 
 ### 6.3 `Mashiro/Platform/EventChannel.h`
 
@@ -240,9 +305,10 @@ namespace Mashiro::Platform {
     template<uint32_t Capacity = 4096>
     class EventChannel {
     public:
-        // Producer (Platform thread only)
-        bool Emit(const SystemEvent& event) noexcept;       // push + wake waiter
-        uint32_t EmitBatch(std::span<const SystemEvent>) noexcept;
+        // Producer (Platform thread only). SystemEvent is a (possibly non-trivial)
+        // variant, so events are *moved* into the ring rather than memcpy'd.
+        bool Emit(SystemEvent&& event) noexcept;            // move into ring + wake waiter
+        uint32_t EmitBatch(std::span<SystemEvent>) noexcept;
         void Close() noexcept;
 
         // Consumer (client thread, single outstanding await)
@@ -254,11 +320,12 @@ namespace Mashiro::Platform {
         uint64_t DropCount()    const noexcept;            // diagnostic: # events dropped on overflow
 
     private:
-        SpscQueue<SystemEvent, Capacity> ring_;
+        SpscQueue<SystemEvent, Capacity> ring_;   // stores moved variant values
         std::atomic<std::coroutine_handle<>> waiter_{nullptr};
         std::atomic<bool>     closed_{false};
         std::atomic<uint64_t> dropCount_{0};
-        // Producer-side coalescing memory (only touched by platform thread):
+        // Producer-side coalescing memory (only touched by platform thread).
+        // lastKind_ is the routing key of the last push, taken from KindOf(event).
         EventKind lastKind_   = EventKind{0xFFFF};
         WindowId  lastWindow_ = 0;
         uint32_t  lastSlot_   = ~0u;
@@ -280,7 +347,7 @@ namespace Mashiro::Platform {
 
 **`BatchAwaiter::await_resume()` returns `BatchView`** — a lightweight non-coroutine input range that pops events from `ring_` lazily on iteration. No coroutine frame allocation. Iteration ends when the ring is observed empty *or* a configurable batch cap is hit. `BatchView` is move-only and tied to the channel's lifetime; it must be fully consumed (or destroyed) before the next `co_await`.
 
-**Producer-side coalescing for high-rate kinds.** For `InputMouseMove` and similar kinds where only the latest sample matters, the producer (`EventPump`) checks before push: if the *unpublished* tail slot would coincide with the previous push of the same kind for the same window AND the consumer has not yet advanced past `lastSlot_`, the previous slot's payload is overwritten before re-publishing the same `tail_`. This is sound because (a) only the producer touches unpublished slots, and (b) the consumer's view of `tail_` cannot regress. If the consumer has already advanced past `lastSlot_`, coalescing is skipped and a new event is pushed normally. Coalescing is opt-in per `EventKind` via a constexpr table.
+**Producer-side coalescing for high-rate kinds.** For `MouseMoveEvent` and similar kinds where only the latest sample matters, the producer (`EventPump`) checks before push: if the *unpublished* tail slot would coincide with the previous push of the same kind (`KindOf(event) == lastKind_`) for the same window AND the consumer has not yet advanced past `lastSlot_`, the previous slot is move-assigned the new event before re-publishing the same `tail_`. This is sound because (a) only the producer touches unpublished slots, and (b) the consumer's view of `tail_` cannot regress. If the consumer has already advanced past `lastSlot_`, coalescing is skipped and a new event is pushed normally. Coalescing is opt-in per `EventKind` via a constexpr table.
 
 **Overflow.** When `TryPush` fails (ring full), `Emit` increments `dropCount_` and returns `false`; the event is lost. `EventPump` logs structured drops at info level. Clients can query `PendingCount()` and `DropCount()` for back-pressure diagnostics.
 
@@ -393,7 +460,10 @@ namespace Mashiro::Platform::Detail {
 
     // Bookkeeping route generation: a private method tagged
     // [[=BookkeepFor{EventKind::X}]] is invoked by EventPump when an event of
-    // kind X is being broadcast. The dispatch is generated by `template for`.
+    // kind X is being broadcast. Dispatch is generated by `template for`; the
+    // current event's kind is read once via KindOf(event) (== EventKind(e.index()))
+    // and matched against the table key, then the matching alternative is
+    // recovered with std::get<std::variant_alternative_t<size_t(K), SystemEvent>>.
     struct BookkeepFor { EventKind kind; bool operator==(const BookkeepFor&) const = default; };
 
     template<typename Manager>
@@ -403,7 +473,7 @@ namespace Mashiro::Platform::Detail {
 } // namespace Mashiro::Platform::Detail
 ```
 
-`EventPump::DispatchBookkeep<Manager>(mgr, event)` is `template for`-expanded over `BuildBookkeepTable<Manager>()`, becoming a static switch with zero virtual calls.
+`EventPump::DispatchBookkeep<Manager>(mgr, event)` is `template for`-expanded over `BuildBookkeepTable<Manager>()`, becoming a static switch on `KindOf(event)` with zero virtual calls; the matched arm passes the typed alternative (`std::get<...>(event)`) to the bookkeep handler.
 
 ### 6.8 `Mashiro/Platform/EventPump.h`
 
@@ -424,17 +494,17 @@ namespace Mashiro::Platform {
         void WaitForWork(void* wakeEvent) noexcept;  // MsgWaitForMultipleObjects
 
         // Dedicated-thread managers call this from their own thread
-        void SubmitExternal(const SystemEvent& event) noexcept;
+        void SubmitExternal(SystemEvent&& event) noexcept;
 
     private:
         static constexpr size_t kMaxChannels = 8;
         EventChannel<>* channels_[kMaxChannels]{};
         uint8_t channelCount_ = 0;
 
-        MpscQueue<SystemEvent> externalInbox_;
+        MpscQueue<SystemEvent> externalInbox_;   // stores moved variant values
         uint32_t nextSequence_ = 0;
 
-        void Broadcast(const SystemEvent& event) noexcept;
+        void Broadcast(SystemEvent&& event) noexcept;
         template<typename M> void DispatchBookkeep(M& mgr, const SystemEvent& event) noexcept;
         std::optional<SystemEvent> TranslateWin32(/* MSG */) noexcept;  // platform-specific impl
     };
@@ -442,7 +512,7 @@ namespace Mashiro::Platform {
 } // namespace Mashiro::Platform
 ```
 
-Per-event order on the Platform thread: translate → assign sequence + timestamp → dispatch bookkeep to all managers (`template for`) → broadcast to all channels. This guarantees that when a client reads an event from its channel, every Manager's any-thread query already reflects the post-event state.
+Per-event order on the Platform thread: translate → stamp `EventHeader` (sequence + timestamp) on the active alternative → dispatch bookkeep to all managers (`template for`) → broadcast (move) to all channels. This guarantees that when a client reads an event from its channel, every Manager's any-thread query already reflects the post-event state.
 
 ### 6.9 `Mashiro/Platform/PlatformThread.h`
 
@@ -592,11 +662,13 @@ namespace Mashiro::Platform {
 
     private:
         friend class EventPump;
-        [[=Detail::BookkeepFor{EventKind::WindowResize}]]   void OnPump_WindowResize(const SystemEvent&) noexcept;
-        [[=Detail::BookkeepFor{EventKind::WindowClose}]]    void OnPump_WindowClose(const SystemEvent&) noexcept;
-        [[=Detail::BookkeepFor{EventKind::WindowMove}]]     void OnPump_WindowMove(const SystemEvent&) noexcept;
-        [[=Detail::BookkeepFor{EventKind::WindowDpiChange}]]void OnPump_WindowDpiChange(const SystemEvent&) noexcept;
-        [[=Detail::BookkeepFor{EventKind::WindowFocus}]]    void OnPump_WindowFocus(const SystemEvent&) noexcept;
+        // Bookkeep handlers receive the typed alternative (the dispatcher already
+        // matched KindOf(event)), so no downcast or kind re-check is needed.
+        [[=Detail::BookkeepFor{EventKind::WindowResize}]]   void OnPump_WindowResize(const WindowResizeEvent&) noexcept;
+        [[=Detail::BookkeepFor{EventKind::WindowClose}]]    void OnPump_WindowClose(const WindowCloseEvent&) noexcept;
+        [[=Detail::BookkeepFor{EventKind::WindowMove}]]     void OnPump_WindowMove(const WindowMoveEvent&) noexcept;
+        [[=Detail::BookkeepFor{EventKind::WindowDpiChange}]]void OnPump_WindowDpiChange(const WindowDpiChangeEvent&) noexcept;
+        [[=Detail::BookkeepFor{EventKind::WindowFocus}]]    void OnPump_WindowFocus(const WindowFocusEvent&) noexcept;
 
         // State storage: stable handles, no fixed cap, used existing primitive.
         struct WindowState {
