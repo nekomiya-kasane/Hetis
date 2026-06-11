@@ -72,7 +72,7 @@
         "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=address -fsanitize=undefined"
       },
       "environment": {
-        "PATH": "T:\\toolchains\\coca-toolchain-p2996\\lib\\clang\\21\\lib\\windows;$penv{PATH}"
+        "PATH": "T:\\toolchains\\coca-toolchain-p2996\\bin;T:\\toolchains\\coca-toolchain-p2996\\lib\\clang\\21\\lib\\windows;$penv{PATH}"
       }
     },
     {
