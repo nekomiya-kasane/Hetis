@@ -85,9 +85,11 @@ namespace Mashiro {
 
         /** @cond INTERNAL */
         namespace Detail {
+
             /// @brief std430 alignment of a homogeneous 4-slot (= `4 * sizeof(T)`): 16 for float, 32 for double.
             template <std::floating_point T>
             inline constexpr size_t kHomogeneousSlotAlign = 4 * sizeof(T);
+        
         } // namespace Detail
         /** @endcond */
     } // namespace Geom
