@@ -15,3 +15,4 @@ include(CTest)
 include(Catch)
 
 add_mashiro_demo(Core ToStringDemo)
+add_mashiro_demo(Core ToJsonDemo)
