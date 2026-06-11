@@ -16,3 +16,6 @@ include(Catch)
 
 add_mashiro_demo(Core ToStringDemo)
 add_mashiro_demo(Core ToJsonDemo)
+
+add_mashiro_demo(Playground VulkanCube)
+add_mashiro_demo(Playground OpenGLCube)

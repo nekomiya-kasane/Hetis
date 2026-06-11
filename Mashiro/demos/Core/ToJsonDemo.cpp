@@ -19,7 +19,7 @@
 #include "Mashiro/Core/ToJson.h"
 
 using namespace Mashiro;
-namespace An = Mashiro::Json::Anno;
+namespace An = Json::Anno;
 
 // =============================================================================
 // 1.  Plain reflectable aggregates
