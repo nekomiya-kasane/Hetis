@@ -16,10 +16,10 @@ struct [[=OnDedicatedThread]] OnDedicatedManager {};
 struct [[=OnFreeThreaded]] OnFreeManager {};
 
 TEST_CASE("Thread contract attributes are present and correctly interpreted", AUTO_TAG) {
-    STATIC_REQUIRE(GetScheduleMode<OnPlatformManager>() == ScheduleMode::PlatformThread);
-    STATIC_REQUIRE(GetScheduleMode<OnDedicatedManager>() == ScheduleMode::DedicatedThread);
-    STATIC_REQUIRE(GetScheduleMode<OnFreeManager>() == ScheduleMode::FreeThreaded);
-    STATIC_REQUIRE(GetScheduleMode<OnFreeManager>() != ScheduleMode::DedicatedThread);
+    STATIC_REQUIRE(GetScheduleMode<OnPlatformManager>() == ScheduleDomain::PlatformThread);
+    STATIC_REQUIRE(GetScheduleMode<OnDedicatedManager>() == ScheduleDomain::DedicatedThread);
+    STATIC_REQUIRE(GetScheduleMode<OnFreeManager>() == ScheduleDomain::FreeThreaded);
+    STATIC_REQUIRE(GetScheduleMode<OnFreeManager>() != ScheduleDomain::DedicatedThread);
 }
 
 // clang-format on
