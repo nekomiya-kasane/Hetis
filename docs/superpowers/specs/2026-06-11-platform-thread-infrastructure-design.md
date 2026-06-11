@@ -1,9 +1,27 @@
 # Platform Thread Infrastructure — Design Spec
 
-**Status:** Draft for review
+**Status:** Draft v1.1 (review fixes applied)
 **Date:** 2026-06-11
 **Author:** Mashiro Engine team
 **Scope:** `Mashiro::Platform` namespace; new sources under `Mashiro/include/Mashiro/Platform/` and `Mashiro/src/Platform/`.
+
+### Revision history
+
+- **v1.0** — initial draft.
+- **v1.1** — fixes from internal review:
+  - Removed `TimingManager` from the topology; high-precision timing exposes free functions in `Mashiro::Platform::Time`, not a Manager. Manager count is **15** throughout.
+  - `BatchAwaiter::await_resume()` now returns a non-coroutine `BatchView` input range (no heap allocation per batch).
+  - Removed unsound "in-place coalesce already-published slots" claim. Replaced with producer-side pre-publish coalescing for high-rate event kinds.
+  - Reworded WndProc reentrancy guarantee: bookkeep handlers *do* run inside `DispatchMessage`; only user-initiated `OwnerTask` bodies are deferred to between pump iterations.
+  - Documented `OwnerTask` lifetime contract: caller must keep the task alive until `co_await` completes; destroying a task with a pending continuation is UB.
+  - Reworded `OwnerExecutor` pool sizing: heap fallback is a documented expected path under bursty contention, not exceptional.
+  - `WindowManager` uses `ChunkedSlotMap<WindowState, WindowId>` for state storage; `SeqLock` array remains fixed at `kMaxWindows`.
+  - `EventChannel` documents single-outstanding-waiter precondition with a debug-mode assertion.
+  - Documented `OwnerTask` coroutine frame allocation: one heap allocation per call when HALO does not apply. The "no heap on hot paths" goal targets event distribution, not one-shot Manager calls.
+  - Spelled out shutdown ordering in `PlatformThread::Run` post-loop.
+  - All silent caps (`kMaxChannels`, `kPoolSize`, `kMaxWindows`) log a structured event and assert in debug builds when exceeded.
+  - `GetDesc`/`GetSize` precondition explicit: caller must `IsValid(handle)` first; default-constructed return on invalid handle.
+  - **New:** `SystemEvent` keeps the union (precise layout) but exposes a reflection-generated type-safe accessor `event.As<EventKind::WindowResize>()`. `consteval` schema check verifies every `EventKind` is bound to exactly one `Payload` member.
 
 ---
 
@@ -76,7 +94,8 @@ Managers are **state owners**, not event consumers. The Platform thread does *no
 │  └──────────────┘                                                    │
 └──────────────────────────────────────────────────────────────────────┘
 
-Free-threaded managers (any thread): Display, Power, AudioDevice, Timing
+Free-threaded managers (any thread): Display, Power, AudioDevice
+Free functions (not a Manager): `Mashiro::Platform::Time::*` for QPC, timer resolution, waitable timers.
 ```
 
 ### 5.2 Cardinality
@@ -100,7 +119,7 @@ loop:
         MsgWaitForMultipleObjects(wakeEvent, INFINITE, QS_ALLINPUT)
 ```
 
-There are no phases. Order is fixed: pump → drain inbox → drain executor → wait. WndProc reentrancy is contained because Platform-thread-side Manager mutations always go through the executor and only run between Pump and Wait, never inside `DispatchMessage`.
+There are no phases. Order is fixed: pump → drain inbox → drain executor → wait. Bookkeep handlers run inside `DispatchMessage` (they are part of message translation and must complete before the message is acked). What is *not* permitted to run inside `DispatchMessage` is user-initiated `OwnerTask` bodies; those are deferred to the explicit `executor_.DrainAll()` step that runs only between pump iterations. The boundary protects against re-entrant Manager mutation while the OS is still inside its own dispatch.
 
 ## 6. Components
 
@@ -148,6 +167,8 @@ Annotations are applied to Manager classes (`[[=kOnPlatformThread]]`) and method
 
 A trivially-copyable, fixed-size canonical event. Sized to one cache line so emission is one `memcpy`.
 
+**Why union, not `std::variant<...>`:** the union form gives precise control over alignment, size (`static_assert(sizeof(SystemEvent) == 64)`), and stable layout across stdlib versions. `std::variant<30+ alternatives>` cannot share an outer header (kind/flags/sequence/timestamp), and its discriminator + alignment depend on libc++ implementation details. The only thing variant gives that the union does not is type-safe accessors — and we recover that with a P2996-reflection-generated accessor (`event.As<EventKind::WindowResize>()`) plus a `consteval` schema check that every `EventKind` enumerator is bound to exactly one `Payload` member.
+
 ```cpp
 namespace Mashiro::Platform {
 
@@ -168,25 +189,39 @@ namespace Mashiro::Platform {
 
     using WindowId = uint32_t;
 
-    // Per-kind payloads (declared once each; full set in header):
-    struct WindowResizePayload { WindowId window; uint32_t width, height; bool minimized; };
-    struct KeyPayload          { WindowId window; uint16_t scancode, vkey; uint8_t mods; bool repeat; };
-    // ... (DragPayload, ImePayload, GamepadStatePayload, FileChangePayload, etc.)
+    // Annotation binding an EventKind enumerator to a Payload member.
+    struct PayloadFor { EventKind kind; constexpr bool operator==(const PayloadFor&) const = default; };
 
     struct SystemEvent {
         EventKind kind;
         uint16_t  flags;
-        uint32_t  sequence;   // monotonic, assigned by EventPump
-        uint64_t  timestamp;  // QPC ticks
+        uint32_t  sequence;
+        uint64_t  timestamp;
+
         union Payload {
-            WindowResizePayload resize;
-            KeyPayload          key;
-            // ... one branch per EventKind
-            alignas(8) uint8_t  raw[48];
+            [[=PayloadFor{EventKind::WindowResize}]]    WindowResizePayload   resize;
+            [[=PayloadFor{EventKind::InputKeyDown}]]    KeyPayload            key;
+            [[=PayloadFor{EventKind::InputKeyUp}]]      KeyPayload            keyUp;
+            // ... one annotated branch per EventKind
+            alignas(8) uint8_t raw[48];
         } payload;
+
+        // Reflection-generated type-safe accessor.
+        // Compile error if K is unbound or the branch type doesn't match.
+        // Debug-mode runtime assert: this->kind == K (or a kind that aliases the same payload).
+        template<EventKind K>
+        [[nodiscard]] auto&       As()       noexcept;
+        template<EventKind K>
+        [[nodiscard]] auto const& As() const noexcept;
     };
+
     static_assert(std::is_trivially_copyable_v<SystemEvent>);
     static_assert(sizeof(SystemEvent) == 64);
+
+    // Consteval schema check: every EventKind enumerator must be reachable
+    // through a unique annotated Payload member; every annotated member must
+    // be trivially copyable. Failure = compile error in this TU.
+    consteval { Detail::VerifyEventSchema(); }
 
 } // namespace Mashiro::Platform
 ```
@@ -195,7 +230,9 @@ Variable-length data (IME composition strings, file paths, clipboard blobs) is s
 
 ### 6.3 `Mashiro/Platform/EventChannel.h`
 
-Awaitable SPSC channel. The Platform thread is the sole producer for every channel. A consumer coroutine on a client thread can `co_await channel.Next()` (single event) or `co_await channel.NextBatch()` (drain-as-generator). One pending waiter per channel — guaranteed by SPSC consumer-side affinity.
+Awaitable SPSC channel. The Platform thread is the sole producer for every channel. A consumer coroutine on a client thread can `co_await channel.Next()` (single event) or `co_await channel.NextBatch()` (drain-as-range).
+
+**Precondition (per-channel):** at most one outstanding `Next()` / `NextBatch()` on a given channel. SPSC's contract is single *thread*, not single *coroutine*; two coroutines on the same client thread that both `co_await` the same channel would race on `waiter_`. Debug builds enforce this with an atomic flag set on suspend and cleared on resume; release builds rely on caller discipline. The intended pattern is one consumer coroutine per channel; clients that want multiple readers attach multiple channels.
 
 ```cpp
 namespace Mashiro::Platform {
@@ -204,35 +241,48 @@ namespace Mashiro::Platform {
     class EventChannel {
     public:
         // Producer (Platform thread only)
-        bool Emit(const SystemEvent& event) noexcept;     // push + wake waiter
+        bool Emit(const SystemEvent& event) noexcept;       // push + wake waiter
         uint32_t EmitBatch(std::span<const SystemEvent>) noexcept;
         void Close() noexcept;
 
-        // Consumer (client thread)
+        // Consumer (client thread, single outstanding await)
         std::optional<SystemEvent> TryReceive() noexcept;
-        auto Next()      noexcept -> NextAwaiter;         // suspends until event or close
-        auto NextBatch() noexcept -> BatchAwaiter;        // suspends, returns Generator drain
+        auto Next()      noexcept -> NextAwaiter;          // suspends until event or close
+        auto NextBatch() noexcept -> BatchAwaiter;         // suspends, returns BatchView
         bool IsClosed()  const noexcept;
+        uint32_t PendingCount() const noexcept;
+        uint64_t DropCount()    const noexcept;            // diagnostic: # events dropped on overflow
 
     private:
-        SpscQueue<SystemEvent, Capacity>            ring_;
-        std::atomic<std::coroutine_handle<>>        waiter_{nullptr};
-        std::atomic<bool>                           closed_{false};
+        SpscQueue<SystemEvent, Capacity> ring_;
+        std::atomic<std::coroutine_handle<>> waiter_{nullptr};
+        std::atomic<bool>     closed_{false};
+        std::atomic<uint64_t> dropCount_{0};
+        // Producer-side coalescing memory (only touched by platform thread):
+        EventKind lastKind_   = EventKind{0xFFFF};
+        WindowId  lastWindow_ = 0;
+        uint32_t  lastSlot_   = ~0u;
 
-        void WakeConsumer() noexcept; // exchange(nullptr) + resume
+#ifndef NDEBUG
+        std::atomic<bool> awaiting_{false};                // single-waiter assertion
+#endif
     };
 
 } // namespace Mashiro::Platform
 ```
 
-Wake protocol (lost-wake-free):
+**Wake protocol (lost-wake-free):**
 
 1. `await_ready()` returns true if `!ring_.Empty() || closed_`.
 2. `await_suspend(h)` stores `h` into `waiter_` (release).
 3. After the store, re-check `!ring_.Empty() || closed_`. If true, attempt to reclaim the handle via `compare_exchange_strong(h, nullptr)`. Success → return `false` (don't suspend). Failure → producer already took the handle and will resume — stay suspended.
-4. Producer's `Emit()` does `TryPush()`, then `waiter_.exchange(nullptr)` → `resume()` if non-null.
+4. Producer's `Emit()` does `TryPush()`, then `waiter_.exchange(nullptr)` → `resume()` if non-null. The handle resume happens on the platform thread; coroutines may co-await an executor of their own to migrate back to their owning client thread (ApplicationLayer concern, not Platform's).
 
-`BatchAwaiter::await_resume()` returns a `Generator<const SystemEvent&>` that lazily drains all currently available events; integrates with range-based `for`.
+**`BatchAwaiter::await_resume()` returns `BatchView`** — a lightweight non-coroutine input range that pops events from `ring_` lazily on iteration. No coroutine frame allocation. Iteration ends when the ring is observed empty *or* a configurable batch cap is hit. `BatchView` is move-only and tied to the channel's lifetime; it must be fully consumed (or destroyed) before the next `co_await`.
+
+**Producer-side coalescing for high-rate kinds.** For `InputMouseMove` and similar kinds where only the latest sample matters, the producer (`EventPump`) checks before push: if the *unpublished* tail slot would coincide with the previous push of the same kind for the same window AND the consumer has not yet advanced past `lastSlot_`, the previous slot's payload is overwritten before re-publishing the same `tail_`. This is sound because (a) only the producer touches unpublished slots, and (b) the consumer's view of `tail_` cannot regress. If the consumer has already advanced past `lastSlot_`, coalescing is skipped and a new event is pushed normally. Coalescing is opt-in per `EventKind` via a constexpr table.
+
+**Overflow.** When `TryPush` fails (ring full), `Emit` increments `dropCount_` and returns `false`; the event is lost. `EventPump` logs structured drops at info level. Clients can query `PendingCount()` and `DropCount()` for back-pressure diagnostics.
 
 ### 6.4 `Mashiro/Platform/OwnerTask.h`
 
@@ -266,6 +316,10 @@ namespace Mashiro::Platform {
 
 If the caller is already on the Platform thread, `TransferToOwner::await_ready()` returns true and the body runs synchronously with zero suspension.
 
+**Lifetime contract.** The caller must keep the `OwnerTask` object alive until `co_await` completes. Destroying a task while its handle is queued in `OwnerExecutor` or actively suspended on another thread is undefined behaviour. The natural usage — `co_await Manager().Method(...)` as a temporary — is safe because the temporary persists across the suspension. Storing a task into a struct and destroying that struct while pending is the violation to avoid.
+
+**Coroutine frame allocation.** `OwnerTask` carries a coroutine frame. The compiler can elide the allocation (HALO) only when it proves the frame does not escape — for cross-thread transfer it always escapes, so each cross-thread call allocates one frame on the heap. The "no heap on hot paths" goal in §4 applies to *event distribution* (the per-frame mouse/key event flood), not to one-shot Manager calls. If a future profile shows Manager-call frame allocation is hot, we can add a custom `Promise::operator new` backed by an `Mashiro::LinearAllocator` per worker.
+
 ### 6.5 `Mashiro/Platform/OwnerExecutor.h`
 
 MPSC queue of coroutine handles. Multiple worker threads submit; the Platform thread drains.
@@ -286,7 +340,7 @@ namespace Mashiro::Platform {
 } // namespace Mashiro::Platform
 ```
 
-Implementation: intrusive Treiber stack of pre-allocated nodes (no heap on hot path). Pool size `kPoolSize = 256` — enough for thousands of in-flight calls because nodes are freed as soon as the handle is resumed. If the pool is exhausted, `Enqueue` falls back to a heap node (cold path, instrumented).
+Implementation: intrusive Treiber stack of pre-allocated nodes, sized by `kPoolSize = 256`. The pool covers the steady-state burst — tens of in-flight calls per worker thread — while the heap fallback covers genuinely bursty contention (e.g., a worker dispatching hundreds of file-watch unsubscribes during shutdown). The fallback is documented and counted, not exceptional. If the counter shows steady use, raise `kPoolSize`; do not treat it as a bug.
 
 `Enqueue` ends with `SetEvent(wakeEvent_)` only when the queue transitioned from empty to non-empty (CAS on the head observed null), avoiding redundant kernel calls.
 
@@ -450,15 +504,34 @@ while (running_) {
     }
 }
 
-// Shutdown
-for each channel: channel.Close();
+// Shutdown ordering — every step runs on the platform thread:
+// 1. Drain executor one last time so any in-flight OwnerTasks complete.
+executor_.DrainAll();
+
+// 2. Stop dedicated-thread managers and join their threads. Their inbox is
+//    no longer fed; remaining inbox events are drained next.
 gamepadMgr_.Stop();
 fileWatchMgr_.Stop();
+pump_.DrainExternalInbox();
+
+// 3. Close client channels. Each Close() wakes its waiter so client
+//    coroutines see std::nullopt / closed and unwind.
+for each channel attached: channel.Close();
+
+// 4. Destroy platform-thread managers. Their destructors run here, on the
+//    platform thread, so DestroyWindow / clipboard cleanup / OLE revoke
+//    happen on the owning thread.
+//    (Manager members are destroyed in reverse declaration order when
+//    PlatformThread itself is destroyed; this Run() simply returns.)
 ```
+
+`RequestStop()` flips `running_ = false` and `SetEvent(wakeEvent_)` so the wait wakes immediately. Callers must not destroy `PlatformThread` until `Run()` returns.
 
 ## 7. Managers
 
-Sixteen Managers split by scheduling mode. Each is a separate header under `Platform/Managers/`. Public APIs follow the patterns above; only the responsibilities and the OS APIs they wrap differ.
+Fifteen Managers split by scheduling mode. Each is a separate header under `Platform/Managers/`. Public APIs follow the patterns above; only the responsibilities and the OS APIs they wrap differ.
+
+High-precision timing (QPC, timer resolution, waitable timers) is not a Manager — it has no thread affinity, no state to coordinate, and no events. It lives as free functions under `Mashiro::Platform::Time` (`Time::Now()`, `Time::SetTimerResolution(ms)`, `Time::CreateWaitableTimer()`, etc.).
 
 ### 7.1 Platform-thread managers
 
@@ -525,11 +598,21 @@ namespace Mashiro::Platform {
         [[=Detail::BookkeepFor{EventKind::WindowDpiChange}]]void OnPump_WindowDpiChange(const SystemEvent&) noexcept;
         [[=Detail::BookkeepFor{EventKind::WindowFocus}]]    void OnPump_WindowFocus(const SystemEvent&) noexcept;
 
-        struct State { void* hwnd = nullptr; bool alive = true; };
-        static constexpr size_t kMax = 64;
-        State                   state_[kMax]{};
-        SeqLock<Window::WindowDesc> descs_[kMax];
-        uint32_t count_ = 0;
+        // State storage: stable handles, no fixed cap, used existing primitive.
+        struct WindowState {
+            void* hwnd = nullptr;
+            bool  alive = true;
+        };
+        ChunkedSlotMap<WindowState, WindowId> windows_;
+
+        // SeqLock array — fixed capacity sufficient for all reasonably
+        // concurrent windows (any-thread queries hit this directly). The
+        // SlotMap may exceed kMaxLiveWindows transiently during create/destroy
+        // churn; queries on a window beyond this cap fall through to a
+        // mutex-guarded slow path (rare; only matters for >256 simultaneous
+        // windows, which exceeds Win32's practical limits anyway).
+        static constexpr size_t kMaxLiveWindows = 256;
+        SeqLock<Window::WindowDesc> descs_[kMaxLiveWindows];
     };
 
     consteval { Detail::VerifyManagerContracts<WindowManager>(); }
@@ -625,10 +708,11 @@ All Managers destructors release OS resources (DestroyWindow for live windows, e
 
 - Fallible Manager APIs return `OwnerTask<Result<T>>` (where `Result<T> = std::expected<T, ErrorCode>`). Callers chain with `.and_then` / `.or_else` after `co_await`.
 - Infallible Manager APIs (`Show`, `Hide`, `SetTitle` after window is alive) return `OwnerTask<VoidResult>` — they can still report errors (e.g., `WindowHandle` is invalid).
-- Any-thread queries (`GetSize`, `GetDesc`) return values, not `Result`. They never fail; they read from `SeqLock<T>` and return the cached state. An invalid `WindowHandle` returns a default-constructed value; callers must check `IsValid` first if they need certainty.
+- Any-thread queries (`GetSize`, `GetDesc`) have a precondition: caller must call `IsValid(handle)` first. Calling them on an invalid handle returns a default-constructed value silently — no error path. This keeps the hot read path free of error-handling code; safety is the caller's contract obligation.
 - Coroutine exceptions (`unhandled_exception` in `OwnerTask::Promise`) are stored and rethrown in `await_resume()`. The Platform thread itself never propagates exceptions out of `Run()`; it logs and continues.
-- Channel overflow: `Emit` returns `false` when the SPSC ring is full. `EventPump` increments a per-channel `dropCount_` and continues. Clients can query `PendingCount()` and respond to back-pressure (e.g., a render thread that has stalled). High-rate event kinds (mouse moves) coalesce on emission: if the most recent event in the ring is the same kind for the same window, payload is overwritten.
-- Pool exhaustion in `OwnerExecutor`: `Enqueue` falls back to a heap-allocated node; the slow path is instrumented with a counter for diagnostics.
+- Channel overflow: `Emit` returns `false` when the SPSC ring is full and increments `dropCount_`. `EventPump` emits a structured log entry per drop (kind, channel index, total drop count) at info level. Clients can query `PendingCount()` and `DropCount()` and respond to back-pressure (e.g., a render thread that has stalled). Producer-side coalescing (§6.3) reduces drops for high-rate kinds like `InputMouseMove`.
+- Pool exhaustion in `OwnerExecutor`: `Enqueue` falls back to a heap-allocated node and increments a counter. As §6.5 documents, this is an expected path under bursty contention, not exceptional.
+- Silent caps (`kMaxChannels = 8`, `kPoolSize = 256`, `kMaxLiveWindows = 256`): when exceeded, log a structured warning and assert in debug builds. Release builds degrade gracefully (channel attach fails, executor uses heap fallback, window query falls through to slow path) rather than crashing.
 
 ## 10. Testing
 
@@ -660,6 +744,11 @@ The negative compile probes for `ManagerTraitsTest.cpp` follow the pattern of `c
 | `SeqLock` for composite any-thread queries | Mutex / shared_mutex | Lock-free read; writer is the Platform thread (single writer); composite values fit in one or two cache lines |
 | Close-as-broadcast (broadcast `Close()` on shutdown) | Per-channel sentinel `SystemEvent` | Close already wakes the waiter and is observable via `IsClosed()`; injecting a sentinel pollutes the event schema |
 | 15 Managers split by scheduling mode | Single monolithic `PlatformManager` | Each Manager owns one OS resource family; small files, focused tests, independent compile units |
+| `SystemEvent` is a tagged union with reflection-generated accessor | `std::variant<...>` | Variant cannot share an outer header (kind/flags/sequence/timestamp), and its discriminator + alignment depend on libc++ implementation; the union form holds `sizeof == 64` precisely. Reflection-based `As<K>()` recovers variant's only real win — type-safe accessors — without dispatch overhead |
+| Producer-side coalescing of unpublished slots | In-place overwrite of already-published slots | Already-published overwrite would race with the consumer reading the slot, breaking SPSC's single-writer-of-tail invariant |
+| `BatchView` non-coroutine input range | `Generator<const SystemEvent&>` | Generator allocates a coroutine frame; events are the hottest path; BatchView pops lazily from the SPSC ring with zero allocation |
+| `ChunkedSlotMap` for `WindowState` storage | Fixed-size array with `count_` | Existing primitive; no silent cap; `SeqLock` array remains fixed because cross-thread query cap (256) is generous |
+| High-precision timing as free functions, not a Manager | `TimingManager` | No thread affinity, no state to coordinate, no events to emit; a Manager class would be ceremony around static functions |
 
 ## 12. Examples
 
@@ -680,18 +769,21 @@ Task<void> RunRenderClient(PlatformThread& platform) {
     while (!events.IsClosed()) {
         for (const auto& event : co_await events.NextBatch()) {
             switch (event.kind) {
-                case EventKind::WindowResize:
-                    RecreateSwapchain(event.payload.resize.width,
-                                      event.payload.resize.height);
+                case EventKind::WindowResize: {
+                    const auto& payload = event.As<EventKind::WindowResize>();
+                    RecreateSwapchain(payload.width, payload.height);
                     break;
+                }
                 case EventKind::WindowClose:
                     platform.RequestStop();
                     break;
                 default: break;
             }
         }
-        auto size = platform.Windows().GetSize(*window);  // any-thread, SeqLock
-        RenderFrame(size);
+        if (platform.Windows().IsValid(*window)) {
+            auto size = platform.Windows().GetSize(*window);  // any-thread, SeqLock
+            RenderFrame(size);
+        }
     }
 
     co_await platform.Windows().Destroy(*window);
