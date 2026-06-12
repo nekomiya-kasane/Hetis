@@ -333,21 +333,6 @@ namespace Mashiro::Hashing {
             }
         }
 
-        /// @brief Check if an entity has a specific annotation type.
-        ///
-        /// Thin alias for @ref Mashiro::Traits::Anno::Has — kept locally so
-        /// existing call sites read naturally.
-        template <typename Ann>
-        consteval bool HasAnnotation(std::meta::info entity) {
-            return ::Mashiro::Traits::Anno::Has<Ann>(entity);
-        }
-
-        /// @brief Extract annotation value of type Ann from entity, or `nullopt`.
-        template <typename Ann>
-        consteval std::optional<Ann> GetAnnotation(std::meta::info entity) {
-            return ::Mashiro::Traits::Anno::Get<Ann>(entity);
-        }
-
         /// @brief Check if entity has an Anno::With<X> annotation (any specialisation).
         consteval bool HasWithAnnotation(std::meta::info entity) {
             for (auto a : std::meta::annotations_of(entity)) {
@@ -382,7 +367,7 @@ namespace Mashiro::Hashing {
          */
         template <typename T>
         consteval auto HashableMembers() {
-            return ::Mashiro::Traits::Anno::SelectMembers<T, Anno::Ignore, Anno::Key, Anno::Order>();
+            return Traits::Anno::SelectMembers<T, Anno::Ignore, Anno::Key, Anno::Order>();
         }
 
     } // namespace Detail
