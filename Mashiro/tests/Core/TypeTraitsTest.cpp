@@ -198,6 +198,40 @@ TEST_CASE("UniqueIdentifier builds a dotted root-to-derived path", AUTO_TAG) {
     STATIC_REQUIRE(T::UniqueIdentifier<Leaf> == "Root.Middle.Leaf");
 }
 
+// Named scopes for ScopedIdentifier (anonymous-namespace fixtures would
+// terminate the scope walk, yielding only the bare name).
+namespace ScopeFix {
+    struct Foo {};
+    enum class Hue { Red };
+    struct Outer {
+        struct Inner {};
+    };
+    namespace Inner {
+        struct Bar {};
+    } // namespace Inner
+} // namespace ScopeFix
+
+TEST_CASE("ScopedIdentifier builds a dotted enclosing-scope path", AUTO_TAG) {
+    // Anonymous-namespace types stop at the unnamed scope: bare name only.
+    STATIC_REQUIRE(T::ScopedIdentifier<Root> == "Root");
+
+    // Named namespaces join with '.', outermost first.
+    STATIC_REQUIRE(T::ScopedIdentifier<ScopeFix::Foo> == "ScopeFix.Foo");
+    STATIC_REQUIRE(T::ScopedIdentifier<ScopeFix::Inner::Bar> ==
+                   "ScopeFix.Inner.Bar");
+
+    // Nested classes contribute their enclosing class name.
+    STATIC_REQUIRE(T::ScopedIdentifier<ScopeFix::Outer> == "ScopeFix.Outer");
+    STATIC_REQUIRE(T::ScopedIdentifier<ScopeFix::Outer::Inner> ==
+                   "ScopeFix.Outer.Inner");
+
+    // Enumeration types are accepted as well as class types.
+    STATIC_REQUIRE(T::ScopedIdentifier<ScopeFix::Hue> == "ScopeFix.Hue");
+
+    // Orthogonal to UniqueIdentifier: scope nesting, not inheritance.
+    STATIC_REQUIRE(T::ScopedIdentifier<Leaf> == "Leaf");
+}
+
 // =============================================================================
 // Enum reflection
 // =============================================================================

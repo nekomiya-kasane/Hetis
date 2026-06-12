@@ -551,15 +551,14 @@ namespace Mashiro {
                 return std::define_static_string(res);
             }
 
-            /// @brief Build the dotted root-to-scoped identifier path of @p type.
+            /// @brief Build the dotted outermost-to-innermost scope path of @p type.
             consteval std::string_view BuildScopedIdentifier(std::meta::info type) {
-                std::vector<std::meta::info> chain; // derived-first
+                std::vector<std::meta::info> chain; // innermost-first
                 chain.push_back(type);
-                auto parent = std::meta::parent_of(type, std::meta::access_context::unchecked());
-                while (!parent.empty()) {
-                    type = std::meta::type_of(parent[0]);
-                    chain.push_back(type);
-                    parent = std::meta::parent_of(type, std::meta::access_context::unchecked());
+                auto parent = std::meta::parent_of(type);
+                while (parent != ^^:: && std::meta::has_identifier(parent)) {
+                    chain.push_back(parent);
+                    parent = std::meta::parent_of(parent);
                 }
                 std::string res;
                 for (size_t i = chain.size(); i-- > 0;) {
@@ -581,8 +580,7 @@ namespace Mashiro {
          * (no bases) trivially satisfy this. Validated entirely at compile time.
          */
         template<typename T>
-        concept SingleInheritedClass =
-            std::is_class_v<T> && Detail::IsSingleInheritedChain(^^T);
+        concept SingleInheritedClass = std::is_class_v<T> && Detail::IsSingleInheritedChain(^^T);
 
         /**
          * @brief Stable, dotted root-to-derived identifier path for a linear class.
@@ -595,8 +593,30 @@ namespace Mashiro {
          * @tparam T A @ref SingleInheritedClass.
          */
         template<SingleInheritedClass T>
-        inline constexpr std::string_view UniqueIdentifier =
-            Detail::BuildUniqueIdentifier(^^T);
+        inline constexpr std::string_view UniqueIdentifier = Detail::BuildUniqueIdentifier(^^T);
+
+        /**
+         * @brief Stable, dotted enclosing-scope path for a type.
+         *
+         * Walks the lexical scope chain via `parent_of`, joining the identifiers
+         * of each enclosing **named** scope (namespaces and classes) with '.',
+         * outermost first. The global namespace and any anonymous namespace
+         * terminate the walk, so a type in an anonymous namespace yields just its
+         * own name.
+         *
+         * For `namespace A::B { struct Foo {}; }`, `ScopedIdentifier<A::B::Foo>`
+         * is `"A.B.Foo"`. For a nested class `struct Outer { struct Inner {}; };`,
+         * `ScopedIdentifier<Outer::Inner>` is `"Outer.Inner"`. Backed by
+         * `std::define_static_string`, so the `std::string_view` has static
+         * storage duration and is usable as a stable compile-time key.
+         *
+         * Unlike @ref UniqueIdentifier (which walks the inheritance chain), this
+         * walks the lexical nesting chain; the two are orthogonal.
+         *
+         * @tparam T A class or enumeration type.
+         */
+        template<typename T> requires (std::is_class_v<T> || std::is_enum_v<T>)
+        inline constexpr std::string_view ScopedIdentifier = Detail::BuildScopedIdentifier(^^T);
 
     } // namespace Traits
 
@@ -979,13 +999,15 @@ namespace Mashiro {
              */
             template <typename T, typename Ignore, typename Key, typename Order>
             consteval std::vector<std::meta::info> SelectMembers() {
-                auto all = std::meta::nonstatic_data_members_of(
-                    ^^T, std::meta::access_context::unchecked());
                 const bool keyMode = AnyMemberHas<T, Key>();
                 std::vector<std::meta::info> result;
-                for (auto m : all) {
-                    if (Has<Ignore>(m)) continue;
-                    if (keyMode && !Has<Key>(m)) continue;
+                for (auto m : Traits::Members<T>) {
+                    if (Has<Ignore>(m)) {
+                        continue;
+                    }
+                    if (keyMode && !Has<Key>(m)) {
+                        continue;
+                    }
                     result.push_back(m);
                 }
                 constexpr int kSentinel = 0x7FFFFFFF;
