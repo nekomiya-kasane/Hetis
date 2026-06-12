@@ -30,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
 
 namespace Mashiro {
 
@@ -381,11 +382,9 @@ namespace Mashiro {
     template<typename Derived>
     struct EventPayload : Detail::EventPayloadBase {
         EventKind kind = Detail::KindFromAnnotation<Derived>();
-        uint8_t   pad0 = 0;             ///< Reserved; keeps `flags` 16-bit aligned.
         uint16_t  flags = 0;            ///< Bitmask of @ref EventFlag values.
         uint32_t  windowId = 0;         ///< Window the event targets, or 0 for app-global.
         uint32_t  sequence = 0;         ///< Monotonic sequence number; total order + dedup.
-        uint32_t  pad1 = 0;             ///< Reserved; keeps `timestamp` 8-byte aligned.
         uint64_t  timestamp = 0;        ///< High-resolution timestamp (steady clock, ns).
 
         constexpr bool operator==(const EventPayload&) const = default;
@@ -1148,54 +1147,37 @@ namespace Mashiro {
             if (!std::meta::is_type(m)) return false;
             if (!std::meta::is_class_type(m)) return false;
             if (!std::meta::is_complete_type(m)) return false;
-            return ::Mashiro::Traits::Anno::Has<PayloadFor>(m);
+            return Traits::Anno::Has<PayloadFor>(m);
         }
 
         /**
-         * @brief Build a histogram (one entry per @ref EventKind) of how many
-         *        payload structs claim each kind. Should be all-ones at the
-         *        end of the header.
-         *
-         * The `is_template / is_type / is_class_type / is_complete_type`
-         * cascade screens out non-class members of `Mashiro` (free functions,
-         * function templates such as `MakePoint<T,N>` from Geom.h, variable
-         * templates, namespaces, etc.). `annotations_of` cannot be applied to
-         * those entities; the cascade is what makes the namespace-wide sweep
-         * portable.
+         * @brief Get all event types.
          */
-        consteval std::array<uint8_t, kEventKindCount> BuildKindCoverage() {
-            std::array<uint8_t, kEventKindCount> seen{};
+        consteval auto GetAllEventTypes() {
+            std::vector<std::meta::info> seen{};
             template for (constexpr auto m :
                           std::define_static_array(
                               std::meta::members_of(^^Mashiro,
                                                     std::meta::access_context::unchecked()))) {
-                if constexpr (!std::meta::is_template(m) &&
-                               std::meta::is_type(m) &&
-                               std::meta::is_class_type(m) &&
-                               std::meta::is_complete_type(m)) {
-                    if constexpr (::Mashiro::Traits::Anno::Has<PayloadFor>(m)) {
-                        constexpr auto bound =
-                            ::Mashiro::Traits::Anno::Get<PayloadFor>(m);
-                        ++seen[static_cast<size_t>(bound->kind)];
-                    }
+                if constexpr (IsBoundPayload(m)) {
+                     seen.push_back(m);
                 }
             }
-            return seen;
-        }
 
-        consteval bool AllKindsCovered() {
-            constexpr auto cov = BuildKindCoverage();
-            for (size_t i = 0; i < cov.size(); ++i)
-                if (cov[i] != 1) return false;
-            return true;
+            if (seen.size() != kEventKindCount) {
+                throw "Every EventKind must have exactly one payload struct annotated "
+                      "[[=PayloadFor{...}]] in namespace Mashiro";
+            }
+            return seen;
         }
 
     } // namespace Detail
     /// @endcond
 
-    static_assert(Detail::AllKindsCovered(),
-                  "Every EventKind must have exactly one payload struct annotated "
-                  "[[=PayloadFor{...}]] in namespace Mashiro");
+    /** @brief A summary type for all events. */
+    using SystemEvent = [:std::meta::substitute(^^std::variant, Detail::GetAllEventTypes()):];
+
+    static_assert(std::variant_size_v<SystemEvent> == kEventKindCount);
 
     // clang-format on
 

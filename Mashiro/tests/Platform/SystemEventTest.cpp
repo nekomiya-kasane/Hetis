@@ -207,11 +207,12 @@ TEST_CASE("KeyEventBase CRTP propagates the derived kind", AUTO_TAG) {
     STATIC_REQUIRE(KeyDownEvent{}.kind == EventKind::InputKeyDown);
     STATIC_REQUIRE(KeyUpEvent{}.kind   == EventKind::InputKeyUp);
 
-    constexpr KeyDownEvent kd{{{.windowId = 3}, .code = KeyCode::Enter, .repeat = true}};
-    STATIC_REQUIRE(kd.kind     == EventKind::InputKeyDown);
-    STATIC_REQUIRE(kd.code     == KeyCode::Enter);
-    STATIC_REQUIRE(kd.repeat);
-    STATIC_REQUIRE(kd.windowId == 3);
+    KeyDownEvent kd{{.code = KeyCode::Enter, .repeat = true}};
+    kd.windowId = 3;
+    REQUIRE(kd.kind     == EventKind::InputKeyDown);
+    REQUIRE(kd.code     == KeyCode::Enter);
+    REQUIRE(kd.repeat);
+    REQUIRE(kd.windowId == 3);
 }
 
 TEST_CASE("FileEventBase CRTP applies to file-system events", AUTO_TAG) {
@@ -301,7 +302,7 @@ TEST_CASE("Traits::PlatformsOf reports the raw bit set", AUTO_TAG) {
 TEST_CASE("TouchGestureEvent carries a typed Kind subenum", AUTO_TAG) {
     using GK = TouchGestureEvent::Kind;
     STATIC_REQUIRE(Traits::SequentialEnum<GK>);
-    constexpr TouchGestureEvent g{{}, .gesture = GK::Pinch, .scale = 1.5f};
+    constexpr TouchGestureEvent g{.gesture = GK::Pinch, .scale = 1.5f};
     STATIC_REQUIRE(g.kind    == EventKind::InputTouchGesture); // outer discriminator
     STATIC_REQUIRE(g.gesture == GK::Pinch);                    // gesture sub-tag
     STATIC_REQUIRE(g.scale   == 1.5f);
