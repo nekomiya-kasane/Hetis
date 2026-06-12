@@ -1,6 +1,7 @@
 #include <print>
 
 #include "Mashiro/Core/ToString.h"
+#include "Mashiro/Platform/SystemEvent.h"
 
 struct {
     float x{1.0f};
@@ -12,11 +13,7 @@ enum class ClassEnum {
     ClassEnumValue2,
 };
 
-enum SomeEnum {
-    Value1,
-    Value2,
-    Value3
-};
+enum SomeEnum { Value1, Value2, Value3 };
 
 enum {
     Anomy1 = 0x01,
@@ -38,5 +35,6 @@ int main() {
     std::println("{}", ToString(Value1));
     std::println("{}", ToString(static_cast<decltype(Anomy1)>(Anomy1 | Anomy2)));
     std::println("{}", ToString(ClassEnum::ClassEnumValue1));
+    std::println("{}", Traits::TypeName<SystemEvent>);
     return 0;
 }
