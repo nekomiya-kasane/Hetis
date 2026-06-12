@@ -1,3 +1,6 @@
+add_library(TestSupport INTERFACE)
+target_include_directories(TestSupport INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/Support")
+
 function(add_mashiro_test CATEGORY TEST_NAME)
     set(TEST_TARGET Test.${CATEGORY}.${TEST_NAME})
 
@@ -35,6 +38,7 @@ add_mashiro_test(Core StructuredLoggerTest)
 add_mashiro_test(Core FixedStringTest)
 add_mashiro_test(Core SOATest)
 add_mashiro_test(Core ToJsonTest)
+add_mashiro_test(Core TypeTraitsTest)
 
 add_mashiro_test(Math FunctionalTest)
 add_mashiro_test(Math VecTest eigen)
