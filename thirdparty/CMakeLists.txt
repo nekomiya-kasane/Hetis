@@ -26,6 +26,41 @@ if(Vulkan_glslc_FOUND)
 endif()
 
 # -----------------------------------------------------------------------------
+# 0b. Vulkan-Headers (KhronosGroup/Vulkan-Headers, vulkan-sdk-1.4.350.0)
+#
+#     `find_package(Vulkan)` exposes `Vulkan::Headers` backed by whatever the
+#     system SDK ships. We override its INTERFACE_INCLUDE_DIRECTORIES so the
+#     codebase tracks the latest headers (new extensions, vulkan.hpp /
+#     vulkan.cppm features) independently of whichever SDK the developer has
+#     installed locally. Every existing consumer (vma, spirv-reflect, imgui)
+#     keeps linking against `Vulkan::Headers` unchanged — they just see the
+#     newer headers.
+# -----------------------------------------------------------------------------
+set(VK_TP_VENDORED_HEADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vulkan-headers/include)
+
+if(TARGET Vulkan::Headers)
+    # `find_package(Vulkan)` (CMake ≥ 3.21) creates `Vulkan::Headers` as an
+    # IMPORTED INTERFACE target — directly editable via set_property. Older
+    # toolchains expose it as an ALIAS to an unnamed imported target; the
+    # ALIASED_TARGET branch covers that case.
+    get_target_property(_vk_headers_aliased Vulkan::Headers ALIASED_TARGET)
+    if(_vk_headers_aliased)
+        set(_vk_headers_target ${_vk_headers_aliased})
+    else()
+        set(_vk_headers_target Vulkan::Headers)
+    endif()
+    set_property(TARGET ${_vk_headers_target}
+        PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${VK_TP_VENDORED_HEADERS_DIR}")
+    message(STATUS "[vulkan/thirdparty] Vulkan-Headers   (vendored, overrides SDK): "
+            "${VK_TP_VENDORED_HEADERS_DIR}")
+else()
+    # No SDK Vulkan::Headers — bring the upstream CMakeLists in directly.
+    add_subdirectory(vulkan-headers)
+    message(STATUS "[vulkan/thirdparty] Vulkan-Headers   (vendored, sole source): "
+            "${VK_TP_VENDORED_HEADERS_DIR}")
+endif()
+
+# -----------------------------------------------------------------------------
 # Build option toggles for heavy libraries (default ON, switch off if unused)
 # -----------------------------------------------------------------------------
 option(VK_TP_BUILD_KTX     "Build KTX-Software (~30s)"   ON)
@@ -171,6 +206,11 @@ set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
 set(GLFW_VULKAN_STATIC  OFF CACHE BOOL "" FORCE)
 set(GLFW_LIBRARY_TYPE   SHARED CACHE STRING "" FORCE)  # glfw3.dll — deploy via vk_tp_deploy_runtime()
 add_subdirectory(glfw)
+
+# -----------------------------------------------------------------------------
+# 7b. glad — OpenGL loader (GLAD 2.0.8, gl:core=4.6 with all extensions)
+# -----------------------------------------------------------------------------
+add_subdirectory(glad)
 
 # -----------------------------------------------------------------------------
 # 8. ImGui (docking branch) — Vulkan + GLFW backends bundled
@@ -602,7 +642,7 @@ message(STATUS "  Bootstrap     : vk-bootstrap")
 message(STATUS "  Shading       : $<$<BOOL:${VK_TP_BUILD_SLANG}>:slang (runtime compiler, vk_tp_deploy_slang())>")
 message(STATUS "  Reflection    : spirv-cross-core/-glsl/-hlsl/-msl/-cpp/-reflect/-util  spirv-reflect")
 message(STATUS "  Textures      : $<$<BOOL:${VK_TP_BUILD_KTX}>:ktx> stb tinyexr")
-message(STATUS "  Window/UI     : glfw imgui")
+message(STATUS "  Window/UI     : glfw glad imgui")
 message(STATUS "  Math          : glm")
 message(STATUS "  Assets        : $<$<BOOL:${VK_TP_BUILD_ASSIMP}>:assimp> tinyobjloader tinygltf cgltf fastgltf meshoptimizer mikktspace")
 message(STATUS "  Utility       : spdlog::spdlog nlohmann_json::nlohmann_json entt tinyfiledialogs cli11")
