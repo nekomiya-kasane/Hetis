@@ -13,7 +13,7 @@
  * actually carries. There is no shared `EventHeader` block: events that target
  * a window inherit @ref Mashiro::Event::WindowSpecificEvent; time-sensitive
  * events inherit @ref Mashiro::Event::TimestampedEvent; everything else
- * inherits @ref Mashiro::Event::Detail::EventPayloadBase directly. The empty
+ * inherits @ref Mashiro::Event::EventPayloadBase directly. The empty
  * marker base is the sole condition for variant membership: every payload
  * struct in `Mashiro::Event` that derives from it is added automatically by
  * reflection. There is no separate `EventKind` enum, no `[[=PayloadFor{}]]`
@@ -53,7 +53,7 @@ namespace Mashiro {
         // ============================================================================
         // Marker Base & Mixins
         // ----------------------------------------------------------------------------
-        // Every payload in this namespace inherits from `Detail::EventPayloadBase`,
+        // Every payload in this namespace inherits from `EventPayloadBase`,
         // either directly (app-global events) or transitively through one of the
         // mixin bases below. Variant membership is reflection-driven on that
         // single condition — no annotation, no enum, no manual table. The empty
@@ -61,17 +61,15 @@ namespace Mashiro {
         // by `Traits::SystemEventPayload<T>` and `std::is_base_of_v`.
         // ============================================================================
 
-        namespace Detail {
-            /**
-             * @brief Empty marker base for every system-event payload.
-             *
-             * Inherited (directly or via @ref WindowSpecificEvent /
-             * @ref TimestampedEvent) by every struct that participates in
-             * @ref Mashiro::SystemEvent. Used by the variant materialiser
-             * to discover payload types via reflection without an annotation.
-             */
-            struct EventPayloadBase {};
-        } // namespace Detail
+        /**
+         * @brief Empty marker base for every system-event payload.
+         *
+         * Inherited (directly or via @ref WindowSpecificEvent /
+         * @ref TimestampedEvent) by every struct that participates in
+         * @ref Mashiro::SystemEvent. Used by the variant materialiser
+         * to discover payload types via reflection without an annotation.
+         */
+        struct EventPayloadBase {};
 
         /**
          * @brief Mixin: payload targets a specific window.
@@ -81,7 +79,7 @@ namespace Mashiro {
          * (display, power, gamepad, file watcher, clipboard, …) do **not**
          * inherit this — there is no `windowId == 0` sentinel for them.
          */
-        struct WindowSpecificEvent : Detail::EventPayloadBase {
+        struct WindowSpecificEvent : EventPayloadBase {
             WindowId windowId = WindowId::Invalid; ///< Window the event targets.
             constexpr bool operator==(const WindowSpecificEvent&) const = default;
         };
@@ -98,7 +96,7 @@ namespace Mashiro {
          * monotonic steady clock reading expressed in nanoseconds (typically QPC
          * on Windows, `clock_gettime(CLOCK_MONOTONIC)` on Linux).
          */
-        struct TimestampedEvent : Detail::EventPayloadBase {
+        struct TimestampedEvent : EventPayloadBase {
             uint64_t timestamp = 0; ///< Monotonic steady-clock reading, ns.
             constexpr bool operator==(const TimestampedEvent&) const = default;
         };
@@ -360,7 +358,7 @@ namespace Mashiro {
              *
              * Inherits @ref WindowSpecificEvent and @ref TimestampedEvent so the
              * derived `KeyDownEvent` / `KeyUpEvent` types pick up `windowId`,
-             * `timestamp`, and the @ref Detail::EventPayloadBase marker
+             * `timestamp`, and the @ref EventPayloadBase marker
              * automatically. The payload type itself is the discriminator on
              * @ref Mashiro::SystemEvent — there is no separate enum tag.
              */
@@ -543,7 +541,11 @@ namespace Mashiro {
         inline namespace Clipboard {
 
             /// @brief OS clipboard contents changed.
-            struct ClipboardUpdateEvent : WindowSpecificEvent {
+            ///
+            /// Global to the application: the clipboard is a system-wide resource, so this
+            /// payload carries no `windowId` (see @ref WindowSpecificEvent). Platforms that
+            /// deliver the notification to a listener window discard that handle here.
+            struct ClipboardUpdateEvent : EventPayloadBase {
                 DragKind kinds = DragKind::None; ///< Bitmask of available MIME categories.
             };
 
@@ -585,17 +587,17 @@ namespace Mashiro {
 
         inline namespace Display {
 
-            struct DisplayConnectEvent : Detail::EventPayloadBase {
+            struct DisplayConnectEvent : EventPayloadBase {
                 DisplayId   display = DisplayId::Invalid;
                 std::string name;
             };
 
-            struct DisplayDisconnectEvent : Detail::EventPayloadBase {
+            struct DisplayDisconnectEvent : EventPayloadBase {
                 DisplayId display = DisplayId::Invalid;
             };
 
             /// @brief A display's mode, position, or topology changed.
-            struct DisplayChangeEvent : Detail::EventPayloadBase {
+            struct DisplayChangeEvent : EventPayloadBase {
                 DisplayId display = DisplayId::Invalid;
                 uvec2     resolution{};
                 float     refreshHz = 0;
@@ -603,13 +605,13 @@ namespace Mashiro {
             };
 
             /// @brief ICC / colour profile change (typically per-display on macOS / Win10+).
-            struct DisplayColorProfileChangeEvent : Detail::EventPayloadBase {
+            struct DisplayColorProfileChangeEvent : EventPayloadBase {
                 DisplayId   display = DisplayId::Invalid;
                 std::string profileName;
             };
 
             /// @brief HDR enable / disable / metadata change.
-            struct DisplayHdrChangeEvent : Detail::EventPayloadBase {
+            struct DisplayHdrChangeEvent : EventPayloadBase {
                 DisplayId display = DisplayId::Invalid;
                 bool      hdrEnabled = false;
                 float     maxLuminanceNits = 0;
@@ -619,15 +621,15 @@ namespace Mashiro {
 
         inline namespace Power {
 
-            struct PowerStateChangeEvent : Detail::EventPayloadBase {
+            struct PowerStateChangeEvent : EventPayloadBase {
                 PowerSource source = PowerSource::Unknown;
                 float       batteryLevel = 1; ///< Normalised [0,1]; 1 if non-battery.
             };
 
-            struct PowerSuspendEvent : Detail::EventPayloadBase {};
-            struct PowerResumeEvent  : Detail::EventPayloadBase {};
+            struct PowerSuspendEvent : EventPayloadBase {};
+            struct PowerResumeEvent  : EventPayloadBase {};
 
-            struct BatteryLevelChangeEvent : Detail::EventPayloadBase {
+            struct BatteryLevelChangeEvent : EventPayloadBase {
                 float    level = 1;
                 bool     charging = false;
                 uint32_t secondsRemaining = 0; ///< 0 if unknown.
@@ -637,14 +639,14 @@ namespace Mashiro {
 
         inline namespace Session {
 
-            struct SessionLockEvent   : Detail::EventPayloadBase {};
-            struct SessionUnlockEvent : Detail::EventPayloadBase {};
+            struct SessionLockEvent   : EventPayloadBase {};
+            struct SessionUnlockEvent : EventPayloadBase {};
 
             /// @brief Win32 fast user switch.
-            struct [[=Platform::WindowsOnly]] SessionUserSwitchEvent : Detail::EventPayloadBase {};
+            struct [[=Platform::WindowsOnly]] SessionUserSwitchEvent : EventPayloadBase {};
 
             /// @brief Logoff or shutdown imminent — last chance to persist work.
-            struct SessionEndQueryEvent : Detail::EventPayloadBase {
+            struct SessionEndQueryEvent : EventPayloadBase {
                 bool isShutdown = false;
                 bool isCritical = false;
             };
@@ -653,7 +655,7 @@ namespace Mashiro {
 
         inline namespace Theme {
     
-            struct AppearanceChangeEvent : Detail::EventPayloadBase {
+            struct AppearanceChangeEvent : EventPayloadBase {
                 AppearanceTheme theme = AppearanceTheme::Unknown;
                 uint32_t        accentColorRgba = 0;
             };
@@ -662,13 +664,13 @@ namespace Mashiro {
 
         inline namespace A13y {
 
-            struct AccessibilityScreenReaderEvent : Detail::EventPayloadBase {
+            struct AccessibilityScreenReaderEvent : EventPayloadBase {
                 bool enabled = false;
             };
-            struct AccessibilityReducedMotionEvent : Detail::EventPayloadBase {
+            struct AccessibilityReducedMotionEvent : EventPayloadBase {
                 bool enabled = false;
             };
-            struct AccessibilityHighContrastEvent : Detail::EventPayloadBase {
+            struct AccessibilityHighContrastEvent : EventPayloadBase {
                 bool enabled = false;
             };
 
@@ -676,14 +678,14 @@ namespace Mashiro {
 
         inline namespace Gamepad {
 
-            struct GamepadConnectEvent : Detail::EventPayloadBase {
+            struct GamepadConnectEvent : EventPayloadBase {
                 DeviceId    device = DeviceId::Invalid;
                 std::string name;
                 uint32_t    vendorId = 0;
                 uint32_t    productId = 0;
             };
 
-            struct GamepadDisconnectEvent : Detail::EventPayloadBase {
+            struct GamepadDisconnectEvent : EventPayloadBase {
                 DeviceId device = DeviceId::Invalid;
             };
 
@@ -694,7 +696,7 @@ namespace Mashiro {
                 uint32_t             buttons = 0;///< Bit mask, layout = vendor-defined map.
             };
 
-            struct GamepadBatteryChangeEvent : Detail::EventPayloadBase {
+            struct GamepadBatteryChangeEvent : EventPayloadBase {
                 DeviceId device = DeviceId::Invalid;
                 float    level = 1;
                 bool     charging = false;
@@ -704,7 +706,7 @@ namespace Mashiro {
 
         inline namespace File {
 
-            struct FileSpecificEvent : Detail::EventPayloadBase {
+            struct FileSpecificEvent : EventPayloadBase {
                 std::string path;
             };
 
@@ -731,7 +733,7 @@ namespace Mashiro {
         inline namespace Misc {
 
             /// @brief OS asked the application to handle an external URL or document.
-            struct UrlOpenRequestEvent : Detail::EventPayloadBase {
+            struct UrlOpenRequestEvent : EventPayloadBase {
                 std::string url; ///< UTF-8 URL or local path.
             };
 
@@ -742,7 +744,7 @@ namespace Mashiro {
             };
 
             /// @brief Generic device hot-plug (USB / monitor / audio endpoint).
-            struct DeviceChangeEvent : Detail::EventPayloadBase {
+            struct DeviceChangeEvent : EventPayloadBase {
                 DeviceId    device = DeviceId::Invalid;
                 std::string description;
                 bool        attached = true;
@@ -750,24 +752,28 @@ namespace Mashiro {
 
         } // namespace Misc
 
+    }
+
         // ============================================================================
         // Reflection Traits — Payload Categorisation
         // ============================================================================
 
-        namespace Traits {
+    namespace Traits {
+
+        inline namespace Event {
 
             /**
              * @brief Concept: `T` is a system-event payload.
              *
              * Satisfied by every class that derives (directly or transitively)
-             * from @ref Detail::EventPayloadBase. The marker is the sole
+             * from @ref EventPayloadBase. The marker is the sole
              * condition for variant membership; the variant materialiser in
              * `Mashiro::Detail::GetAllEventTypes` reflects on
              * `Mashiro::Event` and includes every type that satisfies it.
              */
             template<typename T>
             concept SystemEventPayload =
-                std::is_class_v<T> && std::is_base_of_v<Detail::EventPayloadBase, T>;
+                std::is_class_v<T> && std::is_base_of_v<EventPayloadBase, T>;
 
             /** @brief Concept: payload `T` targets a window. */
             template<typename T>
@@ -841,9 +847,9 @@ namespace Mashiro {
                 SystemEventPayload<P> &&
                 requires(M& m, const P& p) { m.On(p); };
 
-        } // namespace Traits
+        } // namespace Event
 
-    } // namespace Event
+    } // namespace Traits
 
     // ============================================================================
     // SystemEvent — variant materialisation
@@ -860,7 +866,7 @@ namespace Mashiro {
     namespace Detail {
 
         /// @brief `true` iff @p m is a complete class type that derives from
-        ///        @ref Event::Detail::EventPayloadBase. Skips templates,
+        ///        @ref Event::EventPayloadBase. Skips templates,
         ///        function members, and non-class entities so reflecting on
         ///        @p Mashiro::Event is safe.
         consteval bool DerivesFromEventBase(std::meta::info m) {
@@ -869,40 +875,62 @@ namespace Mashiro {
             if (!std::meta::is_class_type(m)) return false;
             if (!std::meta::is_complete_type(m)) return false;
             return std::meta::extract<bool>(std::meta::substitute(
-                ^^std::is_base_of_v, {^^Event::Detail::EventPayloadBase, m}));
+                ^^std::is_base_of_v, {^^Event::EventPayloadBase, m}));
         }
 
-        /// @brief Collect every payload type declared in `Mashiro::Event`.
+        /// @brief Recursively gather every class declared in @p ns or any of its
+        ///        nested namespaces that derives from @ref Event::EventPayloadBase.
+        ///
+        /// Recursion is required because payloads live in nested inline
+        /// namespaces (`Event::Window`, `Event::Keyboard`, …) and `members_of`
+        /// returns only the direct lexical members of @p ns. Duplicates are
+        /// rejected so the materialised variant never carries a repeated
+        /// alternative (which would make `holds_alternative` ambiguous).
+        consteval void CollectEventPayloads(std::meta::info ns,
+                                            std::vector<std::meta::info>& out) {
+            for (auto m : std::meta::members_of(ns, std::meta::access_context::unchecked())) {
+                if (std::meta::is_namespace(m)) {
+                    CollectEventPayloads(m, out);
+                } else if (DerivesFromEventBase(m)) {
+                    bool seen = false;
+                    for (auto e : out) {
+                        if (e == m) { seen = true; break; }
+                    }
+                    if (!seen) out.push_back(m);
+                }
+            }
+        }
+
+        /// @brief Collect every leaf payload type reachable from `Mashiro::Event`.
         ///
         /// Membership rule: the type must derive from
-        /// @ref Event::Detail::EventPayloadBase **and** must not itself be
-        /// the direct base of any other payload in the same namespace. This
-        /// excludes the abstract mixin/composition bases
-        /// (@ref Event::WindowSpecificEvent, @ref Event::TimestampedEvent,
-        /// @ref Event::KeyEventBase, @ref Event::FileSpecificEvent) without
-        /// any naming convention or extra annotation — the type system
-        /// itself decides what counts as a leaf.
+        /// @ref Event::EventPayloadBase **and** must not itself be the direct
+        /// base of another candidate. This excludes the abstract mixin/composition
+        /// bases (@ref Event::WindowSpecificEvent, @ref Event::TimestampedEvent,
+        /// @ref Event::KeyEventBase, @ref Event::FileSpecificEvent) without any
+        /// naming convention or extra annotation — the type system itself decides
+        /// what counts as a leaf. `std::monostate` is always the first alternative.
         consteval auto GetAllEventTypes() {
-            constexpr auto all = std::define_static_array(
-                std::meta::members_of(^^Mashiro::Event, std::meta::access_context::unchecked()));
-
             std::vector<std::meta::info> candidates{};
             candidates.push_back(^^std::monostate);
-            template for (constexpr auto m : all) {
-                if constexpr (DerivesFromEventBase(m)) {
-                    candidates.push_back(m);
+            CollectEventPayloads(^^Mashiro::Event, candidates);
+
+            // Collect, in a single pass, every type that is a direct base of some
+            // candidate. A candidate that never appears here is a leaf. Done as
+            // one O(n·b) gather + O(n·k) lookup instead of an O(n²·b) pairwise
+            // scan, which previously exhausted the constexpr step limit.
+            std::vector<std::meta::info> baseTypes{};
+            for (auto u : candidates) {
+                for (auto b : std::meta::bases_of(u, std::meta::access_context::unchecked())) {
+                    baseTypes.push_back(std::meta::type_of(b));
                 }
             }
 
             std::vector<std::meta::info> leaves{};
             for (auto t : candidates) {
                 bool isBase = false;
-                for (auto u : candidates) {
-                    if (u == t) continue;
-                    for (auto b : std::meta::bases_of(u, std::meta::access_context::unchecked())) {
-                        if (std::meta::type_of(b) == t) { isBase = true; break; }
-                    }
-                    if (isBase) break;
+                for (auto b : baseTypes) {
+                    if (b == t) { isBase = true; break; }
                 }
                 if (!isBase) leaves.push_back(t);
             }
@@ -913,18 +941,15 @@ namespace Mashiro {
     /// @endcond
 
     /**
-     * @brief Sum type of every system-event payload declared in
-     *        @ref Mashiro::Event.
+     * @brief Sum type of every system-event payload declared in @ref Mashiro::Event.
      *
-     * Materialised at compile time from a reflection scan of the namespace,
-     * gated by @ref Event::Traits::SystemEventPayload. The active alternative
-     * *is* the discriminator — clients dispatch via `std::visit` (typed) or
-     * `std::holds_alternative<T>(e)` (single-type query). The numeric
-     * `index()` is not persistence-stable: inserting a new payload re-orders
-     * subsequent indices. There is intentionally no `EventKind` enum.
+     * Materialised at compile time from a reflection scan of the namespace, gated by 
+     * @ref Event::Traits::SystemEventPayload. The active alternative *is* the discriminator — clients dispatch via
+     * `std::visit` (typed) or `std::holds_alternative<T>(e)` (single-type query). The numeric `index()` is not 
+     * persistence-stable: inserting a new payload re-orders subsequent indices. There is intentionally no 
+     * `EventKind` enum.
      */
-    using SystemEvent =
-        [:std::meta::substitute(^^std::variant, Detail::GetAllEventTypes()):];
+    using SystemEvent = [:std::meta::substitute(^^std::variant, Detail::GetAllEventTypes()):];
 
     // ============================================================================
     // Cross-cutting accessors
@@ -943,7 +968,8 @@ namespace Mashiro {
         return std::visit(
             [](const auto& payload) noexcept -> std::string_view {
                 using T = std::remove_cvref_t<decltype(payload)>;
-                return Event::Traits::PayloadTypeName<T>();
+                if constexpr (std::same_as<T, std::monostate>) return "monostate";
+                else return Traits::Event::PayloadTypeName<T>();
             },
             e);
     }
@@ -954,7 +980,7 @@ namespace Mashiro {
         return std::visit(
             [](const auto& payload) noexcept -> std::optional<WindowId> {
                 using T = std::remove_cvref_t<decltype(payload)>;
-                if constexpr (Event::Traits::WindowScoped<T>) return payload.windowId;
+                if constexpr (Traits::Event::WindowScoped<T>) return payload.windowId;
                 else return std::nullopt;
             },
             e);
@@ -966,7 +992,7 @@ namespace Mashiro {
         return std::visit(
             [](const auto& payload) noexcept -> std::optional<uint64_t> {
                 using T = std::remove_cvref_t<decltype(payload)>;
-                if constexpr (Event::Traits::Timestamped<T>) return payload.timestamp;
+                if constexpr (Traits::Event::Timestamped<T>) return payload.timestamp;
                 else return std::nullopt;
             },
             e);
@@ -1012,14 +1038,31 @@ namespace Mashiro {
      *       any-thread query on @p mgr already reflects the post-event state
      *       by the time a client coroutine wakes from `co_await channel.Next()`.
      */
+    /// @cond DOXYGEN_INTERNAL
+    namespace Detail {
+        /// @brief Call `mgr.On(payload)` iff the manager handles that payload.
+        ///
+        /// Hoisted out of the @ref DispatchBookkeep visitor lambda deliberately:
+        /// on this clang-p2996 fork an `if constexpr (Concept<M, P>)` written
+        /// directly inside a generic lambda fails to discard its false branch
+        /// when `M` is a template parameter captured from the enclosing function,
+        /// so `mgr.On` gets hard-instantiated even for managers that lack it. A
+        /// named function template evaluates the predicate in the normal
+        /// two-phase way and prunes correctly.
+        template<typename M, typename P>
+        inline void InvokeBookkeep(M& mgr, const P& payload) noexcept {
+            if constexpr (Traits::Event::HandlesBookkeep<M, P>) {
+                mgr.On(payload);
+            }
+        }
+    } // namespace Detail
+    /// @endcond
+
     template<typename M>
     inline void DispatchBookkeep(M& mgr, const SystemEvent& e) noexcept {
         std::visit(
             [&mgr](const auto& payload) noexcept {
-                using P = std::remove_cvref_t<decltype(payload)>;
-                if constexpr (Event::Traits::HandlesBookkeep<M, P>) {
-                    mgr.On(payload);
-                }
+                Detail::InvokeBookkeep(mgr, payload);
             },
             e);
     }

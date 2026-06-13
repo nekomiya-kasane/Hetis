@@ -114,25 +114,25 @@ TEST_CASE("KeyCode letters and digits map to ASCII code points", AUTO_TAG) {
 // =========================================================================
 
 TEST_CASE("EventPayloadBase is an empty marker; mixins inherit it", AUTO_TAG) {
-    STATIC_REQUIRE(std::is_empty_v<Event::Detail::EventPayloadBase>);
-    STATIC_REQUIRE(std::is_base_of_v<Event::Detail::EventPayloadBase, WindowSpecificEvent>);
-    STATIC_REQUIRE(std::is_base_of_v<Event::Detail::EventPayloadBase, TimestampedEvent>);
+    STATIC_REQUIRE(std::is_empty_v<Event::EventPayloadBase>);
+    STATIC_REQUIRE(std::is_base_of_v<Event::EventPayloadBase, WindowSpecificEvent>);
+    STATIC_REQUIRE(std::is_base_of_v<Event::EventPayloadBase, TimestampedEvent>);
     STATIC_REQUIRE(WindowSpecificEvent{}.windowId  == WindowId::Invalid);
     STATIC_REQUIRE(TimestampedEvent{}.timestamp    == 0);
 }
 
 TEST_CASE("SystemEventPayload concept identifies every payload, rejects anything else", AUTO_TAG) {
-    STATIC_REQUIRE(Event::Traits::SystemEventPayload<WindowResizeEvent>);
-    STATIC_REQUIRE(Event::Traits::SystemEventPayload<KeyDownEvent>);
-    STATIC_REQUIRE(Event::Traits::SystemEventPayload<DisplayChangeEvent>);
-    STATIC_REQUIRE(Event::Traits::SystemEventPayload<FileCreatedEvent>);
-    STATIC_REQUIRE(Event::Traits::SystemEventPayload<TimerTickEvent>);
+    STATIC_REQUIRE(Traits::SystemEventPayload<WindowResizeEvent>);
+    STATIC_REQUIRE(Traits::SystemEventPayload<KeyDownEvent>);
+    STATIC_REQUIRE(Traits::SystemEventPayload<DisplayChangeEvent>);
+    STATIC_REQUIRE(Traits::SystemEventPayload<FileCreatedEvent>);
+    STATIC_REQUIRE(Traits::SystemEventPayload<TimerTickEvent>);
 
     // Plain types are not payloads — anything that doesn't derive from the
     // marker base is excluded.
-    STATIC_REQUIRE_FALSE(Event::Traits::SystemEventPayload<int>);
-    STATIC_REQUIRE_FALSE(Event::Traits::SystemEventPayload<Modifiers>);
-    STATIC_REQUIRE_FALSE(Event::Traits::SystemEventPayload<Event::DragPayloadInfo>);
+    STATIC_REQUIRE_FALSE(Traits::SystemEventPayload<int>);
+    STATIC_REQUIRE_FALSE(Traits::SystemEventPayload<Modifiers>);
+    STATIC_REQUIRE_FALSE(Traits::SystemEventPayload<Event::DragPayloadInfo>);
 }
 
 TEST_CASE("SystemEvent variant excludes abstract bases and includes only leaves", AUTO_TAG) {
@@ -383,7 +383,7 @@ namespace {
 } // namespace
 
 TEST_CASE("HandlesBookkeep concept is purely structural", AUTO_TAG) {
-    using namespace Event::Traits;
+    using namespace Traits;
     STATIC_REQUIRE(HandlesBookkeep<ResizeBookkeeper, WindowResizeEvent>);
     STATIC_REQUIRE(HandlesBookkeep<ResizeBookkeeper, WindowFocusEvent>);
 
