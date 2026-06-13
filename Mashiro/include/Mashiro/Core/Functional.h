@@ -63,10 +63,6 @@ namespace Mashiro {
 
     namespace Traits {
 
-        /// @brief A class type usable as a fixed-size record (reconstructed by `Map`).
-        template<typename T>
-        concept Aggregate = std::is_aggregate_v<std::remove_cvref_t<T>>;
-
         /// @brief An iterable that is *not* tuple-like — eligible for lazy view adaptors.
         template<typename T>
         concept LazyRange = std::ranges::input_range<T> && !Traits::TupleLike<std::remove_cvref_t<T>>;
