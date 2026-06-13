@@ -2,10 +2,9 @@
  * @file TypeTraits.h
  * @brief Reflection-based type traits, structural concepts, and utility types.
  *
- * Provides compile-time introspection helpers built on C++26 static reflection
- * (`<meta>`, P2996) and standard concepts. Every facility is `consteval` /
- * `inline constexpr`, so it folds to immediate values or pure type computation
- * with **zero** runtime cost. Key facilities, grouped by concern:
+ * Provides compile-time introspection helpers built on C++26 static reflection (`<meta>`, P2996) and standard 
+ * concepts. Every facility is `consteval` / `inline constexpr`, so it folds to immediate values or pure type 
+ * computation with **zero** runtime cost. Key facilities, grouped by concern:
  *
  * @par Class member reflection
  * - `Members<T>` / `PublicMembers<T>` and their `*Count` — reflected NSDMs.
@@ -17,10 +16,9 @@
  * @par Base-class reflection
  * - `Bases<T>` / `BasesCount<T>` / `BaseType<T,I>` — direct base introspection.
  * - `RootClass<T>` / `SingleInheritedClass<T>`.
- * - `ChainedIdentifier<T>` / `ChainedDisplayString<T>` — dotted root-to-derived
- *   inheritance path; `ScopedIdentifier<T>` / `ScopedDisplayString<T>` — dotted
- *   enclosing-scope path. `*Identifier` use `identifier_of`; `*DisplayString`
- *   use `display_string_of` (keeping template arguments).
+ * - `ChainedIdentifier<T>` / `ChainedDisplayString<T>` — dotted root-to-derived inheritance path; 
+ *   `ScopedIdentifier<T>` / `ScopedDisplayString<T>` — dotted enclosing-scope path. `*Identifier` use `identifier_of`; 
+ *   `*DisplayString` use `display_string_of` (keeping template arguments).
  *
  * @par Enum reflection
  * - `Enumerators<T>` / `EnumeratorsCount<T>` — reflected enumerators.
@@ -30,22 +28,21 @@
  *
  * @par Structural & categorisation concepts
  * - `TupleLike<T>` / `VariantLike<T>` — structural duck-type detection.
- * - `Aggregate` / `StandardLayoutType` / `TriviallyCopyableType` / `EmptyType` /
- *   `PolymorphicType` / `UniquelyRepresented` / `Reflectable` / `ScopedEnum` …
- * - `SpecializationOf<T,Tmpl>` — generic class-template specialisation probe
- *   (reflection-based; @p Tmpl must be an all-type-parameter template).
- * - Standard-library categorisation: `StdOptional`, `StdVariant`,
- *   `ChronoDuration`, `ChronoTimePoint`, `FilesystemPath`, `ByteRange`,
- *   `StringViewConvertible`, `StringKeyedAssociative`.
+ * - `Aggregate` / `StandardLayoutType` / `TriviallyCopyableType` / `EmptyType` / `PolymorphicType` / 
+ *   `UniquelyRepresented` / `Reflectable` / `ScopedEnum` …
+ * - `SpecializationOf<T,Tmpl>` — generic class-template specialisation probe (reflection-based; @p Tmpl must be an 
+ *   all-type-parameter template).
+ * - Standard-library categorisation: `StdOptional`, `StdVariant`, `ChronoDuration`, `ChronoTimePoint`, 
+ *   `FilesystemPath`, `ByteRange`, `StringViewConvertible`, `StringKeyedAssociative`.
  *
  * @par Type-level algebra
- * - `TypeList` plus `At` / `Head` / `Tail` / `Last` / `Concat` / `MapT` /
- *   `FilterT` / `FoldT` / `Reverse` / `Unique` / `PushFront` / `PushBack` /
- *   `PopBack` / `IndexOf` / `Contains` / `AllOf` / `AnyOf` / `NoneOf` / `CountIf`.
+ * - `TypeList` plus `At` / `Head` / `Tail` / `Last` / `Concat` / `MapT` / `FilterT` / `FoldT` / `Reverse` / 
+ *   `Unique` / `PushFront` / `PushBack` / `PopBack` / `IndexOf` / `Contains` / `AllOf` / `AnyOf` / `NoneOf` / 
+ *   `CountIf`.
  *
  * @par Annotations (C++26 `[[=...]]`)
- * - `Anno::*` — annotation probing + member filtering/ordering driven by
- *   user-supplied `Ignore` / `Key` / `Order` annotation tag types.
+ * - `Anno::*` — annotation probing + member filtering/ordering driven by user-supplied `Ignore` / `Key` / `Order` 
+ *   annotation tag types.
  *
  * - `Overload` — lambda-overload-set builder for `std::visit`.
  *
