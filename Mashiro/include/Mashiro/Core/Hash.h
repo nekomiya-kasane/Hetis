@@ -18,22 +18,247 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <bit>
+#include <compare>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <meta>
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
+#include "Mashiro/Core/Int128.h"
 #include "Mashiro/Core/TypeTraits.h"
 
 namespace Mashiro::Hashing {
+
+    // =========================================================================
+    // Uuid — RFC-4122 universally unique identifier (a 128-bit semantic value)
+    // =========================================================================
+
+    /// @brief Thrown by @ref Uuid::Parse on a malformed RFC-4122 string. As the
+    ///        parser is `constexpr`, reaching a throw during constant evaluation
+    ///        (e.g. a bad `_uuid` literal) is a hard compile error.
+    class UuidParseError : public std::invalid_argument {
+    public:
+        using std::invalid_argument::invalid_argument;
+    };
+
+    /// @brief Why an RFC-4122 string failed to parse.
+    enum class UuidParseErrc : uint8_t {
+        Ok = 0,        ///< Parsed successfully.
+        Empty,         ///< Input (after stripping wrappers) was empty.
+        BadLength,     ///< Body was not the canonical 36 characters.
+        MissingHyphen, ///< Expected `-` at a group boundary (pos 8/13/18/23).
+        InvalidHexDigit,   ///< A non-hex character appeared in a hex group.
+        UnterminatedBrace, ///< A leading `{` had no matching trailing `}`.
+    };
+
+    /// @brief Static human-readable description for a @ref UuidParseErrc.
+    [[nodiscard]] constexpr std::string_view UuidParseErrcMessage(UuidParseErrc e) noexcept {
+        switch (e) {
+            case UuidParseErrc::Ok:                 return "ok";
+            case UuidParseErrc::Empty:              return "empty UUID string";
+            case UuidParseErrc::BadLength:          return "UUID body must be 36 characters (8-4-4-4-12)";
+            case UuidParseErrc::MissingHyphen:      return "expected '-' at group boundary";
+            case UuidParseErrc::InvalidHexDigit:    return "invalid hexadecimal digit";
+            case UuidParseErrc::UnterminatedBrace:  return "missing closing '}'";
+        }
+        return "unknown UUID parse error";
+    }
+
+    /**
+     * @brief An RFC-4122 universally unique identifier — a distinct 128-bit type.
+     *
+     * Wraps a single @ref Mashiro::uint128_t held big-endian (byte 0 is the most
+     * significant), so the canonical 8-4-4-4-12 string reads straight off the
+     * value. It is a structural, trivially-copyable type with total ordering.
+     *
+     * `Uuid` carries *identity* semantics and is deliberately separate from the
+     * raw hash result of @ref Fnv1a128 (a plain `uint128_t`): a hash is a number,
+     * a UUID is a name. Convert explicitly — e.g. `Uuid{"x"_hash128}` — when you
+     * intend to derive a name-style identifier from a digest.
+     */
+    struct Uuid {
+        uint128_t value = 0;  ///< Big-endian 128-bit value (byte 0 = most significant).
+
+        constexpr Uuid() noexcept = default;
+        explicit constexpr Uuid(uint128_t v) noexcept : value(v) {}
+        /// @brief Compose from most/least-significant 64-bit halves (big-endian).
+        constexpr Uuid(uint64_t hi, uint64_t lo) noexcept
+            : value((static_cast<uint128_t>(hi) << 64) | static_cast<uint128_t>(lo)) {}
+
+        constexpr bool operator==(const Uuid&) const = default;
+        constexpr auto operator<=>(const Uuid&) const = default;
+
+        /// @brief The underlying 128-bit value.
+        [[nodiscard]] constexpr uint128_t ToUint128() const noexcept { return value; }
+        /// @brief Mutable reference to the underlying 128-bit value.
+        [[nodiscard]] constexpr uint128_t& AsUint128() noexcept { return value; }
+        /// @brief Const reference to the underlying 128-bit value.
+        [[nodiscard]] constexpr const uint128_t& AsUint128() const noexcept { return value; }
+        /// @brief Wrap a native 128-bit integer.
+        [[nodiscard]] static constexpr Uuid FromUint128(uint128_t v) noexcept { return Uuid{v}; }
+
+        /// @brief The all-zero (nil) UUID.
+        [[nodiscard]] static constexpr Uuid Nil() noexcept { return {}; }
+
+        /// @brief `true` if this is the nil UUID.
+        [[nodiscard]] constexpr bool IsNil() const noexcept { return value == 0; }
+
+        /// @brief The byte at index @p i in big-endian order (0 = most significant).
+        [[nodiscard]] constexpr uint8_t Byte(size_t i) const noexcept {
+            return static_cast<uint8_t>(value >> ((15 - (i & 15)) * 8));
+        }
+
+        /// @brief RFC-4122 version nibble (bits 12..15 of the time_hi field).
+        [[nodiscard]] constexpr uint8_t Version() const noexcept {
+            return static_cast<uint8_t>((value >> 76) & 0xF);
+        }
+
+        /// @brief RFC-4122 variant bits (top bits of the clock_seq_hi byte).
+        [[nodiscard]] constexpr uint8_t Variant() const noexcept {
+            return static_cast<uint8_t>((value >> 62) & 0x3);
+        }
+
+        /**
+         * @brief Stamp the RFC-4122 version and variant fields onto this digest.
+         *
+         * Overwrites the version nibble with @p version and sets the variant to
+         * the RFC-4122 form (10xx). The digest is FNV-based rather than MD5/SHA-1,
+         * so the default version is 8 ("custom"). The remaining 122 bits are left
+         * as the hash output.
+         */
+        [[nodiscard]] constexpr Uuid WithRfc4122(uint8_t version = 8) const noexcept {
+            uint128_t v = value;
+            v &= ~(static_cast<uint128_t>(0xF) << 76);
+            v |= static_cast<uint128_t>(version & 0xF) << 76;
+            v &= ~(static_cast<uint128_t>(0x3) << 62);
+            v |= static_cast<uint128_t>(0x2) << 62;
+            return Uuid{v};
+        }
+
+        /// @brief Hex digit → 0..15, or -1 if @p c is not a hex digit.
+        [[nodiscard]] static constexpr int HexNibble(char c) noexcept {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        }
+
+        /// @brief ASCII lowercase of @p c (only A..Z folded; other bytes pass through).
+        [[nodiscard]] static constexpr char ToLower(char c) noexcept {
+            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+        }
+
+        /// @brief Canonical 8-4-4-4-12 lowercase hex string.
+        [[nodiscard]] constexpr std::array<char, 36> ToChars() const noexcept {
+            constexpr char kHex[] = "0123456789abcdef";
+            std::array<char, 36> out{};
+            size_t pos = 0;
+            for (size_t i = 0; i < 16; ++i) {
+                if (i == 4 || i == 6 || i == 8 || i == 10) {
+                    out[pos++] = '-';
+                }
+                uint8_t b = Byte(i);
+                out[pos++] = kHex[b >> 4];
+                out[pos++] = kHex[b & 0xF];
+            }
+            return out;
+        }
+
+        /// @brief Canonical 8-4-4-4-12 lowercase hex string as a `std::string`.
+        [[nodiscard]] std::string ToString() const {
+            auto c = ToChars();
+            return std::string(c.data(), c.size());
+        }
+
+        /// @brief Parse strictly canonical 8-4-4-4-12 hex (no wrappers).
+        ///
+        /// The lowest-level parser: @p sv must be exactly the 36-character body.
+        /// Returns the parsed value or the specific @ref UuidParseErrc.
+        [[nodiscard]] static constexpr std::expected<Uuid, UuidParseErrc>
+        ParseCanonical(std::string_view sv) noexcept {
+            if (sv.empty()) return std::unexpected(UuidParseErrc::Empty);
+            if (sv.size() != 36) return std::unexpected(UuidParseErrc::BadLength);
+            uint128_t v = 0;
+            for (size_t i = 0; i < sv.size(); ++i) {
+                if (i == 8 || i == 13 || i == 18 || i == 23) {
+                    if (sv[i] != '-') return std::unexpected(UuidParseErrc::MissingHyphen);
+                    continue;
+                }
+                int n = HexNibble(sv[i]);
+                if (n < 0) return std::unexpected(UuidParseErrc::InvalidHexDigit);
+                v = (v << 4) | static_cast<uint128_t>(n);
+            }
+            return Uuid{v};
+        }
+
+        /// @brief Parse an RFC-4122 string, tolerating a `urn:uuid:` prefix and/or
+        ///        surrounding `{ }` braces, then a strict canonical body.
+        ///
+        /// Both wrappers are optional and the `urn:uuid:` scheme is matched
+        /// case-insensitively (RFC 4122 §3). Returns the value or the specific
+        /// @ref UuidParseErrc. `constexpr`, so usable in constant evaluation and
+        /// reusable at runtime with no allocation.
+        [[nodiscard]] static constexpr auto Parse(std::string_view sv) noexcept -> std::expected<Uuid, UuidParseErrc> {
+            if (sv.empty()) {
+                return std::unexpected(UuidParseErrc::Empty);
+            }
+
+            // Optional "urn:uuid:" scheme prefix (case-insensitive).
+            constexpr std::string_view kUrn = "urn:uuid:";
+            if (sv.size() >= kUrn.size()) {
+                bool match = true;
+                for (size_t i = 0; i < kUrn.size(); ++i) {
+                    if (ToLower(sv[i]) != kUrn[i]) {
+                        match = false; 
+                        break;
+                    }
+                }
+                if (match) {
+                    sv.remove_prefix(kUrn.size());
+                }
+            }
+
+            // Optional surrounding braces.
+            if (!sv.empty() && sv.front() == '{') {
+                if (sv.back() != '}') {
+                    return std::unexpected(UuidParseErrc::UnterminatedBrace);
+                }
+                sv.remove_prefix(1);
+                sv.remove_suffix(1);
+            }
+
+            return ParseCanonical(sv);
+        }
+
+        /// @brief Parse, throwing @ref UuidParseError on failure. Reusable at
+        ///        runtime; in constant evaluation a failure is a compile error.
+        [[nodiscard]] static constexpr Uuid ParseOrThrow(std::string_view sv) {
+            auto r = Parse(sv);
+            if (!r) throw UuidParseError(std::string(UuidParseErrcMessage(r.error())));
+            return *r;
+        }
+
+        /// @brief Parse an RFC-4122 string (with optional wrappers), or `nullopt`.
+        [[nodiscard]] static constexpr std::optional<Uuid> FromString(std::string_view sv) noexcept {
+            auto r = Parse(sv);
+            return r ? std::optional<Uuid>(*r) : std::nullopt;
+        }
+    };
+    static_assert(sizeof(Uuid) == 16);
+    static_assert(std::is_trivially_copyable_v<Uuid>);
 
     // =========================================================================
     // Concepts (declared early so Anno::With can constrain its parameter)
@@ -145,35 +370,33 @@ namespace Mashiro::Hashing {
 
     /// @name Stateless algorithms
     /// @{
-
-    /// @brief FNV-1a 64-bit (stateless, one-shot).
-    struct Fnv1a64 {
-        using ResultType = uint64_t;
-        static constexpr uint64_t kOffset = 14695981039346656037ULL;
-        static constexpr uint64_t kPrime  = 1099511628211ULL;
-
-        [[nodiscard]] constexpr uint64_t operator()(
-            std::span<const std::byte> data) const noexcept {
-            uint64_t h = kOffset;
-            for (std::byte b : data) {
-                h ^= static_cast<uint64_t>(b);
-                h *= kPrime;
-            }
-            return h;
-        }
-    };
-
+    
     /// @brief FNV-1a 32-bit (stateless, one-shot).
     struct Fnv1a32 {
         using ResultType = uint32_t;
         static constexpr uint32_t kOffset = 2166136261U;
         static constexpr uint32_t kPrime  = 16777619U;
 
-        [[nodiscard]] constexpr uint32_t operator()(
-            std::span<const std::byte> data) const noexcept {
-            uint32_t h = kOffset;
+        [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
+            ResultType h = kOffset;
             for (std::byte b : data) {
-                h ^= static_cast<uint32_t>(b);
+                h ^= static_cast<ResultType>(b);
+                h *= kPrime;
+            }
+            return h;
+        }
+    };
+
+    /// @brief FNV-1a 64-bit (stateless, one-shot).
+    struct Fnv1a64 {
+        using ResultType = uint64_t;
+        static constexpr ResultType kOffset = 14695981039346656037ULL;
+        static constexpr ResultType kPrime  = 1099511628211ULL;
+
+        [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
+            ResultType h = kOffset;
+            for (std::byte b : data) {
+                h ^= static_cast<ResultType>(b);
                 h *= kPrime;
             }
             return h;
@@ -184,9 +407,8 @@ namespace Mashiro::Hashing {
     struct Murmur64 {
         using ResultType = uint64_t;
 
-        [[nodiscard]] constexpr uint64_t operator()(
-            std::span<const std::byte> data) const noexcept {
-            uint64_t h = Fnv1a64{}(data);
+        [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
+            ResultType h = Fnv1a64{}(data);
             h ^= h >> 33; h *= 0xff51afd7ed558ccdULL;
             h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ULL;
             h ^= h >> 33;
@@ -197,6 +419,27 @@ namespace Mashiro::Hashing {
     /// @brief Default algorithm used when none is specified.
     using DefaultAlgo = Fnv1a64;
 
+    /// @brief FNV-1a 128-bit (stateless, one-shot). Result is a raw 128-bit hash.
+    struct Fnv1a128 {
+        using ResultType = uint128_t;
+
+        /// @brief 128-bit FNV offset basis (0x6c62272e07bb0142'62b821756295c58d).
+        static constexpr ResultType kOffset =
+            (static_cast<ResultType>(0x6c62272e07bb0142ULL) << 64) | 0x62b821756295c58dULL;
+        /// @brief 128-bit FNV prime (2^88 + 2^8 + 0x3b).
+        static constexpr ResultType kPrime =
+            (static_cast<ResultType>(0x0000000001000000ULL) << 64) | 0x000000000000013bULL;
+
+        [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
+            ResultType h = kOffset;
+            for (std::byte b : data) {
+                h ^= static_cast<ResultType>(static_cast<uint8_t>(b));
+                h *= kPrime;
+            }
+            return h;
+        }
+    };
+
     /// @}
 
     // =========================================================================
@@ -206,43 +449,43 @@ namespace Mashiro::Hashing {
     /// @name Stateful hashers
     /// @{
 
-    /// @brief Stateful FNV-1a 64-bit (incremental feed).
-    struct Fnv1a64State {
-        using ResultType = uint64_t;
-        uint64_t state = Fnv1a64::kOffset;
-
-        [[nodiscard]] static constexpr Fnv1a64State Seed() noexcept { return {}; }
-
-        constexpr void Feed(std::span<const std::byte> chunk) noexcept {
-            for (std::byte b : chunk) {
-                state ^= static_cast<uint64_t>(b);
-                state *= Fnv1a64::kPrime;
-            }
-        }
-
-        [[nodiscard]] constexpr uint64_t Finalize() const noexcept { return state; }
-    };
-
     /// @brief Stateful FNV-1a 32-bit (incremental feed).
     struct Fnv1a32State {
-        using ResultType = uint32_t;
-        uint32_t state = Fnv1a32::kOffset;
+        using ResultType = Fnv1a32::ResultType;
+        ResultType state = Fnv1a32::kOffset;
 
         [[nodiscard]] static constexpr Fnv1a32State Seed() noexcept { return {}; }
 
         constexpr void Feed(std::span<const std::byte> chunk) noexcept {
             for (std::byte b : chunk) {
-                state ^= static_cast<uint32_t>(b);
+                state ^= static_cast<ResultType>(b);
                 state *= Fnv1a32::kPrime;
             }
         }
 
-        [[nodiscard]] constexpr uint32_t Finalize() const noexcept { return state; }
+        [[nodiscard]] constexpr ResultType Finalize() const noexcept { return state; }
+    };
+
+    /// @brief Stateful FNV-1a 64-bit (incremental feed).
+    struct Fnv1a64State {
+        using ResultType = Fnv1a64::ResultType;
+        ResultType state = Fnv1a64::kOffset;
+
+        [[nodiscard]] static constexpr Fnv1a64State Seed() noexcept { return {}; }
+
+        constexpr void Feed(std::span<const std::byte> chunk) noexcept {
+            for (std::byte b : chunk) {
+                state ^= static_cast<ResultType>(b);
+                state *= Fnv1a64::kPrime;
+            }
+        }
+
+        [[nodiscard]] constexpr ResultType Finalize() const noexcept { return state; }
     };
 
     /// @brief Stateful Murmur64 (FNV-1a 64 feed + fmix64 on finalize).
     struct Murmur64State {
-        using ResultType = uint64_t;
+        using ResultType = Murmur64::ResultType;
         Fnv1a64State inner{};
 
         [[nodiscard]] static constexpr Murmur64State Seed() noexcept { return {}; }
@@ -251,13 +494,30 @@ namespace Mashiro::Hashing {
             inner.Feed(chunk);
         }
 
-        [[nodiscard]] constexpr uint64_t Finalize() const noexcept {
+        [[nodiscard]] constexpr ResultType Finalize() const noexcept {
             uint64_t h = inner.Finalize();
             h ^= h >> 33; h *= 0xff51afd7ed558ccdULL;
             h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ULL;
             h ^= h >> 33;
             return h;
         }
+    };
+
+    /// @brief Stateful FNV-1a 128-bit (incremental feed). Result is a raw 128-bit hash.
+    struct Fnv1a128State {
+        using ResultType = uint128_t;
+        ResultType state = Fnv1a128::kOffset;
+
+        [[nodiscard]] static constexpr Fnv1a128State Seed() noexcept { return {}; }
+
+        constexpr void Feed(std::span<const std::byte> chunk) noexcept {
+            for (std::byte b : chunk) {
+                state ^= static_cast<ResultType>(static_cast<uint8_t>(b));
+                state *= Fnv1a128::kPrime;
+            }
+        }
+
+        [[nodiscard]] constexpr ResultType Finalize() const noexcept { return state; }
     };
 
     /// @}
@@ -300,27 +560,24 @@ namespace Mashiro::Hashing {
             }
         }
 
-        /// @brief Constexpr hash of a string_view (char-by-char, avoids byte cast).
+        /// @brief Constexpr hash of a string_view.
+        ///
+        /// Both paths delegate to the algorithm's own byte-span operator, so the
+        /// result is identical for every algo (Murmur64 included). At runtime the
+        /// span aliases @p sv directly (zero copy). During constant evaluation
+        /// `reinterpret_cast` is unavailable, so the chars are first materialised
+        /// into a byte buffer — the only constexpr-legal way to obtain the span.
         template <StatelessAlgo A>
-        [[nodiscard]] constexpr ResultOf<A> HashString(const A&, std::string_view sv) noexcept {
-            using R = ResultOf<A>;
-            if constexpr (std::same_as<A, Fnv1a64>) {
-                uint64_t h = Fnv1a64::kOffset;
-                for (char c : sv) { h ^= static_cast<uint64_t>(static_cast<unsigned char>(c)); h *= Fnv1a64::kPrime; }
-                return h;
-            } else if constexpr (std::same_as<A, Fnv1a32>) {
-                uint32_t h = Fnv1a32::kOffset;
-                for (char c : sv) { h ^= static_cast<uint32_t>(static_cast<unsigned char>(c)); h *= Fnv1a32::kPrime; }
-                return h;
-            } else {
-                uint64_t h = Fnv1a64::kOffset;
-                for (char c : sv) { h ^= static_cast<uint64_t>(static_cast<unsigned char>(c)); h *= Fnv1a64::kPrime; }
-                if constexpr (std::same_as<A, Murmur64>) {
-                    h ^= h >> 33; h *= 0xff51afd7ed558ccdULL;
-                    h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ULL;
-                    h ^= h >> 33;
+        [[nodiscard]] constexpr ResultOf<A> HashString(const A& algo, std::string_view sv) noexcept {
+            if consteval {
+                std::vector<std::byte> bytes(sv.size());
+                for (size_t i = 0; i < sv.size(); ++i) {
+                    bytes[i] = static_cast<std::byte>(static_cast<unsigned char>(sv[i]));
                 }
-                return static_cast<R>(h);
+                return algo(std::span<const std::byte>{bytes.data(), bytes.size()});
+            } else {
+                return algo(std::span<const std::byte>{
+                    reinterpret_cast<const std::byte*>(sv.data()), sv.size()});
             }
         }
 
@@ -545,14 +802,30 @@ namespace Mashiro::Hashing {
 
     namespace Literals {
 
+        /// @brief Compile-time 32-bit string hash: `"hello"_hash32`.
+        [[nodiscard]] consteval uint32_t operator""_hash32(const char* str, size_t len) noexcept {
+            return Detail::HashString(Fnv1a32{}, std::string_view{str, len});
+        }
+
         /// @brief Compile-time 64-bit string hash: `"hello"_hash`.
         [[nodiscard]] consteval uint64_t operator""_hash(const char* str, size_t len) noexcept {
             return Detail::HashString(Fnv1a64{}, std::string_view{str, len});
         }
 
-        /// @brief Compile-time 32-bit string hash: `"hello"_hash32`.
-        [[nodiscard]] consteval uint32_t operator""_hash32(const char* str, size_t len) noexcept {
-            return Detail::HashString(Fnv1a32{}, std::string_view{str, len});
+        /// @brief Compile-time 128-bit string hash digest: `"hello"_hash128`.
+        [[nodiscard]] consteval uint128_t operator""_hash128(const char* str, size_t len) noexcept {
+            return Detail::HashString(Fnv1a128{}, std::string_view{str, len});
+        }
+
+        /// @brief Parse an RFC-4122 literal into a @ref Uuid: `"…"_uuid`.
+        ///
+        /// Accepts the canonical 8-4-4-4-12 form with an optional `urn:uuid:`
+        /// prefix and/or surrounding `{ }`. A malformed literal makes
+        /// @ref Uuid::ParseOrThrow throw inside this `consteval`, which the
+        /// standard turns into a compile error pinpointing the bad literal. The
+        /// same parser is `constexpr`, so it is equally usable at runtime.
+        [[nodiscard]] consteval Uuid operator""_uuid(const char* str, size_t len) {
+            return Uuid::ParseOrThrow(std::string_view{str, len});
         }
 
     } // namespace Literals
@@ -576,5 +849,21 @@ struct std::hash<T> {
             return static_cast<size_t>(
                 Mashiro::Hashing::Hash(value, Mashiro::Hashing::Fnv1a32{}));
         }
+    }
+};
+
+// =============================================================================
+// std::formatter — canonical 8-4-4-4-12 rendering of a Uuid
+// =============================================================================
+
+/// @brief Format a `Uuid` in canonical RFC-4122 string form.
+/// @todo support format_context arguments
+template <>
+struct std::formatter<Mashiro::Hashing::Uuid> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    auto format(const Mashiro::Hashing::Uuid& id, std::format_context& ctx) const {
+        auto chars = id.ToChars();
+        return std::copy(chars.begin(), chars.end(), ctx.out());
     }
 };

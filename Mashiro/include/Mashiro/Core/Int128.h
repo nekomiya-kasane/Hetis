@@ -2,18 +2,17 @@
  * @file Int128.h
  * @brief 128-bit integer aliases over the compiler's `__int128` extension.
  *
- * Exposes @ref Mashiro::uint128_t and @ref Mashiro::int128_t as project-wide
- * names for the toolchain's native 128-bit integer types. These are **not**
- * ISO C++ types; they are a compiler extension (`__int128` / `__uint128_t`)
- * that the build mandates — see the `HAVE_INT128` probe in
- * `cmake/ReflectionFeatureProbes.cmake`, which fails configuration loudly on a
- * toolchain that lacks them. Centralising the spelling here keeps the rest of
- * the codebase free of the leading-underscore extension names and gives a
- * single place to document the contract.
+ * Exposes @ref Mashiro::uint128_t and @ref Mashiro::int128_t as project-wide names for the
+ * toolchain's native 128-bit integer types. These are **not** ISO C++ types; they are a compiler
+ * extension (`__int128` / `__uint128_t`) that the build mandates — see the `HAVE_INT128` probe in
+ * `cmake/ReflectionFeatureProbes.cmake`, which fails configuration loudly on a toolchain that lacks
+ * them. Centralising the spelling here keeps the rest of the codebase free of the
+ * leading-underscore extension names and gives a single place to document the contract.
  *
- * The 128-bit hash tier (`Hashing::Fnv1a128`, `Hashing::Uuid`) relies on native
- * 128-bit arithmetic, as may any other wide-integer code; these aliases give it
- * a stable, extension-name-free spelling.
+ * The 128-bit hash tier (`Hashing::Fnv1a128`, `Hashing::Uuid`) is the primary consumer: it carries
+ * its accumulator as @ref Mashiro::uint128_t and converts to/from the two-lane `Uuid` via
+ * `Uuid::ToUint128()` / `Uuid::FromUint128()`. Any other wide-integer code should reach for these
+ * aliases too, keeping the extension spelling out of the rest of the tree.
  *
  * @ingroup Core
  */
@@ -31,11 +30,9 @@ namespace Mashiro {
     /// @brief Signed 128-bit integer (compiler extension `__int128`).
     using int128_t = __int128;
 
-    static_assert(sizeof(uint128_t) == 16,
-                  "Mashiro::uint128_t must be a 16-byte integer");
-    static_assert(sizeof(int128_t) == 16,
-                  "Mashiro::int128_t must be a 16-byte integer");
+    static_assert(sizeof(uint128_t) == 16, "Mashiro::uint128_t must be a 16-byte integer");
+    static_assert(sizeof(int128_t) == 16, "Mashiro::int128_t must be a 16-byte integer");
     static_assert(sizeof(uint128_t) * CHAR_BIT == 128,
                   "Mashiro::uint128_t must be exactly 128 bits wide");
 
-}  // namespace Mashiro
+} // namespace Mashiro

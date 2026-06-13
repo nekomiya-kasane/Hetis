@@ -11,6 +11,8 @@
 #include "Support/Meta.h"
 #include <catch2/catch_test_macros.hpp>
 
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 
@@ -461,4 +463,211 @@ TEST_CASE("Constexpr: Combine folds at compile time", AUTO_TAG) {
     STATIC_REQUIRE(c != 1);
     STATIC_REQUIRE(c != 2);
 }
+
+// =============================================================================
+// [Uuid] — 128-bit digest tier
+// =============================================================================
+
+TEST_CASE("Concept: Fnv1a128 satisfies the algorithm concepts", AUTO_TAG) {
+    STATIC_REQUIRE(Mashiro::Hashing::StatelessAlgo<Fnv1a128>);
+    STATIC_REQUIRE(Mashiro::Hashing::StatefulAlgo<Fnv1a128State>);
+    STATIC_REQUIRE(Mashiro::Hashing::AnyAlgo<Fnv1a128>);
+    STATIC_REQUIRE(std::same_as<Mashiro::Hashing::ResultOf<Fnv1a128>, Uuid>);
+    STATIC_REQUIRE(std::same_as<Mashiro::Hashing::ResultOf<Fnv1a128State>, Uuid>);
+    STATIC_REQUIRE(Mashiro::Hashing::kResultBits<Fnv1a128> == 128);
+    STATIC_REQUIRE(Mashiro::Hashing::HashResult<Uuid>);
+    STATIC_REQUIRE(Mashiro::Hashing::HashResult<uint64_t>);
+}
+
+TEST_CASE("Fnv1a128 empty input returns offset basis", AUTO_TAG) {
+    constexpr auto h = Fnv1a128{}(std::span<const std::byte>{});
+    STATIC_REQUIRE(h == Fnv1a128::kOffset);
+}
+
+TEST_CASE("Fnv1a128 is deterministic and input-sensitive", AUTO_TAG) {
+    constexpr auto a = DoHash(std::string_view("foobar"), Fnv1a128{});
+    constexpr auto b = DoHash(std::string_view("foobar"), Fnv1a128{});
+    constexpr auto c = DoHash(std::string_view("foobaz"), Fnv1a128{});
+    STATIC_REQUIRE(a == b);
+    STATIC_REQUIRE(a != c);
+    STATIC_REQUIRE(std::same_as<decltype(a), const Uuid>);
+}
+
+TEST_CASE("Fnv1a128 stateful matches stateless for string", AUTO_TAG) {
+    constexpr auto cpoResult = DoHash(std::string_view("hello world"), Fnv1a128{});
+    constexpr auto hasherResult = Hasher<Fnv1a128State>::Of(std::string_view("hello world"));
+    STATIC_REQUIRE(cpoResult == hasherResult);
+}
+
+TEST_CASE("Fnv1a128 chunked feed equals whole feed", AUTO_TAG) {
+    constexpr auto whole = Hasher<Fnv1a128State>::Of(std::string_view("abcdefghij"));
+    constexpr auto chunked = [] {
+        Hasher<Fnv1a128State> h;
+        h.Feed(std::string_view("abcde"));
+        h.Feed(std::string_view("fghij"));
+        return h.Finalize();
+    }();
+    STATIC_REQUIRE(whole == chunked);
+}
+
+TEST_CASE("Uuid ordering and equality", AUTO_TAG) {
+    STATIC_REQUIRE(Uuid{0, 1} < Uuid{0, 2});
+    STATIC_REQUIRE(Uuid{0, 2} < Uuid{1, 0});  // hi dominates
+    STATIC_REQUIRE(Uuid{5, 5} == Uuid{5, 5});
+    STATIC_REQUIRE(Uuid::Nil().IsNil());
+    STATIC_REQUIRE_FALSE(Uuid{0, 1}.IsNil());
+}
+
+TEST_CASE("Uuid byte access is big-endian", AUTO_TAG) {
+    constexpr Uuid id{0x0011223344556677ULL, 0x8899aabbccddeeffULL};
+    STATIC_REQUIRE(id.Byte(0) == 0x00);
+    STATIC_REQUIRE(id.Byte(7) == 0x77);
+    STATIC_REQUIRE(id.Byte(8) == 0x88);
+    STATIC_REQUIRE(id.Byte(15) == 0xff);
+}
+
+TEST_CASE("Uuid ToChars produces canonical 8-4-4-4-12 form", AUTO_TAG) {
+    constexpr bool ok = [] {
+        Uuid id{0x0011223344556677ULL, 0x8899aabbccddeeffULL};
+        auto chars = id.ToChars();
+        return std::string_view{chars.data(), chars.size()} ==
+               "00112233-4455-6677-8899-aabbccddeeff";
+    }();
+    STATIC_REQUIRE(ok);
+}
+
+TEST_CASE("Uuid FromString round-trips ToChars", AUTO_TAG) {
+    constexpr Uuid id{0x0011223344556677ULL, 0x8899aabbccddeeffULL};
+    constexpr bool roundtrips = [] {
+        Uuid id{0x0011223344556677ULL, 0x8899aabbccddeeffULL};
+        auto chars = id.ToChars();
+        auto parsed = Uuid::FromString(std::string_view{chars.data(), chars.size()});
+        return parsed.has_value() && *parsed == id;
+    }();
+    STATIC_REQUIRE(roundtrips);
+
+    // Uppercase accepted too.
+    STATIC_REQUIRE(Uuid::FromString("00112233-4455-6677-8899-AABBCCDDEEFF") == id);
+}
+
+TEST_CASE("Uuid FromString rejects malformed input", AUTO_TAG) {
+    STATIC_REQUIRE_FALSE(Uuid::FromString("").has_value());
+    STATIC_REQUIRE_FALSE(Uuid::FromString("not-a-uuid").has_value());
+    // Wrong length (35 chars).
+    STATIC_REQUIRE_FALSE(Uuid::FromString("00112233-4455-6677-8899-aabbccddeef").has_value());
+    // Missing separators (correct length but no dashes).
+    STATIC_REQUIRE_FALSE(
+        Uuid::FromString("001122334455667788990aabbccddeeff0").has_value());
+    // Non-hex digit.
+    STATIC_REQUIRE_FALSE(
+        Uuid::FromString("g0112233-4455-6677-8899-aabbccddeeff").has_value());
+}
+
+TEST_CASE("Uuid WithRfc4122 stamps version and variant", AUTO_TAG) {
+    constexpr Uuid raw{0xffffffffffffffffULL, 0xffffffffffffffffULL};
+    constexpr Uuid v8 = raw.WithRfc4122();       // default version 8
+    STATIC_REQUIRE(v8.Version() == 8);
+    STATIC_REQUIRE(v8.Variant() == 0x2);          // RFC-4122 variant (10xx)
+
+    constexpr Uuid v5 = raw.WithRfc4122(5);
+    STATIC_REQUIRE(v5.Version() == 5);
+    STATIC_REQUIRE(v5.Variant() == 0x2);
+}
+
+TEST_CASE("UDL: _hash128 produces FNV-1a 128 digest", AUTO_TAG) {
+    constexpr auto h = "hello"_hash128;
+    constexpr auto ref = DoHash(std::string_view("hello"), Fnv1a128{});
+    STATIC_REQUIRE(h == ref);
+    STATIC_REQUIRE("foo"_hash128 != "bar"_hash128);
+    STATIC_REQUIRE(""_hash128 == Fnv1a128::kOffset);
+    STATIC_REQUIRE(std::same_as<decltype(h), const uint128_t>);
+}
+
+TEST_CASE("CPO: Hash struct with Fnv1a128", AUTO_TAG) {
+    constexpr SimpleStruct a{1.0f, 2.0f, 3.0f};
+    constexpr SimpleStruct b{1.0f, 2.0f, 3.0f};
+    constexpr SimpleStruct c{4.0f, 5.0f, 6.0f};
+    constexpr auto ha = DoHash(a, Fnv1a128{});
+    STATIC_REQUIRE(std::same_as<decltype(ha), const uint128_t>);
+    STATIC_REQUIRE(ha == DoHash(b, Fnv1a128{}));
+    STATIC_REQUIRE(ha != DoHash(c, Fnv1a128{}));
+}
+
+TEST_CASE("Combine: uint128_t digests mix non-commutatively", AUTO_TAG) {
+    constexpr uint128_t a = "alpha"_hash128;
+    constexpr uint128_t b = "beta"_hash128;
+    constexpr auto r = Combine(a, b);
+    STATIC_REQUIRE(r != a);
+    STATIC_REQUIRE(r != b);
+    STATIC_REQUIRE(Combine(a, b) != Combine(b, a));  // non-commutative
+}
+
+TEST_CASE("std::hash<Uuid> and unordered_map", AUTO_TAG) {
+    std::unordered_map<Uuid, int> map;
+    Uuid key = "00112233-4455-6677-8899-aabbccddeeff"_uuid;
+    map[key] = 7;
+    REQUIRE(map[key] == 7);
+    REQUIRE(map.count(key) == 1);
+}
+
+TEST_CASE("std::formatter<Uuid> renders canonical form", AUTO_TAG) {
+    Uuid id{0x0011223344556677ULL, 0x8899aabbccddeeffULL};
+    REQUIRE(std::format("{}", id) == "00112233-4455-6677-8899-aabbccddeeff");
+    REQUIRE(id.ToString() == "00112233-4455-6677-8899-aabbccddeeff");
+}
+
+TEST_CASE("_uuid literal parses a canonical RFC-4122 string at compile time", AUTO_TAG) {
+    constexpr Uuid id = "00112233-4455-6677-8899-aabbccddeeff"_uuid;
+    STATIC_REQUIRE(id == Uuid{0x0011223344556677ULL, 0x8899aabbccddeeffULL});
+    // Round-trips through the canonical renderer.
+    constexpr bool roundtrips = [] {
+        Uuid u = "12345678-90ab-cdef-1234-567890abcdef"_uuid;
+        auto chars = u.ToChars();
+        return std::string_view{chars.data(), chars.size()} ==
+               "12345678-90ab-cdef-1234-567890abcdef";
+    }();
+    STATIC_REQUIRE(roundtrips);
+}
+
+TEST_CASE("Uuid::Parse accepts urn:uuid: and brace wrappers", AUTO_TAG) {
+    constexpr Uuid ref{0x0011223344556677ULL, 0x8899aabbccddeeffULL};
+    // urn:uuid: prefix, case-insensitive scheme.
+    STATIC_REQUIRE(Uuid::Parse("urn:uuid:00112233-4455-6677-8899-aabbccddeeff") == ref);
+    STATIC_REQUIRE(Uuid::Parse("URN:UUID:00112233-4455-6677-8899-aabbccddeeff") == ref);
+    // Surrounding braces.
+    STATIC_REQUIRE(Uuid::Parse("{00112233-4455-6677-8899-aabbccddeeff}") == ref);
+    // Both wrappers together.
+    STATIC_REQUIRE(Uuid::Parse("urn:uuid:{00112233-4455-6677-8899-aabbccddeeff}") == ref);
+}
+
+TEST_CASE("Uuid::Parse reports specific error codes", AUTO_TAG) {
+    STATIC_REQUIRE(Uuid::Parse("").error() == UuidParseErrc::Empty);
+    STATIC_REQUIRE(Uuid::Parse("00112233-4455-6677-8899-aabbccddeef").error()
+                   == UuidParseErrc::BadLength);
+    // Correct length, wrong separator.
+    STATIC_REQUIRE(Uuid::Parse("00112233x4455-6677-8899-aabbccddeeff").error()
+                   == UuidParseErrc::MissingHyphen);
+    // Correct length, non-hex digit.
+    STATIC_REQUIRE(Uuid::Parse("g0112233-4455-6677-8899-aabbccddeeff").error()
+                   == UuidParseErrc::InvalidHexDigit);
+    // Opening brace without a closing one.
+    STATIC_REQUIRE(Uuid::Parse("{00112233-4455-6677-8899-aabbccddeeff").error()
+                   == UuidParseErrc::UnterminatedBrace);
+}
+
+TEST_CASE("Uuid::ParseOrThrow throws UuidParseError at runtime", AUTO_TAG) {
+    REQUIRE(Uuid::ParseOrThrow("00112233-4455-6677-8899-aabbccddeeff")
+            == Uuid{0x0011223344556677ULL, 0x8899aabbccddeeffULL});
+    REQUIRE_THROWS_AS(Uuid::ParseOrThrow("not-a-uuid"), UuidParseError);
+    REQUIRE_THROWS_AS(Uuid::ParseOrThrow(""), UuidParseError);
+}
+
+TEST_CASE("Uuid parsers are reusable at runtime", AUTO_TAG) {
+    // Same constexpr parser, exercised at runtime with a dynamic string.
+    std::string s = "urn:uuid:12345678-90ab-cdef-1234-567890abcdef";
+    auto parsed = Uuid::Parse(std::string_view{s});
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->ToString() == "12345678-90ab-cdef-1234-567890abcdef");
+}
+
 
