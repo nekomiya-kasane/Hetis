@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MIT
 //
 // Tests for Mashiro::Platform::SystemEvent — the reflection-driven event
-// vocabulary. Verifies the kind/payload binding, layout invariants, the
-// CRTP NSDMI, the platform-filter trait, and end-to-end completeness of
-// the EventKind ↔ payload mapping.
+// vocabulary. Verifies the marker base + mixins (EventPayloadBase /
+// WindowSpecificEvent / TimestampedEvent), the platform-filter trait, the
+// cross-cutting accessors (NameOf / WindowOf / TimestampOf), the variant
+// materialisation, and convention-based bookkeep dispatch.
+//
+// There is intentionally no `EventKind` enum and no `[[=PayloadFor{...}]]`
+// annotation: the payload type *is* the discriminator on `SystemEvent`.
 
 #include <Mashiro/Platform/SystemEvent.h>
 
@@ -12,35 +16,20 @@
 #include <Support/Meta.h>
 
 #include <array>
+#include <optional>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 
 // clang-format off
 
 using namespace Mashiro;
 
 // =========================================================================
-// Section 1 — EventKind: sequential, dense, kEventKindCount agreement
+// Section 1 — Categorisation enums (TouchPhase / ScrollUnit / …)
 // =========================================================================
 
-TEST_CASE("EventKind is a SequentialEnum and fits in one byte", AUTO_TAG) {
-    STATIC_REQUIRE(Traits::SequentialEnum<EventKind>);
-    STATIC_REQUIRE(sizeof(EventKind) == 1);
-    STATIC_REQUIRE(kEventKindCount == Traits::EnumeratorsCount<EventKind>);
-    STATIC_REQUIRE(kEventKindCount > 0);
-    STATIC_REQUIRE(static_cast<size_t>(EventKind::WindowCreate) == 0);
-}
-
-TEST_CASE("EventKind enumerator names round-trip via reflection", AUTO_TAG) {
-    STATIC_REQUIRE(Traits::EventKindName<EventKind::WindowCreate>()    == "WindowCreate");
-    STATIC_REQUIRE(Traits::EventKindName<EventKind::WindowResize>()    == "WindowResize");
-    STATIC_REQUIRE(Traits::EventKindName<EventKind::InputKeyDown>()    == "InputKeyDown");
-    STATIC_REQUIRE(Traits::EventKindName<EventKind::InputMouseMove>()  == "InputMouseMove");
-    STATIC_REQUIRE(Traits::EventKindName<EventKind::FileRenamed>()     == "FileRenamed");
-    STATIC_REQUIRE(Traits::EventKindName<EventKind::DeviceChange>()    == "DeviceChange");
-}
-
-TEST_CASE("Generic Traits::EnumeratorName covers every payload-categorisation enum", AUTO_TAG) {
+TEST_CASE("Categorisation enums round-trip via reflection", AUTO_TAG) {
     STATIC_REQUIRE(Traits::EnumeratorName<TouchPhase, TouchPhase::Began>()       == "Began");
     STATIC_REQUIRE(Traits::EnumeratorName<TouchPhase, TouchPhase::Cancelled>()   == "Cancelled");
     STATIC_REQUIRE(Traits::EnumeratorName<ScrollUnit, ScrollUnit::Pixels>()      == "Pixels");
@@ -53,8 +42,7 @@ TEST_CASE("Generic Traits::EnumeratorName covers every payload-categorisation en
 // Section 2 — Bitfield enums: operator| / & / mask / static categorisation
 // =========================================================================
 
-TEST_CASE("EventFlag, PenButton, FileChangeFlags, DragKind, PlatformBit are BitfieldEnums", AUTO_TAG) {
-    STATIC_REQUIRE(Traits::BitfieldEnum<EventFlag>);
+TEST_CASE("PenButton, FileChangeFlags, DragKind, PlatformBit are BitfieldEnums", AUTO_TAG) {
     STATIC_REQUIRE(Traits::BitfieldEnum<PenButton>);
     STATIC_REQUIRE(Traits::BitfieldEnum<FileChangeFlags>);
     STATIC_REQUIRE(Traits::BitfieldEnum<DragKind>);
@@ -122,104 +110,112 @@ TEST_CASE("KeyCode letters and digits map to ASCII code points", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 5 — EventHeader layout (24 bytes, 8-byte aligned, std-layout)
+// Section 5 — Marker base + mixins: opt-in via inheritance
 // =========================================================================
 
-TEST_CASE("EventHeader layout is fixed at 24 bytes / 8-byte aligned", AUTO_TAG) {
-    STATIC_REQUIRE(sizeof(EventHeader)  == 24);
-    STATIC_REQUIRE(alignof(EventHeader) == 8);
-    STATIC_REQUIRE(std::is_standard_layout_v<EventHeader>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<EventHeader>);
+TEST_CASE("EventPayloadBase is an empty marker; mixins inherit it", AUTO_TAG) {
+    STATIC_REQUIRE(std::is_empty_v<Event::Detail::EventPayloadBase>);
+    STATIC_REQUIRE(std::is_base_of_v<Event::Detail::EventPayloadBase, WindowSpecificEvent>);
+    STATIC_REQUIRE(std::is_base_of_v<Event::Detail::EventPayloadBase, TimestampedEvent>);
+    STATIC_REQUIRE(WindowSpecificEvent{}.windowId  == WindowId::Invalid);
+    STATIC_REQUIRE(TimestampedEvent{}.timestamp    == 0);
 }
 
-TEST_CASE("EventHeader compares structurally", AUTO_TAG) {
-    constexpr EventHeader a{.kind = EventKind::WindowCreate, .windowId = 1};
-    constexpr EventHeader b{.kind = EventKind::WindowCreate, .windowId = 1};
-    constexpr EventHeader c{.kind = EventKind::WindowCreate, .windowId = 2};
-    STATIC_REQUIRE(a == b);
-    STATIC_REQUIRE_FALSE(a == c);
+TEST_CASE("SystemEventPayload concept identifies every payload, rejects anything else", AUTO_TAG) {
+    STATIC_REQUIRE(Event::Traits::SystemEventPayload<WindowResizeEvent>);
+    STATIC_REQUIRE(Event::Traits::SystemEventPayload<KeyDownEvent>);
+    STATIC_REQUIRE(Event::Traits::SystemEventPayload<DisplayChangeEvent>);
+    STATIC_REQUIRE(Event::Traits::SystemEventPayload<FileCreatedEvent>);
+    STATIC_REQUIRE(Event::Traits::SystemEventPayload<TimerTickEvent>);
+
+    // Plain types are not payloads — anything that doesn't derive from the
+    // marker base is excluded.
+    STATIC_REQUIRE_FALSE(Event::Traits::SystemEventPayload<int>);
+    STATIC_REQUIRE_FALSE(Event::Traits::SystemEventPayload<Modifiers>);
+    STATIC_REQUIRE_FALSE(Event::Traits::SystemEventPayload<Event::DragPayloadInfo>);
+}
+
+TEST_CASE("SystemEvent variant excludes abstract bases and includes only leaves", AUTO_TAG) {
+    // Concrete leaves are present; abstract bases (WindowSpecificEvent,
+    // TimestampedEvent, KeyEventBase, FileSpecificEvent) are filtered out by
+    // the "is-not-a-base-of-another-candidate" leaf rule in the variant
+    // materialiser, so they cannot be constructed as a SystemEvent.
+    STATIC_REQUIRE_FALSE(std::is_constructible_v<SystemEvent, WindowSpecificEvent>);
+    STATIC_REQUIRE_FALSE(std::is_constructible_v<SystemEvent, TimestampedEvent>);
+    STATIC_REQUIRE_FALSE(std::is_constructible_v<SystemEvent, Event::KeyEventBase>);
+    STATIC_REQUIRE_FALSE(std::is_constructible_v<SystemEvent, Event::FileSpecificEvent>);
+
+    STATIC_REQUIRE(std::is_constructible_v<SystemEvent, WindowResizeEvent>);
+    STATIC_REQUIRE(std::is_constructible_v<SystemEvent, KeyDownEvent>);
+    STATIC_REQUIRE(std::is_constructible_v<SystemEvent, FileCreatedEvent>);
+    STATIC_REQUIRE(std::is_constructible_v<SystemEvent, TimerTickEvent>);
+}
+
+TEST_CASE("WindowScoped concept identifies window-targeting payloads", AUTO_TAG) {
+    STATIC_REQUIRE(Traits::WindowScoped<WindowResizeEvent>);
+    STATIC_REQUIRE(Traits::WindowScoped<KeyDownEvent>);
+    STATIC_REQUIRE(Traits::WindowScoped<MouseMoveEvent>);
+    STATIC_REQUIRE(Traits::WindowScoped<DragDropEvent>);
+    STATIC_REQUIRE(Traits::WindowScoped<ImeCommitEvent>);
+
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<DisplayChangeEvent>);
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<PowerStateChangeEvent>);
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<GamepadStateEvent>);
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<FileCreatedEvent>);
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<ClipboardUpdateEvent>);
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<AppearanceChangeEvent>);
+}
+
+TEST_CASE("Timestamped concept identifies time-sensitive payloads", AUTO_TAG) {
+    STATIC_REQUIRE(Traits::Timestamped<KeyDownEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<MouseMoveEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<TouchEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<TouchGestureEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<PenEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<ImeCompositionEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<GamepadStateEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<TimerTickEvent>);
+    STATIC_REQUIRE(Traits::Timestamped<WindowResizeEvent>);
+
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<WindowFocusEvent>);
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<DisplayChangeEvent>);
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<PowerStateChangeEvent>);
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<FileCreatedEvent>);
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<ClipboardUpdateEvent>);
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<AppearanceChangeEvent>);
 }
 
 // =========================================================================
-// Section 6 — CRTP `kind` is auto-populated from PayloadFor
+// Section 6 — Mixin defaults + base-class composition
 // =========================================================================
 
-TEST_CASE("EventPayload kind is initialised from PayloadFor annotation", AUTO_TAG) {
-    // Window lifecycle
-    STATIC_REQUIRE(WindowCreateEvent{}.kind                    == EventKind::WindowCreate);
-    STATIC_REQUIRE(WindowResizeEvent{}.kind                    == EventKind::WindowResize);
-    STATIC_REQUIRE(WindowCloseEvent{}.kind                     == EventKind::WindowClose);
-    STATIC_REQUIRE(WindowDestroyEvent{}.kind                   == EventKind::WindowDestroy);
-    STATIC_REQUIRE(WindowMoveEvent{}.kind                      == EventKind::WindowMove);
-    STATIC_REQUIRE(WindowFocusEvent{}.kind                     == EventKind::WindowFocus);
-    STATIC_REQUIRE(WindowDpiChangeEvent{}.kind                 == EventKind::WindowDpiChange);
-    STATIC_REQUIRE(WindowOcclusionChangeEvent{}.kind           == EventKind::WindowOcclusionChange);
-    STATIC_REQUIRE(WindowExposedEvent{}.kind                   == EventKind::WindowExposed);
-    STATIC_REQUIRE(WindowDwmCompositionChangeEvent{}.kind      == EventKind::WindowDwmCompositionChange);
-
-    // Keyboard
-    STATIC_REQUIRE(KeyDownEvent{}.kind              == EventKind::InputKeyDown);
-    STATIC_REQUIRE(KeyUpEvent{}.kind                == EventKind::InputKeyUp);
-    STATIC_REQUIRE(CharEvent{}.kind                 == EventKind::InputChar);
-    STATIC_REQUIRE(KeyboardLayoutChangeEvent{}.kind == EventKind::InputKeyboardLayoutChange);
-
-    // Pointer / touch / pen
-    STATIC_REQUIRE(MouseEnterEvent{}.kind     == EventKind::InputMouseEnter);
-    STATIC_REQUIRE(MouseMoveEvent{}.kind      == EventKind::InputMouseMove);
-    STATIC_REQUIRE(MouseButtonEvent{}.kind    == EventKind::InputMouseButton);
-    STATIC_REQUIRE(ScrollEvent{}.kind         == EventKind::InputScroll);
-    STATIC_REQUIRE(RawMouseMotionEvent{}.kind == EventKind::InputRawMouseMotion);
-    STATIC_REQUIRE(TouchEvent{}.kind          == EventKind::InputTouch);
-    STATIC_REQUIRE(TouchGestureEvent{}.kind   == EventKind::InputTouchGesture);
-    STATIC_REQUIRE(PenEvent{}.kind            == EventKind::InputPen);
-    STATIC_REQUIRE(PenProximityEvent{}.kind   == EventKind::InputPenProximity);
-    STATIC_REQUIRE(PenButtonEvent{}.kind      == EventKind::InputPenButton);
-
-    // IME / clipboard / drag-drop
-    STATIC_REQUIRE(ImeCommitEvent{}.kind        == EventKind::ImeCommit);
-    STATIC_REQUIRE(ImeCandidateListEvent{}.kind == EventKind::ImeCandidateList);
-    STATIC_REQUIRE(ClipboardUpdateEvent{}.kind  == EventKind::ClipboardUpdate);
-    STATIC_REQUIRE(SelectionUpdateEvent{}.kind  == EventKind::SelectionUpdate);
-    STATIC_REQUIRE(DragDropEvent{}.kind         == EventKind::DragDrop);
-
-    // Display / power / accessibility / gamepad / files / misc
-    STATIC_REQUIRE(DisplayHdrChangeEvent{}.kind         == EventKind::DisplayHdrChange);
-    STATIC_REQUIRE(PowerStateChangeEvent{}.kind         == EventKind::PowerStateChange);
-    STATIC_REQUIRE(AccessibilityScreenReaderEvent{}.kind== EventKind::AccessibilityScreenReader);
-    STATIC_REQUIRE(GamepadStateEvent{}.kind             == EventKind::GamepadState);
-    STATIC_REQUIRE(FileCreatedEvent{}.kind              == EventKind::FileCreated);
-    STATIC_REQUIRE(FileRenamedEvent{}.kind              == EventKind::FileRenamed);
-    STATIC_REQUIRE(FileWatchOverflowEvent{}.kind        == EventKind::FileWatchOverflow);
-    STATIC_REQUIRE(UrlOpenRequestEvent{}.kind           == EventKind::UrlOpenRequest);
-    STATIC_REQUIRE(TimerTickEvent{}.kind                == EventKind::TimerTick);
-    STATIC_REQUIRE(DeviceChangeEvent{}.kind             == EventKind::DeviceChange);
+TEST_CASE("Mixin fields default-construct to documented sentinels", AUTO_TAG) {
+    STATIC_REQUIRE(WindowResizeEvent{}.windowId  == WindowId::Invalid);
+    STATIC_REQUIRE(WindowResizeEvent{}.timestamp == 0);
+    STATIC_REQUIRE(KeyDownEvent{}.windowId       == WindowId::Invalid);
+    STATIC_REQUIRE(KeyDownEvent{}.timestamp      == 0);
+    STATIC_REQUIRE(WindowCreateEvent{}.windowId  == WindowId::Invalid);
+    STATIC_REQUIRE(GamepadStateEvent{}.timestamp == 0);
 }
 
-TEST_CASE("Designated initialisers leave kind intact", AUTO_TAG) {
-    constexpr WindowResizeEvent ev{{.windowId = 7, .sequence = 42, .timestamp = 1'000'000ULL}};
-    STATIC_REQUIRE(ev.kind == EventKind::WindowResize);
-    STATIC_REQUIRE(ev.windowId  == 7);
-    STATIC_REQUIRE(ev.sequence  == 42);
-    STATIC_REQUIRE(ev.timestamp == 1'000'000ULL);
-}
-
-TEST_CASE("KeyEventBase CRTP propagates the derived kind", AUTO_TAG) {
-    STATIC_REQUIRE(KeyDownEvent{}.kind == EventKind::InputKeyDown);
-    STATIC_REQUIRE(KeyUpEvent{}.kind   == EventKind::InputKeyUp);
-
-    KeyDownEvent kd{{.code = KeyCode::Enter, .repeat = true}};
-    kd.windowId = 3;
-    REQUIRE(kd.kind     == EventKind::InputKeyDown);
-    REQUIRE(kd.code     == KeyCode::Enter);
+TEST_CASE("KeyEventBase mixin fields propagate to derived events", AUTO_TAG) {
+    KeyDownEvent kd{};
+    kd.windowId  = WindowId{3};
+    kd.timestamp = 1'234'000ULL;
+    kd.code      = KeyCode::Enter;
+    kd.repeat    = true;
+    REQUIRE(kd.code      == KeyCode::Enter);
     REQUIRE(kd.repeat);
-    REQUIRE(kd.windowId == 3);
+    REQUIRE(kd.windowId  == WindowId{3});
+    REQUIRE(kd.timestamp == 1'234'000ULL);
 }
 
-TEST_CASE("FileEventBase CRTP applies to file-system events", AUTO_TAG) {
-    STATIC_REQUIRE(FileCreatedEvent{}.kind          == EventKind::FileCreated);
-    STATIC_REQUIRE(FileDeletedEvent{}.kind          == EventKind::FileDeleted);
-    STATIC_REQUIRE(FileModifiedEvent{}.kind         == EventKind::FileModified);
-    STATIC_REQUIRE(FileAttributesChangedEvent{}.kind== EventKind::FileAttributesChanged);
+TEST_CASE("FileSpecificEvent base inherits the marker but no mixin", AUTO_TAG) {
+    STATIC_REQUIRE_FALSE(Traits::WindowScoped<FileCreatedEvent>);
+    STATIC_REQUIRE_FALSE(Traits::Timestamped<FileCreatedEvent>);
+    FileCreatedEvent c{};
+    c.path = "/tmp/x";
+    REQUIRE(c.path == "/tmp/x");
 }
 
 // =========================================================================
@@ -239,16 +235,8 @@ TEST_CASE("Plain payloads remain trivially copyable", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 8 — Reflection traits — kind / type-name / availability
+// Section 8 — Reflection traits — type name / availability / platforms
 // =========================================================================
-
-TEST_CASE("Traits::KindOf<T>() agrees with the value injected into kind", AUTO_TAG) {
-    STATIC_REQUIRE(Traits::KindOf<WindowResizeEvent>() == EventKind::WindowResize);
-    STATIC_REQUIRE(Traits::KindOf<KeyDownEvent>()      == EventKind::InputKeyDown);
-    STATIC_REQUIRE(Traits::KindOf<DragDropEvent>()     == EventKind::DragDrop);
-    STATIC_REQUIRE(Traits::KindOf<TimerTickEvent>()    == EventKind::TimerTick);
-    STATIC_REQUIRE(Traits::KindOf<TimerTickEvent>()    == TimerTickEvent{}.kind);
-}
 
 TEST_CASE("Traits::PayloadTypeName returns the unqualified struct name", AUTO_TAG) {
     STATIC_REQUIRE(Traits::PayloadTypeName<WindowResizeEvent>() == "WindowResizeEvent");
@@ -287,12 +275,11 @@ TEST_CASE("Traits::AvailableOn filters by Platform::OnPlatform annotation", AUTO
 }
 
 TEST_CASE("Traits::PlatformsOf reports the raw bit set", AUTO_TAG) {
-    // Portable → Mask of all known platforms.
-    STATIC_REQUIRE(Traits::PlatformsOf<WindowResizeEvent>() == PlatformBit_All);
-    STATIC_REQUIRE(Traits::PlatformsOf<WindowExposedEvent>()           == PlatformBit_Linux);
-    STATIC_REQUIRE(Traits::PlatformsOf<WindowScaleChangeEvent>()       == PlatformBit::Linux_Wayland);
-    STATIC_REQUIRE(Traits::PlatformsOf<WindowDwmCompositionChangeEvent>() == PlatformBit::Windows);
-    STATIC_REQUIRE(Traits::PlatformsOf<SessionUserSwitchEvent>()       == PlatformBit::Windows);
+    STATIC_REQUIRE(Traits::PlatformsOf<WindowResizeEvent>()                == PlatformBit_All);
+    STATIC_REQUIRE(Traits::PlatformsOf<WindowExposedEvent>()               == PlatformBit_Linux);
+    STATIC_REQUIRE(Traits::PlatformsOf<WindowScaleChangeEvent>()           == PlatformBit::Linux_Wayland);
+    STATIC_REQUIRE(Traits::PlatformsOf<WindowDwmCompositionChangeEvent>()  == PlatformBit::Windows);
+    STATIC_REQUIRE(Traits::PlatformsOf<SessionUserSwitchEvent>()           == PlatformBit::Windows);
 }
 
 // =========================================================================
@@ -302,31 +289,156 @@ TEST_CASE("Traits::PlatformsOf reports the raw bit set", AUTO_TAG) {
 TEST_CASE("TouchGestureEvent carries a typed Kind subenum", AUTO_TAG) {
     using GK = TouchGestureEvent::Kind;
     STATIC_REQUIRE(Traits::SequentialEnum<GK>);
-    constexpr TouchGestureEvent g{.gesture = GK::Pinch, .scale = 1.5f};
-    STATIC_REQUIRE(g.kind    == EventKind::InputTouchGesture); // outer discriminator
-    STATIC_REQUIRE(g.gesture == GK::Pinch);                    // gesture sub-tag
-    STATIC_REQUIRE(g.scale   == 1.5f);
+    TouchGestureEvent g{};
+    g.gesture = GK::Pinch;
+    g.scale   = 1.5f;
+    REQUIRE(g.gesture == GK::Pinch);
+    REQUIRE(g.scale   == 1.5f);
 }
 
 // =========================================================================
-// Section 10 — Completeness sanity
-//
-// `SystemEvent.h` already carries `static_assert(Detail::AllKindsCovered())`
-// at file scope, so a missing payload binding is a compile error before this
-// test ever runs. We instead spot-check via `Traits::KindOf<T>()` for a
-// representative slice — if any kind ever loses its payload, KindOf fails to
-// instantiate and surfaces here.
+// Section 10 — SystemEvent variant + cross-cutting accessors
 // =========================================================================
 
-TEST_CASE("Spot-check KindOf round-trip across the EventKind taxonomy", AUTO_TAG) {
-    STATIC_REQUIRE(Traits::KindOf<WindowCreateEvent>()      == EventKind::WindowCreate);
-    STATIC_REQUIRE(Traits::KindOf<KeyDownEvent>()           == EventKind::InputKeyDown);
-    STATIC_REQUIRE(Traits::KindOf<ScrollEvent>()            == EventKind::InputScroll);
-    STATIC_REQUIRE(Traits::KindOf<DragDropEvent>()          == EventKind::DragDrop);
-    STATIC_REQUIRE(Traits::KindOf<DisplayHdrChangeEvent>()  == EventKind::DisplayHdrChange);
-    STATIC_REQUIRE(Traits::KindOf<GamepadStateEvent>()      == EventKind::GamepadState);
-    STATIC_REQUIRE(Traits::KindOf<FileWatchOverflowEvent>() == EventKind::FileWatchOverflow);
-    STATIC_REQUIRE(Traits::KindOf<DeviceChangeEvent>()      == EventKind::DeviceChange);
+TEST_CASE("SystemEvent is a std::variant whose alternatives are the payload types", AUTO_TAG) {
+    STATIC_REQUIRE(std::variant_size_v<SystemEvent> > 0);
+
+    SystemEvent ev{WindowResizeEvent{}};
+    REQUIRE(std::holds_alternative<WindowResizeEvent>(ev));
+    ev = KeyDownEvent{};
+    REQUIRE(std::holds_alternative<KeyDownEvent>(ev));
+    ev = DisplayChangeEvent{};
+    REQUIRE(std::holds_alternative<DisplayChangeEvent>(ev));
+}
+
+TEST_CASE("NameOf(SystemEvent) returns the active alternative's type name", AUTO_TAG) {
+    SystemEvent ev{WindowResizeEvent{}};
+    REQUIRE(Mashiro::NameOf(ev) == "WindowResizeEvent");
+
+    ev = KeyDownEvent{};
+    REQUIRE(Mashiro::NameOf(ev) == "KeyDownEvent");
+
+    ev = DisplayChangeEvent{};
+    REQUIRE(Mashiro::NameOf(ev) == "DisplayChangeEvent");
+}
+
+TEST_CASE("WindowOf(SystemEvent) returns the windowId only for window-scoped events", AUTO_TAG) {
+    KeyDownEvent kd{};
+    kd.windowId = WindowId{42};
+    SystemEvent ev{kd};
+    REQUIRE(Mashiro::WindowOf(ev) == std::optional<WindowId>{WindowId{42}});
+
+    ev = DisplayChangeEvent{};
+    REQUIRE(Mashiro::WindowOf(ev) == std::nullopt);
+
+    ev = ClipboardUpdateEvent{};
+    REQUIRE(Mashiro::WindowOf(ev) == std::nullopt);
+}
+
+TEST_CASE("TimestampOf(SystemEvent) returns the ns timestamp only when carried", AUTO_TAG) {
+    MouseMoveEvent mm{};
+    mm.timestamp = 9'999'888'777ULL;
+    SystemEvent ev{mm};
+    REQUIRE(Mashiro::TimestampOf(ev) == std::optional<uint64_t>{9'999'888'777ULL});
+
+    ev = WindowFocusEvent{};
+    REQUIRE(Mashiro::TimestampOf(ev) == std::nullopt);
+
+    ev = DisplayChangeEvent{};
+    REQUIRE(Mashiro::TimestampOf(ev) == std::nullopt);
+}
+
+// =========================================================================
+// Section 11 — Convention-based bookkeep dispatch
+//
+// `DispatchBookkeep<M>(mgr, ev)` visits the active alternative and, for any
+// payload type `P` for which `mgr.On(p)` is well-formed, instantiates and
+// calls the matching arm. Payloads the manager does not handle are pruned
+// at compile time via `if constexpr`, so dispatch is zero-cost on
+// alternatives outside the manager's responsibility.
+// =========================================================================
+
+namespace {
+
+    struct ResizeBookkeeper {
+        int   resizeCount = 0;
+        int   focusCount  = 0;
+        ivec2 lastSize{};
+        bool  lastFocused = false;
+
+        void On(const WindowResizeEvent& ev) noexcept {
+            ++resizeCount;
+            lastSize = ev.size;
+        }
+        void On(const WindowFocusEvent& ev) noexcept {
+            ++focusCount;
+            lastFocused = ev.focused;
+        }
+    };
+
+    struct InertManager {
+        int callCount = 0;
+    };
+
+} // namespace
+
+TEST_CASE("HandlesBookkeep concept is purely structural", AUTO_TAG) {
+    using namespace Event::Traits;
+    STATIC_REQUIRE(HandlesBookkeep<ResizeBookkeeper, WindowResizeEvent>);
+    STATIC_REQUIRE(HandlesBookkeep<ResizeBookkeeper, WindowFocusEvent>);
+
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<ResizeBookkeeper, KeyDownEvent>);
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<ResizeBookkeeper, DisplayChangeEvent>);
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<ResizeBookkeeper, MouseMoveEvent>);
+
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<InertManager, WindowResizeEvent>);
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<InertManager, KeyDownEvent>);
+
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<ResizeBookkeeper, int>);
+}
+
+TEST_CASE("DispatchBookkeep routes payloads to matching On overloads", AUTO_TAG) {
+    ResizeBookkeeper mgr{};
+
+    WindowResizeEvent rz{};
+    rz.size = {800, 600};
+    SystemEvent ev{rz};
+    DispatchBookkeep(mgr, ev);
+    REQUIRE(mgr.resizeCount == 1);
+    REQUIRE(mgr.lastSize.x  == 800);
+    REQUIRE(mgr.lastSize.y  == 600);
+    REQUIRE(mgr.focusCount  == 0);
+
+    WindowFocusEvent fc{};
+    fc.focused = true;
+    ev = fc;
+    DispatchBookkeep(mgr, ev);
+    REQUIRE(mgr.focusCount   == 1);
+    REQUIRE(mgr.lastFocused  == true);
+    REQUIRE(mgr.resizeCount  == 1);
+}
+
+TEST_CASE("DispatchBookkeep ignores payloads the manager does not handle", AUTO_TAG) {
+    ResizeBookkeeper mgr{};
+
+    SystemEvent ev{KeyDownEvent{}};
+    DispatchBookkeep(mgr, ev);
+    ev = DisplayChangeEvent{};
+    DispatchBookkeep(mgr, ev);
+    ev = MouseMoveEvent{};
+    DispatchBookkeep(mgr, ev);
+
+    REQUIRE(mgr.resizeCount == 0);
+    REQUIRE(mgr.focusCount  == 0);
+}
+
+TEST_CASE("DispatchBookkeep on a manager with no handlers compiles and is a no-op", AUTO_TAG) {
+    InertManager mgr{};
+    SystemEvent ev{WindowResizeEvent{}};
+    DispatchBookkeep(mgr, ev);
+    ev = KeyDownEvent{};
+    DispatchBookkeep(mgr, ev);
+    REQUIRE(mgr.callCount == 0);
 }
 
 // clang-format on

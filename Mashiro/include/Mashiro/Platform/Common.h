@@ -73,6 +73,11 @@ namespace Mashiro {
 
     } // namespace Platform
 
+    /// @brief Stable identifier for a window owned by the Platform thread.
+    ///        Issued by `WindowManager` on creation and valid until the matching
+    ///        `WindowDestroy` event is broadcast.
+    enum class WindowId : uint32_t { Invalid = 0 };
+
     /// @brief Identifier for a connected input device (keyboard, mouse, pen, gamepad).
     enum class DeviceId : uint32_t { Invalid = 0 };
 

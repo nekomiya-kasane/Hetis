@@ -7,10 +7,23 @@
  * - @ref Mashiro::KeyCode — logical keys
  * - @ref Mashiro::MouseButton — mouse buttons
  * - @ref Mashiro::Modifiers — modifier-key state
- * - @ref Mashiro::EventKind — discriminator tag for the unified event stream
- * - @ref Mashiro::PayloadFor / @ref Mashiro::SystemEvent — kind/payload binding
+ * - @ref Mashiro::SystemEvent — `std::variant` over every payload
  *
- * Values are stable and may be persisted (e.g. in keybinding configs).
+ * Each event payload is an aggregate that declares **only** the fields it
+ * actually carries. There is no shared `EventHeader` block: events that target
+ * a window inherit @ref Mashiro::Event::WindowSpecificEvent; time-sensitive
+ * events inherit @ref Mashiro::Event::TimestampedEvent; everything else
+ * inherits @ref Mashiro::Event::Detail::EventPayloadBase directly. The empty
+ * marker base is the sole condition for variant membership: every payload
+ * struct in `Mashiro::Event` that derives from it is added automatically by
+ * reflection. There is no separate `EventKind` enum, no `[[=PayloadFor{}]]`
+ * annotation, and no persistent stable id — the payload type *is* the
+ * discriminator.
+ *
+ * Cross-cutting queries (e.g. "what window does this event target, if any?")
+ * are reflection-driven concepts in @ref Mashiro::Event::Traits, so the type
+ * system — not a sentinel `== 0` runtime check — answers "does this event
+ * have a window?".
  *
  * @ingroup Platform
  */
@@ -26,9 +39,10 @@
 #include <array>
 #include <cstdint>
 #include <meta>
-#include <span>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 #include <variant>
 
@@ -37,202 +51,57 @@ namespace Mashiro {
     inline namespace Event {
 
         // ============================================================================
-        // Event Kinds
+        // Marker Base & Mixins
+        // ----------------------------------------------------------------------------
+        // Every payload in this namespace inherits from `Detail::EventPayloadBase`,
+        // either directly (app-global events) or transitively through one of the
+        // mixin bases below. Variant membership is reflection-driven on that
+        // single condition — no annotation, no enum, no manual table. The empty
+        // marker base contributes zero bytes to derived aggregates and is detected
+        // by `Traits::SystemEventPayload<T>` and `std::is_base_of_v`.
         // ============================================================================
+
+        namespace Detail {
+            /**
+             * @brief Empty marker base for every system-event payload.
+             *
+             * Inherited (directly or via @ref WindowSpecificEvent /
+             * @ref TimestampedEvent) by every struct that participates in
+             * @ref Mashiro::SystemEvent. Used by the variant materialiser
+             * to discover payload types via reflection without an annotation.
+             */
+            struct EventPayloadBase {};
+        } // namespace Detail
 
         /**
-         * @brief Discriminator tag for entries on the unified Platform event stream.
+         * @brief Mixin: payload targets a specific window.
          *
-         * All Platform-thread producers (Win32 pump, X11/xcb pump, Wayland
-         * dispatcher, dedicated worker threads such as gamepad and file watchers)
-         * funnel events through the unified writer; this tag identifies which
-         * payload variant follows. Values are sequential (no holes, no manual
-         * numbering) so they index per-kind dispatch tables directly — enforced
-         * by the `Traits::SequentialEnum` static_assert below.
-         *
-         * Each entry is bound to a payload type via the @ref Mashiro::PayloadFor
-         * annotation on that struct; @ref Mashiro::Traits::PayloadOf recovers the
-         * mapping at compile time.
-         *
-         * @note Insertions must preserve sequentiality. Append new entries at the
-         *       very end and never reuse freed values — persisted bindings rely
-         *       on numeric stability.
+         * Inherited by every event whose meaning is window-scoped (lifecycle,
+         * input, IME, drag-drop, …). Events that are global to the application
+         * (display, power, gamepad, file watcher, clipboard, …) do **not**
+         * inherit this — there is no `windowId == 0` sentinel for them.
          */
-        enum class EventKind : uint8_t {
-            // ---- Window lifecycle -------------------------------------------------
-            WindowCreate,
-            WindowClose,
-            WindowDestroy,
-            WindowResize,
-            WindowMove,
-            WindowFocus,
-            WindowMinimize,
-            WindowMaximize,
-            WindowRestore,
-            WindowVisibilityChange,
-            WindowEnterFullscreen,
-            WindowLeaveFullscreen,
-            WindowDpiChange,
-            WindowScaleChange,         ///< Wayland fractional-scale.
-            WindowThemeChange,
-            WindowOcclusionChange,     ///< macOS occlusion / Win32 cloak.
-            WindowExposed,             ///< X11 Expose / damage region needs redraw.
-            WindowDwmCompositionChange,///< Win32 DWM composition enabled / disabled.
-
-            // ---- Keyboard ---------------------------------------------------------
-            InputKeyDown,
-            InputKeyUp,
-            InputChar,                 ///< Translated text codepoint(s).
-            InputKeyboardLayoutChange,
-
-            // ---- Pointer ----------------------------------------------------------
-            InputMouseEnter,
-            InputMouseLeave,
-            InputMouseMove,
-            InputMouseButton,
-            InputScroll,
-            InputRawMouseMotion,       ///< Unaccelerated relative motion (FPS / DCC).
-
-            // ---- Touch / pen ------------------------------------------------------
-            InputTouch,
-            InputTouchGesture,         ///< Pinch / rotate / swipe (synthesised).
-            InputPen,
-            InputPenProximity,
-            InputPenButton,
-
-            // ---- IME --------------------------------------------------------------
-            ImeActivate,
-            ImeDeactivate,
-            ImeComposition,
-            ImeCompositionUpdate,
-            ImeCommit,
-            ImeCandidateList,
-            ImePreeditCursor,
-
-            // ---- Clipboard --------------------------------------------------------
-            ClipboardUpdate,
-            SelectionUpdate,           ///< X11 PRIMARY / Wayland selection.
-
-            // ---- Drag and drop ----------------------------------------------------
-            DragEnter,
-            DragOver,
-            DragDrop,
-            DragLeave,
-
-            // ---- Display ----------------------------------------------------------
-            DisplayConnect,
-            DisplayDisconnect,
-            DisplayChange,
-            DisplayColorProfileChange,
-            DisplayHdrChange,
-
-            // ---- Power / session --------------------------------------------------
-            PowerStateChange,
-            PowerSuspend,
-            PowerResume,
-            BatteryLevelChange,
-            SessionLock,
-            SessionUnlock,
-            SessionUserSwitch,         ///< Win32 fast user switch.
-            SessionEndQuery,           ///< Logoff / shutdown about to occur.
-
-            // ---- Appearance / accessibility ---------------------------------------
-            AppearanceChange,          ///< Light / dark / accent / contrast.
-            AccessibilityScreenReader,
-            AccessibilityReducedMotion,
-            AccessibilityHighContrast,
-
-            // ---- Gamepad ----------------------------------------------------------
-            GamepadConnect,
-            GamepadDisconnect,
-            GamepadState,
-            GamepadBatteryChange,
-
-            // ---- File system watcher ---------------------------------------------
-            FileCreated,
-            FileModified,
-            FileDeleted,
-            FileRenamed,
-            FileAttributesChanged,
-            FileWatchOverflow,         ///< Backend buffer overflowed; rescan needed.
-
-            // ---- Misc -------------------------------------------------------------
-            UrlOpenRequest,            ///< OS asked the app to open a URL/file.
-            TimerTick,
-            DeviceChange,              ///< Generic hot-plug (USB / monitor / audio).
+        struct WindowSpecificEvent : Detail::EventPayloadBase {
+            WindowId windowId = WindowId::Invalid; ///< Window the event targets.
+            constexpr bool operator==(const WindowSpecificEvent&) const = default;
         };
-        static_assert(Traits::SequentialEnum<EventKind>);
-        static_assert(sizeof(EventKind) == 1);
-
-        /// @brief Number of distinct @ref EventKind values.
-        inline constexpr size_t kEventKindCount = Traits::EnumeratorsCount<EventKind>;
-
-        // ============================================================================
-        // Event Payload Binding
-        // ============================================================================
 
         /**
-         * @brief Annotation attached to a payload type to bind it to an @ref EventKind.
+         * @brief Mixin: payload carries a high-resolution capture timestamp.
          *
-         * A payload struct carries this annotation to declare which `EventKind`
-         * value identifies it on the wire; reflection recovers the binding so the
-         * tag and payload layout cannot drift apart. There is exactly one payload
-         * per kind, enforced by a compile-time static_assert at the bottom of
-         * this header.
+         * Inherited by events whose downstream consumers need sub-millisecond
+         * timing — input latency measurement, IME composition timeouts, gesture
+         * velocity, timer ticks. Events at the seconds / minutes timescale
+         * (theme change, display reconfiguration, power state) do not carry it.
          *
-         * @code
-         * struct [[=PayloadFor{EventKind::WindowResize}]] WindowResizeEvent : EventHeader { ... };
-         * @endcode
+         * Stamped by the producer immediately before broadcast; the value is a
+         * monotonic steady clock reading expressed in nanoseconds (typically QPC
+         * on Windows, `clock_gettime(CLOCK_MONOTONIC)` on Linux).
          */
-        struct PayloadFor {
-            EventKind kind;
-            constexpr bool operator==(const PayloadFor&) const = default;
+        struct TimestampedEvent : Detail::EventPayloadBase {
+            uint64_t timestamp = 0; ///< Monotonic steady-clock reading, ns.
+            constexpr bool operator==(const TimestampedEvent&) const = default;
         };
-
-        // ============================================================================
-        // Event Header (layout reference)
-        // ============================================================================
-
-        /**
-         * @brief Layout-equivalent view of the first 24 bytes of every payload.
-         *
-         * Concrete payloads do **not** derive from this type. Each
-         * @ref EventPayload specialisation lays out the same fields in the same
-         * order so that buffer-level code (golden-file tests, hex dumps,
-         * cross-process serialisers) can interpret an opaque byte span as an
-         * `EventHeader` regardless of the trailing variant.
-         *
-         * @note `kind` on a concrete payload is auto-populated to the value bound
-         *       by the type's @ref PayloadFor annotation; this struct exists
-         *       solely as a layout / documentation reference.
-         */
-        struct EventHeader {
-            EventKind kind = EventKind{};   ///< Discriminator — see @ref PayloadFor.
-            uint8_t   pad0 = 0;             ///< Reserved; keeps `flags` 16-bit aligned.
-            uint16_t  flags = 0;            ///< Bitmask of @ref EventFlag values.
-            uint32_t  windowId = 0;         ///< Window the event targets, or 0 for app-global.
-            uint32_t  sequence = 0;         ///< Monotonic sequence number; total order + dedup.
-            uint32_t  pad1 = 0;             ///< Reserved; keeps `timestamp` 8-byte aligned.
-            uint64_t  timestamp = 0;        ///< High-resolution timestamp (steady clock, ns).
-
-            constexpr bool operator==(const EventHeader&) const = default;
-        };
-        static_assert(std::is_trivially_copyable_v<EventHeader>);
-        static_assert(std::is_standard_layout_v<EventHeader>);
-        static_assert(sizeof(EventHeader) == 24, "EventHeader layout must remain stable");
-        static_assert(alignof(EventHeader) == 8);
-
-        /**
-         * @brief Kind-agnostic flag bits storable in `EventHeader::flags`.
-         */
-        enum class EventFlag : uint8_t {
-            None        = 0,
-            Synthetic   = 1u << 0, ///< Generated internally rather than from the OS.
-            Coalesced   = 1u << 1, ///< Multiple OS events folded into this one (e.g. mouse-move).
-            Replayed    = 1u << 2, ///< Replayed from a recording or testing harness.
-            Lost        = 1u << 3, ///< Marker indicating one or more events were dropped before this one.
-        };
-        static_assert(Traits::BitfieldEnum<EventFlag>);
 
         // ============================================================================
         // Common Sub-Types
@@ -296,7 +165,8 @@ namespace Mashiro {
 
         /**
          * @brief File-system change classification (per-event detail beyond
-         *        @ref EventKind::FileCreated etc.).
+         *        the @ref FileCreatedEvent / @ref FileDeletedEvent variant
+         *        membership).
          */
         enum class FileChangeFlags : uint16_t {
             None        = 0,
@@ -322,174 +192,89 @@ namespace Mashiro {
         // clang-format off
 
         // ============================================================================
-        // Event Payloads
+        // Events
         // ============================================================================
 
-        /// @cond DOXYGEN_PAYLOAD_NOISE
-        namespace Detail {
+        inline namespace Window {
 
-            /// @brief Marker base so generic code can detect payload structs at
-            ///        compile time without depending on the CRTP template signature.
-            struct EventPayloadBase {};
+            /// @brief Window has been created and is ready for first draw.
+            struct WindowCreateEvent : WindowSpecificEvent {
+                ivec2 size{};       ///< Initial client size in pixels.
+                float dpiScale = 1; ///< Initial DPI scale factor.
+            };
 
-            /**
-             * @brief Recover the @ref EventKind bound to a payload type via its
-             *        `[[=PayloadFor{...}]]` annotation.
-             *
-             * Used as the NSDMI for `EventPayload<Derived>::kind` so every concrete
-             * payload starts life with the correct discriminator without needing a
-             * user-written constructor — the type stays an aggregate.
-             *
-             * @tparam Derived Concrete payload struct (the CRTP self-type).
-             * @return The kind bound by exactly one @ref PayloadFor annotation.
-             *
-             * @note Evaluated lazily during instantiation of the NSDMI, i.e. when
-             *       `Derived` has its full annotation set defined. Calls fail at
-             *       compile time if the annotation is missing.
-             */
-            template<typename Derived>
-            consteval EventKind KindFromAnnotation() {
-                constexpr auto bound = Traits::Anno::Get<PayloadFor>(^^Derived);
-                static_assert(bound.has_value(),
-                              "Payload type must carry exactly one [[=PayloadFor{...}]] annotation");
-                return bound->kind;
-            }
+            /// @brief OS requested the window to close (X / Cmd-Q / Alt-F4).
+            struct WindowCloseEvent : WindowSpecificEvent {};
 
-        } // namespace Detail
-        /// @endcond
+            /// @brief Window has been destroyed; this is the last event for `windowId`.
+            struct WindowDestroyEvent : WindowSpecificEvent {};
 
-        /**
-         * @brief CRTP base shared by every concrete event payload.
-         *
-         * Lays out the fields of @ref EventHeader directly (so payloads remain
-         * standard-layout and ABI-compatible with the header view) and uses a
-         * reflection-driven default member initialiser to populate `kind` with the
-         * value bound by the derived type's `[[=PayloadFor{...}]]` annotation.
-         *
-         * Because no user-defined constructor is introduced, every derived payload
-         * remains an aggregate and stays designated-initialiser friendly:
-         * @code
-         * WindowResizeEvent ev{
-         *     {.windowId = 1, .sequence = 42, .timestamp = clock.Now()},
-         *     .size = {1280, 720},
-         * };
-         * // ev.kind is automatically EventKind::WindowResize.
-         * @endcode
-         *
-         * The compiler resolves the `kind` initialiser at constant-evaluation time,
-         * so on a release build the value is an immediate store with no call.
-         *
-         * @tparam Derived Concrete payload struct (the curiously-recurring self-type).
-         */
-        template<typename Derived>
-        struct EventPayload : Detail::EventPayloadBase {
-            EventKind kind = Detail::KindFromAnnotation<Derived>();
-            uint16_t  flags = 0;            ///< Bitmask of @ref EventFlag values.
-            uint32_t  windowId = 0;         ///< Window the event targets, or 0 for app-global.
-            uint32_t  sequence = 0;         ///< Monotonic sequence number; total order + dedup.
-            uint64_t  timestamp = 0;        ///< High-resolution timestamp (steady clock, ns).
+            /// @brief Client area has been resized.
+            struct WindowResizeEvent : WindowSpecificEvent, TimestampedEvent {
+                ivec2 size{};
+                bool  isMinimised = false;
+            };
 
-            constexpr bool operator==(const EventPayload&) const = default;
-        };
+            /// @brief Window has been moved on the desktop.
+            struct WindowMoveEvent : WindowSpecificEvent {
+                ivec2 position{};
+            };
 
-        // ---- Window lifecycle ---------------------------------------------------
+            /// @brief Window gained or lost keyboard focus.
+            struct WindowFocusEvent : WindowSpecificEvent {
+                bool focused = false;
+            };
 
-        /// @brief Window has been created and is ready for first draw.
-        struct [[=PayloadFor{EventKind::WindowCreate}]] 
-        WindowCreateEvent : EventPayload<WindowCreateEvent> {
-            ivec2 size{};       ///< Initial client size in pixels.
-            float dpiScale = 1; ///< Initial DPI scale factor.
-        };
+            /// @brief Window has been iconified / minimized, maximized, or restored.
+            struct WindowMinimizeEvent : WindowSpecificEvent {};
+            struct WindowMaximizeEvent : WindowSpecificEvent {};
+            struct WindowRestoreEvent : WindowSpecificEvent {};
 
-        /// @brief OS requested the window to close (X / Cmd-Q / Alt-F4).
-        struct [[=PayloadFor{EventKind::WindowClose}]] 
-        WindowCloseEvent : EventPayload<WindowCloseEvent> {};
+            /// @brief Window visibility has toggled (`ShowWindow`, `xdg_toplevel.configure`).
+            struct WindowVisibilityChangeEvent : WindowSpecificEvent {
+                bool visible = false;
+            };
 
-        /// @brief Window has been destroyed; this is the last event for `windowId`.
-        struct [[=PayloadFor{EventKind::WindowDestroy}]] 
-        WindowDestroyEvent : EventPayload<WindowDestroyEvent> {};
+            struct WindowEnterFullscreenEvent : WindowSpecificEvent {
+                DisplayId display = DisplayId::Invalid;
+            };
+            struct WindowLeaveFullscreenEvent : WindowSpecificEvent {};
 
-        /// @brief Client area has been resized.
-        struct [[=PayloadFor{EventKind::WindowResize}]] 
-        WindowResizeEvent : EventPayload<WindowResizeEvent> {
-            ivec2 size{};
-            bool  isMinimised = false;
-        };
+            /// @brief DPI / scale of the window's monitor changed (per-monitor DPI on Win10+).
+            struct WindowDpiChangeEvent : WindowSpecificEvent {
+                float oldScale = 1;
+                float newScale = 1;
+            };
 
-        /// @brief Window has been moved on the desktop.
-        struct [[=PayloadFor{EventKind::WindowMove}]] 
-        WindowMoveEvent : EventPayload<WindowMoveEvent> {
-            ivec2 position{};
-        };
+            /// @brief Wayland fractional-scale factor change.
+            struct [[=Platform::WaylandOnly]] WindowScaleChangeEvent : WindowSpecificEvent {
+                float scale = 1; ///< Multiples of 120 / 120, surfaced as float.
+            };
 
-        /// @brief Window gained or lost keyboard focus.
-        struct [[=PayloadFor{EventKind::WindowFocus}]] 
-        WindowFocusEvent : EventPayload<WindowFocusEvent> {
-            bool focused = false;
-        };
+            /// @brief OS theme applied to the window (decorations, system menu).
+            struct WindowThemeChangeEvent : WindowSpecificEvent {
+                AppearanceTheme theme = AppearanceTheme::Unknown;
+            };
 
-        struct [[=PayloadFor{EventKind::WindowMinimize}]]
-        WindowMinimizeEvent : EventPayload<WindowMinimizeEvent> {};
+            /// @brief Window occluded / unoccluded (macOS visibility, Win32 cloak / DWM).
+            struct WindowOcclusionChangeEvent : WindowSpecificEvent {
+                bool occluded = false;
+            };
 
-        struct [[=PayloadFor{EventKind::WindowMaximize}]]
-        WindowMaximizeEvent : EventPayload<WindowMaximizeEvent> {};
+            /// @brief X11 `Expose` / Wayland frame damage — region must be redrawn.
+            struct [[=Platform::LinuxOnly]] WindowExposedEvent : WindowSpecificEvent {
+                ivec2 origin{};
+                ivec2 extent{};
+            };
 
-        struct [[=PayloadFor{EventKind::WindowRestore}]]
-        WindowRestoreEvent : EventPayload<WindowRestoreEvent> {};
+            /// @brief Win32 DWM composition state toggled (`WM_DWMCOMPOSITIONCHANGED`).
+            struct [[=Platform::WindowsOnly]] WindowDwmCompositionChangeEvent : WindowSpecificEvent {
+                bool compositionEnabled = false;
+            };
 
-        /// @brief Window visibility has toggled (`ShowWindow`, `xdg_toplevel.configure`).
-        struct [[=PayloadFor{EventKind::WindowVisibilityChange}]] 
-        WindowVisibilityChangeEvent : EventPayload<WindowVisibilityChangeEvent> {
-            bool visible = false;
-        };
+        } // namespace Window
 
-        struct [[=PayloadFor{EventKind::WindowEnterFullscreen}]] 
-        WindowEnterFullscreenEvent : EventPayload<WindowEnterFullscreenEvent> {
-            DisplayId display = DisplayId::Invalid;
-        };
-        struct [[=PayloadFor{EventKind::WindowLeaveFullscreen}]] 
-        WindowLeaveFullscreenEvent : EventPayload<WindowLeaveFullscreenEvent> {};
-
-        /// @brief DPI / scale of the window's monitor changed (per-monitor DPI on Win10+).
-        struct [[=PayloadFor{EventKind::WindowDpiChange}]] 
-        WindowDpiChangeEvent : EventPayload<WindowDpiChangeEvent> {
-            float oldScale = 1;
-            float newScale = 1;
-        };
-
-        /// @brief Wayland fractional-scale factor change.
-        struct [[=PayloadFor{EventKind::WindowScaleChange}, =Platform::WaylandOnly]] 
-        WindowScaleChangeEvent : EventPayload<WindowScaleChangeEvent> {
-            float scale = 1; ///< Multiples of 120 / 120, surfaced as float.
-        };
-
-        /// @brief OS theme applied to the window (decorations, system menu).
-        struct [[=PayloadFor{EventKind::WindowThemeChange}]] 
-        WindowThemeChangeEvent : EventPayload<WindowThemeChangeEvent> {
-            AppearanceTheme theme = AppearanceTheme::Unknown;
-        };
-
-        /// @brief Window occluded / unoccluded (macOS visibility, Win32 cloak / DWM).
-        struct [[=PayloadFor{EventKind::WindowOcclusionChange}]] 
-        WindowOcclusionChangeEvent : EventPayload<WindowOcclusionChangeEvent> {
-            bool occluded = false;
-        };
-
-        /// @brief X11 `Expose` / Wayland frame damage — region must be redrawn.
-        struct [[=PayloadFor{EventKind::WindowExposed}, =Platform::LinuxOnly]] 
-        WindowExposedEvent : EventPayload<WindowExposedEvent> {
-            ivec2 origin{};
-            ivec2 extent{};
-        };
-
-        /// @brief Win32 DWM composition state toggled (`WM_DWMCOMPOSITIONCHANGED`).
-        struct [[=PayloadFor{EventKind::WindowDwmCompositionChange}, =Platform::WindowsOnly]] 
-        WindowDwmCompositionChangeEvent : EventPayload<WindowDwmCompositionChangeEvent> {
-            bool compositionEnabled = false;
-        };
-
-        // ---- Keyboard -----------------------------------------------------------
-
+        // clang-format off
         /**
          * @brief Logical key identifier.
          *
@@ -501,94 +286,26 @@ namespace Mashiro {
             Unknown = 0,
 
             // Letters (ASCII uppercase)
-            A = 'A',
-            B = 'B',
-            C = 'C',
-            D = 'D',
-            E = 'E',
-            F = 'F',
-            G = 'G',
-            H = 'H',
-            I = 'I',
-            J = 'J',
-            K = 'K',
-            L = 'L',
-            M = 'M',
-            N = 'N',
-            O = 'O',
-            P = 'P',
-            Q = 'Q',
-            R = 'R',
-            S = 'S',
-            T = 'T',
-            U = 'U',
-            V = 'V',
-            W = 'W',
-            X = 'X',
-            Y = 'Y',
-            Z = 'Z',
+            A = 'A', B = 'B', C = 'C', D = 'D', E = 'E', F = 'F', G = 'G', H = 'H', I = 'I', J = 'J', K = 'K',
+            L = 'L', M = 'M', N = 'N', O = 'O', P = 'P', Q = 'Q', R = 'R', S = 'S', T = 'T', U = 'U', V = 'V',
+            W = 'W', X = 'X', Y = 'Y', Z = 'Z',
 
             // Numbers (ASCII digits)
-            Num0 = '0',
-            Num1 = '1',
-            Num2 = '2',
-            Num3 = '3',
-            Num4 = '4',
-            Num5 = '5',
-            Num6 = '6',
-            Num7 = '7',
-            Num8 = '8',
-            Num9 = '9',
+            Num0 = '0', Num1 = '1', Num2 = '2', Num3 = '3', Num4 = '4', Num5 = '5', Num6 = '6', Num7 = '7',
+            Num8 = '8', Num9 = '9',
 
             // Function keys
-            F1 = 256,
-            F2,
-            F3,
-            F4,
-            F5,
-            F6,
-            F7,
-            F8,
-            F9,
-            F10,
-            F11,
-            F12,
+            F1 = 256, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15, F16, F17, F18, F19, F20, 
+            F21, F22, F23, F24,
 
             // Navigation / modifiers / whitespace
-            Escape,
-            Tab,
-            CapsLock,
-            Shift,
-            Control,
-            Alt,
-            Super,
-            Space,
-            Enter,
-            Backspace,
-            Delete,
-            Insert,
-            Home,
-            End,
-            PageUp,
-            PageDown,
-            Left,
-            Right,
-            Up,
-            Down,
+            Escape, Tab, CapsLock, Shift, Control, Alt, Super, Space, Enter, Backspace, Delete, Insert, Home,
+            End, PageUp, PageDown, Left, Right, Up, Down,
 
             // Punctuation
-            Comma,
-            Period,
-            Slash,
-            Semicolon,
-            Quote,
-            BracketLeft,
-            BracketRight,
-            Backslash,
-            Minus,
-            Equal,
-            Grave,
+            Comma, Period, Slash, Semicolon, Quote, BracketLeft, BracketRight, Backslash, Minus, Equal, Grave,
         };
+        // clang-format on
 
         /**
          * @brief Bit-packed modifier-key state accompanying an input event.
@@ -636,43 +353,41 @@ namespace Mashiro {
         /// @brief Physical scancode that produced this key event (USB HID Usage ID, OS native).
         enum class Scancode : uint32_t { Unknown = 0 };
 
-        /**
-         * @brief Common payload skeleton for both key-down and key-up.
-         *
-         * CRTP-parameterised on the concrete event so the inherited
-         * @ref EventPayload<Derived>::kind initialiser still resolves to the
-         * derived type's `[[=PayloadFor{...}]]` annotation.
-         */
-        template<typename Derived>
-        struct KeyEventBase : EventPayload<Derived> {
-            KeyCode   code     = KeyCode::Unknown; ///< Logical key.
-            Scancode  scancode = Scancode::Unknown;///< Physical key (layout-independent).
-            Modifiers mods{};                      ///< Modifier-key state at event time.
-            DeviceId  device   = DeviceId::Invalid;///< Originating keyboard.
-            bool      repeat   = false;            ///< OS auto-repeat (key-down only).
-        };
+        inline namespace Keyboard {
 
-        struct [[=PayloadFor{EventKind::InputKeyDown}]]
-        KeyDownEvent : KeyEventBase<KeyDownEvent> {};
+            /**
+             * @brief Common payload skeleton for both key-down and key-up.
+             *
+             * Inherits @ref WindowSpecificEvent and @ref TimestampedEvent so the
+             * derived `KeyDownEvent` / `KeyUpEvent` types pick up `windowId`,
+             * `timestamp`, and the @ref Detail::EventPayloadBase marker
+             * automatically. The payload type itself is the discriminator on
+             * @ref Mashiro::SystemEvent — there is no separate enum tag.
+             */
+            struct KeyEventBase : WindowSpecificEvent, TimestampedEvent {
+                KeyCode   code     = KeyCode::Unknown; ///< Logical key.
+                Scancode  scancode = Scancode::Unknown;///< Physical key (layout-independent).
+                Modifiers mods{};                      ///< Modifier-key state at event time.
+                DeviceId  device   = DeviceId::Invalid;///< Originating keyboard.
+                bool      repeat   = false;            ///< OS auto-repeat (key-down only).
+            };
 
-        struct [[=PayloadFor{EventKind::InputKeyUp}]]
-        KeyUpEvent : KeyEventBase<KeyUpEvent> {};
+            struct KeyDownEvent : KeyEventBase {};
+            struct KeyUpEvent : KeyEventBase {};
 
-        /// @brief Translated text input — one or more codepoints from a single keystroke.
-        struct [[=PayloadFor{EventKind::InputChar}]] 
-        CharEvent : EventPayload<CharEvent> {
-            std::array<char32_t, 4> codepoints{}; ///< UTF-32, zero-terminated when shorter than 4.
-            uint8_t   count = 0;                  ///< Number of valid entries in `codepoints`.
-            Modifiers mods{};
-        };
+            /// @brief Translated text input — one or more codepoints from a single keystroke.
+            struct CharEvent : WindowSpecificEvent {
+                std::array<char32_t, 4> codepoints{}; ///< UTF-32, zero-terminated when shorter than 4.
+                uint8_t   count = 0;                  ///< Number of valid entries in `codepoints`.
+                Modifiers mods{};
+            };
 
-        /// @brief Active keyboard layout / input source changed.
-        struct [[=PayloadFor{EventKind::InputKeyboardLayoutChange}]]
-        KeyboardLayoutChangeEvent : EventPayload<KeyboardLayoutChangeEvent> {
-            std::string layoutId; ///< OS identifier (e.g. "en-US", "ja-JP-IME").
-        };
+            /// @brief Active keyboard layout / input source changed.
+            struct KeyboardLayoutChangeEvent : WindowSpecificEvent {
+                std::string layoutId; ///< OS identifier (e.g. "en-US", "ja-JP-IME").
+            };
 
-        // ---- Pointer ------------------------------------------------------------
+        } // namespace Keyboard
 
         /**
          * @brief Logical mouse button identifier.
@@ -688,425 +403,390 @@ namespace Mashiro {
             Button5 = 4, ///< Typically "forward" on five-button mice.
         };
 
-        struct [[=PayloadFor{EventKind::InputMouseEnter}]]
-        MouseEnterEvent : EventPayload<MouseEnterEvent> {};
-
-        struct [[=PayloadFor{EventKind::InputMouseLeave}]]
-        MouseLeaveEvent : EventPayload<MouseLeaveEvent> {};
-
-        /**
-         * @brief Pointer moved within the window's client area.
-         */
-        struct [[=PayloadFor{EventKind::InputMouseMove}]] 
-        MouseMoveEvent : EventPayload<MouseMoveEvent> {
-            vec2     position{};                 ///< Client-space, sub-pixel precision.
-            vec2     delta{};                    ///< Movement since previous event.
-            Modifiers mods{};
-            DeviceId device = DeviceId::Invalid;
-        };
-
-        /**
-         * @brief Pointer button pressed or released.
-         */
-        struct [[=PayloadFor{EventKind::InputMouseButton}]] 
-        MouseButtonEvent : EventPayload<MouseButtonEvent> {
-            vec2        position{};
-            MouseButton button = MouseButton::Left;
-            bool        pressed = false;
-            uint8_t     clickCount = 1; ///< 1=single, 2=double, 3=triple, etc.
-            Modifiers   mods{};
-            DeviceId    device = DeviceId::Invalid;
-        };
-
-        /// @brief Mouse wheel / trackpad scroll.
-        struct [[=PayloadFor{EventKind::InputScroll}]] 
-        ScrollEvent : EventPayload<ScrollEvent> {
-            vec2       position{};
-            vec2       delta{};        ///< +Y = scroll up, +X = scroll right.
-            ScrollUnit unit = ScrollUnit::Lines;
-            bool       inertial = false;///< macOS / precision touchpad inertial phase.
-            Modifiers  mods{};
-            DeviceId   device = DeviceId::Invalid;
-        };
-
-        /// @brief Raw, unaccelerated relative mouse motion (`WM_INPUT` / xinput2 / libinput).
-        struct [[=PayloadFor{EventKind::InputRawMouseMotion}]] 
-        RawMouseMotionEvent : EventPayload<RawMouseMotionEvent> {
-            ivec2    delta{};
-            DeviceId device = DeviceId::Invalid;
-        };
-
-        // ---- Touch / pen --------------------------------------------------------
-
-        /// @brief Single-finger touch contact event.
-        struct [[=PayloadFor{EventKind::InputTouch}]] 
-        TouchEvent : EventPayload<TouchEvent> {
-            TouchId    id = TouchId::Invalid;
-            TouchPhase phase = TouchPhase::Began;
-            vec2       position{};
-            vec2       size{};      ///< Contact ellipse size in pixels (0 if unsupported).
-            float      pressure = 0;///< Normalised [0,1].
-        };
-
-        /// @brief OS-synthesised gesture from the trackpad / touch driver.
-        struct [[=PayloadFor{EventKind::InputTouchGesture}]]
-        TouchGestureEvent : EventPayload<TouchGestureEvent> {
-            enum class Kind : uint8_t { Pinch, Rotate, Swipe, Pan, Tap, LongPress };
-            Kind  gesture  = Kind::Pinch; ///< Renamed from `kind` to avoid shadowing the EventPayload discriminator.
-            vec2  position{};
-            vec2  delta;      ///< Pan/swipe direction in pixels.
-            float scale = 1;    ///< Pinch scale factor.
-            float rotation = 0; ///< Rotation in radians.
-        };
-
-        /// @brief Stylus / pen contact event with full Wintab/Pointer-Input metadata.
-        struct [[=PayloadFor{EventKind::InputPen}]] 
-        PenEvent : EventPayload<PenEvent> {
-            TouchPhase phase = TouchPhase::Began;
-            vec2       position{};
-            float      pressure = 0;     ///< Normalised [0,1].
-            float      tiltX = 0;        ///< Radians, +X axis tilt.
-            float      tiltY = 0;        ///< Radians, +Y axis tilt.
-            float      twist = 0;        ///< Barrel rotation in radians.
-            float      tangentialPressure = 0;
-            DeviceId   device = DeviceId::Invalid;
-        };
-
-        /// @brief Pen entered or left the digitiser hover range.
-        struct [[=PayloadFor{EventKind::InputPenProximity}]] 
-        PenProximityEvent : EventPayload<PenProximityEvent> {
-            bool     entering = true;
-            DeviceId device = DeviceId::Invalid;
-        };
-
-        /// @brief Pen barrel button / eraser-tip state changed.
-        struct [[=PayloadFor{EventKind::InputPenButton}]] 
-        PenButtonEvent : EventPayload<PenButtonEvent> {
-            PenButton buttons = PenButton::None;
-            bool      pressed = false;
-            DeviceId  device = DeviceId::Invalid;
-        };
-
-        // ---- IME ----------------------------------------------------------------
-
-        struct [[=PayloadFor{EventKind::ImeActivate}]]   
-        ImeActivateEvent : EventPayload<ImeActivateEvent> {};
-
-        struct [[=PayloadFor{EventKind::ImeDeactivate}]] 
-        ImeDeactivateEvent : EventPayload<ImeDeactivateEvent> {};
-
-        /// @brief IME composition started.
-        struct [[=PayloadFor{EventKind::ImeComposition}]] 
-        ImeCompositionEvent : EventPayload<ImeCompositionEvent> {
-            std::string preedit; ///< UTF-8 preedit / composition string.
-            uint32_t    caret = 0;
-        };
-
-        /// @brief IME composition contents changed.
-        struct [[=PayloadFor{EventKind::ImeCompositionUpdate}]] 
-        ImeCompositionUpdateEvent : EventPayload<ImeCompositionUpdateEvent> {
-            std::string preedit;
-            uint32_t    caret = 0;
-            uint32_t    selectionStart = 0;
-            uint32_t    selectionEnd = 0;
-        };
-
-        /// @brief IME committed a final string.
-        struct [[=PayloadFor{EventKind::ImeCommit}]] 
-        ImeCommitEvent : EventPayload<ImeCommitEvent> {
-            std::string text; ///< UTF-8 finalised string.
-        };
-
-        /// @brief IME candidate-window contents updated.
-        struct [[=PayloadFor{EventKind::ImeCandidateList}]] 
-        ImeCandidateListEvent : EventPayload<ImeCandidateListEvent> {
-            std::vector<std::string> candidates; ///< UTF-8 candidates.
-            uint32_t selected = 0;               ///< Currently-highlighted index.
-            uint32_t pageStart = 0;
-            uint32_t pageSize = 0;
-        };
-
-        /// @brief Where the host should anchor the candidate window (in client space).
-        struct [[=PayloadFor{EventKind::ImePreeditCursor}]] 
-        ImePreeditCursorEvent : EventPayload<ImePreeditCursorEvent> {
-            ivec2 caretOrigin{}; ///< Client-space pixel origin.
-            uvec2 caretSize{};
-        };
-
-        // ---- Clipboard ----------------------------------------------------------
-
-        /// @brief OS clipboard contents changed.
-        struct [[=PayloadFor{EventKind::ClipboardUpdate}]] 
-        ClipboardUpdateEvent : EventPayload<ClipboardUpdateEvent> {
-            DragKind kinds = DragKind::None; ///< Bitmask of available MIME categories.
-        };
-
-        /// @brief X11 PRIMARY / Wayland selection changed (separate from clipboard).
-        struct [[=PayloadFor{EventKind::SelectionUpdate}, =Platform::LinuxOnly]] 
-        SelectionUpdateEvent : EventPayload<SelectionUpdateEvent> {
-            DragKind kinds = DragKind::None;
-        };
-
-        // ---- Drag and drop ------------------------------------------------------
-
-        struct DragPayloadInfo {
-            DragKind                 kinds = DragKind::None;
-            std::vector<std::string> mimeTypes;
-            size_t                   itemCount = 0;
-        };
-
-        struct [[=PayloadFor{EventKind::DragEnter}]] 
-        DragEnterEvent : EventPayload<DragEnterEvent> {
-            vec2            position{};
-            DragPayloadInfo payload;
-        };
-
-        struct [[=PayloadFor{EventKind::DragOver}]] 
-        DragOverEvent : EventPayload<DragOverEvent> {
-            vec2 position{};
-        };
-
-        struct [[=PayloadFor{EventKind::DragDrop}]]
-        DragDropEvent : EventPayload<DragDropEvent> {
-            vec2                      position{};
-            std::vector<std::string>  paths;       ///< For `Files` payloads, decoded local paths.
-            std::string               text;        ///< For `Text` payloads.
-            std::vector<std::byte>    blob;        ///< For `Custom` / `Image` payloads, raw bytes.
-            DragKind                  drag = DragKind::None; ///< Renamed from `kind` to avoid shadowing the discriminator.
-        };
-
-        struct [[=PayloadFor{EventKind::DragLeave}]] 
-        DragLeaveEvent : EventPayload<DragLeaveEvent> {};
-
-        // ---- Display ------------------------------------------------------------
-
-        struct [[=PayloadFor{EventKind::DisplayConnect}]] 
-        DisplayConnectEvent : EventPayload<DisplayConnectEvent> {
-            DisplayId   display = DisplayId::Invalid;
-            std::string name;
-        };
-
-        struct [[=PayloadFor{EventKind::DisplayDisconnect}]] 
-        DisplayDisconnectEvent : EventPayload<DisplayDisconnectEvent> {
-            DisplayId display = DisplayId::Invalid;
-        };
-
-        /// @brief A display's mode, position, or topology changed.
-        struct [[=PayloadFor{EventKind::DisplayChange}]] 
-        DisplayChangeEvent : EventPayload<DisplayChangeEvent> {
-            DisplayId display = DisplayId::Invalid;
-            uvec2     resolution{};
-            float     refreshHz = 0;
-            float     dpiScale = 1;
-        };
-
-        /// @brief ICC / colour profile change (typically per-display on macOS / Win10+).
-        struct [[=PayloadFor{EventKind::DisplayColorProfileChange}]] 
-        DisplayColorProfileChangeEvent : EventPayload<DisplayColorProfileChangeEvent> {
-            DisplayId   display = DisplayId::Invalid;
-            std::string profileName;
-        };
-
-        /// @brief HDR enable / disable / metadata change.
-        struct [[=PayloadFor{EventKind::DisplayHdrChange}]] 
-        DisplayHdrChangeEvent : EventPayload<DisplayHdrChangeEvent> {
-            DisplayId display = DisplayId::Invalid;
-            bool      hdrEnabled = false;
-            float     maxLuminanceNits = 0;
-        };
-
-        // ---- Power / session ----------------------------------------------------
-
-        struct [[=PayloadFor{EventKind::PowerStateChange}]] 
-        PowerStateChangeEvent : EventPayload<PowerStateChangeEvent> {
-            PowerSource source = PowerSource::Unknown;
-            float       batteryLevel = 1; ///< Normalised [0,1]; 1 if non-battery.
-        };
-
-        struct [[=PayloadFor{EventKind::PowerSuspend}]] 
-        PowerSuspendEvent : EventPayload<PowerSuspendEvent> {};
-
-        struct [[=PayloadFor{EventKind::PowerResume}]]  
-        PowerResumeEvent : EventPayload<PowerResumeEvent> {};
-
-        struct [[=PayloadFor{EventKind::BatteryLevelChange}]] 
-        BatteryLevelChangeEvent : EventPayload<BatteryLevelChangeEvent> {
-            float    level = 1;
-            bool     charging = false;
-            uint32_t secondsRemaining = 0; ///< 0 if unknown.
-        };
-
-        struct [[=PayloadFor{EventKind::SessionLock}]]   
-        SessionLockEvent : EventPayload<SessionLockEvent> {};
-
-        struct [[=PayloadFor{EventKind::SessionUnlock}]] 
-        SessionUnlockEvent : EventPayload<SessionUnlockEvent> {};
-
-        /// @brief Win32 fast user switch.
-        struct [[=PayloadFor{EventKind::SessionUserSwitch}, =Platform::WindowsOnly]] 
-        SessionUserSwitchEvent : EventPayload<SessionUserSwitchEvent> {};
-
-        /// @brief Logoff or shutdown imminent — last chance to persist work.
-        struct [[=PayloadFor{EventKind::SessionEndQuery}]] 
-        SessionEndQueryEvent : EventPayload<SessionEndQueryEvent> {
-            bool isShutdown = false;
-            bool isCritical = false;
-        };
-
-        // ---- Appearance / accessibility ----------------------------------------
-
-        struct [[=PayloadFor{EventKind::AppearanceChange}]] 
-        AppearanceChangeEvent : EventPayload<AppearanceChangeEvent> {
-            AppearanceTheme theme = AppearanceTheme::Unknown;
-            uint32_t        accentColorRgba = 0;
-        };
-
-        struct [[=PayloadFor{EventKind::AccessibilityScreenReader}]] 
-        AccessibilityScreenReaderEvent : EventPayload<AccessibilityScreenReaderEvent> {
-            bool enabled = false;
-        };
-
-        struct [[=PayloadFor{EventKind::AccessibilityReducedMotion}]] 
-        AccessibilityReducedMotionEvent : EventPayload<AccessibilityReducedMotionEvent> {
-            bool enabled = false;
-        };
-
-        struct [[=PayloadFor{EventKind::AccessibilityHighContrast}]] 
-        AccessibilityHighContrastEvent : EventPayload<AccessibilityHighContrastEvent> {
-            bool enabled = false;
-        };
-
-        // ---- Gamepad ------------------------------------------------------------
-
-        struct [[=PayloadFor{EventKind::GamepadConnect}]] 
-        GamepadConnectEvent : EventPayload<GamepadConnectEvent> {
-            DeviceId    device = DeviceId::Invalid;
-            std::string name;
-            uint32_t    vendorId = 0;
-            uint32_t    productId = 0;
-        };
-
-        struct [[=PayloadFor{EventKind::GamepadDisconnect}]] 
-        GamepadDisconnectEvent : EventPayload<GamepadDisconnectEvent> {
-            DeviceId device = DeviceId::Invalid;
-        };
-
-        /// @brief Snapshot of a gamepad's full state.
-        struct [[=PayloadFor{EventKind::GamepadState}]] 
-        GamepadStateEvent : EventPayload<GamepadStateEvent> {
-            DeviceId             device = DeviceId::Invalid;
-            std::array<float, 6> axes{};    ///< LX, LY, RX, RY, LT, RT (normalised).
-            uint32_t             buttons = 0;///< Bit mask, layout = vendor-defined map.
-        };
-
-        struct [[=PayloadFor{EventKind::GamepadBatteryChange}]] 
-        GamepadBatteryChangeEvent : EventPayload<GamepadBatteryChangeEvent> {
-            DeviceId device = DeviceId::Invalid;
-            float    level = 1;
-            bool     charging = false;
-        };
-
-        // ---- File system watcher ------------------------------------------------
-
-        /**
-         * @brief Common payload skeleton for file-system change events.
-         *
-         * CRTP-parameterised on the concrete event so the inherited `kind` is
-         * resolved from the derived type's annotation rather than this base.
-         */
-        template<typename Derived>
-        struct FileEventBase : EventPayload<Derived> {
-            std::string path;
-        };
-
-        struct [[=PayloadFor{EventKind::FileCreated}]]
-        FileCreatedEvent  : FileEventBase<FileCreatedEvent> {};
-
-        struct [[=PayloadFor{EventKind::FileDeleted}]]
-        FileDeletedEvent  : FileEventBase<FileDeletedEvent> {};
-
-        struct [[=PayloadFor{EventKind::FileModified}]]
-        FileModifiedEvent : FileEventBase<FileModifiedEvent> {
-            FileChangeFlags changes = FileChangeFlags::None;
-        };
-
-        struct [[=PayloadFor{EventKind::FileRenamed}]]
-        FileRenamedEvent : EventPayload<FileRenamedEvent> {
-            std::string oldPath;
-            std::string newPath;
-        };
-
-        struct [[=PayloadFor{EventKind::FileAttributesChanged}]]
-        FileAttributesChangedEvent : FileEventBase<FileAttributesChangedEvent> {
-            FileChangeFlags changes = FileChangeFlags::None;
-        };
-
-        /// @brief Watcher could not keep up — caller must rescan the watched root.
-        struct [[=PayloadFor{EventKind::FileWatchOverflow}]] 
-        FileWatchOverflowEvent : EventPayload<FileWatchOverflowEvent> {
-            std::string root;
-        };
-
-        // ---- Misc ---------------------------------------------------------------
-
-        /// @brief OS asked the application to handle an external URL or document.
-        struct [[=PayloadFor{EventKind::UrlOpenRequest}]] 
-        UrlOpenRequestEvent : EventPayload<UrlOpenRequestEvent> {
-            std::string url; ///< UTF-8 URL or local path.
-        };
-
-        /// @brief Coalesced periodic timer tick (for clients that opt in).
-        struct [[=PayloadFor{EventKind::TimerTick}]] 
-        TimerTickEvent : EventPayload<TimerTickEvent> {
-            uint32_t timerId = 0;
-            uint64_t periodNs = 0;
-        };
-
-        /// @brief Generic device hot-plug (USB / monitor / audio endpoint).
-        struct [[=PayloadFor{EventKind::DeviceChange}]] 
-        DeviceChangeEvent : EventPayload<DeviceChangeEvent> {
-            DeviceId    device = DeviceId::Invalid;
-            std::string description;
-            bool        attached = true;
-        };
+        inline namespace Mouse {
+
+            struct MouseEnterEvent : WindowSpecificEvent {};
+            struct MouseLeaveEvent : WindowSpecificEvent {};
+
+            /**
+             * @brief Pointer moved within the window's client area.
+             */
+            struct MouseMoveEvent : WindowSpecificEvent, TimestampedEvent {
+                vec2     position{};                 ///< Client-space, sub-pixel precision.
+                vec2     delta{};                    ///< Movement since previous event.
+                Modifiers mods{};
+                DeviceId device = DeviceId::Invalid;
+            };
+
+            /**
+             * @brief Pointer button pressed or released.
+             */
+            struct MouseButtonEvent : WindowSpecificEvent, TimestampedEvent {
+                vec2        position{};
+                MouseButton button = MouseButton::Left;
+                bool        pressed = false;
+                uint8_t     clickCount = 1; ///< 1=single, 2=double, 3=triple, etc.
+                Modifiers   mods{};
+                DeviceId    device = DeviceId::Invalid;
+            };
+
+            /// @brief Mouse wheel / trackpad scroll.
+            struct ScrollEvent : WindowSpecificEvent, TimestampedEvent {
+                vec2       position{};
+                vec2       delta{};        ///< +Y = scroll up, +X = scroll right.
+                ScrollUnit unit = ScrollUnit::Lines;
+                bool       inertial = false;///< macOS / precision touchpad inertial phase.
+                Modifiers  mods{};
+                DeviceId   device = DeviceId::Invalid;
+            };
+
+            /// @brief Raw, unaccelerated relative mouse motion (`WM_INPUT` / xinput2 / libinput).
+            struct RawMouseMotionEvent : WindowSpecificEvent, TimestampedEvent {
+                ivec2    delta{};
+                DeviceId device = DeviceId::Invalid;
+            };
+            
+        } // namespace Mouse
+
+        inline namespace Touch {
+
+            /// @brief Single-finger touch contact event.
+            struct TouchEvent : WindowSpecificEvent, TimestampedEvent {
+                TouchId    id = TouchId::Invalid;
+                TouchPhase phase = TouchPhase::Began;
+                vec2       position{};
+                vec2       size{};      ///< Contact ellipse size in pixels (0 if unsupported).
+                float      pressure = 0;///< Normalised [0,1].
+            };
+
+            /// @brief OS-synthesised gesture from the trackpad / touch driver.
+            struct TouchGestureEvent : WindowSpecificEvent, TimestampedEvent {
+                enum class Kind : uint8_t { Pinch, Rotate, Swipe, Pan, Tap, LongPress };
+                Kind  gesture  = Kind::Pinch; ///< Sub-tag distinguishing the gesture kind.
+                vec2  position{};
+                vec2  delta;        ///< Pan/swipe direction in pixels.
+                float scale = 1;    ///< Pinch scale factor.
+                float rotation = 0; ///< Rotation in radians.
+            };
+            
+        } // namespace Touch
+
+        inline namespace Pen {
+
+            /// @brief Stylus / pen contact event with full Wintab/Pointer-Input metadata.
+            struct PenEvent : WindowSpecificEvent, TimestampedEvent {
+                TouchPhase phase = TouchPhase::Began;
+                vec2       position{};
+                float      pressure = 0;     ///< Normalised [0,1].
+                float      tiltX = 0;        ///< Radians, +X axis tilt.
+                float      tiltY = 0;        ///< Radians, +Y axis tilt.
+                float      twist = 0;        ///< Barrel rotation in radians.
+                float      tangentialPressure = 0;
+                DeviceId   device = DeviceId::Invalid;
+            };
+
+            /// @brief Pen entered or left the digitiser hover range.
+            struct PenProximityEvent : WindowSpecificEvent, TimestampedEvent {
+                bool     entering = true;
+                DeviceId device = DeviceId::Invalid;
+            };
+
+            /// @brief Pen barrel button / eraser-tip state changed.
+            struct PenButtonEvent : WindowSpecificEvent, TimestampedEvent {
+                PenButton buttons = PenButton::None;
+                bool      pressed = false;
+                DeviceId  device = DeviceId::Invalid;
+            };
+
+        } // namespace Pen
+
+        inline namespace IME {
+
+            struct ImeActivateEvent : WindowSpecificEvent {};
+            struct ImeDeactivateEvent : WindowSpecificEvent {};
+
+            /// @brief IME composition started.
+            struct ImeCompositionEvent : WindowSpecificEvent, TimestampedEvent {
+                std::string preedit; ///< UTF-8 preedit / composition string.
+                uint32_t    caret = 0;
+            };
+
+            /// @brief IME composition contents changed.
+            struct ImeCompositionUpdateEvent : WindowSpecificEvent, TimestampedEvent {
+                std::string preedit;
+                uint32_t    caret = 0;
+                uint32_t    selectionStart = 0;
+                uint32_t    selectionEnd = 0;
+            };
+
+            /// @brief IME committed a final string.
+            struct ImeCommitEvent : WindowSpecificEvent, TimestampedEvent {
+                std::string text; ///< UTF-8 finalised string.
+            };
+
+            /// @brief IME candidate-window contents updated.
+            struct ImeCandidateListEvent : WindowSpecificEvent {
+                std::vector<std::string> candidates; ///< UTF-8 candidates.
+                uint32_t selected = 0;               ///< Currently-highlighted index.
+                uint32_t pageStart = 0;
+                uint32_t pageSize = 0;
+            };
+
+            /// @brief Where the host should anchor the candidate window (in client space).
+            struct ImePreeditCursorEvent : WindowSpecificEvent {
+                ivec2 caretOrigin{}; ///< Client-space pixel origin.
+                uvec2 caretSize{};
+            };
+
+        } // namespace IME
+
+        inline namespace Clipboard {
+
+            /// @brief OS clipboard contents changed.
+            struct ClipboardUpdateEvent : WindowSpecificEvent {
+                DragKind kinds = DragKind::None; ///< Bitmask of available MIME categories.
+            };
+
+            /// @brief X11 PRIMARY / Wayland selection changed (separate from clipboard).
+            struct [[=Platform::LinuxOnly]] SelectionUpdateEvent : WindowSpecificEvent {
+                DragKind kinds = DragKind::None;
+            };
+
+        } // namespace Clipboard
+
+        inline namespace DnD {
+
+            struct DragPayloadInfo {
+                DragKind                 kinds = DragKind::None;
+                std::vector<std::string> mimeTypes;
+                size_t                   itemCount = 0;
+            };
+
+            struct DragEnterEvent : WindowSpecificEvent {
+                vec2            position{};
+                DragPayloadInfo payload;
+            };
+
+            struct DragOverEvent : WindowSpecificEvent {
+                vec2 position{};
+            };
+
+            struct DragDropEvent : WindowSpecificEvent {
+                vec2                      position{};
+                std::vector<std::string>  paths;       ///< For `Files` payloads, decoded local paths.
+                std::string               text;        ///< For `Text` payloads.
+                std::vector<std::byte>    blob;        ///< For `Custom` / `Image` payloads, raw bytes.
+                DragKind                  drag = DragKind::None; ///< MIME-category fingerprint.
+            };
+
+            struct DragLeaveEvent : WindowSpecificEvent {};
+
+        } // namespace DnD
+
+        inline namespace Display {
+
+            struct DisplayConnectEvent : Detail::EventPayloadBase {
+                DisplayId   display = DisplayId::Invalid;
+                std::string name;
+            };
+
+            struct DisplayDisconnectEvent : Detail::EventPayloadBase {
+                DisplayId display = DisplayId::Invalid;
+            };
+
+            /// @brief A display's mode, position, or topology changed.
+            struct DisplayChangeEvent : Detail::EventPayloadBase {
+                DisplayId display = DisplayId::Invalid;
+                uvec2     resolution{};
+                float     refreshHz = 0;
+                float     dpiScale = 1;
+            };
+
+            /// @brief ICC / colour profile change (typically per-display on macOS / Win10+).
+            struct DisplayColorProfileChangeEvent : Detail::EventPayloadBase {
+                DisplayId   display = DisplayId::Invalid;
+                std::string profileName;
+            };
+
+            /// @brief HDR enable / disable / metadata change.
+            struct DisplayHdrChangeEvent : Detail::EventPayloadBase {
+                DisplayId display = DisplayId::Invalid;
+                bool      hdrEnabled = false;
+                float     maxLuminanceNits = 0;
+            };
+
+        } // namespace Display
+
+        inline namespace Power {
+
+            struct PowerStateChangeEvent : Detail::EventPayloadBase {
+                PowerSource source = PowerSource::Unknown;
+                float       batteryLevel = 1; ///< Normalised [0,1]; 1 if non-battery.
+            };
+
+            struct PowerSuspendEvent : Detail::EventPayloadBase {};
+            struct PowerResumeEvent  : Detail::EventPayloadBase {};
+
+            struct BatteryLevelChangeEvent : Detail::EventPayloadBase {
+                float    level = 1;
+                bool     charging = false;
+                uint32_t secondsRemaining = 0; ///< 0 if unknown.
+            };
+
+        }
+
+        inline namespace Session {
+
+            struct SessionLockEvent   : Detail::EventPayloadBase {};
+            struct SessionUnlockEvent : Detail::EventPayloadBase {};
+
+            /// @brief Win32 fast user switch.
+            struct [[=Platform::WindowsOnly]] SessionUserSwitchEvent : Detail::EventPayloadBase {};
+
+            /// @brief Logoff or shutdown imminent — last chance to persist work.
+            struct SessionEndQueryEvent : Detail::EventPayloadBase {
+                bool isShutdown = false;
+                bool isCritical = false;
+            };
+
+        } // namespace Session
+
+        inline namespace Theme {
+    
+            struct AppearanceChangeEvent : Detail::EventPayloadBase {
+                AppearanceTheme theme = AppearanceTheme::Unknown;
+                uint32_t        accentColorRgba = 0;
+            };
+
+        } // namespace Theme
+
+        inline namespace A13y {
+
+            struct AccessibilityScreenReaderEvent : Detail::EventPayloadBase {
+                bool enabled = false;
+            };
+            struct AccessibilityReducedMotionEvent : Detail::EventPayloadBase {
+                bool enabled = false;
+            };
+            struct AccessibilityHighContrastEvent : Detail::EventPayloadBase {
+                bool enabled = false;
+            };
+
+        } // namespace A13y
+
+        inline namespace Gamepad {
+
+            struct GamepadConnectEvent : Detail::EventPayloadBase {
+                DeviceId    device = DeviceId::Invalid;
+                std::string name;
+                uint32_t    vendorId = 0;
+                uint32_t    productId = 0;
+            };
+
+            struct GamepadDisconnectEvent : Detail::EventPayloadBase {
+                DeviceId device = DeviceId::Invalid;
+            };
+
+            /// @brief Snapshot of a gamepad's full state.
+            struct GamepadStateEvent : TimestampedEvent {
+                DeviceId             device = DeviceId::Invalid;
+                std::array<float, 6> axes{};    ///< LX, LY, RX, RY, LT, RT (normalised).
+                uint32_t             buttons = 0;///< Bit mask, layout = vendor-defined map.
+            };
+
+            struct GamepadBatteryChangeEvent : Detail::EventPayloadBase {
+                DeviceId device = DeviceId::Invalid;
+                float    level = 1;
+                bool     charging = false;
+            };
+
+        } // namespace Gamepad
+
+        inline namespace File {
+
+            struct FileSpecificEvent : Detail::EventPayloadBase {
+                std::string path;
+            };
+
+            struct FileCreatedEvent : FileSpecificEvent {};
+            struct FileDeletedEvent : FileSpecificEvent {};
+
+            struct FileModifiedEvent : FileSpecificEvent {
+                FileChangeFlags changes = FileChangeFlags::None;
+            };
+
+            struct FileRenamedEvent : FileSpecificEvent {
+                std::string newPath;
+            };
+
+            struct FileAttributesChangedEvent : FileSpecificEvent {
+                FileChangeFlags changes = FileChangeFlags::None;
+            };
+
+            /// @brief Watcher could not keep up — caller must rescan the watched root.
+            struct FileWatchOverflowEvent : FileSpecificEvent {};
+
+        } // namespace File
+
+        inline namespace Misc {
+
+            /// @brief OS asked the application to handle an external URL or document.
+            struct UrlOpenRequestEvent : Detail::EventPayloadBase {
+                std::string url; ///< UTF-8 URL or local path.
+            };
+
+            /// @brief Coalesced periodic timer tick (for clients that opt in).
+            struct TimerTickEvent : TimestampedEvent {
+                uint32_t timerId = 0;
+                uint64_t periodNs = 0;
+            };
+
+            /// @brief Generic device hot-plug (USB / monitor / audio endpoint).
+            struct DeviceChangeEvent : Detail::EventPayloadBase {
+                DeviceId    device = DeviceId::Invalid;
+                std::string description;
+                bool        attached = true;
+            };
+
+        } // namespace Misc
 
         // ============================================================================
-        // Reflection Traits — Kind ↔ Payload Mapping
+        // Reflection Traits — Payload Categorisation
         // ============================================================================
 
         namespace Traits {
 
-            /** @brief Concept: `T` is a system-event payload (derives from
-             *         @ref Mashiro::Detail::EventPayloadBase).
+            /**
+             * @brief Concept: `T` is a system-event payload.
+             *
+             * Satisfied by every class that derives (directly or transitively)
+             * from @ref Detail::EventPayloadBase. The marker is the sole
+             * condition for variant membership; the variant materialiser in
+             * `Mashiro::Detail::GetAllEventTypes` reflects on
+             * `Mashiro::Event` and includes every type that satisfies it.
              */
             template<typename T>
-            concept SystemEventPayload = std::is_base_of_v<::Mashiro::Detail::EventPayloadBase, T>;
+            concept SystemEventPayload =
+                std::is_class_v<T> && std::is_base_of_v<Detail::EventPayloadBase, T>;
 
-            /**
-             * @brief Recover the @ref EventKind that payload `T` is bound to.
-             *
-             * @tparam T A payload struct annotated with exactly one @ref PayloadFor.
-             * @return The bound `EventKind`.
-             *
-             * Compile-time. Asserts that the binding annotation exists.
-             */
-            template<SystemEventPayload T>
-            consteval EventKind KindOf() {
-                constexpr auto bound = ::Mashiro::Traits::Anno::Get<PayloadFor>(^^T);
-                static_assert(bound.has_value(),
-                              "Payload must carry a PayloadFor annotation");
-                return bound->kind;
-            }
+            /** @brief Concept: payload `T` targets a window. */
+            template<typename T>
+            concept WindowScoped = std::is_base_of_v<WindowSpecificEvent, T>;
+
+            /** @brief Concept: payload `T` carries a high-resolution capture timestamp. */
+            template<typename T>
+            concept Timestamped = std::is_base_of_v<TimestampedEvent, T>;
 
             /**
              * @brief Recover a payload's supported @ref PlatformBit set.
              *
              * Returns @ref PlatformBit_All when the payload carries no
-             * @ref Platform::OnPlatform annotation (i.e. portable).
+             * `[[=Platform::OnPlatform{...}]]` annotation (i.e. portable).
              */
             template<SystemEventPayload T>
             consteval PlatformBit PlatformsOf() {
-                constexpr auto on = Mashiro::Traits::Anno::Get<Platform::OnPlatform>(^^T);
+                constexpr auto on =
+                    Mashiro::Traits::Anno::Get<Platform::OnPlatform>(^^T);
                 return on ? on->set : PlatformBit_All;
             }
 
@@ -1117,7 +797,8 @@ namespace Mashiro {
              * @tparam P Single-bit platform (e.g. `PlatformBit::Windows`).
              */
             template<SystemEventPayload T, PlatformBit P>
-            inline constexpr bool AvailableOn = (PlatformsOf<T>() & P) != PlatformBit::None;
+            inline constexpr bool AvailableOn =
+                (PlatformsOf<T>() & P) != PlatformBit::None;
 
             /// @brief The unqualified type name of payload `T` (`"WindowResizeEvent"` etc.).
             template<SystemEventPayload T>
@@ -1125,65 +806,225 @@ namespace Mashiro {
                 return std::meta::identifier_of(^^T);
             }
 
-            /// @brief The textual name of an @ref EventKind enumerator.
-            template<EventKind K>
-            consteval std::string_view EventKindName() {
-                return Mashiro::Traits::EnumeratorName<EventKind, K>();
-            }
+            // ================================================================
+            // Bookkeep dispatch — convention-based, type-driven, no annotation
+            // ----------------------------------------------------------------
+            // A Platform-thread Manager opts into bookkeeping for payload `P`
+            // simply by declaring a member function
+            //
+            //     void On(const P&) noexcept;          // (any access)
+            //
+            // where `P` is a @ref SystemEventPayload. No `[[=Bookkeep]]`
+            // annotation, no registry, no per-Manager dispatch table — the
+            // convention *is* the protocol. The concept below lifts that
+            // protocol into the type system so reflection and `std::visit`
+            // can prune non-participating alternatives at compile time.
+            //
+            // Bookkeep handlers are invoked by `Mashiro::DispatchBookkeep`
+            // (defined after `SystemEvent`); managers that wish to keep the
+            // overloads private may friend the dispatcher's templated
+            // function, since it is templated on `M`.
+            // ================================================================
+
+            /**
+             * @brief Concept: manager `M` carries a bookkeep handler for payload `P`.
+             *
+             * Satisfied iff `P` is a @ref SystemEventPayload and the
+             * expression `m.On(p)` is well-formed (and accessible) for an
+             * `M& m` and `const P& p`. The check is purely structural — no
+             * annotation, no marker base on `M` — so any class wishing to
+             * act as a bookkeep target only needs to declare the matching
+             * `On` overloads.
+             */
+            template<typename M, typename P>
+            concept HandlesBookkeep =
+                SystemEventPayload<P> &&
+                requires(M& m, const P& p) { m.On(p); };
 
         } // namespace Traits
 
     } // namespace Event
 
     // ============================================================================
-    // Compile-Time Completeness Check
+    // SystemEvent — variant materialisation
+    // ----------------------------------------------------------------------------
+    // The variant alternatives are discovered by reflecting on `Mashiro::Event`
+    // and selecting every class that satisfies `Event::Traits::SystemEventPayload`.
+    // Order is the declaration order of the namespace; `std::variant::index()` is
+    // therefore *not* a stable persistent id — clients must dispatch on the
+    // payload type via `std::visit` / `std::holds_alternative`, never on the
+    // numeric index. There is no separate enum tag.
     // ============================================================================
 
     /// @cond DOXYGEN_INTERNAL
     namespace Detail {
 
-        /// @brief `true` for class / struct types that carry a @ref PayloadFor
-        ///        annotation. Function / variable templates and other
-        ///        non-class members of `Mashiro` are skipped — `annotations_of`
-        ///        cannot be applied to template entities or non-types.
-        consteval bool IsBoundPayload(std::meta::info m) {
+        /// @brief `true` iff @p m is a complete class type that derives from
+        ///        @ref Event::Detail::EventPayloadBase. Skips templates,
+        ///        function members, and non-class entities so reflecting on
+        ///        @p Mashiro::Event is safe.
+        consteval bool DerivesFromEventBase(std::meta::info m) {
             if (std::meta::is_template(m)) return false;
             if (!std::meta::is_type(m)) return false;
             if (!std::meta::is_class_type(m)) return false;
             if (!std::meta::is_complete_type(m)) return false;
-            return Traits::Anno::Has<PayloadFor>(m);
+            return std::meta::extract<bool>(std::meta::substitute(
+                ^^std::is_base_of_v, {^^Event::Detail::EventPayloadBase, m}));
         }
 
-        /**
-         * @brief Get all event types.
-         */
+        /// @brief Collect every payload type declared in `Mashiro::Event`.
+        ///
+        /// Membership rule: the type must derive from
+        /// @ref Event::Detail::EventPayloadBase **and** must not itself be
+        /// the direct base of any other payload in the same namespace. This
+        /// excludes the abstract mixin/composition bases
+        /// (@ref Event::WindowSpecificEvent, @ref Event::TimestampedEvent,
+        /// @ref Event::KeyEventBase, @ref Event::FileSpecificEvent) without
+        /// any naming convention or extra annotation — the type system
+        /// itself decides what counts as a leaf.
         consteval auto GetAllEventTypes() {
-            std::vector<std::meta::info> seen{};
-            template for (constexpr auto m :
-                          std::define_static_array(
-                              std::meta::members_of(^^Mashiro::Event,
-                                                    std::meta::access_context::unchecked()))) {
-                if constexpr (IsBoundPayload(m)) {
-                     seen.push_back(m);
+            constexpr auto all = std::define_static_array(
+                std::meta::members_of(^^Mashiro::Event, std::meta::access_context::unchecked()));
+
+            std::vector<std::meta::info> candidates{};
+            candidates.push_back(^^std::monostate);
+            template for (constexpr auto m : all) {
+                if constexpr (DerivesFromEventBase(m)) {
+                    candidates.push_back(m);
                 }
             }
 
-            if (seen.size() != kEventKindCount) {
-                throw "Every EventKind must have exactly one payload struct annotated "
-                      "[[=PayloadFor{...}]] in namespace Mashiro";
+            std::vector<std::meta::info> leaves{};
+            for (auto t : candidates) {
+                bool isBase = false;
+                for (auto u : candidates) {
+                    if (u == t) continue;
+                    for (auto b : std::meta::bases_of(u, std::meta::access_context::unchecked())) {
+                        if (std::meta::type_of(b) == t) { isBase = true; break; }
+                    }
+                    if (isBase) break;
+                }
+                if (!isBase) leaves.push_back(t);
             }
-            return seen;
+            return leaves;
         }
 
     } // namespace Detail
     /// @endcond
 
-    /** @brief A summary type for all events. */
-    using SystemEvent = [:std::meta::substitute(^^std::variant, Detail::GetAllEventTypes()):];
+    /**
+     * @brief Sum type of every system-event payload declared in
+     *        @ref Mashiro::Event.
+     *
+     * Materialised at compile time from a reflection scan of the namespace,
+     * gated by @ref Event::Traits::SystemEventPayload. The active alternative
+     * *is* the discriminator — clients dispatch via `std::visit` (typed) or
+     * `std::holds_alternative<T>(e)` (single-type query). The numeric
+     * `index()` is not persistence-stable: inserting a new payload re-orders
+     * subsequent indices. There is intentionally no `EventKind` enum.
+     */
+    using SystemEvent =
+        [:std::meta::substitute(^^std::variant, Detail::GetAllEventTypes()):];
 
-    static_assert(std::variant_size_v<SystemEvent> == kEventKindCount);
+    // ============================================================================
+    // Cross-cutting accessors
+    // ----------------------------------------------------------------------------
+    // Type-driven, sentinel-free queries over a `SystemEvent`. Each accessor visits the active alternative and 
+    // returns the relevant field only when the payload type opted into it via the matching mixin 
+    // (@ref Event::WindowSpecificEvent, @ref Event::TimestampedEvent). The visitor lambda is `if constexpr`-guarded 
+    // by the corresponding concept, so non-participating alternatives never read a field that doesn't exist.
+    // ============================================================================
+
+    /// @brief Unqualified type name of the active alternative
+    ///        (`"WindowResizeEvent"`, `"KeyDownEvent"`, …). Useful for
+    ///        structured logging and assertion messages without committing to
+    ///        a persistent numeric id.
+    [[nodiscard]] inline std::string_view NameOf(const SystemEvent& e) noexcept {
+        return std::visit(
+            [](const auto& payload) noexcept -> std::string_view {
+                using T = std::remove_cvref_t<decltype(payload)>;
+                return Event::Traits::PayloadTypeName<T>();
+            },
+            e);
+    }
+
+    /// @brief Window the event targets, or `std::nullopt` if the active payload
+    ///        is not window-scoped.
+    [[nodiscard]] inline std::optional<WindowId> WindowOf(const SystemEvent& e) noexcept {
+        return std::visit(
+            [](const auto& payload) noexcept -> std::optional<WindowId> {
+                using T = std::remove_cvref_t<decltype(payload)>;
+                if constexpr (Event::Traits::WindowScoped<T>) return payload.windowId;
+                else return std::nullopt;
+            },
+            e);
+    }
+
+    /// @brief Capture timestamp, or `std::nullopt` if the active payload does
+    ///        not carry one.
+    [[nodiscard]] inline std::optional<uint64_t> TimestampOf(const SystemEvent& e) noexcept {
+        return std::visit(
+            [](const auto& payload) noexcept -> std::optional<uint64_t> {
+                using T = std::remove_cvref_t<decltype(payload)>;
+                if constexpr (Event::Traits::Timestamped<T>) return payload.timestamp;
+                else return std::nullopt;
+            },
+            e);
+    }
+
+    // ============================================================================
+    // Convention-based bookkeep dispatch
+    // ----------------------------------------------------------------------------
+    // `EventPump` calls @ref DispatchBookkeep once per Platform-thread Manager
+    // immediately after a `SystemEvent` has been translated and timestamped, and
+    // *before* the event is broadcast on the SPSC channels. The dispatcher
+    // visits the active alternative; for each payload type the manager declares
+    // a matching `On(const P&)` overload (per @ref Event::Traits::HandlesBookkeep),
+    // the corresponding arm is instantiated and the call is a direct member
+    // invocation — no virtual call, no table lookup. Alternatives that the
+    // manager does not handle resolve to the empty `else` branch and are
+    // erased at compile time, so a manager that bookkeeps only window events
+    // pays nothing for the keyboard / IME / display arms.
+    //
+    // The dispatcher is non-throwing: bookkeep handlers are documented to be
+    // `noexcept`, and the `std::visit` lambda body issues no exceptions of its
+    // own. Placing the dispatcher next to @ref NameOf / @ref WindowOf
+    // emphasises that it is one more cross-cutting accessor over the variant —
+    // not a feature private to `EventPump` — so testing rigs can drive it
+    // directly.
+    // ============================================================================
+
+    /**
+     * @brief Type-driven bookkeep dispatch.
+     *
+     * Visits the active alternative of @p e and, for each payload type `P`
+     * that satisfies @ref Event::Traits::HandlesBookkeep with @p mgr, calls
+     * `mgr.On(payload)`. Payloads the manager does not handle are skipped at
+     * compile time via `if constexpr`.
+     *
+     * @tparam M Concrete Manager type (or any class with `On(const P&)`
+     *           overloads); deduced from @p mgr.
+     * @param mgr   Manager instance to receive matching bookkeep callbacks.
+     * @param e     The translated system event.
+     *
+     * @note Must be called on the Platform thread before `EventPump::Broadcast`.
+     *       The bookkeep-before-broadcast invariant guarantees that any
+     *       any-thread query on @p mgr already reflects the post-event state
+     *       by the time a client coroutine wakes from `co_await channel.Next()`.
+     */
+    template<typename M>
+    inline void DispatchBookkeep(M& mgr, const SystemEvent& e) noexcept {
+        std::visit(
+            [&mgr](const auto& payload) noexcept {
+                using P = std::remove_cvref_t<decltype(payload)>;
+                if constexpr (Event::Traits::HandlesBookkeep<M, P>) {
+                    mgr.On(payload);
+                }
+            },
+            e);
+    }
 
     // clang-format on
-    
+
 } // namespace Mashiro
 
