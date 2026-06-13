@@ -135,8 +135,11 @@ TEST_CASE("int128_t reaches its two's-complement extremes", AUTO_TAG) {
     STATIC_REQUIRE(min < 0);
     STATIC_REQUIRE(max > 0);
     STATIC_REQUIRE(min + max == -1);
-    // |min| overflows the positive range, so -min wraps back to min.
-    STATIC_REQUIRE(static_cast<int128_t>(-min) == min);
+    // The magnitude of min is unrepresentable as a positive int128_t; negating
+    // it would be signed overflow (UB), so we verify the bit pattern via the
+    // unsigned domain instead, where the operation is well defined.
+    STATIC_REQUIRE(static_cast<uint128_t>(min) == (static_cast<uint128_t>(1) << 127));
+    STATIC_REQUIRE(-(static_cast<uint128_t>(min)) == (static_cast<uint128_t>(1) << 127));
 }
 
 TEST_CASE("narrowing conversion keeps the low 64 bits", AUTO_TAG) {

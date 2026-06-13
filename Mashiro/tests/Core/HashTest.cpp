@@ -472,11 +472,9 @@ TEST_CASE("Concept: Fnv1a128 satisfies the algorithm concepts", AUTO_TAG) {
     STATIC_REQUIRE(Mashiro::Hashing::StatelessAlgo<Fnv1a128>);
     STATIC_REQUIRE(Mashiro::Hashing::StatefulAlgo<Fnv1a128State>);
     STATIC_REQUIRE(Mashiro::Hashing::AnyAlgo<Fnv1a128>);
-    STATIC_REQUIRE(std::same_as<Mashiro::Hashing::ResultOf<Fnv1a128>, Uuid>);
-    STATIC_REQUIRE(std::same_as<Mashiro::Hashing::ResultOf<Fnv1a128State>, Uuid>);
+    STATIC_REQUIRE(std::same_as<Mashiro::Hashing::ResultOf<Fnv1a128>, uint128_t>);
+    STATIC_REQUIRE(std::same_as<Mashiro::Hashing::ResultOf<Fnv1a128State>, uint128_t>);
     STATIC_REQUIRE(Mashiro::Hashing::kResultBits<Fnv1a128> == 128);
-    STATIC_REQUIRE(Mashiro::Hashing::HashResult<Uuid>);
-    STATIC_REQUIRE(Mashiro::Hashing::HashResult<uint64_t>);
 }
 
 TEST_CASE("Fnv1a128 empty input returns offset basis", AUTO_TAG) {
@@ -490,7 +488,7 @@ TEST_CASE("Fnv1a128 is deterministic and input-sensitive", AUTO_TAG) {
     constexpr auto c = DoHash(std::string_view("foobaz"), Fnv1a128{});
     STATIC_REQUIRE(a == b);
     STATIC_REQUIRE(a != c);
-    STATIC_REQUIRE(std::same_as<decltype(a), const Uuid>);
+    STATIC_REQUIRE(std::same_as<decltype(a), const uint128_t>);
 }
 
 TEST_CASE("Fnv1a128 stateful matches stateless for string", AUTO_TAG) {
