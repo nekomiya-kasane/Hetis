@@ -11,6 +11,7 @@
 #   HAVE_ANNOTATIONS           P3394  Annotations for Reflection (MANDATORY)
 #   HAVE_CONSTEVAL_BLOCKS       P3289  consteval { } blocks       (MANDATORY)
 #   HAVE_EXPANSION_STATEMENTS   P1306  template for               (MANDATORY)
+#   HAVE_INT128                 ----  __int128 / __uint128_t      (MANDATORY)
 #
 # (*) P3394 was plenary-approved into the C++26 IS working draft (Sofia, 2025),
 #     so it is a standard feature. Per project policy it is therefore required;
@@ -184,6 +185,26 @@ static_assert(hetisCountViaExpansion() == 3);
 int main() { return 0; }
 " HAVE_EXPANSION_STATEMENTS)
 
+# --- 128-bit integers (__int128 / __uint128_t compiler extension) ------------
+# Not an ISO type, but the project's 128-bit hash tier (Hashing::Uuid) and the
+# Mashiro::uint128_t / int128_t aliases depend on it. The probe verifies the
+# extension exists, has the expected 16-byte width, and supports the arithmetic
+# the codebase relies on. Treated as mandatory: configure fails loudly on a
+# toolchain that lacks it rather than silently dropping the 128-bit facilities.
+check_cxx_source_compiles("
+int main() {
+    __uint128_t u = 0;
+    __int128 s = 0;
+    static_assert(sizeof(__uint128_t) == 16, \"expected 16-byte __uint128_t\");
+    static_assert(sizeof(__int128) == 16, \"expected 16-byte __int128\");
+    u = (static_cast<__uint128_t>(0x0123456789abcdefULL) << 64) | 0xfedcba9876543210ULL;
+    u *= 3u;
+    u ^= 1u;
+    s = -s;
+    return static_cast<int>((u >> 120) + s);
+}
+" HAVE_INT128)
+
 # --- P3394: annotation structural value --------------------------------------
 check_cxx_source_compiles("
 #include <meta>
@@ -233,4 +254,13 @@ if(NOT HAVE_EXPANSION_STATEMENTS)
         "        Ensure -freflection-latest is enabled.")
 endif()
 
+if(NOT HAVE_INT128)
+    message(FATAL_ERROR
+        "[Hetis] 128-bit integers (__int128 / __uint128_t) are required but the compiler probe failed.\n"
+        "        The project's 128-bit hash tier (Hashing::Uuid) and the\n"
+        "        Mashiro::uint128_t / int128_t aliases depend on this compiler extension.\n"
+        "        Use a toolchain that provides 16-byte __int128 / __uint128_t.")
+endif()
+
 message(STATUS "[Hetis] C++26 reflection features: P2996, P3491, P3394, P3289, P1306 -> all present (required).")
+message(STATUS "[Hetis] 128-bit integer extension (__int128 / __uint128_t) -> present (required).")
