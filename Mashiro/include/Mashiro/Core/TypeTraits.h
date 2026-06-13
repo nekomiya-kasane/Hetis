@@ -16,7 +16,11 @@
  *
  * @par Base-class reflection
  * - `Bases<T>` / `BasesCount<T>` / `BaseType<T,I>` — direct base introspection.
- * - `RootClass<T>` / `SingleInheritedClass<T>` / `UniqueIdentifier<T>`.
+ * - `RootClass<T>` / `SingleInheritedClass<T>`.
+ * - `ChainedIdentifier<T>` / `ChainedDisplayString<T>` — dotted root-to-derived
+ *   inheritance path; `ScopedIdentifier<T>` / `ScopedDisplayString<T>` — dotted
+ *   enclosing-scope path. `*Identifier` use `identifier_of`; `*DisplayString`
+ *   use `display_string_of` (keeping template arguments).
  *
  * @par Enum reflection
  * - `Enumerators<T>` / `EnumeratorsCount<T>` — reflected enumerators.
@@ -531,8 +535,9 @@ namespace Mashiro {
                 return true;
             }
 
-            /// @brief Build the dotted root-to-derived identifier path of @p type.
-            consteval std::string_view BuildUniqueIdentifier(std::meta::info type) {
+            /// @brief Collect the single-inheritance chain of @p type, derived-first
+            ///        (i.e. @p type, its base, its base's base, ...).
+            consteval std::vector<std::meta::info> InheritanceChain(std::meta::info type) {
                 std::vector<std::meta::info> chain; // derived-first
                 chain.push_back(type);
                 auto bases = std::meta::bases_of(type, std::meta::access_context::unchecked());
@@ -541,18 +546,12 @@ namespace Mashiro {
                     chain.push_back(type);
                     bases = std::meta::bases_of(type, std::meta::access_context::unchecked());
                 }
-                std::string res;
-                for (size_t i = chain.size(); i-- > 0;) {
-                    if (!res.empty()) {
-                        res += '.';
-                    }
-                    res += std::meta::identifier_of(chain[i]);
-                }
-                return std::define_static_string(res);
+                return chain;
             }
 
-            /// @brief Build the dotted outermost-to-innermost scope path of @p type.
-            consteval std::string_view BuildScopedIdentifier(std::meta::info type) {
+            /// @brief Collect the enclosing named-scope chain of @p type, innermost-first.
+            ///        Stops at the global namespace or any unnamed (anonymous) scope.
+            consteval std::vector<std::meta::info> ScopeChain(std::meta::info type) {
                 std::vector<std::meta::info> chain; // innermost-first
                 chain.push_back(type);
                 auto parent = std::meta::parent_of(type);
@@ -560,12 +559,29 @@ namespace Mashiro {
                     chain.push_back(parent);
                     parent = std::meta::parent_of(parent);
                 }
+                return chain;
+            }
+
+            /// @brief Join a derived-/innermost-first reflection @p chain into a dotted
+            ///        outermost-first path.
+            ///
+            /// Each component is rendered with @c std::meta::display_string_of when
+            /// @p useDisplay is @c true (so template-ids keep their arguments and
+            /// components without a plain identifier still render), otherwise with
+            /// @c std::meta::identifier_of. The result is promoted to static storage
+            /// via @c std::define_static_string.
+            consteval std::string_view JoinChain(const std::vector<std::meta::info>& chain,
+                                                 bool useDisplay) {
                 std::string res;
                 for (size_t i = chain.size(); i-- > 0;) {
                     if (!res.empty()) {
                         res += '.';
                     }
-                    res += std::meta::identifier_of(chain[i]);
+                    if (useDisplay) {
+                        res += std::meta::display_string_of(chain[i]);
+                    } else {
+                        res += std::meta::identifier_of(chain[i]);
+                    }
                 }
                 return std::define_static_string(res);
             }
@@ -585,15 +601,34 @@ namespace Mashiro {
         /**
          * @brief Stable, dotted root-to-derived identifier path for a linear class.
          *
-         * For `struct A {}; struct B : A {}; struct C : B {};`, `UniqueIdentifier<C>`
-         * is `"A.B.C"`. Backed by `std::define_static_string`, so the resulting
-         * `std::string_view` has static storage duration and is usable as a stable
-         * compile-time key (e.g. for type registries or serialisation tags).
+         * For `struct A {}; struct B : A {}; struct C : B {};`, `ChainedIdentifier<C>`
+         * is `"A.B.C"`. Each level is rendered with `identifier_of`, so every base
+         * in the chain must have a plain identifier (template-id bases are rejected;
+         * use @ref ChainedDisplayString for those). Backed by
+         * `std::define_static_string`, so the resulting `std::string_view` has static
+         * storage duration and is usable as a stable compile-time key (e.g. for type
+         * registries or serialisation tags).
          *
          * @tparam T A @ref SingleInheritedClass.
          */
         template<SingleInheritedClass T>
-        inline constexpr std::string_view UniqueIdentifier = Detail::BuildUniqueIdentifier(^^T);
+        inline constexpr std::string_view ChainedIdentifier =
+            Detail::JoinChain(Detail::InheritanceChain(^^T), /*useDisplay=*/false);
+
+        /**
+         * @brief Stable, dotted root-to-derived display path for a linear class.
+         *
+         * Like @ref ChainedIdentifier, but renders each level with
+         * `display_string_of` instead of `identifier_of`. This keeps template
+         * arguments on the path (e.g. a base `Tagged<int>` contributes
+         * `"Tagged<int>"`) and tolerates bases that lack a plain identifier. For
+         * plain (non-template) chains the result matches @ref ChainedIdentifier.
+         *
+         * @tparam T A @ref SingleInheritedClass.
+         */
+        template<SingleInheritedClass T>
+        inline constexpr std::string_view ChainedDisplayString =
+            Detail::JoinChain(Detail::InheritanceChain(^^T), /*useDisplay=*/true);
 
         /**
          * @brief Stable, dotted enclosing-scope path for a type.
@@ -610,13 +645,28 @@ namespace Mashiro {
          * `std::define_static_string`, so the `std::string_view` has static
          * storage duration and is usable as a stable compile-time key.
          *
-         * Unlike @ref UniqueIdentifier (which walks the inheritance chain), this
+         * Unlike @ref ChainedIdentifier (which walks the inheritance chain), this
          * walks the lexical nesting chain; the two are orthogonal.
          *
          * @tparam T A class or enumeration type.
          */
         template<typename T> requires (std::is_class_v<T> || std::is_enum_v<T>)
-        inline constexpr std::string_view ScopedIdentifier = Detail::BuildScopedIdentifier(^^T);
+        inline constexpr std::string_view ScopedIdentifier =
+            Detail::JoinChain(Detail::ScopeChain(^^T), /*useDisplay=*/false);
+
+        /**
+         * @brief Stable, dotted enclosing-scope display path for a type.
+         *
+         * Like @ref ScopedIdentifier, but renders each enclosing scope with
+         * `display_string_of` instead of `identifier_of`, so a template-id
+         * component keeps its arguments. For plain (non-template) scopes the result
+         * matches @ref ScopedIdentifier.
+         *
+         * @tparam T A class or enumeration type.
+         */
+        template<typename T> requires (std::is_class_v<T> || std::is_enum_v<T>)
+        inline constexpr std::string_view ScopedDisplayString =
+            Detail::JoinChain(Detail::ScopeChain(^^T), /*useDisplay=*/true);
 
     } // namespace Traits
 

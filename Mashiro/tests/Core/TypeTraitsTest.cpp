@@ -81,6 +81,14 @@ namespace {
         virtual ~Virtual() = default;
     };
 
+    // --- Fixtures: templated inheritance (identifier vs display differ) -------
+
+    template <typename U>
+    struct Tagged {
+        U value;
+    };
+    struct IntHolder : Tagged<int> {};
+
     // --- Fixtures: enums -----------------------------------------------------
 
     enum class Color : std::uint8_t {
@@ -192,10 +200,23 @@ TEST_CASE("RootClass and SingleInheritedClass classify hierarchies", AUTO_TAG) {
     STATIC_REQUIRE_FALSE(T::SingleInheritedClass<Diamond>);
 }
 
-TEST_CASE("UniqueIdentifier builds a dotted root-to-derived path", AUTO_TAG) {
-    STATIC_REQUIRE(T::UniqueIdentifier<Root> == "Root");
-    STATIC_REQUIRE(T::UniqueIdentifier<Middle> == "Root.Middle");
-    STATIC_REQUIRE(T::UniqueIdentifier<Leaf> == "Root.Middle.Leaf");
+TEST_CASE("ChainedIdentifier builds a dotted root-to-derived path", AUTO_TAG) {
+    STATIC_REQUIRE(T::ChainedIdentifier<Root> == "Root");
+    STATIC_REQUIRE(T::ChainedIdentifier<Middle> == "Root.Middle");
+    STATIC_REQUIRE(T::ChainedIdentifier<Leaf> == "Root.Middle.Leaf");
+}
+
+TEST_CASE("ChainedDisplayString keeps template arguments on the chain", AUTO_TAG) {
+    // For a plain (non-template) chain, each component's display string equals
+    // its identifier, so the path matches ChainedIdentifier exactly.
+    STATIC_REQUIRE(T::ChainedDisplayString<Root> == "Root");
+    STATIC_REQUIRE(T::ChainedDisplayString<Middle> == "Root.Middle");
+    STATIC_REQUIRE(T::ChainedDisplayString<Leaf> == "Root.Middle.Leaf");
+    STATIC_REQUIRE(T::ChainedDisplayString<Leaf> == T::ChainedIdentifier<Leaf>);
+
+    // A template base contributes its argument list (Tagged<int>), which
+    // identifier_of cannot render -- this is what ChainedDisplayString adds.
+    STATIC_REQUIRE(T::ChainedDisplayString<IntHolder> == "Tagged<int>.IntHolder");
 }
 
 // Named scopes for ScopedIdentifier (anonymous-namespace fixtures would
@@ -209,6 +230,8 @@ namespace ScopeFix {
     namespace Inner {
         struct Bar {};
     } // namespace Inner
+    template <typename U>
+    struct Boxed {};
 } // namespace ScopeFix
 
 TEST_CASE("ScopedIdentifier builds a dotted enclosing-scope path", AUTO_TAG) {
@@ -228,8 +251,31 @@ TEST_CASE("ScopedIdentifier builds a dotted enclosing-scope path", AUTO_TAG) {
     // Enumeration types are accepted as well as class types.
     STATIC_REQUIRE(T::ScopedIdentifier<ScopeFix::Hue> == "ScopeFix.Hue");
 
-    // Orthogonal to UniqueIdentifier: scope nesting, not inheritance.
+    // Orthogonal to ChainedIdentifier: scope nesting, not inheritance.
     STATIC_REQUIRE(T::ScopedIdentifier<Leaf> == "Leaf");
+}
+
+TEST_CASE("ScopedDisplayString keeps template arguments on the scope path", AUTO_TAG) {
+    // Anonymous-namespace types stop at the unnamed scope: bare name only.
+    STATIC_REQUIRE(T::ScopedDisplayString<Root> == "Root");
+    STATIC_REQUIRE(T::ScopedDisplayString<Leaf> == "Leaf");
+
+    // For non-template scopes, each component's display string equals its
+    // identifier, so the path matches ScopedIdentifier exactly.
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Foo> == "ScopeFix.Foo");
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Inner::Bar> ==
+                   "ScopeFix.Inner.Bar");
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Outer> == "ScopeFix.Outer");
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Outer::Inner> ==
+                   "ScopeFix.Outer.Inner");
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Hue> == "ScopeFix.Hue");
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Foo> ==
+                   T::ScopedIdentifier<ScopeFix::Foo>);
+
+    // A template specialization keeps its argument list in the leaf component,
+    // which identifier_of cannot render -- this is what ScopedDisplayString adds.
+    STATIC_REQUIRE(T::ScopedDisplayString<ScopeFix::Boxed<int>> ==
+                   "ScopeFix.Boxed<int>");
 }
 
 // =============================================================================
