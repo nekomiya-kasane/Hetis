@@ -45,18 +45,22 @@
  *       non-atomic shared storage used by @ref SpscRingBuffer.h.
  *
  * ### Compile-time guarantees (C++26 reflection)
- * Members are tagged with @ref Concurrency::SeqCounter / @ref Concurrency::SeqPayload
- * annotations. @ref Concurrency::AuditSeqLockLayout proves — entirely at compile
- * time via P2996 static reflection — that the counter starts a cache line, the
- * object occupies whole cache lines (no *external* false sharing), and that exactly
- * one counter/payload pair exists. The audit runs in the `consteval` block at the
- * end of this header for representative instantiations.
+ * Both data members are written only by the single writer thread, so each is tagged
+ * with the project-wide @ref Concurrency::ProducerOwned contention domain (see
+ * @ref FalseSharing.h). Sharing one cache line is therefore legitimate — indeed
+ * desirable, since a reader's fast path then touches a single line. The `consteval`
+ * block at the end of this header proves, via P2996 static reflection, that the
+ * layout is free of internal false sharing (@ref Concurrency::AuditFalseSharing),
+ * occupies whole cache lines (no *external* false sharing,
+ * @ref Concurrency::OccupiesWholeLines), starts a line
+ * (@ref Concurrency::DomainStartsLine), and spans exactly one line
+ * (@ref Concurrency::DomainLineSpan).
  *
  * @ingroup Core
  */
 #pragma once
 
-#include "TypeTraits.h"
+#include "Mashiro/Core/FalseSharing.h"
 
 #include <atomic>
 #include <bit>
@@ -70,109 +74,6 @@
 #include <utility>
 
 namespace Mashiro {
-
-    // =========================================================================
-    // Concurrency role annotations + reflection-driven SeqLock layout audit
-    // (reopens the Concurrency namespace introduced in SpscRingBuffer.h)
-    // =========================================================================
-
-    /**
-     * @brief Thread-ownership annotations and compile-time layout audits.
-     *
-     * The seqlock additions below tag the two structural members of a `SeqLock`
-     * so that @ref AuditSeqLockLayout can verify the physical layout with C++26
-     * static reflection.
-     */
-    namespace Concurrency {
-
-        struct SeqCounter {}; ///< Annotation: the atomic sequence counter of a `SeqLock`.
-        struct SeqPayload {}; ///< Annotation: the protected snapshot payload of a `SeqLock`.
-
-        /**
-         * @brief Compile-time description of a `SeqLock`'s physical memory layout.
-         *
-         * Produced by @ref AnalyzeSeqLockLayout; exposed via `SeqLock::Layout()` so
-         * callers can assert layout properties (e.g. read locality) at compile time.
-         */
-        struct SeqLockLayoutReport {
-            size_t cacheLine = 0;       ///< Cache-line granularity used for the audit.
-            size_t counterOffset = 0;   ///< Byte offset of the sequence counter.
-            size_t counterSize = 0;     ///< Size of the sequence counter.
-            size_t payloadOffset = 0;   ///< Byte offset of the payload.
-            size_t payloadSize = 0;     ///< Size of the payload.
-            size_t readCacheLines = 0;  ///< Distinct cache lines a reader's fast path touches.
-            bool hasCounter = false;    ///< A `SeqCounter`-tagged member was found.
-            bool hasPayload = false;    ///< A `SeqPayload`-tagged member was found.
-            bool singleCounter = true;  ///< Exactly one `SeqCounter` member.
-            bool singlePayload = true;  ///< Exactly one `SeqPayload` member.
-            bool everyMemberTagged = true; ///< Every NSDM carries exactly one role tag.
-            bool counterStartsLine = false; ///< The counter begins a cache line.
-            bool payloadCoLocated = false;  ///< Counter and payload share a cache line.
-            bool wholeLineAligned = false;  ///< The object is aligned to whole cache lines.
-            bool valid = false;             ///< All structural invariants hold.
-        };
-
-        /**
-         * @brief Reflect over @p L's non-static data members and compute its layout report.
-         * @tparam L A `SeqLock` specialisation (any reflectable, complete class works).
-         */
-        template<typename L>
-        consteval SeqLockLayoutReport AnalyzeSeqLockLayout() {
-            SeqLockLayoutReport r{};
-            const size_t line = Platform::kCacheLineSize;
-            r.cacheLine = line;
-            for (auto member : Traits::Members<L>) {
-                const bool counter = Traits::Anno::Has<SeqCounter>(member);
-                const bool payload = Traits::Anno::Has<SeqPayload>(member);
-                if (int{counter} + int{payload} != 1) {
-                    r.everyMemberTagged = false; // member with zero or both role tags
-                    continue;
-                }
-                const size_t offset = static_cast<size_t>(std::meta::offset_of(member).bytes);
-                const size_t size = std::meta::size_of(std::meta::type_of(member));
-                if (counter) {
-                    if (r.hasCounter) {
-                        r.singleCounter = false;
-                    }
-                    r.hasCounter = true;
-                    r.counterOffset = offset;
-                    r.counterSize = size;
-                } else {
-                    if (r.hasPayload) {
-                        r.singlePayload = false;
-                    }
-                    r.hasPayload = true;
-                    r.payloadOffset = offset;
-                    r.payloadSize = size;
-                }
-            }
-
-            r.wholeLineAligned = (alignof(L) >= line) && (alignof(L) % line == 0);
-            r.counterStartsLine = r.hasCounter && (r.counterOffset % line == 0);
-            r.payloadCoLocated = r.hasCounter && r.hasPayload &&
-                                 (r.counterOffset / line == r.payloadOffset / line);
-            if (r.hasCounter && r.hasPayload) {
-                const size_t firstLine = r.counterOffset / line;
-                const size_t lastByte = r.payloadOffset + (r.payloadSize ? r.payloadSize - 1 : 0);
-                const size_t lastLine = lastByte / line;
-                r.readCacheLines = lastLine >= firstLine ? lastLine - firstLine + 1 : 1;
-            }
-            r.valid = r.everyMemberTagged && r.hasCounter && r.hasPayload && r.singleCounter &&
-                      r.singlePayload && r.wholeLineAligned && r.counterStartsLine;
-            return r;
-        }
-
-        /**
-         * @brief `consteval` predicate: @p L is a well-formed, cache-friendly seqlock.
-         * @return true iff exactly one counter/payload pair exists, the counter starts
-         *         a cache line, and the object is aligned to whole cache lines.
-         */
-        template<typename L>
-        consteval bool AuditSeqLockLayout() {
-            return AnalyzeSeqLockLayout<L>().valid;
-        }
-
-    } // namespace Concurrency
 
     // =========================================================================
     // SeqLock<T>
@@ -298,15 +199,15 @@ namespace Mashiro {
         }
 
         /// @brief Compile-time physical-layout report for this specialisation.
-        [[nodiscard]] static consteval Concurrency::SeqLockLayoutReport Layout() {
-            return Concurrency::AnalyzeSeqLockLayout<SeqLock>();
+        [[nodiscard]] static consteval Concurrency::CacheLayoutReport Layout() {
+            return Concurrency::AnalyzeCacheLayout<SeqLock>();
         }
         /// @}
 
     private:
-        [[=Concurrency::SeqCounter{}]] alignas(Platform::kCacheLineSize)
+        [[=Concurrency::ProducerOwned{}]] alignas(Platform::kCacheLineSize)
         std::atomic<SequenceType> seq_{0};
-        [[=Concurrency::SeqPayload{}]] T data_{};
+        [[=Concurrency::ProducerOwned{}]] T data_{};
 
         static_assert(std::atomic<SequenceType>::is_always_lock_free,
                       "SeqLock requires a lock-free sequence counter");
@@ -318,11 +219,26 @@ namespace Mashiro {
 
     /** @cond INTERNAL */
     consteval {
-        static_assert(Concurrency::AuditSeqLockLayout<SeqLock<std::uint64_t>>(),
-                      "SeqLock<uint64_t> failed the compile-time layout audit");
-        static_assert(Concurrency::AuditSeqLockLayout<SeqLock<double>>(),
-                      "SeqLock<double> failed the compile-time layout audit");
-        static_assert(SeqLock<std::uint64_t>::Layout().readCacheLines == 1,
+        using Concurrency::AuditFalseSharing;
+        using Concurrency::OccupiesWholeLines;
+        using Concurrency::DomainStartsLine;
+        using Concurrency::DomainLineSpan;
+        using Concurrency::ProducerOwned;
+
+        // Internal false sharing: the counter and payload share the single writer's
+        // domain, so co-locating them on one line is provably conflict-free.
+        static_assert(AuditFalseSharing<SeqLock<std::uint64_t>>(),
+                      "SeqLock<uint64_t> failed the internal false-sharing audit");
+        static_assert(AuditFalseSharing<SeqLock<double>>(),
+                      "SeqLock<double> failed the internal false-sharing audit");
+        // External false sharing: whole-line occupancy keeps array neighbours apart.
+        static_assert(OccupiesWholeLines<SeqLock<std::uint64_t>>(),
+                      "SeqLock<uint64_t> must occupy whole cache lines");
+        // The writer's state begins a cache line...
+        static_assert(DomainStartsLine<SeqLock<std::uint64_t>, ProducerOwned>(),
+                      "SeqLock counter must start a cache line");
+        // ...and a small payload shares that one line, so a reader touches a single line.
+        static_assert(DomainLineSpan<SeqLock<std::uint64_t>, ProducerOwned>() == 1,
                       "small SeqLock payloads must share the counter's cache line");
     }
     /** @endcond */

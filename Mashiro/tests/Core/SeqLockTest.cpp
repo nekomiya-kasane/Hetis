@@ -298,29 +298,31 @@ TEST_CASE("SeqLock: hot-path operations are noexcept", AUTO_TAG) {
 }
 
 TEST_CASE("SeqLock: reflection layout audit proves a cache-friendly layout", AUTO_TAG) {
-	STATIC_REQUIRE(Concurrency::AuditSeqLockLayout<SeqLock<std::uint64_t>>());
-	STATIC_REQUIRE(Concurrency::AuditSeqLockLayout<SeqLock<double>>());
-	STATIC_REQUIRE(Concurrency::AuditSeqLockLayout<SeqLock<Wide>>());
-	STATIC_REQUIRE(Concurrency::AuditSeqLockLayout<SeqLock<Huge256>>());
+	STATIC_REQUIRE(Concurrency::AuditFalseSharing<SeqLock<std::uint64_t>>());
+	STATIC_REQUIRE(Concurrency::AuditFalseSharing<SeqLock<double>>());
+	STATIC_REQUIRE(Concurrency::AuditFalseSharing<SeqLock<Wide>>());
+	STATIC_REQUIRE(Concurrency::AuditFalseSharing<SeqLock<Huge256>>());
+	// Whole-line occupancy rules out external false sharing between array neighbours.
+	STATIC_REQUIRE(Concurrency::OccupiesWholeLines<SeqLock<std::uint64_t>>());
+	STATIC_REQUIRE(Concurrency::OccupiesWholeLines<SeqLock<Huge256>>());
 }
 
 TEST_CASE("SeqLock: Layout() exposes compile-time layout facts", AUTO_TAG) {
+	using Concurrency::ProducerOwned;
+
 	constexpr auto small = SeqLock<std::uint64_t>::Layout();
 	STATIC_REQUIRE(small.valid);
-	STATIC_REQUIRE(small.hasCounter);
-	STATIC_REQUIRE(small.hasPayload);
-	STATIC_REQUIRE(small.singleCounter);
-	STATIC_REQUIRE(small.singlePayload);
-	STATIC_REQUIRE(small.everyMemberTagged);
-	STATIC_REQUIRE(small.counterStartsLine);
-	STATIC_REQUIRE(small.wholeLineAligned);
-	STATIC_REQUIRE(small.payloadCoLocated);
-	// A small payload shares the counter's cache line: one line per read.
-	STATIC_REQUIRE(small.readCacheLines == 1);
+	STATIC_REQUIRE(small.classifiedAll);  // every member carries the single-writer domain
+	STATIC_REQUIRE(!small.hasConflict);   // one writer, so co-location is conflict-free
+	STATIC_REQUIRE(small.memberCount == 2);
+	STATIC_REQUIRE(small.occupiesWholeLines);
+	// The writer's state begins a cache line, and a small payload shares it: one line per read.
+	STATIC_REQUIRE(Concurrency::DomainStartsLine<SeqLock<std::uint64_t>, ProducerOwned>());
+	STATIC_REQUIRE(Concurrency::DomainLineSpan<SeqLock<std::uint64_t>, ProducerOwned>() == 1);
 
 	// A 256-byte payload necessarily spans more than one cache line
 	// (robust for 64- and 128-byte interference sizes).
 	constexpr auto huge = SeqLock<Huge256>::Layout();
 	STATIC_REQUIRE(huge.valid);
-	STATIC_REQUIRE(huge.readCacheLines >= 2);
+	STATIC_REQUIRE(Concurrency::DomainLineSpan<SeqLock<Huge256>, ProducerOwned>() >= 2);
 }

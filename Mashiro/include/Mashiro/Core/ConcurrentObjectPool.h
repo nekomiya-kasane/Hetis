@@ -30,16 +30,20 @@
  * a live handle without a detectable generation change.
  *
  * ### Compile-time guarantees (C++26 reflection)
- * Members are tagged with @ref Concurrency::FreeListHead / @ref Concurrency::PoolStorage
- * annotations; @ref Concurrency::AuditPoolLayout proves — via P2996 static
- * reflection — that the contended head starts its own cache line and that exactly
- * one head exists. The audit runs in the `consteval` block at the end of this
- * header for representative instantiations.
+ * The contended free-list head is tagged with the project-wide
+ * @ref Concurrency::Contended domain and the cold SoA storage with
+ * @ref Concurrency::SharedStorage (see @ref FalseSharing.h).
+ * @ref Concurrency::AuditFalseSharing proves — via P2996 static reflection — that
+ * these two writer domains never share a cache line, and
+ * @ref Concurrency::DomainStartsLine that the head begins its own line. The audit
+ * runs in the `consteval` block at the end of this header for representative
+ * instantiations.
  *
  * @ingroup Core
  */
 #pragma once
 
+#include "Mashiro/Core/FalseSharing.h"
 #include "Mashiro/Core/TypeTraits.h"
 #include "Mashiro/Core/Result.h"
 
@@ -146,92 +150,6 @@ namespace Mashiro {
     } // namespace Detail
 
     // =========================================================================
-    // Concurrency role annotations + reflection-driven pool layout audit
-    // (reopens the Concurrency namespace introduced in SpscRingBuffer.h)
-    // =========================================================================
-
-    namespace Concurrency {
-
-        struct FreeListHead {}; ///< Annotation: the contended atomic free-list head word.
-        struct PoolStorage {};  ///< Annotation: cold SoA storage / bookkeeping members.
-
-        /**
-         * @brief Compile-time description of a pool's physical memory layout.
-         *
-         * Produced by @ref AnalyzePoolLayout and surfaced via
-         * `ConcurrentObjectPool::Layout()` so callers can assert that the
-         * contended head is isolated on its own cache line at compile time.
-         */
-        struct PoolLayoutReport {
-            size_t cacheLine = 0;        ///< Cache-line granularity used for the audit.
-            size_t headOffset = 0;       ///< Byte offset of the free-list head.
-            bool hasHead = false;        ///< A `FreeListHead`-tagged member was found.
-            bool singleHead = true;      ///< Exactly one `FreeListHead` member.
-            bool everyMemberTagged = true; ///< Every NSDM carries exactly one role tag.
-            bool headStartsLine = false; ///< The head begins a cache line.
-            bool headIsolated = true;    ///< No `PoolStorage` member shares the head's line.
-            bool valid = false;          ///< All structural invariants hold.
-        };
-
-        /**
-         * @brief Reflect over @p P's non-static data members and compute its layout report.
-         * @tparam P A `ConcurrentObjectPool` specialisation (any complete class works).
-         */
-        template<typename P>
-        consteval PoolLayoutReport AnalyzePoolLayout() {
-            PoolLayoutReport r{};
-            const size_t line = Platform::kCacheLineSize;
-            r.cacheLine = line;
-            size_t headLine = 0;
-            for (auto member : Traits::Members<P>) {
-                const bool head = Traits::Anno::Has<FreeListHead>(member);
-                const bool storage = Traits::Anno::Has<PoolStorage>(member);
-                if (int{head} + int{storage} != 1) {
-                    r.everyMemberTagged = false;
-                    continue;
-                }
-                const size_t offset = static_cast<size_t>(std::meta::offset_of(member).bytes);
-                if (head) {
-                    if (r.hasHead) {
-                        r.singleHead = false;
-                    }
-                    r.hasHead = true;
-                    r.headOffset = offset;
-                    headLine = offset / line;
-                }
-            }
-            r.headStartsLine = r.hasHead && (r.headOffset % line == 0);
-            if (r.hasHead) {
-                for (auto member : Traits::Members<P>) {
-                    if (!Traits::Anno::Has<PoolStorage>(member)) {
-                        continue;
-                    }
-                    const size_t offset = static_cast<size_t>(std::meta::offset_of(member).bytes);
-                    const size_t size = std::meta::size_of(std::meta::type_of(member));
-                    const size_t first = offset / line;
-                    const size_t last = (offset + (size ? size - 1 : 0)) / line;
-                    if (first <= headLine && headLine <= last) {
-                        r.headIsolated = false;
-                    }
-                }
-            }
-            r.valid = r.everyMemberTagged && r.hasHead && r.singleHead && r.headStartsLine &&
-                      r.headIsolated;
-            return r;
-        }
-
-        /**
-         * @brief `consteval` predicate: @p P isolates its contended free-list head.
-         * @return true iff exactly one head exists, it starts a cache line and no
-         *         cold storage member shares that line.
-         */
-        template<typename P>
-        consteval bool AuditPoolLayout() {
-            return AnalyzePoolLayout<P>().valid;
-        }
-
-    } // namespace Concurrency
-
     // =========================================================================
     // PoolHandle — versioned, type-erased reference into a pool slot
     // =========================================================================
@@ -290,22 +208,22 @@ namespace Mashiro {
 
     static_assert(std::is_trivially_copyable_v<PoolHandle> && sizeof(PoolHandle) == 4);
 
+    /**
+     * @brief Optional runtime counters, compiled in only when `enableStats`.
+     *
+     * Kept in a tiny struct so the storage can hold a `[[msvc::no_unique_address]]`
+     * member that is empty (zero cost) when stats are disabled.
+     */
+    struct PoolStats {
+        std::atomic<uint64_t> acquires{0}; ///< Successful slot acquisitions.
+        std::atomic<uint64_t> releases{0}; ///< Slot releases.
+        std::atomic<uint64_t> failures{0}; ///< Acquisitions that hit an empty pool.
+    };
+
+    /// @brief Empty stand-in used when stats are disabled (occupies no space).
+    struct NoPoolStats {};
+
     namespace Detail {
-
-        /**
-         * @brief Optional runtime counters, compiled in only when `enableStats`.
-         *
-         * Kept in a tiny struct so the storage can hold a `[[msvc::no_unique_address]]`
-         * member that is empty (zero cost) when stats are disabled.
-         */
-        struct PoolStats {
-            std::atomic<uint64_t> acquires{0}; ///< Successful slot acquisitions.
-            std::atomic<uint64_t> releases{0}; ///< Slot releases.
-            std::atomic<uint64_t> failures{0}; ///< Acquisitions that hit an empty pool.
-        };
-
-        /// @brief Empty stand-in used when stats are disabled (occupies no space).
-        struct NoPoolStats {};
 
         /**
          * @brief Inline (object-embedded) SoA storage for a pool.
@@ -315,7 +233,7 @@ namespace Mashiro {
          * per-slot generations. Each array starts on its own cache line so a write
          * to one array (e.g. a `links` update on the alloc path) never invalidates
          * a neighbouring array's line at the array boundary — only the head's line
-         * is shared by design (proven by @ref Concurrency::AuditPoolLayout).
+         * is shared by design (proven by @ref Concurrency::AuditFalseSharing).
          * Payload bytes are deliberately uninitialised — every slot is placement-new
          * constructed before it is read. Optional @p Stats live here too (empty and
          * free when disabled) so the pool object itself keeps exactly two members:
@@ -392,6 +310,10 @@ namespace Mashiro {
 
     } // namespace Detail
 
+    template<typename T, size_t Capacity, size_t Align = 16, typename Stats = NoPoolStats, bool Inline = true>
+    using PoolStore = Detail::PoolStoreFor<T, Capacity, Align, Stats, 
+                                           Inline ? Detail::BackingKind::Inline : Detail::BackingKind::Heap>;
+
     // =========================================================================
     // ConcurrentObjectPool<T, Config>
     // =========================================================================
@@ -427,7 +349,7 @@ namespace Mashiro {
         static constexpr uint32_t kSentinelU = static_cast<uint32_t>(kAba.sentinel);
         static constexpr uint64_t kTagStep = uint64_t{1} << kAba.indexBits;
 
-        using StatsT = std::conditional_t<C.enableStats, Detail::PoolStats, Detail::NoPoolStats>;
+        using StatsT = std::conditional_t<C.enableStats, PoolStats, NoPoolStats>;
         using Store = Detail::PoolStoreFor<T, kCapacity, kAlignment, StatsT, C.backing>;
 
         static_assert(std::atomic<uint64_t>::is_always_lock_free,
@@ -495,8 +417,7 @@ namespace Mashiro {
          */
         template<typename... Args>
             requires std::constructible_from<T, Args&&...>
-        [[nodiscard]] Handle Emplace(Args&&... args) noexcept(
-            std::is_nothrow_constructible_v<T, Args&&...>) {
+        [[nodiscard]] Handle Emplace(Args&&... args) noexcept(std::is_nothrow_constructible_v<T, Args&&...>) {
             const uint32_t index = PopFreeIndex();
             if (index == kSentinel) [[unlikely]] {
                 if constexpr (C.enableStats) {
@@ -509,16 +430,14 @@ namespace Mashiro {
             } else {
                 // Strong guarantee: a throwing constructor must not leak the slot.
                 try {
-                    ::new (static_cast<void*>(store_.ValuePtr(index)))
-                        T(std::forward<Args>(args)...);
+                    ::new (static_cast<void*>(store_.ValuePtr(index))) T(std::forward<Args>(args)...);
                 } catch (...) {
                     PushFreeIndex(index);
                     throw;
                 }
             }
             // even -> odd marks the slot live; the handle records this generation.
-            const uint32_t gen =
-                store_.Gen(index).fetch_add(1, std::memory_order_release) + 1u;
+            const uint32_t gen = store_.Gen(index).fetch_add(1, std::memory_order_release) + 1u;
             if constexpr (C.enableStats) {
                 store_.stats.acquires.fetch_add(1, std::memory_order_relaxed);
             }
@@ -617,8 +536,7 @@ namespace Mashiro {
                 return false;
             }
             const uint32_t live = store_.Gen(handle.Index()).load(std::memory_order_acquire);
-            return (live & 1u) &&
-                   static_cast<uint16_t>(live) == static_cast<uint16_t>(handle.Generation());
+            return (live & 1u) && static_cast<uint16_t>(live) == static_cast<uint16_t>(handle.Generation());
         }
         /// @}
 
@@ -636,8 +554,7 @@ namespace Mashiro {
          *
          * @return Number of handles written to the front of @p out.
          */
-        [[nodiscard]] size_t AcquireBulk(std::span<Handle> out) noexcept(
-            std::is_nothrow_default_constructible_v<T>)
+        [[nodiscard]] size_t AcquireBulk(std::span<Handle> out) noexcept(std::is_nothrow_default_constructible_v<T>)
             requires std::default_initializable<T>
         {
             size_t n = 0;
@@ -796,8 +713,8 @@ namespace Mashiro {
         }
 
         /// @brief Compile-time physical-layout report for this specialisation.
-        [[nodiscard]] static consteval Concurrency::PoolLayoutReport Layout() {
-            return Concurrency::AnalyzePoolLayout<ConcurrentObjectPool>();
+        [[nodiscard]] static consteval Concurrency::CacheLayoutReport Layout() {
+            return Concurrency::AnalyzeCacheLayout<ConcurrentObjectPool>();
         }
         /// @}
 
@@ -817,8 +734,7 @@ namespace Mashiro {
             // A live slot has an odd generation (see Emplace); a stale or already-freed
             // handle therefore mismatches on parity or on the low 16 bits.
             for (;;) {
-                if (!(current & 1u) ||
-                    static_cast<uint16_t>(current) != static_cast<uint16_t>(handle.Generation())) {
+                if (!(current & 1u) || static_cast<uint16_t>(current) != static_cast<uint16_t>(handle.Generation())) {
                     return false; // stale or already released
                 }
                 if (gen.compare_exchange_weak(current, current + 1u, std::memory_order_acq_rel,
@@ -940,11 +856,12 @@ namespace Mashiro {
         }
 
         // --- Contended free-list head: alone on its cache line ---
-        [[=Concurrency::FreeListHead{}]] alignas(Platform::kCacheLineSize)
+        [[=Concurrency::Contended{}]] alignas(Platform::kCacheLineSize)
         std::atomic<uint64_t> head_{};
 
         // --- Cold SoA storage (+ optional stats) on a separate cache region ---
-        [[=Concurrency::PoolStorage{}]] alignas(Platform::kCacheLineSize) Store store_{};
+        [[=Concurrency::SharedStorage{}]] alignas(Platform::kCacheLineSize)
+        Store store_{};
     };
 
     // =========================================================================
@@ -953,16 +870,23 @@ namespace Mashiro {
 
     /** @cond INTERNAL */
     consteval {
-        static_assert(Concurrency::AuditPoolLayout<ConcurrentObjectPool<std::uint64_t>>(),
-                      "ConcurrentObjectPool<uint64_t> failed the compile-time layout audit");
-        static_assert(
-            Concurrency::AuditPoolLayout<
-                ConcurrentObjectPool<std::uint64_t,
-                                     Detail::PoolConfig{.backing = Detail::BackingKind::Heap}>>(),
-            "heap-backed ConcurrentObjectPool failed the compile-time layout audit");
-        // The contended head must not share a line with cold storage.
-        static_assert(ConcurrentObjectPool<std::uint64_t>::Layout().headIsolated,
-                      "free-list head shares a cache line with cold pool storage");
+        using Concurrency::AuditFalseSharing;
+        using Concurrency::DomainStartsLine;
+        using Concurrency::Contended;
+
+        using HeapPool = ConcurrentObjectPool<
+            std::uint64_t, Detail::PoolConfig{.backing = Detail::BackingKind::Heap}>;
+
+        // Internal false sharing: the contended head and the cold SoA storage are
+        // distinct write domains and must never overlap a cache line.
+        static_assert(AuditFalseSharing<ConcurrentObjectPool<std::uint64_t>>(),
+                      "ConcurrentObjectPool<uint64_t> failed the internal false-sharing audit");
+        static_assert(AuditFalseSharing<HeapPool>(),
+                      "heap-backed ConcurrentObjectPool failed the internal false-sharing audit");
+        // The contended head owns the start of its own cache line.
+        static_assert(DomainStartsLine<ConcurrentObjectPool<std::uint64_t>, Contended>(),
+                      "free-list head must start its own cache line");
     }
     /** @endcond */
+
 } // namespace Mashiro

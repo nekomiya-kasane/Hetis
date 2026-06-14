@@ -33,6 +33,7 @@
  */
 #pragma once
 
+#include "Mashiro/Core/FalseSharing.h"
 #include "Mashiro/Core/TypeTraits.h"
 
 #include <atomic>
@@ -52,90 +53,6 @@
 #include <vector>
 
 namespace Mashiro {
-
-    // =========================================================================
-    // Concurrency role annotations + reflection-driven false-sharing audit
-    // =========================================================================
-
-    /**
-     * @brief Thread-ownership annotations and compile-time layout audits.
-     *
-     * Members of concurrent data structures are tagged with one of the role
-     * annotations below; `AuditFalseSharing` then proves — via C++26 static
-     * reflection over the annotated members — that no two members of
-     * different roles ever share a cache line.
-     */
-    namespace Concurrency {
-
-        struct ProducerOwned {}; ///< Annotation: written by the producer thread only.
-        struct ConsumerOwned {}; ///< Annotation: written by the consumer thread only.
-        struct SharedStorage {}; ///< Annotation: accessed by both threads at disjoint offsets.
-
-        /** @cond INTERNAL */
-        namespace Detail {
-
-            /// @brief Byte offset of a reflected non-static data member (tolerant of
-            ///        `offset_of` returning `member_offset` or a raw integer).
-            consteval size_t MemberOffsetBytes(std::meta::info member) {
-                return static_cast<size_t>(std::meta::offset_of(member).bytes);
-            }
-
-        } // namespace Detail
-        /** @endcond */
-
-        /**
-         * @brief Reflection-driven false-sharing audit.
-         *
-         * Verifies, entirely at compile time, that:
-         * 1. every non-static data member of @p Ring carries exactly one
-         *    `Concurrency` role annotation, and
-         * 2. members of *different* roles never overlap the same cache line
-         *    (`Platform::kCacheLineSize` granularity).
-         *
-         * @return true if the layout is provably free of cross-role false sharing.
-         */
-        template<typename Ring>
-        consteval bool AuditFalseSharing() {
-            enum class Role : uint8_t { Producer, Consumer, Shared };
-            struct Extent {
-                size_t firstLine;
-                size_t lastLine;
-                Role role;
-            };
-
-            std::vector<Extent> extents;
-            for (auto member : Traits::Members<Ring>) {
-                const bool producer = Traits::Anno::Has<ProducerOwned>(member);
-                const bool consumer = Traits::Anno::Has<ConsumerOwned>(member);
-                const bool shared = Traits::Anno::Has<SharedStorage>(member);
-                if (int{producer} + int{consumer} + int{shared} != 1) {
-                    return false; // every member must declare exactly one role
-                }
-                const size_t begin = Detail::MemberOffsetBytes(member);
-                const size_t size = std::meta::size_of(std::meta::type_of(member));
-                const Role role = producer  ? Role::Producer
-                                  : consumer ? Role::Consumer
-                                             : Role::Shared;
-                extents.push_back(Extent{begin / Platform::kCacheLineSize,
-                                         (begin + size - 1) / Platform::kCacheLineSize, role});
-            }
-
-            for (size_t i = 0; i < extents.size(); ++i) {
-                for (size_t j = i + 1; j < extents.size(); ++j) {
-                    if (extents[i].role == extents[j].role) {
-                        continue; // same owner may share a line by design
-                    }
-                    const bool disjoint = extents[i].lastLine < extents[j].firstLine ||
-                                          extents[j].lastLine < extents[i].firstLine;
-                    if (!disjoint) {
-                        return false; // cross-role cache-line overlap = false sharing
-                    }
-                }
-            }
-            return true;
-        }
-
-    } // namespace Concurrency
 
     // =========================================================================
     // SpscQueue<T, Capacity> — typed fixed-size element queue

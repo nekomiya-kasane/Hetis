@@ -736,21 +736,23 @@ TEST_CASE("Pool: copy and move are deleted", AUTO_TAG) {
 }
 
 TEST_CASE("Pool: reflection layout audit isolates the free-list head", AUTO_TAG) {
-    STATIC_REQUIRE(Concurrency::AuditPoolLayout<ConcurrentObjectPool<std::uint64_t>>());
-    STATIC_REQUIRE(Concurrency::AuditPoolLayout<ConcurrentObjectPool<Widget>>());
-    STATIC_REQUIRE(Concurrency::AuditPoolLayout<ConcurrentObjectPool<
+    STATIC_REQUIRE(Concurrency::AuditFalseSharing<ConcurrentObjectPool<std::uint64_t>>());
+    STATIC_REQUIRE(Concurrency::AuditFalseSharing<ConcurrentObjectPool<Widget>>());
+    STATIC_REQUIRE(Concurrency::AuditFalseSharing<ConcurrentObjectPool<
                        Widget, Detail::PoolConfig{.backing = Detail::BackingKind::Heap}>>());
 }
 
 TEST_CASE("Pool: Layout() exposes compile-time layout facts", AUTO_TAG) {
+    using Concurrency::Contended;
+
     constexpr auto report = ConcurrentObjectPool<Widget>::Layout();
     STATIC_REQUIRE(report.valid);
-    STATIC_REQUIRE(report.hasHead);
-    STATIC_REQUIRE(report.singleHead);
-    STATIC_REQUIRE(report.everyMemberTagged);
-    STATIC_REQUIRE(report.headStartsLine);
-    STATIC_REQUIRE(report.headIsolated);
-    STATIC_REQUIRE(report.headOffset == 0); // the hot head leads the object
+    STATIC_REQUIRE(report.classifiedAll);
+    STATIC_REQUIRE(!report.hasConflict);  // the head and cold storage never share a line
+    STATIC_REQUIRE(report.memberCount == 2);
+    // The contended head leads the object and owns the start of its own cache line.
+    STATIC_REQUIRE(Concurrency::DomainStartsLine<ConcurrentObjectPool<Widget>, Contended>());
+    STATIC_REQUIRE(Concurrency::DomainLineSpan<ConcurrentObjectPool<Widget>, Contended>() == 1);
 }
 
 
