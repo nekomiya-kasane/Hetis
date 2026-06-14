@@ -870,6 +870,7 @@ namespace Mashiro {
 
     /** @cond INTERNAL */
     consteval {
+
         using Concurrency::AuditFalseSharing;
         using Concurrency::DomainStartsLine;
         using Concurrency::Contended;
@@ -886,6 +887,7 @@ namespace Mashiro {
         // The contended head owns the start of its own cache line.
         static_assert(DomainStartsLine<ConcurrentObjectPool<std::uint64_t>, Contended>(),
                       "free-list head must start its own cache line");
+
     }
     /** @endcond */
 

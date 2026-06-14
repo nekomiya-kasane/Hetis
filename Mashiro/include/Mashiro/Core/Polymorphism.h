@@ -112,7 +112,14 @@ namespace Mashiro::Polymorphism {
 
         /// @brief Build the cv-qualified `Impl*` matching the cv-qualifiers of member @p m.
         ///        Reference-qualifiers are intentionally not propagated (no free-function counterpart).
+        ///        Throws a compile-time diagnostic naming the offending type if @p impl is not a class.
         consteval std::meta::info ThisPointerType(std::meta::info impl, std::meta::info m) {
+            if (!std::meta::is_class_type(impl)) {
+                throw std::define_static_string(
+                    "Polymorphism::ThisPointerType: implementation type '"
+                    + std::string{std::meta::display_string_of(impl)}
+                    + "' is not a class type — only class types can host the synthesised vtable thunks.");
+            }
             auto t = impl;
             if (std::meta::is_const(m))    t = std::meta::add_const(t);
             if (std::meta::is_volatile(m)) t = std::meta::add_volatile(t);
@@ -120,7 +127,14 @@ namespace Mashiro::Polymorphism {
         }
 
         /// @brief Project a function reflection's parameter list to a list of parameter type infos.
+        ///        Throws a compile-time diagnostic naming the offending entity if @p f is not callable.
         consteval std::vector<std::meta::info> ParamTypes(std::meta::info f) {
+            if (!std::meta::is_function(f)) {
+                throw std::define_static_string(
+                    "Polymorphism::ParamTypes: '"
+                    + std::string{std::meta::display_string_of(f)}
+                    + "' is not a function reflection — only methods participate in vtable synthesis.");
+            }
             std::vector<std::meta::info> out;
             for (auto p : std::meta::parameters_of(f)) {
                 out.push_back(std::meta::type_of(p));
@@ -150,6 +164,8 @@ namespace Mashiro::Polymorphism {
         }
 
         /// @brief Aggregate-member specs for @ref Vtable<Iface, Impl>: one slot per selected Iface method.
+        ///        Slot names are the bare method identifier; @ref Define rejects overload sets so
+        ///        names are guaranteed unique within the aggregate.
         template<typename Iface, typename Impl>
         consteval std::vector<std::meta::info> VtableSpecs() {
             std::vector<std::meta::info> out;
@@ -165,7 +181,21 @@ namespace Mashiro::Polymorphism {
         /// Strict structural match: identifier, parameter types, cv-qualifiers, and return type all
         /// equal. Returns the null reflection (`std::meta::info{}`) when no compatible counterpart
         /// exists. Overload sets are resolved by signature; the first matching overload wins.
+        /// Throws compile-time diagnostics for malformed inputs (non-class @p classType,
+        /// non-callable @p ifaceMember).
         consteval std::meta::info FindCompatible(std::meta::info classType, std::meta::info ifaceMember) {
+            if (!std::meta::is_class_type(classType)) {
+                throw std::define_static_string(
+                    "Polymorphism::FindCompatible: implementation argument '"
+                    + std::string{std::meta::display_string_of(classType)}
+                    + "' is not a class type.");
+            }
+            if (!std::meta::is_function(ifaceMember)) {
+                throw std::define_static_string(
+                    "Polymorphism::FindCompatible: interface member '"
+                    + std::string{std::meta::display_string_of(ifaceMember)}
+                    + "' is not a callable reflection.");
+            }
             const auto name       = std::meta::identifier_of(ifaceMember);
             const auto wantRet    = std::meta::return_type_of(ifaceMember);
             const auto wantParams = ParamTypes(ifaceMember);
@@ -198,14 +228,32 @@ namespace Mashiro::Polymorphism {
             return true;
         }
 
-        /// @brief Locate the synthesised slot of @p V whose injected name equals @p name.
-        ///        Used to bind thunks back to the slots produced by @ref VtableSpecs.
-        template<typename V>
-        consteval std::meta::info FindVtableSlot(std::string_view name) {
-            for (auto m : std::meta::nonstatic_data_members_of(^^V, std::meta::access_context::unchecked())) {
-                if (std::meta::has_identifier(m) && std::meta::identifier_of(m) == name) return m;
+        /// @brief Return the first method identifier that occurs more than once among the selected
+        ///        methods of @p Iface, or an empty view when every selected method has a unique name.
+        ///
+        /// @TODO Lift this restriction by mangling overloaded slots with a stable signature suffix
+        /// (e.g. `Draw__int_int`) and exposing a PMF-keyed `Adapter::invoke<Pmf>()` accessor that
+        /// resolves the matching slot via reflection. The current single-pass design rejects
+        /// overload sets up front to keep slot identifiers (and the user-facing call surface
+        /// `vtable().Name`) clean while the broader vtable composition is still settling.
+        template<typename Iface>
+        consteval std::string_view FindOverloadCollision() {
+            const auto methods = SelectMethods<Iface>();
+            for (size_t i = 0; i < methods.size(); ++i) {
+                const auto name = std::meta::identifier_of(methods[i]);
+                for (size_t j = i + 1; j < methods.size(); ++j) {
+                    if (std::meta::identifier_of(methods[j]) == name) {
+                        return name;
+                    }
+                }
             }
-            return std::meta::info{};
+            return {};
+        }
+
+        /// @brief @c true when no two selected methods of @p Iface share an identifier.
+        template<typename Iface>
+        consteval bool NoOverloadCollisions() {
+            return FindOverloadCollision<Iface>().empty();
         }
 
     } // namespace Detail
@@ -232,24 +280,50 @@ namespace Mashiro::Polymorphism {
      * (Iface, Impl) pair.** After the call, `Vtable<Iface, Impl>` is a complete aggregate carrying
      * one function-pointer slot per selected Iface method, named after the source method.
      *
+     * @par Overload limitation (current)
+     * Slot names are the bare method identifier, so the aggregate cannot host two selected methods
+     * sharing a name. `Define` rejects overload sets up front with a `static_assert` carrying the
+     * colliding identifier; either rename one of the overloads or mark the secondary one with
+     * `[[=Anno::Skip{}]]`.
+     *
+     * @TODO Lift this restriction by mangling overloaded slots with a deterministic signature
+     * suffix (e.g. `Draw__int_int`) and exposing a PMF-keyed `Adapter::invoke<Pmf>()` accessor that
+     * resolves the matching slot via reflection. Tracked as a future extension; the rejection is in
+     * place to keep the user-facing call surface (`vtable().Name`) clean while the broader vtable
+     * composition is still settling.
+     *
      * @code
      * consteval { Mashiro::Polymorphism::Define<IDrawable, Square>(); }
      * @endcode
      */
     template<typename Iface, typename Impl>
     consteval void Define() {
+        constexpr auto collision = Detail::FindOverloadCollision<Iface>();
+        if constexpr (!collision.empty()) {
+            throw std::define_static_string(
+                "Polymorphism::Define: interface '"
+                + std::string{std::meta::display_string_of(^^Iface)}
+                + "' has overloaded selected method '" + std::string{collision}
+                + "'. The current name-keyed vtable cannot disambiguate overload sets — rename one "
+                  "of the overloads or skip it with [[=Anno::Skip{}]]. (Tracked TODO: signature-"
+                  "mangled slots + PMF-keyed Adapter::invoke<Pmf>().)");
+        }
         std::meta::define_aggregate(^^Vtable<Iface, Impl>, Detail::VtableSpecs<Iface, Impl>());
     }
 
     /**
-     * @brief Concept: @p Impl provides every selected method of @p Iface with a compatible signature.
+     * @brief Concept: @p Impl provides every selected method of @p Iface with a compatible signature
+     *        and the interface contains no overloaded selected methods.
      *
      * Compatibility is structural — identical name, parameter types, cv-qualifiers, and return type.
-     * Failure produces a constraint-failure diagnostic at @ref kVtable / @ref Adapter request,
-     * pointing the user at the (Iface, Impl) pair that failed to match.
+     * The overload-uniqueness clause makes the concept honest: an interface with overloaded methods
+     * cannot be projected through the current name-keyed aggregate, so it cannot be `Implements`-ed
+     * by anything until that limitation is lifted (see @ref Define). Failure produces a constraint-
+     * failure diagnostic at @ref kVtable / @ref Adapter request, pointing at the (Iface, Impl) pair.
      */
     template<typename Impl, typename Iface>
     concept Implements = std::is_class_v<Iface> && std::is_class_v<Impl>
+        && Detail::NoOverloadCollisions<Iface>()
         && Detail::AllMethodsMatch<Iface, Impl>();
 
     /** @cond INTERNAL */
@@ -304,12 +378,20 @@ namespace Mashiro::Polymorphism {
             std::meta::nonstatic_data_members_of(^^Vtable<Iface, Impl>, std::meta::access_context::unchecked()));
 
         /// @brief Find the selected Iface member matching the slot's identifier.
+        ///        Throws a compile-time diagnostic naming the offending slot if no selected method
+        ///        bears that name — that condition signals a build-system inconsistency between the
+        ///        @ref Vtable shape and the currently-instantiated selection.
         template<typename Iface>
         consteval std::meta::info FindIfaceMemberByName(std::string_view name) {
             for (auto m : kSelectedMethods<Iface>) {
                 if (std::meta::identifier_of(m) == name) return m;
             }
-            return std::meta::info{};
+            throw std::define_static_string(
+                "Polymorphism: vtable slot '" + std::string{name}
+                + "' on interface '" + std::string{std::meta::display_string_of(^^Iface)}
+                + "' has no matching selected interface method (slot identifier and selected-methods "
+                  "set are out of sync — likely a stale Define<Iface, Impl>() call from a previous "
+                  "version of the interface).");
         }
 
         /// @brief Build a populated @ref Vtable instance whose slots are free-function thunks into Impl.
@@ -319,18 +401,36 @@ namespace Mashiro::Polymorphism {
         /// pointer. Splicing @p Vtable's own member ensures the lvalue access is well-formed; the
         /// Iface member is only used to reconstruct the thunk's signature, while the target Impl
         /// member is materialised as a pointer-to-member-function NTTP for the thunk.
+        ///
+        /// Throws compile-time diagnostics that identify the offending (Iface, Impl, slot) tuple
+        /// when no compatible Impl method exists — the @ref Implements concept is the early gate,
+        /// but this throw is a defence-in-depth check should the concept be bypassed.
         template<typename Iface, typename Impl>
         consteval Vtable<Iface, Impl> BuildVtable() {
             Vtable<Iface, Impl> v{};
             template for (constexpr auto slot : kVtableSlots<Iface, Impl>) {
                 constexpr auto ifaceMember = FindIfaceMemberByName<Iface>(std::meta::identifier_of(slot));
                 constexpr auto target      = FindCompatible(^^Impl, ifaceMember);
-                using SelfRaw              = typename [: std::meta::remove_pointer(ThisPointerType(^^Impl, ifaceMember)) :];
-                using R                    = typename [: std::meta::return_type_of(ifaceMember) :];
-                using Params               = typename [: ParamTypeListInfo(ifaceMember) :];
-                constexpr auto pmf         = &[: target :];
-                using ThunkT               = typename ThunkFromList<SelfRaw, pmf, R, Params>::Type;
-                v.[: slot :]               = &ThunkT::Invoke;
+                if constexpr (target == std::meta::info{}) {
+                    throw std::define_static_string(
+                        "Polymorphism::BuildVtable: implementation '"
+                        + std::string{std::meta::display_string_of(^^Impl)}
+                        + "' has no method matching interface slot '"
+                        + std::string{std::meta::identifier_of(ifaceMember)}
+                        + "' on '"
+                        + std::string{std::meta::display_string_of(^^Iface)}
+                        + "' — required signature is '"
+                        + std::string{std::meta::display_string_of(std::meta::type_of(ifaceMember))}
+                        + "'. Add a matching method (same identifier, parameter types, cv-qualifiers, "
+                          "and return type) to the implementation, or skip the interface method with "
+                          "[[=Anno::Skip{}]].");
+                }
+                using SelfRaw      = typename [: std::meta::remove_pointer(ThisPointerType(^^Impl, ifaceMember)) :];
+                using R            = typename [: std::meta::return_type_of(ifaceMember) :];
+                using Params       = typename [: ParamTypeListInfo(ifaceMember) :];
+                constexpr auto pmf = &[: target :];
+                using ThunkT       = typename ThunkFromList<SelfRaw, pmf, R, Params>::Type;
+                v.[: slot :]       = &ThunkT::Invoke;
             }
             return v;
         }
@@ -387,3 +487,13 @@ namespace Mashiro::Polymorphism {
     };
 
 } // namespace Mashiro::Polymorphism
+
+namespace Mashiro {
+    
+    namespace Anno {
+        
+        using namespace Mashiro::Polymorphism::Anno;
+
+    }
+
+}
