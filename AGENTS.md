@@ -7,6 +7,7 @@
 3. 零技术债。不为向后兼容做架构妥协，不保留 SFINAE、宏元编程、手写 trait 偏特化等已被语言新特性取代的旧范式。
 
 工具链假设为 COCA clang-p2996（Bloomberg fork, Clang 21, libc++），编译标志 `-std=gnu++26 -freflection-latest`。`-freflection-latest` 一并启用 P2996 反射、P3096 参数反射、P1306 expansion statements、P3289 consteval blocks、P3381 反射语法、P3385 attribute reflection。其他语言取最新稳定版。
+每条命令前添加运行python T:\toolchains\coca-toolchain-p2996\setup.py exec以时刻激活开发环境。
 
 ---
 

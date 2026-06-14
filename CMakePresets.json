@@ -78,12 +78,12 @@
     {
       "name": "x64-ubsan",
       "displayName": "x64 UBSan (clang-p2996)",
-      "description": "UndefinedBehaviorSanitizer only (static runtime, no DLL) on a Debug base. Lighter than ASan; use when ASan's memory cost is prohibitive.",
+      "description": "UndefinedBehaviorSanitizer only (static runtime, no DLL) on a Debug base. Lighter than ASan; use when ASan's memory cost is prohibitive. The static clang_rt.ubsan_standalone runtime's Windows stack-unwinder references SymFunctionTableAccess64 / SymGetModuleBase64, so dbghelp must be linked. It is pulled in with `-Xclang --dependent-lib=dbghelp` (embeds /DEFAULTLIB:dbghelp in every object) rather than a bare `-ldbghelp` linker flag, so CMake's compiler-ABI try_compile probes resolve it too. ASan gets dbghelp transitively via its dynamic runtime DLL; UBSan-only does not.",
       "inherits": "windows-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all",
-        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all",
+        "CMAKE_C_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all -Xclang --dependent-lib=dbghelp",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all -Xclang --dependent-lib=dbghelp",
         "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined",
         "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fsanitize=undefined",
         "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined"
