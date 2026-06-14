@@ -42,6 +42,7 @@ add_mashiro_test(Core FixedStringTest)
 add_mashiro_test(Core SOATest)
 add_mashiro_test(Core ToJsonTest)
 add_mashiro_test(Core TypeTraitsTest)
+add_mashiro_test(Core PolymorphismTest)
 add_mashiro_test(Core DumbPtrTest)
 add_mashiro_test(Core ABITest)
 
