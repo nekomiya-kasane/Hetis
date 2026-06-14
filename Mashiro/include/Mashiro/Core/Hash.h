@@ -832,22 +832,25 @@ namespace Mashiro::Hashing {
 
 } // namespace Mashiro::Hashing
 
+namespace Mashiro {
+
+    using Hashing::Uuid;
+
+}
+
 // =============================================================================
 // std::hash automatic injection
 // =============================================================================
 
 /// @brief Auto-specialise `std::hash` for any type satisfying `Mashiro::Hashing::Hashable`.
 template <typename T>
-    requires (Mashiro::Hashing::Hashable<T> &&
-              !std::is_arithmetic_v<T> &&
-              !std::convertible_to<T, std::string_view>)
+    requires (Mashiro::Hashing::Hashable<T> &&!std::is_arithmetic_v<T> && !std::convertible_to<T, std::string_view>)
 struct std::hash<T> {
     [[nodiscard]] constexpr size_t operator()(const T& value) const noexcept {
         if constexpr (sizeof(size_t) == 8) {
             return static_cast<size_t>(Mashiro::Hashing::Hash(value));
         } else {
-            return static_cast<size_t>(
-                Mashiro::Hashing::Hash(value, Mashiro::Hashing::Fnv1a32{}));
+            return static_cast<size_t>(Mashiro::Hashing::Hash(value, Mashiro::Hashing::Fnv1a32{}));
         }
     }
 };
@@ -859,10 +862,10 @@ struct std::hash<T> {
 /// @brief Format a `Uuid` in canonical RFC-4122 string form.
 /// @todo support format_context arguments
 template <>
-struct std::formatter<Mashiro::Hashing::Uuid> {
+struct std::formatter<Mashiro::Uuid> {
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
 
-    auto format(const Mashiro::Hashing::Uuid& id, std::format_context& ctx) const {
+    auto format(const Mashiro::Uuid& id, std::format_context& ctx) const {
         auto chars = id.ToChars();
         return std::copy(chars.begin(), chars.end(), ctx.out());
     }
