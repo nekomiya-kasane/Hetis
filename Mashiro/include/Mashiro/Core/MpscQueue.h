@@ -10,19 +10,29 @@
  * path and trivially destructible at teardown.
  *
  * @par Why bounded-array Vyukov, not pool-backed nodes
- * The first design instinct, given the existing @ref Mashiro::ConcurrentObjectPool primitive, is to
- * draw nodes from a pool and link them via Treiber-style enqueue. The pool's value lives in two
- * places: (a) ABA-safe slot recycling and (b) the project's reflection-driven cache-layout audit.
- * For MPSC, (a) is unnecessary — the Vyukov scheme uses a per-cell monotonic sequence counter that
- * makes ABA structurally impossible without ever reading a pointer. The pool would add a hot-path
- * free-list CAS for no correctness benefit, and its `Poolable<T>` contract does not naturally fit a
- * stream of moved-in payloads. (b) — the layout audit — is *not* unique to the pool; it is exposed
- * by `Mashiro::Concurrency` and we apply the same `[[=Contended]]` / `[[=ConsumerOwned]]` /
- * `[[=SharedStorage]]` annotations here so this header carries the same compile-time guarantee.
+ * @ref Mashiro::ConcurrentObjectPool is the project's ABA-safe, generation-checked, MPMC-friendly
+ * slot allocator. Building MPSC on top of it (pool-backed Vyukov linked queue: each node drawn
+ * from the pool, linked by a `next` slot index) is a valid design and *is* the right tool for any
+ * MPSC whose payloads are objects with stable node identity — explicitly the @c OwnerExecutor
+ * mailbox of pre-allocated coroutine-handle nodes called out in spec §6.5. That use case wants
+ * the pool's slot lifetime, generation guard, and ABA-safe free list, and `OwnerExecutor` should
+ * therefore be implemented over @ref ConcurrentObjectPool directly, not through this header.
  *
- * The pool remains the right tool for `OwnerExecutor`'s pre-allocated coroutine-handle nodes
- * (spec §6.5: "Treiber stack of pre-allocated nodes"). That use case is structurally different: it
- * stores discrete objects with stable identity, not a stream of moved-in values.
+ * For a general MPSC of *moved-in payload values* (the @c EventPump external inbox per spec §6.8 —
+ * `SystemEvent` variants flowing through and out, no stable node identity), the pool's two main
+ * guarantees decompose:
+ *  - **ABA safety** is unnecessary: bounded-array Vyukov uses a per-cell monotonic sequence
+ *    counter, never a pointer, and the `seq == pos+1` / `seq == pos+Capacity` handshake makes ABA
+ *    structurally impossible. A pool-backed implementation would add a hot-path free-list CAS for
+ *    no correctness benefit.
+ *  - **Generation guard / use-after-free** is moot when the consumer drains by value and the
+ *    payload no longer exists after `TryPop`.
+ *
+ * What @em is shared with the pool — the project-wide cache-line domain audit
+ * (@c Concurrency::Contended / @c ConsumerOwned / @c SharedStorage tags + @c AuditFalseSharing)
+ * — is exposed independently in @ref Mashiro/Core/FalseSharing.h and applied here in full. So
+ * "high architecture reuse" lives at the layout-audit level; "node lifetime reuse" is the pool's
+ * job, kept for the workloads that actually need it.
  *
  * @par Algorithm — Vyukov MPMC (consumer-restricted to 1)
  * Each cell carries an `atomic<size_t> seq` plus an aligned storage region for `T`. A cell with
