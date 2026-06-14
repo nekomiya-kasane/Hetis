@@ -11,6 +11,7 @@
  * - `FromString<T>(sv)` → `T`.
  *
  * Dispatch priority (ToString):
+ *  0. `ToStringHook<T>` specialisation (open customisation point)
  *  1. ADL `ToString(v)`
  *  2. `v.ToString()`
  *  3. `nullptr` / `bool` / `char` / string-like literals
@@ -47,6 +48,44 @@ namespace Mashiro {
     /// @brief Parse a value of type @p T from its string representation.
     template<typename T>
     [[nodiscard]] constexpr T FromString(std::string_view iString);
+
+    /**
+     * @brief Open customisation point for @ref ToString — specialise to teach a type how to render.
+     *
+     * The @ref Mashiro::ToString name is a customisation-point *object* (a namespace-scope
+     * `inline constexpr` variable), so a same-named free function or hidden friend declared inside
+     * `namespace Mashiro` collides with it. This trait sidesteps that: users **specialise the class
+     * template** instead of writing anything called `ToString`, so the hook is decoupled from the
+     * name and from any namespace. It is also the *only* mechanism that can target a whole template
+     * family by **partial** specialisation (e.g. every `DumbPtr<W>`), which ADL overloads and member
+     * hooks cannot express.
+     *
+     * Lives in @ref Mashiro::Hook, the namespace that gathers every open customisation point — type
+     * `Mashiro::Hook::` in an IDE to discover what can be hooked.
+     *
+     * Provide a `static` member `ToString(const T&) -> std::string`. The primary template is left
+     * undefined: an unspecialised @p T simply means "no hook", and dispatch falls through to the
+     * other branches.
+     *
+     * @code
+     * // (a) Full specialisation for your own type:
+     * template<> struct Mashiro::Hook::ToStringHook<UserApp::Money> {
+     *     static std::string ToString(const UserApp::Money& m) { return "$" + std::to_string(m.cents); }
+     * };
+     * // (b) Partial specialisation for a Mashiro-owned template type:
+     * template<class W> struct Mashiro::Hook::ToStringHook<Mashiro::DumbPtr<W>> {
+     *     static std::string ToString(const Mashiro::DumbPtr<W>& d) { return d ? "ptr" : "null"; }
+     * };
+     * @endcode
+     *
+     * @tparam T The (cv-unqualified) type to customise. Highest dispatch priority in @ref ToString.
+     */
+    namespace Hook {
+
+        template<typename T>
+        struct ToStringHook;
+
+    } // namespace Hook
 
     /// @brief Annotation: when placed on a pointer member, ToString will dereference
     /// and recursively print the pointee instead of printing the raw address.
@@ -144,6 +183,12 @@ namespace Mashiro {
             { T::FromString(std::string_view{}) } -> std::convertible_to<T>;
         };
 
+        /// @brief A usable @ref Mashiro::Hook::ToStringHook specialisation exists for @p T.
+        template <typename T>
+        concept HasHookToString = requires(const T& iValue) {
+            { Hook::ToStringHook<T>::ToString(iValue) } -> std::convertible_to<std::string>;
+        };
+
         /**
          * @brief Types whose `ToStringView` result is a view over static / stable
          *        storage (won't dangle). Everything else must go through `ToString`.
@@ -160,10 +205,14 @@ namespace Mashiro {
         [[nodiscard]] constexpr std::string ToStringImpl(T&& iValue) {
             using U = std::remove_cvref_t<T>;
 
+            // 0. ToStringHook<U> specialisation — open customisation point, highest priority.
+            if constexpr (Detail::HasHookToString<U>) {
+                return MakeString(Hook::ToStringHook<U>::ToString(iValue));
+            }
             // 1. free ToString(...) via ADL
-            if constexpr (Detail::ADL::FreeToString::Available<U>) {
+            else if constexpr (Detail::ADL::FreeToString::Available<U>) {
                 return Detail::ADL::FreeToString::Invoke(std::forward<T>(iValue));
-            } 
+            }
             // 2. object.ToString()
             else if constexpr (Detail::HasMemberToString<U>) {
                 return MakeString(std::forward<T>(iValue).ToString());

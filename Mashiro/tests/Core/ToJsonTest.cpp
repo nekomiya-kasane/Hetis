@@ -105,9 +105,46 @@ namespace TestTypes {
         [[= An::AsInt{}]] Color tag = Color::Red;
     };
 
+    // --- ToJsonHook customisation-point fixtures -----------------------------
+    // No reflection-friendly shape needed: the hook teaches it to (de)serialise.
+    struct HookScalar {
+        int n = 0;
+    };
+
+    // A member-ToJson type, to prove the hook (priority 0) wins over the member.
+    struct HookWins {
+        int n = 0;
+        json ToJson() const { return json("member"); }
+    };
+
+    // A template family — exercises PARTIAL specialisation of the hook.
+    template<class W>
+    struct HookBox {
+        W value{};
+    };
+
 } // namespace TestTypes
 
 using namespace TestTypes;
+
+// Hook specialisations live at namespace scope, reachable from outside
+// `namespace Mashiro` without colliding with the `Mashiro::ToJson` object.
+template<>
+struct Mashiro::Hook::ToJsonHook<HookScalar> {
+    static json ToJson(const HookScalar& v) { return json{{"hook", v.n}}; }
+    static void FromJson(const json& j, HookScalar& v) { v.n = j.at("hook").get<int>(); }
+};
+
+template<>
+struct Mashiro::Hook::ToJsonHook<HookWins> {
+    static json ToJson(const HookWins&) { return json("hook"); }
+};
+
+template<class W>
+struct Mashiro::Hook::ToJsonHook<HookBox<W>> {
+    static json ToJson(const HookBox<W>& b) { return Mashiro::ToJson(b.value); }
+};
+
 
 // =========================================================================
 // Section 1 — Scalars / strings / bool / null
@@ -351,6 +388,25 @@ TEST_CASE("Member ToJson / FromJson are honoured", AUTO_TAG) {
     REQUIRE(j.at("x") == 42);
     auto back = FromJson<CustomMember>(j);
     REQUIRE(back.payload == 21);
+}
+
+TEST_CASE("ToJsonHook specialisation drives (de)serialisation", AUTO_TAG) {
+    HookScalar h{7};
+    auto j = ToJson(h);
+    REQUIRE(j.at("hook") == 7);
+    auto back = FromJson<HookScalar>(j);
+    REQUIRE(back.n == 7);
+}
+
+TEST_CASE("ToJsonHook outranks a member ToJson", AUTO_TAG) {
+    auto j = ToJson(HookWins{3});
+    REQUIRE(j.is_string());
+    REQUIRE(j.get<std::string>() == "hook");
+}
+
+TEST_CASE("ToJsonHook resolves through a partial specialisation", AUTO_TAG) {
+    REQUIRE(ToJson(HookBox<int>{42}).get<int>() == 42);
+    REQUIRE(ToJson(HookBox<std::string>{"hi"}).get<std::string>() == "hi");
 }
 
 // =========================================================================

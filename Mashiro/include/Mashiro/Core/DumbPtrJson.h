@@ -15,8 +15,14 @@
  * **no** `FromJson`. A `DumbPtr` member in a serialised struct is therefore output-only, the
  * truthful model for a non-owning observer.
  *
- * The hook is an ADL `ToJson(DumbPtr<W>)` overload in `namespace Mashiro`, picked up by
- * `Json::Detail::ToJsonImpl`'s `HasFreeToJson` branch before any generic handling.
+ * @par How the hook is attached
+ * The hook is a **partial specialisation** of the @ref Mashiro::Hook::ToJsonHook open customisation
+ * point, `Hook::ToJsonHook<DumbPtr<W>>`, providing only the emit half (`ToJson`) and no `FromJson`.
+ * A partial specialisation is the one mechanism that can target the whole `DumbPtr<W>` *family* at
+ * once — a free ADL `ToJson` overload cannot live in `namespace Mashiro` (it would collide with the
+ * `Mashiro::ToJson` customisation-point object), and a member hook would drag the nlohmann
+ * dependency into `DumbPtr.h`. `Json::Detail::ToJsonImpl` picks this up via its highest-priority
+ * `HasHookToJson` branch.
  *
  * @ingroup Core
  */
@@ -28,20 +34,24 @@
 #include "Mashiro/Core/DumbPtr.h"
 #include "Mashiro/Core/ToJson.h"
 
-namespace Mashiro {
+namespace Mashiro::Hook {
 
     /**
      * @brief One-way JSON hook for `DumbPtr` — emits the observed address.
      *
-     * @return `json(nullptr)` for an empty observer, otherwise a JSON string of the form
-     *                         `"0xADDR"`. Never dereferences the pointee.
+     * Emits `null` for an empty observer, otherwise a JSON string of the form `"0xADDR"`. Never
+     * dereferences the pointee. Defines no `FromJson`, so a `DumbPtr` is output-only by design.
+     *
+     * @tparam W The observed (pointed-to) type.
      */
     template<class W>
-    [[nodiscard]] inline json ToJson(DumbPtr<W> p) {
-        if (!p) {
-            return json(nullptr);
+    struct ToJsonHook<DumbPtr<W>> {
+        [[nodiscard]] static json ToJson(DumbPtr<W> p) {
+            if (!p) {
+                return json(nullptr);
+            }
+            return json(std::format("{}", static_cast<const void*>(p.Get())));
         }
-        return json(std::format("{}", static_cast<const void*>(p.Get())));
-    }
+    };
 
-} // namespace Mashiro
+} // namespace Mashiro::Hook

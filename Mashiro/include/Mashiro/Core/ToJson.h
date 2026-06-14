@@ -14,6 +14,7 @@
  * MessagePack / UBJSON binary formats — all transparent.
  *
  * @section dispatch Dispatch priority (`ToJson(v)`)
+ *  0. `ToJsonHook<T>` specialisation — open customisation point.
  *  1. ADL `ToJson(v)` — Mashiro hook (returns `json`).
  *  2. Member `v.ToJson()`.
  *  3. nullptr / arithmetic / bool — direct conversion.
@@ -79,6 +80,42 @@ namespace Mashiro {
 
     /// @brief Insertion-order-preserving variant; useful for golden-file output.
     using ordered_json = nlohmann::ordered_json;
+
+    /**
+     * @brief Open customisation point for @ref ToJson / @ref FromJson — specialise to teach a type
+     *        how to (de)serialise.
+     *
+     * The @ref Mashiro::ToJson / @ref Mashiro::FromJson names are customisation-point *objects* /
+     * function templates at namespace scope, so a same-named free function or hidden friend inside
+     * `namespace Mashiro` collides with them. This trait sidesteps that: users **specialise the class
+     * template** instead of writing anything called `ToJson`, decoupling the hook from the name and
+     * from any namespace. It is also the only mechanism that can target a whole template family by
+     * **partial** specialisation (e.g. every `DumbPtr<W>`), which ADL overloads cannot express.
+     *
+     * Lives in @ref Mashiro::Hook, the namespace that gathers every open customisation point — type
+     * `Mashiro::Hook::` in an IDE to discover what can be hooked.
+     *
+     * Provide a `static` member `ToJson(const T&) -> json` to emit, and optionally
+     * `static void FromJson(const json&, T&)` to parse (omit it for one-way / output-only types).
+     * The primary template is left undefined: an unspecialised @p T means "no hook", and dispatch
+     * falls through to the generic reflection machinery.
+     *
+     * @code
+     * // One-way (emit only) partial specialisation for a Mashiro-owned template type:
+     * template<class W> struct Mashiro::Hook::ToJsonHook<Mashiro::DumbPtr<W>> {
+     *     static Mashiro::json ToJson(Mashiro::DumbPtr<W> p) {
+     *         return p ? Mashiro::json(std::format("{}", static_cast<const void*>(p.Get())))
+     *                  : Mashiro::json(nullptr);
+     *     }
+     * };
+     * @endcode
+     *
+     * @tparam T The (cv-unqualified) type to customise. Highest dispatch priority in @ref ToJson.
+     */
+    namespace Hook {
+        template <typename T>
+        struct ToJsonHook;
+    } // namespace Hook
 
     // =========================================================================
     // Annotations
@@ -226,6 +263,18 @@ namespace Mashiro {
         template <typename T>
         concept HasMemberFromJson = requires(const json& j) {
             { T::FromJson(j) } -> std::convertible_to<T>;
+        };
+
+        /// @brief A usable @ref Mashiro::Hook::ToJsonHook specialisation with an emit hook exists for @p T.
+        template <typename T>
+        concept HasHookToJson = requires(const T& v) {
+            { Hook::ToJsonHook<T>::ToJson(v) } -> std::convertible_to<json>;
+        };
+
+        /// @brief A @ref Mashiro::Hook::ToJsonHook specialisation with a parse hook exists for @p T.
+        template <typename T>
+        concept HasHookFromJson = requires(const json& j, T& v) {
+            Hook::ToJsonHook<T>::FromJson(j, v);
         };
 
         /// @brief Detects nlohmann's own free `to_json(j, v)` /
@@ -435,7 +484,8 @@ namespace Mashiro {
         template <typename T>
         [[nodiscard]] json ToJsonImpl(T&& iValue) {
             using U = std::remove_cvref_t<T>;
-            if      constexpr (ADL::HasFreeToJson<U>)            return ToJson(std::forward<T>(iValue));
+            if      constexpr (HasHookToJson<U>)                 return Hook::ToJsonHook<U>::ToJson(iValue);
+            else if constexpr (ADL::HasFreeToJson<U>)            return ToJson(std::forward<T>(iValue));
             else if constexpr (HasMemberToJson<U>)               return iValue.ToJson();
             else if constexpr (std::is_null_pointer_v<U>)        return json(nullptr);
             else if constexpr (std::same_as<U, bool>)            return json(iValue);
@@ -493,7 +543,8 @@ namespace Mashiro {
         template <typename T>
         void FromJsonImpl(const json& iJson, T& oValue) {
             using U = std::remove_cvref_t<T>;
-            if      constexpr (ADL::HasFreeFromJson<U>)   FromJson(iJson, oValue);
+            if      constexpr (HasHookFromJson<U>)        Hook::ToJsonHook<U>::FromJson(iJson, oValue);
+            else if constexpr (ADL::HasFreeFromJson<U>)   FromJson(iJson, oValue);
             else if constexpr (HasMemberFromJson<U>)      oValue = U::FromJson(iJson);
             else if constexpr (std::is_null_pointer_v<U>) {
                 if (!iJson.is_null())

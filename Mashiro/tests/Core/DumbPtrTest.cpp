@@ -52,6 +52,17 @@ namespace {
 
 } // anonymous namespace
 
+// Detection concepts: hoisted into a dependent context so an absent (constrained-away)
+// operator is a *soft* substitution failure rather than a hard error. With a concrete
+// alias the clang-p2996 front-end evaluates the requires-body eagerly and reports the
+// missing `operator*` / `operator->` as a fatal diagnostic instead of `false`.
+namespace {
+    template<class T>
+    concept HasStarDeref = requires(T v) { *v; };
+    template<class T>
+    concept HasArrowDeref = requires(T v) { v.operator->(); };
+} // anonymous namespace
+
 // =============================================================================
 // [Compile-time] — size, triviality, concept, element trait
 // =============================================================================
@@ -80,8 +91,8 @@ TEST_CASE("Trait: DumbPtrElement recovers the observed type", AUTO_TAG) {
 
 TEST_CASE("Void: opaque handle has no deref operators", AUTO_TAG) {
     using V = DumbPtr<void>;
-    STATIC_REQUIRE(!requires(V v) { *v; });
-    STATIC_REQUIRE(!requires(V v) { v.operator->(); });
+    STATIC_REQUIRE(!HasStarDeref<V>);
+    STATIC_REQUIRE(!HasArrowDeref<V>);
     // but the handle ops still work
     STATIC_REQUIRE(requires(V v) { v.Get(); });
     STATIC_REQUIRE(requires(V v) { static_cast<bool>(v); });

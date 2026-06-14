@@ -56,6 +56,51 @@ struct ConvertibleAndMemberType {
     std::string ToString() const { return "member"; }
 };
 
+// --- ToStringHook customisation-point test types -----------------------------
+// A plain type with no free/member hook: only a ToStringHook specialisation teaches it to render.
+struct HookOnlyType {
+    int value{};
+};
+
+// A type that ALSO has a free ToString and a member ToString, to prove the Hook
+// specialisation wins over both (priority 0 in the dispatch table). The free hook
+// lives in `namespace Detail` (ADL-only) so it doesn't clash with the
+// `Mashiro::ToString` object under `using namespace Mashiro`.
+namespace Detail {
+struct HookWinsType {
+    std::string ToString() const { return "member"; }
+};
+std::string ToString(const HookWinsType&) { return "free"; }
+} // namespace Detail
+using ::Detail::HookWinsType;
+
+// A template family, to exercise PARTIAL specialisation of the hook — something
+// neither an ADL free function nor a member hook can express for a whole family.
+template<class W>
+struct HookTemplate {
+    W value{};
+};
+
+// Hook specialisations must live at namespace scope (here, the global namespace),
+// proving the customisation point is reachable from outside `namespace Mashiro`
+// without colliding with the `Mashiro::ToString` object.
+template<>
+struct Mashiro::Hook::ToStringHook<HookOnlyType> {
+    static std::string ToString(const HookOnlyType& v) { return "hook:" + std::to_string(v.value); }
+};
+
+template<>
+struct Mashiro::Hook::ToStringHook<HookWinsType> {
+    static std::string ToString(const HookWinsType&) { return "hook"; }
+};
+
+template<class W>
+struct Mashiro::Hook::ToStringHook<HookTemplate<W>> {
+    static std::string ToString(const HookTemplate<W>& v) {
+        return "hookT:" + Mashiro::ToString(v.value);
+    }
+};
+
 enum class Color { red, green, blue };
 
 enum class SparseEnum : int { minus = -1, big = 1024 };
@@ -153,6 +198,21 @@ TEST_CASE("ToString prefers custom free ToString", AUTO_TAG) {
 TEST_CASE("ToString prefers member ToString over string conversion", AUTO_TAG) {
     REQUIRE(S(MemberToStringType{9}) == "member-ToString:9");
     REQUIRE(S(ConvertibleAndMemberType{}) == "member");
+}
+
+TEST_CASE("ToString uses a ToStringHook specialisation when no other hook exists", AUTO_TAG) {
+    STATIC_REQUIRE(ToStringCallable<HookOnlyType>);
+    REQUIRE(S(HookOnlyType{5}) == "hook:5");
+}
+
+TEST_CASE("ToString prefers a ToStringHook over free and member hooks", AUTO_TAG) {
+    // HookWinsType has all three; the hook (priority 0) must win.
+    REQUIRE(S(HookWinsType{}) == "hook");
+}
+
+TEST_CASE("ToString resolves a partially specialised ToStringHook for a template family", AUTO_TAG) {
+    REQUIRE(S(HookTemplate<int>{42}) == "hookT:42");
+    REQUIRE(S(HookTemplate<bool>{true}) == "hookT:true");
 }
 
 TEST_CASE("ToString handles string-like values", AUTO_TAG) {
