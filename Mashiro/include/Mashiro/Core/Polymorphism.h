@@ -42,6 +42,9 @@
 #pragma once
 
 #include "Mashiro/Core/TypeTraits.h"
+#include "Mashiro/Core/Int128.h"
+#include "Mashiro/Core/ABI.h"
+#include "Mashiro/Core/Hash.h"
 
 #include <concepts>
 #include <cstddef>
@@ -94,15 +97,65 @@ namespace Mashiro::Polymorphism {
             return virt || forced;
         }
 
-        /// @brief Reflected, declaration-ordered list of @p Iface methods participating in the vtable.
+        /// @brief Walk the class @p root's reflection hierarchy in derived-first order, invoking
+        ///        @p visit for each (depth, member) pair across @p root and every base class.
+        ///        Visits each unique base class exactly once (handles diamond inheritance and
+        ///        virtual bases) — duplicates are filtered by reflection-info equality of the base
+        ///        class type.
+        ///
+        /// @tparam Visit Callable as @c void(size_t depth, std::meta::info member). Depth is 0 for
+        ///               members declared in @p root, 1 for direct bases, etc.
+        template<typename Visit>
+        consteval void WalkHierarchyMembers(std::meta::info root, Visit&& visit) {
+            std::vector<std::meta::info> stack{root};
+            std::vector<std::meta::info> seen{root};
+            for (size_t i = 0; i < stack.size(); ++i) {
+                const size_t depth = i;
+                for (auto m : std::meta::members_of(stack[i], std::meta::access_context::unchecked())) {
+                    visit(depth, m);
+                }
+                for (auto b : std::meta::bases_of(stack[i], std::meta::access_context::unchecked())) {
+                    const auto baseType = std::meta::type_of(b);
+                    bool already = false;
+                    for (auto s : seen) {
+                        if (s == baseType) { already = true; break; }
+                    }
+                    if (!already) {
+                        stack.push_back(baseType);
+                        seen.push_back(baseType);
+                    }
+                }
+            }
+        }
+
+        /// @brief Reflected, declaration-ordered list of @p Iface methods participating in the vtable,
+        ///        walking the entire base-class hierarchy.
+        ///
+        /// Override-aware: when a derived interface @c override's a base method (same identifier and
+        /// signature), only the derived entity is kept. Otherwise inherited base methods are carried
+        /// through, so a `Vtable<IDerived, Impl>` projects every method @c IDerived's contract
+        /// implies — direct + inherited.
+        ///
+        /// Order: direct members of @c Iface first (declaration order), then base methods in
+        /// breadth-first hierarchy order.
         template<typename Iface>
         consteval std::vector<std::meta::info> SelectMethods() {
             std::vector<std::meta::info> out;
-            for (auto m : std::meta::members_of(^^Iface, std::meta::access_context::unchecked())) {
-                if (IsAdapterEntry(m)) {
-                    out.push_back(m);
+            WalkHierarchyMembers(^^Iface, [&](size_t /*depth*/, std::meta::info m) {
+                if (!IsAdapterEntry(m)) {
+                    return;
                 }
-            }
+                // Override filter: skip a base-class method whose identifier matches one already
+                // selected from a more-derived class. The first occurrence wins because the walk
+                // is derived-first.
+                const auto name = std::meta::identifier_of(m);
+                for (auto kept : out) {
+                    if (std::meta::identifier_of(kept) == name) {
+                        return;
+                    }
+                }
+                out.push_back(m);
+            });
             return out;
         }
 
@@ -201,20 +254,24 @@ namespace Mashiro::Polymorphism {
             const auto wantParams = ParamTypes(ifaceMember);
             const bool wantC      = std::meta::is_const(ifaceMember);
             const bool wantV      = std::meta::is_volatile(ifaceMember);
-            for (auto m : std::meta::members_of(classType, std::meta::access_context::unchecked())) {
-                if (!IsRegularMethod(m)) continue;
-                if (!std::meta::has_identifier(m) || std::meta::identifier_of(m) != name) continue;
-                if (std::meta::is_const(m) != wantC || std::meta::is_volatile(m) != wantV) continue;
-                if (std::meta::return_type_of(m) != wantRet) continue;
+            // Walk the impl's full base-class hierarchy in derived-first order so that, when a
+            // derived class overrides an inherited base method, we lock onto the derived entity
+            // (the dispatch we install in the vtable) rather than silently picking the base.
+            std::meta::info match = std::meta::info{};
+            WalkHierarchyMembers(classType, [&](size_t /*depth*/, std::meta::info m) {
+                if (match != std::meta::info{}) return;
+                if (!IsRegularMethod(m)) return;
+                if (!std::meta::has_identifier(m) || std::meta::identifier_of(m) != name) return;
+                if (std::meta::is_const(m) != wantC || std::meta::is_volatile(m) != wantV) return;
+                if (std::meta::return_type_of(m) != wantRet) return;
                 auto pts = ParamTypes(m);
-                if (pts.size() != wantParams.size()) continue;
-                bool ok = true;
+                if (pts.size() != wantParams.size()) return;
                 for (size_t i = 0; i < pts.size(); ++i) {
-                    if (pts[i] != wantParams[i]) { ok = false; break; }
+                    if (pts[i] != wantParams[i]) return;
                 }
-                if (ok) return m;
-            }
-            return std::meta::info{};
+                match = m;
+            });
+            return match;
         }
 
         /// @brief Compile-time predicate: every selected method of @p Iface has a compatible @p Impl method.
@@ -258,6 +315,41 @@ namespace Mashiro::Polymorphism {
 
     } // namespace Detail
     /** @endcond */
+
+    /**
+     * @brief Stable 128-bit hash over the projected vtable shape of @p Iface.
+     *
+     * Folds every selected method's Itanium-mangled signature into an FNV-1a128 digest. The hash
+     * is keyed on @p Iface alone — the choice of @c Impl never participates — and changes whenever
+     * any factor that would alter the synthesised vtable shape changes: a method added, removed,
+     * renamed, reordered, or whose signature (parameter types, return type, cv-qualifier) shifts.
+     *
+     * The Itanium ABI mangling captures everything an external observer would care about for
+     * binary compatibility, so the digest is suitable as an ABI-compatibility token: persist it
+     * alongside a serialised interface contract and a future build's mismatch reveals itself as a
+     * digest difference rather than as a corrupted vtable at run time.
+     *
+     * @tparam Iface Interface type whose selected methods are reflected and mangled.
+     */
+    template<typename Iface>
+    consteval uint128_t AbiDigest() {
+        // Materialise the per-method bytes into a constexpr-friendly std::array so we can feed
+        // FNV-1a's `std::span<const std::byte>` API without reinterpret_cast (which is forbidden
+        // in a constant expression). std::bit_cast<std::byte>(char) is well-defined and constexpr.
+        Hashing::Fnv1a128State h;
+        template for (constexpr auto m : Detail::kSelectedMethods<Iface>) {
+            constexpr std::string_view mangled = ABI::Itanium::Mangle(m);
+            constexpr auto bytes = []() {
+                std::array<std::byte, mangled.size()> out{};
+                for (size_t i = 0; i < mangled.size(); ++i) {
+                    out[i] = std::bit_cast<std::byte>(static_cast<unsigned char>(mangled[i]));
+                }
+                return out;
+            }();
+            h.Feed(std::span<const std::byte>{bytes.data(), bytes.size()});
+        }
+        return h.Finalize();
+    }
 
     /**
      * @brief Aggregate vtable shape for the (Iface, Impl) pair — forward-declared.

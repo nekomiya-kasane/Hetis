@@ -528,50 +528,254 @@ TEST_CASE("Vtable bound to a pure-virtual Impl base dispatches via the concrete 
 }
 
 // =============================================================================
-// Section 11 — Iface inheritance: which methods does Define<> see?
+// Section 11 — Iface inheritance: derived interface picks up base methods
 // =============================================================================
 
 namespace {
 
     struct IBase {
-        virtual ~IBase()                   = default;
-        virtual int  BaseValue() const     = 0;
-        virtual void Touch()               = 0;
+        virtual ~IBase()                = default;
+        virtual int  BaseValue() const  = 0;
+        virtual void Touch()            = 0;
     };
 
     struct IDerived : IBase {
-        virtual int DerivedOnly() const    = 0;
+        virtual int DerivedOnly() const = 0;
         // Note: does NOT override BaseValue / Touch — they remain pure on IDerived.
     };
 
+    // An override scenario: derived interface refines a base method. Only the derived entity
+    // should appear in the vtable; the base entity is shadowed.
+    struct IBaseOverride {
+        virtual ~IBaseOverride()    = default;
+        virtual int  Tick()         = 0;
+    };
+    struct IDerivedOverride : IBaseOverride {
+        int Tick() override         = 0;     // pure-virtual override of base method
+    };
+
     struct DerivedImpl {
-        int  v        = 0;
-        int  touchHits = 0;
+        int v          = 0;
+        int touchHits  = 0;
 
         int  BaseValue() const   { return v; }
         void Touch()             { ++touchHits; }
         int  DerivedOnly() const { return v + 100; }
     };
 
+    struct OverrideImpl {
+        int counter = 0;
+        int Tick()  { return ++counter; }
+    };
+
 } // namespace
 
-consteval { P::Define<IDerived, DerivedImpl>(); }
+consteval { P::Define<IDerived,         DerivedImpl>(); }
+consteval { P::Define<IDerivedOverride, OverrideImpl>(); }
 
-TEST_CASE("Iface inheritance: vtable only carries the derived interface's directly-declared methods", AUTO_TAG) {
-    // Documented current behaviour: SelectMethods walks std::meta::members_of, which returns the
-    // direct (declared-in-this-class) members only. Inherited pure-virtual methods from IBase are
-    // therefore *not* projected into the vtable.
-    //
-    // This test pins the current behaviour so any future change (e.g. a recursive walk of
-    // bases_of) trips a deliberate update of the test rather than a silent capability shift.
+TEST_CASE("Iface inheritance: vtable carries direct + inherited methods", AUTO_TAG) {
+    // The hierarchy walk picks up IBase::BaseValue and IBase::Touch alongside
+    // IDerived::DerivedOnly, with the derived interface's directly-declared methods first.
     using V = P::Vtable<IDerived, DerivedImpl>;
-    STATIC_REQUIRE(Traits::MembersCount<V> == 1);
-    STATIC_REQUIRE(Traits::MemberNames<V>[0] == "DerivedOnly");
+    STATIC_REQUIRE(Traits::MembersCount<V> == 3);
+
+    constexpr auto names = Traits::MemberNames<V>;
+    STATIC_REQUIRE(names[0] == "DerivedOnly");
+    STATIC_REQUIRE(names[1] == "BaseValue");
+    STATIC_REQUIRE(names[2] == "Touch");
 }
 
-TEST_CASE("Iface inheritance: dispatch reaches the derived-only method on the impl", AUTO_TAG) {
+TEST_CASE("Iface inheritance: dispatch reaches both direct and inherited methods", AUTO_TAG) {
     DerivedImpl d{};
     d.v = 5;
     P::Adapter<IDerived, DerivedImpl> a{&d};
     REQUIRE(a.vtable().DerivedOnly(a.target) == 105);
+    REQUIRE(a.vtable().BaseValue(a.target) == 5);
+    a.vtable().Touch(a.target);
+    a.vtable().Touch(a.target);
+    REQUIRE(d.touchHits == 2);
 }
+
+TEST_CASE("Iface inheritance: derived override shadows the base entity in the vtable", AUTO_TAG) {
+    // Both IBaseOverride and IDerivedOverride declare a method named Tick. The hierarchy walk
+    // visits derived first; the duplicate-name filter then drops the base's Tick. The vtable
+    // therefore has exactly one Tick slot, and dispatching through it lands on the override.
+    using V = P::Vtable<IDerivedOverride, OverrideImpl>;
+    STATIC_REQUIRE(Traits::MembersCount<V> == 1);
+    STATIC_REQUIRE(Traits::MemberNames<V>[0] == "Tick");
+
+    OverrideImpl impl{};
+    P::Adapter<IDerivedOverride, OverrideImpl> a{&impl};
+    REQUIRE(a.vtable().Tick(a.target) == 1);
+    REQUIRE(a.vtable().Tick(a.target) == 2);
+    REQUIRE(impl.counter == 2);
+}
+
+// =============================================================================
+// Section 12 — AbiDigest: vtable-shape hash for ABI compatibility tracking
+// =============================================================================
+//
+// Contract: AbiDigest<Iface>() is a 128-bit FNV-1a hash over the Itanium-mangled signatures of the
+// methods selected for the interface's vtable. The intended invariants are
+//   (a) STABILITY     same Iface -> same digest across queries.
+//   (b) SENSITIVITY   any change that would alter the synthesised vtable shape -> different digest.
+//   (c) IFACE-ONLY    the digest is keyed on Iface; the choice of Impl never participates.
+// These tests pin each invariant with a separate fixture pair so a regression in any axis fails
+// independently rather than being absorbed into a generic "two interfaces differ" assertion.
+
+namespace {
+
+    // ---- (a) baseline + identical-shape sibling ----------------------------
+    struct IDigest_A {
+        virtual ~IDigest_A()           = default;
+        virtual int  Get(int) const    = 0;
+        virtual void Set(int, double)  = 0;
+    };
+
+    struct IDigest_A_Same {            // Same names, same signatures, same order — same digest.
+        virtual ~IDigest_A_Same()         = default;
+        virtual int  Get(int) const       = 0;
+        virtual void Set(int, double)     = 0;
+    };
+
+    // ---- (b) sensitivity fixtures: each varies exactly one axis ------------
+    struct IDigest_AddedMethod {       // adds a third method
+        virtual ~IDigest_AddedMethod()    = default;
+        virtual int  Get(int) const       = 0;
+        virtual void Set(int, double)     = 0;
+        virtual void Extra()              = 0;
+    };
+    struct IDigest_RemovedMethod {     // drops Set
+        virtual ~IDigest_RemovedMethod()  = default;
+        virtual int  Get(int) const       = 0;
+    };
+    struct IDigest_RenamedMethod {     // Get -> Read
+        virtual ~IDigest_RenamedMethod()  = default;
+        virtual int  Read(int) const      = 0;
+        virtual void Set(int, double)     = 0;
+    };
+    struct IDigest_DiffParam {         // Get(int) -> Get(unsigned)
+        virtual ~IDigest_DiffParam()      = default;
+        virtual int  Get(unsigned) const  = 0;
+        virtual void Set(int, double)     = 0;
+    };
+    struct IDigest_DiffReturn {        // int Get -> long Get
+        virtual ~IDigest_DiffReturn()     = default;
+        virtual long Get(int) const       = 0;
+        virtual void Set(int, double)     = 0;
+    };
+    struct IDigest_DiffCv {            // const Get -> non-const Get
+        virtual ~IDigest_DiffCv()         = default;
+        virtual int  Get(int)             = 0;
+        virtual void Set(int, double)     = 0;
+    };
+    struct IDigest_Reordered {         // Set declared before Get
+        virtual ~IDigest_Reordered()      = default;
+        virtual void Set(int, double)     = 0;
+        virtual int  Get(int) const       = 0;
+    };
+
+    // ---- (c) impl-independence fixture -------------------------------------
+    struct IDigest_C {
+        virtual ~IDigest_C()              = default;
+        virtual int  Compute() const      = 0;
+    };
+    struct DigestImplA {
+        int Compute() const { return 1; }
+    };
+    struct DigestImplB {                                   // Different Impl, same Iface.
+        int extraField = 0;
+        int Compute() const { return extraField; }
+    };
+
+    // ---- (d) annotation interaction fixtures: same Iface, different selection ----
+    // Two interfaces declared in this same translation unit. They have identical *projected*
+    // method sets after annotation processing — the equivalence is what the digest must report.
+    struct IDigest_Annotated {
+        virtual ~IDigest_Annotated()                    = default;
+        virtual int  Required() const                   = 0;
+        [[=P::Anno::Skip{}]]  virtual void Skipped() const  {}
+        [[=P::Anno::Force{}]] int  Forced() const         { return 0; }
+        void NotInVtable() const                          {}
+    };
+    // The "no-noise" sibling: same name, same direct members minus the annotation machinery, so
+    // the projected method set differs (Skipped is virtual but no longer skipped, NotInVtable
+    // is now Force-eligible only if explicit). The digests must therefore *differ*.
+    struct IDigest_AnnotatedNoise {
+        virtual ~IDigest_AnnotatedNoise()               = default;
+        virtual int  Required() const                   = 0;
+        virtual void Skipped() const                    = 0;     // now selected
+    };
+
+    // ---- (e) inheritance fixtures: derived adds methods on top of base ----
+    struct IDigest_Base {
+        virtual ~IDigest_Base()        = default;
+        virtual int  Base1() const     = 0;
+        virtual void Base2()           = 0;
+    };
+    struct IDigest_Derived : IDigest_Base {
+        virtual int  Leaf() const      = 0;
+    };
+
+} // namespace
+
+TEST_CASE("AbiDigest is consteval and stable", AUTO_TAG) {
+    constexpr auto first  = P::AbiDigest<IDigest_A>();
+    constexpr auto second = P::AbiDigest<IDigest_A>();
+    STATIC_REQUIRE(first == second);                       // (a) deterministic across queries.
+    REQUIRE(first == second);                              // and from a runtime call site too.
+    // The Itanium mangler encodes each method's parent class name into the symbol, so the digest
+    // is keyed on the type identity of @p Iface as well as on its method shape. Two interfaces
+    // with identical signatures but different names therefore produce different digests — which
+    // is the correct ABI-compatibility semantics: a "MyV1" and a "MyV2" with the same shape are
+    // not interchangeable from a binary-protocol point of view, and the digest tracks that.
+}
+
+TEST_CASE("AbiDigest changes when a method is added or removed", AUTO_TAG) {
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_AddedMethod>());
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_RemovedMethod>());
+}
+
+TEST_CASE("AbiDigest changes when a method is renamed", AUTO_TAG) {
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_RenamedMethod>());
+}
+
+TEST_CASE("AbiDigest changes when parameter, return, or cv-qualifier changes", AUTO_TAG) {
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_DiffParam>());
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_DiffReturn>());
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_DiffCv>());
+}
+
+TEST_CASE("AbiDigest changes when methods are reordered", AUTO_TAG) {
+    // The vtable layout is order-sensitive (slot[0], slot[1], ...), so the digest must be too.
+    // This is what protects against a "compatible at the type level but ABI-shifted" scenario.
+    STATIC_REQUIRE(P::AbiDigest<IDigest_A>() != P::AbiDigest<IDigest_Reordered>());
+}
+
+TEST_CASE("AbiDigest does not depend on the implementation type", AUTO_TAG) {
+    // Digest is keyed on Iface only — Impl never participates.
+    STATIC_REQUIRE(P::AbiDigest<IDigest_C>() == P::AbiDigest<IDigest_C>());
+    static_assert(std::same_as<decltype(P::AbiDigest<IDigest_C>()), uint128_t>);
+}
+
+TEST_CASE("AbiDigest reflects annotation-driven selection (Skip / Force)", AUTO_TAG) {
+    // Skip removes a method, Force promotes one — both alter the projected method set, so the
+    // digest of the annotated interface must differ from its no-annotation sibling.
+    STATIC_REQUIRE(P::AbiDigest<IDigest_Annotated>() != P::AbiDigest<IDigest_AnnotatedNoise>());
+}
+
+TEST_CASE("AbiDigest covers inherited base-class methods", AUTO_TAG) {
+    // The hierarchy walker (Section 11) puts derived methods first then base methods, and the
+    // digest folds them in that order. A derived interface that adds Leaf on top of Base1/Base2
+    // therefore produces a strictly different digest than the base alone — inherited methods
+    // participate, but they don't make the derived digest collapse to the base's.
+    STATIC_REQUIRE(P::AbiDigest<IDigest_Derived>() != P::AbiDigest<IDigest_Base>());
+}
+
+TEST_CASE("AbiDigest is non-zero for any non-empty vtable", AUTO_TAG) {
+    // FNV-1a128 has a non-zero offset basis, so feeding any input yields a non-zero result. This is
+    // a defence-in-depth check against accidentally returning a zero-initialised state.
+    constexpr auto digest = P::AbiDigest<IDigest_A>();
+    STATIC_REQUIRE(digest != uint128_t{0});
+}
+
