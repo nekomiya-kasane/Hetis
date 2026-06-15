@@ -73,6 +73,7 @@ option(VK_TP_BUILD_MSDFGEN "Build msdfgen (core-only, zero external deps)" ON)
 option(VK_TP_BUILD_METIS   "Build METIS + GKlib graph partitioner (custom static build)" ON)
 option(VK_TP_BUILD_EFSW    "Build efsw filesystem watcher" ON)
 option(VK_TP_BUILD_CATCH2  "Build Catch2 test framework"   ON)
+option(VK_TP_BUILD_PERFETTO "Build Perfetto tracing SDK (amalgamated static library)" ON)
 
 # -----------------------------------------------------------------------------
 # 1. VulkanMemoryAllocator (header-only)
@@ -387,6 +388,32 @@ endif()
 add_library(renderdoc_app INTERFACE)
 target_include_directories(renderdoc_app INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/renderdoc_app)
 
+# -----------------------------------------------------------------------------
+# 24b. Perfetto tracing SDK (amalgamated perfetto.h + perfetto.cc).
+#      This is the official C++ SDK release layout, not the full GN-built
+#      upstream tree. Target: perfetto.
+# -----------------------------------------------------------------------------
+if(VK_TP_BUILD_PERFETTO)
+    set(PERFETTO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/perfetto)
+    if(NOT EXISTS "${PERFETTO_DIR}/perfetto.h" OR NOT EXISTS "${PERFETTO_DIR}/perfetto.cc")
+        message(FATAL_ERROR "[vulkan/thirdparty] Perfetto SDK missing at ${PERFETTO_DIR}. "
+                            "Expected perfetto-cpp-sdk-src release layout with perfetto.h/perfetto.cc.")
+    endif()
+
+    add_library(perfetto STATIC ${PERFETTO_DIR}/perfetto.cc)
+    target_include_directories(perfetto PUBLIC ${PERFETTO_DIR})
+    target_compile_definitions(perfetto PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_features(perfetto PUBLIC cxx_std_17)
+    if(WIN32)
+        target_link_libraries(perfetto PUBLIC ws2_32)
+    endif()
+    if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        target_compile_options(perfetto PRIVATE /bigobj)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+        target_compile_options(perfetto PRIVATE -Wa,-mbig-obj)
+    endif()
+endif()
+
 # =============================================================================
 #  Frontier-renderer additions (2026)
 # =============================================================================
@@ -646,7 +673,7 @@ message(STATUS "  Window/UI     : glfw glad imgui")
 message(STATUS "  Math          : glm")
 message(STATUS "  Assets        : $<$<BOOL:${VK_TP_BUILD_ASSIMP}>:assimp> tinyobjloader tinygltf cgltf fastgltf meshoptimizer mikktspace")
 message(STATUS "  Utility       : spdlog::spdlog nlohmann_json::nlohmann_json entt tinyfiledialogs cli11")
-message(STATUS "  Profiling     : TracyClient (active=${VK_TP_BUILD_TRACY})  renderdoc_app")
+message(STATUS "  Profiling     : TracyClient (active=${VK_TP_BUILD_TRACY})  renderdoc_app $<$<BOOL:${VK_TP_BUILD_PERFETTO}>:perfetto>")
 message(STATUS "  Concurrency   : $<$<BOOL:${VK_TP_BUILD_TBB}>:TBB::tbb (vk_tp_deploy_tbb())> taskflow stdexec")
 message(STATUS "  UI extras     : imguizmo implot")
 message(STATUS "  Physics       : $<$<BOOL:${VK_TP_BUILD_JOLT}>:Jolt>")
