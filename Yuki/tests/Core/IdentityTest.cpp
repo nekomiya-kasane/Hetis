@@ -9,6 +9,8 @@
  * robustness on unannotated class types and on non-class types like `int`).
  */
 #include <Yuki/Core/Identity.h>
+#include <Yuki/Core/MetaClass.h>
+#include <Yuki/Core/RootObject.h>
 
 #include "Meta.h"
 #include <catch2/catch_test_macros.hpp>
@@ -48,6 +50,19 @@ namespace {
 
     struct Plain {
         int value;
+    };
+
+    // --- Fixtures: closure-architecture additions (Task 1) -------------------
+
+    struct [[=Anno::Implementation]] StatelessTestImpl : Yuki::MetaNode<StatelessTestImpl> {};
+    struct [[=Anno::Extension, =Anno::Lazy{}]] StatefulExt
+        : Yuki::ExtensionNode<StatefulExt, StatelessTestImpl> {
+        using ExtensionNode::ExtensionNode;
+        int payload{0};
+    };
+    struct [[=Anno::Extension, =Anno::Eager{}]] StatelessExt
+        : Yuki::ExtensionNode<StatelessExt, StatelessTestImpl> {
+        using ExtensionNode::ExtensionNode;
     };
 
 } // namespace
@@ -187,4 +202,26 @@ TEST_CASE("Each fixture satisfies exactly one base-role concept", AUTO_TAG) {
     STATIC_REQUIRE(exactlyOne.template operator()<ShapeProxy>() == 1);
     STATIC_REQUIRE(exactlyOne.template operator()<ShapeBridge>() == 1);
     STATIC_REQUIRE(exactlyOne.template operator()<Plain>() == 0);
+}
+
+// =============================================================================
+// Closure-architecture additions — Eager/Lazy, reflection-based stateless
+// discriminator, runtime IidOf
+// =============================================================================
+
+TEST_CASE("StatelessExtensionClass detects empty-NSDM extensions", AUTO_TAG) {
+    STATIC_REQUIRE(Yuki::Anno::StatelessExtensionClass<StatelessExt>);
+    STATIC_REQUIRE_FALSE(Yuki::Anno::StatelessExtensionClass<StatefulExt>);
+}
+
+TEST_CASE("Anno::Eager and Anno::Lazy are detected via reflection", AUTO_TAG) {
+    STATIC_REQUIRE(Yuki::Anno::IsEager<StatelessExt>);
+    STATIC_REQUIRE(Yuki::Anno::IsLazy<StatefulExt>);
+    STATIC_REQUIRE_FALSE(Yuki::Anno::IsEager<StatefulExt>);
+}
+
+TEST_CASE("IidOf has a runtime form taking a MetaCore", AUTO_TAG) {
+    constexpr auto staticIid = Yuki::IidOf<StatelessTestImpl>();
+    const auto runtimeIid = Yuki::IidOf(Yuki::MetaCoreOf<StatelessTestImpl>);
+    REQUIRE(staticIid == runtimeIid);
 }

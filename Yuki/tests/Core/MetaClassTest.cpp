@@ -60,7 +60,7 @@ namespace {
 
     inline constexpr std::meta::info kShinyExtends[] = {^^CircleImpl};
 
-    // Declaration-only Extension: has a data member -> derives to DataExtension, even through Meta.
+    // Stateful extension: declares one or more NSDMs on the Extension class itself.
     struct [[=Anno::Meta{.type = ClassType::Extension, .extends = kShinyExtends}]] ShinyExt {
         int gloss;
     };
@@ -122,8 +122,9 @@ TEST_CASE("extends resolves to the extended core", AUTO_TAG) {
     STATIC_REQUIRE(MetaCoreOf<ShinyExt>.extends[0] == &MetaCoreOf<CircleImpl>);
 }
 
-TEST_CASE("Extension role derives to DataExtension when it carries data", AUTO_TAG) {
-    STATIC_REQUIRE(MetaCoreOf<ShinyExt>.type == ClassType::DataExtension);
+TEST_CASE("Stateful extension is reflected as Extension and satisfies StatefulExtensionClass", AUTO_TAG) {
+    STATIC_REQUIRE(MetaCoreOf<ShinyExt>.type == ClassType::Extension);
+    STATIC_REQUIRE(StatefulExtensionClass<ShinyExt>);
 }
 
 // =============================================================================
@@ -144,7 +145,7 @@ TEST_CASE("Inline brace-list implements resolves like an array-backed Meta", AUT
 }
 
 TEST_CASE("Stacked Extends merges into the extends edge set", AUTO_TAG) {
-    STATIC_REQUIRE(MetaCoreOf<StackedExt>.type == ClassType::DataExtension);
+    STATIC_REQUIRE(MetaCoreOf<StackedExt>.type == ClassType::Extension);
     STATIC_REQUIRE(MetaCoreOf<StackedExt>.extends.size() == 1);
     STATIC_REQUIRE(MetaCoreOf<StackedExt>.extends[0] == &MetaCoreOf<CircleImpl>);
 }
@@ -154,12 +155,12 @@ TEST_CASE("Stacked Extends merges into the extends edge set", AUTO_TAG) {
 // =============================================================================
 
 TEST_CASE("IidOf honours the annotation override", AUTO_TAG) {
-    STATIC_REQUIRE(IidOf<IPinned>.value == Uuid::ParseOrThrow("3f2504e0-4f89-41d3-9a0c-0305e82c3301"));
+    STATIC_REQUIRE(IidOf<IPinned>().value == Uuid::ParseOrThrow("3f2504e0-4f89-41d3-9a0c-0305e82c3301"));
 }
 
 TEST_CASE("IidOf falls back to StableHash when unannotated", AUTO_TAG) {
-    STATIC_REQUIRE(IidOf<IShape>.value == StableHash<IShape>.value);
-    STATIC_REQUIRE(IidOf<IDrawable>.value == StableHash<IDrawable>.value);
+    STATIC_REQUIRE(IidOf<IShape>().value == StableHash<IShape>.value);
+    STATIC_REQUIRE(IidOf<IDrawable>().value == StableHash<IDrawable>.value);
 }
 
 TEST_CASE("StableHash is RFC-4122 stamped and per-type distinct", AUTO_TAG) {
@@ -176,7 +177,7 @@ TEST_CASE("StableHash is RFC-4122 stamped and per-type distinct", AUTO_TAG) {
 TEST_CASE("Static and dynamic surfaces agree on the same core", AUTO_TAG) {
     const MetaClass& mc = MetaClassOf<CircleImpl>;
     REQUIRE(mc.classType() == ClassTypeOf<CircleImpl>);
-    REQUIRE(mc.iid() == IidOf<CircleImpl>);
+    REQUIRE(mc.iid() == IidOf<CircleImpl>());
     REQUIRE(mc.name() == Yuki::NameOf<CircleImpl>);
     REQUIRE(mc.baseMeta() == BaseMetaOf<CircleImpl>);
     REQUIRE(&mc.core() == &MetaCoreOf<CircleImpl>);

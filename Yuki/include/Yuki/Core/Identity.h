@@ -16,8 +16,9 @@
  * unannotated or non-class types instead of being ill-formed, and the named role concepts
  * (@ref InterfaceClass, @ref ImplementationClass, …) partition types over that result.
  *
- * Stateful vs. stateless extensions are *not* separate roles: the only difference is a sizeof
- * question, decided at compile time from the type itself (see @ref StatefulExtensionClass).
+ * Stateful vs. stateless extensions are *not* separate roles: the only difference is a reflection
+ * question over an Extension's own NSDMs, decided at compile time from the type itself (see
+ * @ref Anno::StatelessExtensionClass).
  *
  * This header owns **roles only**. Identity-by-IID, the three-layer @c MetaClass, and the
  * reflection pipeline that bakes a class's metadata into `.rodata` live in `MetaClass.h`; the
@@ -55,14 +56,17 @@ namespace Yuki {
      *
      * "Stateful vs. stateless" extension is *not* a role distinction — both are
      * @ref ClassType::Extension. Whether an extension carries per-instance data (and therefore
-     * needs a refcount, side-table storage, etc.) is decided from `sizeof` at compile time; see
-     * @ref StatefulExtensionClass.
+     * needs a refcount, side-table storage, etc.) is decided by reflection over the NSDMs declared
+     * on the Extension class itself — inherited members from the anchor/CRTP base are skipped, so
+     * @c sizeof is not consulted; see @ref Anno::StatelessExtensionClass.
      */
     enum class ClassType : uint8_t {
         None           = 0,  ///< Not part of the object model (no @ref Anno::Meta annotation).
         Interface      = 1,  ///< A behaviour contract.
         Implementation = 2,  ///< A main component implementation.
-        Extension      = 3,  ///< Extension; statefulness is a `sizeof` distinction, not a role.
+        Extension      = 3,  ///< Extension; stateless vs. stateful is a reflection-based distinction
+                             ///< on the Extension's own NSDMs (see @ref Anno::StatelessExtensionClass),
+                             ///< not a role.
         Imposter       = 4,  ///< A stand-in / proxy class.
         Bridge         = 5,  ///< A generated TIE/BOA adapter class.
     };
@@ -191,6 +195,47 @@ namespace Yuki {
         inline constexpr Role Bridge{ClassType::Bridge};
         /// @}
 
+        // ---------------------------------------------------------------------
+        // Eager / Lazy — materialization-timing markers for Extensions
+        // ---------------------------------------------------------------------
+
+        /**
+         * @brief Marker annotation: materialize this Extension at *closure construction time*.
+         *
+         * Stamped as `[[=Anno::Eager{}]]` on an `Anno::Extension` class to override the per-statefulness
+         * default (the trailing `{}` is required — @c Eager is an empty struct, so the annotation is a
+         * prvalue of it). Detected purely by reflection (see @ref IsEager); carries no state of its own. The
+         * registrar generated for the Extension consults @ref IsEager / @ref IsLazy to decide whether
+         * to enrol the type in the owning Implementation's eager-set or to wire it onto the lazy
+         * `SideTableResolver` path.
+         *
+         * @note Stateless Extensions default to Eager; stateful Extensions default to Lazy. The
+         *       annotation is only required when an author wants the *non-default* behaviour, but
+         *       spelling it out explicitly is also accepted and reads as documentation at the site
+         *       of declaration.
+         */
+        struct Eager {};
+
+        /**
+         * @brief Marker annotation: materialize this Extension at *first query* (lazy resolution).
+         *
+         * Spelled as `[[=Anno::Lazy{}]]` on an `Anno::Extension` class — the trailing `{}` is required
+         * for the same reason as @ref Eager (empty struct ⇒ prvalue spelling). The peer of @ref Eager;
+         * see its docs. A class carrying both @ref Eager and @ref Lazy is a user error; downstream
+         * introspection treats the situation as Eager wins, but the registrar is the authoritative
+         * resolver and is free to diagnose the conflict.
+         */
+        // TODO(task-8): registrar diagnoses Eager+Lazy conflict.
+        struct Lazy {};
+
+        /// @brief `true` if @p T carries an @ref Eager annotation (stackable; checked by type only).
+        template<class T>
+        inline constexpr bool IsEager = !std::meta::annotations_of(^^T, ^^Eager).empty();
+
+        /// @brief `true` if @p T carries a @ref Lazy annotation (stackable; checked by type only).
+        template<class T>
+        inline constexpr bool IsLazy = !std::meta::annotations_of(^^T, ^^Lazy).empty();
+
     } // namespace Anno
 
     // =========================================================================
@@ -284,19 +329,43 @@ namespace Yuki {
     template<typename T>
     concept ExtensionClass = IsClassType<T, ClassType::Extension>;
 
-    /// @brief A *stateful* extension — an extension whose layout carries per-instance data.
-    ///
-    /// The compile-time discriminator that decides storage and refcounting policy: a stateful
-    /// extension needs side-table storage and an opt-in refcount; a stateless one is a
-    /// `.rodata`-resident singleton with refcounting that has no meaning. The check is purely
-    /// `sizeof`: extensions (which derive from a 1-byte polymorphic-anchor base) carry data
-    /// exactly when their footprint exceeds that base.
-    template<typename T>
-    concept StatefulExtensionClass = ExtensionClass<T> && (sizeof(T) > 1);
+    namespace Anno {
 
-    /// @brief A *stateless* extension — an extension with no per-instance data; singleton-shareable.
-    template<typename T>
-    concept StatelessExtensionClass = ExtensionClass<T> && (sizeof(T) <= 1);
+        /**
+         * @brief A *stateless* extension — an extension with no per-instance data; singleton-shareable.
+         *
+         * The compile-time discriminator that decides storage and refcounting policy: a stateless
+         * extension is a `.rodata`-resident singleton whose dispatch entry can be a
+         * @c CodeExtensionSingleton; a stateful extension needs side-table storage routed through a
+         * @c SideTableResolver. The check uses reflection rather than @c sizeof: every Extension
+         * derives transitively from @c RootObject and so unconditionally carries ≥ 2 machine words,
+         * making @c sizeof a false discriminator. Instead, count the NSDMs *declared on @p E itself*
+         * — inherited members from the anchor/CRTP base are skipped because their @c parent_of
+         * reflection differs from @c ^^E.
+         */
+        template<class E>
+        concept StatelessExtensionClass = ExtensionClass<E> && [] consteval {
+            std::size_t own = 0;
+            template for (constexpr auto m : std::define_static_array(
+                              std::meta::nonstatic_data_members_of(^^E, std::meta::access_context::current()))) {
+                if (std::meta::parent_of(m) == ^^E) {
+                    ++own;
+                }
+            }
+            return own == 0;
+        }();
+
+        /// @brief A *stateful* extension — an extension whose layout carries per-instance data.
+        ///        Negation of @ref StatelessExtensionClass restricted to @ref ExtensionClass.
+        template<class E>
+        concept StatefulExtensionClass = ExtensionClass<E> && !StatelessExtensionClass<E>;
+
+    } // namespace Anno
+
+    /// @brief Re-export so unqualified `Yuki::StatelessExtensionClass` keeps working (the historical
+    ///        spelling pre-dates the move into `Anno`).
+    using Anno::StatelessExtensionClass;
+    using Anno::StatefulExtensionClass;
 
     /// @brief Either flavour of component.
     template<typename T>

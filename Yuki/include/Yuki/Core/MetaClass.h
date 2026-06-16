@@ -125,17 +125,29 @@ namespace Yuki {
      * @brief The identity of @p I — the `[[=Iid("…")]]` annotation if present, else @ref StableHash.
      *
      * A single switch (annotation present?), not a dual track: every class has exactly one identity,
-     * sourced from one place.
+     * sourced from one place. This is the *static* form, where the type is known at the call site.
+     *
+     * Spelled as a `consteval` function template (rather than a variable template) so it can share
+     * the unqualified name @c IidOf with the dynamic-side overload below — the two surfaces are
+     * peers, taking either a type (statically) or a @ref MetaCore (dynamically) and answering the
+     * same identity question.
+     *
+     * @note Call sites that previously read @c IidOf<I> as a value must now write @c IidOf<I>()
+     *       (one paren-pair); the value is still folded at compile time.
      */
     template<typename I>
-    inline constexpr Iid IidOf = [] consteval {
-        constexpr bool overridden = !std::meta::annotations_of(^^I, ^^Iid).empty();
+    [[nodiscard]] consteval Iid IidOf() noexcept {
+        constexpr bool overridden = [] consteval {
+            return !std::meta::annotations_of(^^I, ^^Iid).empty();
+        }();
         if constexpr (overridden) {
-            return std::meta::extract<Iid>(std::meta::annotations_of(^^I, ^^Iid)[0]);
+            return [] consteval {
+                return std::meta::extract<Iid>(std::meta::annotations_of(^^I, ^^Iid)[0]);
+            }();
         } else {
             return StableHash<I>;
         }
-    }();
+    }
 
     // =========================================================================
     // Layer ① MetaCore — the immutable core (inline constexpr, .rodata)
@@ -157,15 +169,57 @@ namespace Yuki {
         const MetaCore* omBase{nullptr};                  ///< Nearest OM ancestor core, or nullptr.
     };
 
+    /**
+     * @brief Runtime form of @ref IidOf: read the IID off an already-built @ref MetaCore.
+     *
+     * Used on the dynamic dispatch path where the type-erased side of the system has a @ref MetaCore
+     * (or @c MetaClass) in hand and just needs the identity it carries. The body is a single field
+     * read — there is no separate registry, no hashing — so the two surfaces share a single source
+     * of truth: the function template asks reflection for the IID *of @p I*, and this overload
+     * reads it back through the same @ref MetaCore the pipeline baked it into.
+     */
+    [[nodiscard]] inline Iid IidOf(const MetaCore& core) noexcept { return core.iid; }
+
     // =========================================================================
     // Layer ② MetaLinks — the structural tail (load-time write, hot-path read)
     // =========================================================================
 
-    /// @brief A perfect-hash dispatch entry: an interface IID mapped to its core and `this` offset.
+    /**
+     * @brief How a @ref DispatchEntry reaches the requested interface from a host pointer.
+     *
+     * The runtime contract of the QueryInterface fast path. Every interface offered by an impl
+     * lands in exactly one bucket — and which bucket is decided at compile time, fully visible to
+     * the optimiser. The `kind` field on @ref DispatchEntry exists for diagnostics and for the
+     * dynamic-face @c Query path that goes through @c MetaClassDynamic; the static-face @ref Query
+     * folds the bucket away and emits the matching pointer adjustment directly.
+     *
+     * @c DirectCast covers BOA — the impl C++-inherits the interface, so @c Query<I> is a fold to
+     * `static_cast<I*>(p)` and the compiler emits the layout-required offset. @c InlineFacade
+     * covers the Hot facade subobjects aggregated inside the impl. @c CodeExtensionSingleton
+     * covers stateless code-extensions (Anno::Extension with no NSDM): a single facade lives in
+     * `.rodata` and is shared across instances. @c SideTableResolver covers DataExtensions whose
+     * storage hangs off a per-instance side table installed by the loader. @c FacadeList covers
+     * Cold/runtime-attached interfaces walked through @c RootObject's facade chain.
+     */
+    enum class DispatchKind : uint8_t {
+        DirectCast,             ///< BOA: `static_cast<I*>(impl)` with C++-emitted offset.
+        InlineFacade,           ///< Hot inline-aggregated facade subobject (offset known statically).
+        CodeExtensionSingleton, ///< Stateless code-extension; shared facade in `.rodata`.
+        SideTableResolver,      ///< DataExtension storage looked up via per-instance side table.
+        FacadeList,             ///< Cold/runtime-attached interface; walks the @c FacadeList chain.
+    };
+    static_assert(sizeof(DispatchKind) == 1);
+
+    /// @brief A perfect-hash dispatch entry: an interface IID mapped to its core, kind, and offset.
+    ///
+    /// `offset` is interpreted by @c kind: a byte offset from the host base for @c DirectCast and
+    /// @c InlineFacade, an opaque index into the side table for @c SideTableResolver, and 0 for
+    /// the singleton/facade-list kinds (which carry no offset because they don't need one).
     struct DispatchEntry {
-        Iid iid{};                       ///< The interface's identity.
-        const MetaCore* iface{nullptr};  ///< The interface's core.
-        std::ptrdiff_t offset{0};        ///< `this`-adjustment to reach the subobject.
+        Iid iid{};                                ///< The interface's identity.
+        const MetaCore* iface{nullptr};           ///< The interface's core (for diagnostics / QI).
+        DispatchKind kind{DispatchKind::DirectCast};  ///< Which bucket reached the interface.
+        std::ptrdiff_t offset{0};                 ///< `this`-adjustment, kind-dependent meaning.
     };
 
     /**
@@ -411,7 +465,7 @@ namespace Yuki {
             MetaCore c;
             c.type = ClassTypeOf<T>;
             c.qualifiedName = std::define_static_string(std::meta::display_string_of(^^T));
-            c.iid = IidOf<T>;
+            c.iid = IidOf<T>();
             c.extends = kExtendsCores<T>;
             c.implements = kImplementsCores<T>;
             c.omBase = OmBaseCore<T>();
@@ -436,5 +490,54 @@ namespace Yuki {
     /// @brief @p T's nearest object-model ancestor core, or `nullptr`. Source: @ref MetaCore::omBase.
     template<typename T>
     inline constexpr const MetaCore* BaseMetaOf = MetaCoreOf<T>.omBase;
+
+    // =========================================================================
+    // Static-face Query<I>(C*) — the type-known fast path of QueryInterface
+    // =========================================================================
+
+    /**
+     * @brief Compile-time @c QueryInterface for the case where the host's static type is known.
+     *
+     * The "static face" of the QI surface: when the caller already has a @c C* with @c C's complete
+     * type visible, the answer is decidable at compile time. The function folds to one of:
+     *
+     *   - `static_cast<I*>(p)` — when @c C C++-inherits @p I (BOA / @c InlineFacade aggregated as a
+     *     subobject of @c C);
+     *   - the address of the inline-aggregated facade subobject — when the metaclass pipeline
+     *     records an @c InlineFacade entry whose offset is a compile-time constant;
+     *   - @c nullptr — when @p I cannot be reached statically (the dynamic face, taking
+     *     @c RootObject*, must consult @c MetaClassDynamic and the runtime tie chain instead).
+     *
+     * No tag check, no vcall, no table lookup: the optimiser sees through the @c if @c constexpr and
+     * emits the C++-language-level offset adjustment directly.
+     *
+     * @tparam I The interface to retrieve.
+     * @param p  A pointer to a fully-typed host. May be @c nullptr.
+     * @return A native @p I pointer when the cast is statically valid; @c nullptr otherwise.
+     */
+    template<InterfaceClass I, typename C>
+    [[nodiscard]] constexpr I* Query(C* p) noexcept {
+        if (p == nullptr) {
+            return nullptr;
+        }
+        if constexpr (std::derived_from<C, I>) {
+            return static_cast<I*>(p);
+        } else {
+            return nullptr;
+        }
+    }
+
+    /// @copydoc Query
+    template<InterfaceClass I, typename C>
+    [[nodiscard]] constexpr const I* Query(const C* p) noexcept {
+        if (p == nullptr) {
+            return nullptr;
+        }
+        if constexpr (std::derived_from<C, I>) {
+            return static_cast<const I*>(p);
+        } else {
+            return nullptr;
+        }
+    }
 
 } // namespace Yuki
