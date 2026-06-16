@@ -1,8 +1,9 @@
-#include <Mashiro/Schedular/Generator.h>
+#include <Mashiro/Async/Generator.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -148,6 +149,20 @@ TEST_CASE("Generator exception propagation", AUTO_TAG) {
     auto gen = ThrowingGen();
     auto it = gen.begin();
     REQUIRE(*it == 1);
+    bool threw = false;
+    try {
+        std::fprintf(stderr, "[probe] before ++it\n");
+        ++it;
+        std::fprintf(stderr, "[probe] ++it returned without throwing\n");
+    } catch (const std::runtime_error& e) {
+        threw = true;
+        std::fprintf(stderr, "[probe] caught runtime_error: %s\n", e.what());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[probe] caught std::exception (not runtime_error): %s\n", e.what());
+    } catch (...) {
+        std::fprintf(stderr, "[probe] caught unknown exception type\n");
+    }
+    REQUIRE(threw);
     REQUIRE_THROWS_AS(++it, std::runtime_error);
 }
 
