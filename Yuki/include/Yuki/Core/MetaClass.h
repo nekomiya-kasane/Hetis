@@ -304,6 +304,41 @@ namespace Yuki {
             return nullptr;
         }
 
+        // =====================================================================
+        // Snapshot retirement — RCU-by-epoch reclaim of replaced DispatchSnapshots
+        // =====================================================================
+        //
+        // Per spec §2.3. When a registrar publishes a new DispatchSnapshot it cannot free the old
+        // one immediately — readers that acquire-loaded the prior pointer still hold it for the
+        // duration of one query. Instead it hands the old snapshot to @ref RetireSnapshot together
+        // with a deleter (the registrar knows the allocation shape; this layer does not). The next
+        // @ref SweepRetirements call — typically the next @c Registry::Install on *any* metaclass —
+        // drains the list under one mutex and runs each deleter; by then every reader that touched
+        // the retired snapshot has finished, because a Yuki query is leaf-short and never blocks.
+        //
+        // No per-thread epoch counter, no hazard pointers: the discipline is "any registrar Install
+        // is a global epoch boundary", and the sweep is O(retired-since-last-sweep) under a single
+        // std::mutex. The mutex guards a short push_back / swap / size critical section; contention
+        // is bounded by the number of concurrent registrars (rare).
+
+        /// @brief Function the registrar provides for freeing a retired snapshot.
+        ///        Receives ownership of @p s and is responsible for freeing both the snapshot and
+        ///        its entry array (the arena shape is opaque to the retirement layer).
+        using SnapshotDeleter = void (*)(const DispatchSnapshot* s) noexcept;
+
+        /// @brief Enqueue @p s for deferred reclaim; @p d will be called by the next sweep.
+        ///        No-op when @p s is @c nullptr (registrars publishing an initial snapshot have no
+        ///        prior pointer to retire).
+        void          RetireSnapshot(const DispatchSnapshot* s, SnapshotDeleter d) noexcept;
+
+        /// @brief Drain the retirement list and run each deleter. Total: visits exactly the
+        ///        snapshots enqueued since the previous sweep.
+        void          SweepRetirements() noexcept;
+
+        /// @brief Count of snapshots currently awaiting reclaim. Diagnostic / test hook; callers
+        ///        on the hot path do not consult this.
+        [[nodiscard]] std::size_t PendingRetirementCount() noexcept;
+
     } // namespace Detail
     /** @endcond */
 
