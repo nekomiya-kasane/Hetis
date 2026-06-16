@@ -21,6 +21,9 @@
 
 #include <Yuki/Core/MetaClass.h>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <mutex>
 
 namespace Yuki {
@@ -53,6 +56,108 @@ namespace Yuki {
          * for the life of the process.
          */
         [[nodiscard]] std::mutex& WriterMutexFor(const MetaClass& mc) noexcept;
+
+    } // namespace Registry
+
+    /// @cond INTERNAL
+    namespace Detail {
+
+        /**
+         * @brief Byte offset of the @p I subobject inside @p T, via static_cast on a probe pointer.
+         *
+         * Used by @ref Yuki::Registry::Install to bake a @c DispatchKind::DirectCast offset into each
+         * entry — the runtime dispatch is then a single integer add on the @c T* nucleus. The probe
+         * address is a non-null sentinel; no memory is dereferenced, only the layout-aware pointer
+         * adjustment that @c static_cast performs is observed via integer arithmetic. This is the
+         * same trick the canonical CATIA TIE/BOA implementations use and matches MSVC's own
+         * implementation of @c offsetof for virtual / multiple inheritance.
+         */
+        template<typename T, typename I>
+        inline std::ptrdiff_t StaticCastOffset() noexcept {
+            constexpr std::uintptr_t kProbe = 0x1000;
+            T* p  = reinterpret_cast<T*>(kProbe);
+            I* ip = static_cast<I*>(p);
+            return static_cast<std::ptrdiff_t>(reinterpret_cast<std::uintptr_t>(ip) - kProbe);
+        }
+
+        /**
+         * @brief Build the @ref DispatchEntry array for an Implementation @p T at registration time.
+         *
+         * Walks @c kImplementsInfos<T> (the annotation-driven static list of interfaces) and emits
+         * one @ref DispatchKind::DirectCast entry per interface. The array is sorted by @ref Iid so
+         * the snapshot satisfies the binary-search precondition of @ref Detail::LookupEntry. The
+         * returned @c std::array has size known at compile time but values computed at first call.
+         *
+         * @note Only the DirectCast arm is filled here. @c InlineFacade entries — for interfaces the
+         *       impl does *not* C++-inherit but instead routes through a small adapter — land in
+         *       Task 11 once the static-face facade probe is in place.
+         */
+        template<typename T>
+        inline auto BuildImplDispatchEntries() noexcept {
+            constexpr auto N = kImplementsInfos<T>.size();
+            std::array<DispatchEntry, N> out{};
+            std::size_t i = 0;
+            template for (constexpr auto Ireflect : kImplementsInfos<T>) {
+                using I = [:Ireflect:];
+                out[i] = DispatchEntry{
+                    IidOf<I>(),
+                    DispatchKind::DirectCast,
+                    {.staticOffset = StaticCastOffset<T, I>()},
+                };
+                ++i;
+            }
+            std::ranges::sort(out, {}, &DispatchEntry::iid);
+            return out;
+        }
+
+    } // namespace Detail
+    /// @endcond
+
+    namespace Registry {
+
+        /**
+         * @brief Publish a @ref DispatchSnapshot for the Implementation class @p T.
+         *
+         * Spec §3.3 step 1 + §4.2 DirectCast arm. The body is a textbook double-checked-locking
+         * registrar:
+         *  1. Check @ref AlreadyInstalled — fast path when the same TU runs twice.
+         *  2. Take @ref WriterMutexFor — only writers on this class serialize; writers on other
+         *     classes run concurrently.
+         *  3. Re-check under the lock to close the race window.
+         *  4. Build the entry array (function-static, one per @p T, lazy-init thread-safe by
+         *     C++11 magic statics).
+         *  5. Lazily install the @c MetaLinks on first call.
+         *  6. Release-publish the new snapshot via @c exchange so any future reader's acquire-load
+         *     sees a fully-constructed snapshot; retire the old one if any.
+         *  7. @ref MarkInstalled and @ref Detail::SweepRetirements — the per-Install sweep is the
+         *     RCU epoch boundary spec §2.3 describes.
+         *
+         * @note Function-static storage gives the snapshot @em program lifetime, so the retire
+         *       deleter is a no-op — there is nothing to free, only the bookkeeping slot to drain.
+         *       Snapshots backed by registry-owned arenas (Tasks 8 / 10) will use real deleters.
+         */
+        template<ImplementationClass T>
+        inline void Install() noexcept {
+            const Iid id = IidOf<T>();
+            if (AlreadyInstalled(id)) return;
+            auto& mc = MetaClassOf<T>;
+            std::lock_guard guard{WriterMutexFor(mc)};
+            if (AlreadyInstalled(id)) return;
+
+            static MetaLinks                       links;
+            static auto                            entries = Detail::BuildImplDispatchEntries<T>();
+            static const DispatchSnapshot          snap{entries.size(), entries.data(), nullptr};
+
+            if (mc.links() == nullptr) {
+                mc.setLinks(&links);
+            }
+            const auto* old = links.dispatch.exchange(&snap, std::memory_order_release);
+            if (old != nullptr) {
+                Detail::RetireSnapshot(old, [](const DispatchSnapshot*) noexcept {});
+            }
+            MarkInstalled(id);
+            Detail::SweepRetirements();
+        }
 
     } // namespace Registry
 
