@@ -184,43 +184,128 @@ namespace Yuki {
     // Layer ② MetaLinks — the structural tail (load-time write, hot-path read)
     // =========================================================================
 
+    // Forward decl: payload arms point at RootObject identity (singleton facade, resolver result).
+    class RootObject;
+
     /**
      * @brief How a @ref DispatchEntry reaches the requested interface from a host pointer.
      *
      * The runtime contract of the QueryInterface fast path. Every interface offered by an impl
      * lands in exactly one bucket — and which bucket is decided at compile time, fully visible to
-     * the optimiser. The `kind` field on @ref DispatchEntry exists for diagnostics and for the
-     * dynamic-face @c Query path that goes through @c MetaClassDynamic; the static-face @ref Query
-     * folds the bucket away and emits the matching pointer adjustment directly.
+     * the optimiser. The `kind` field on @ref DispatchEntry selects which arm of @ref
+     * DispatchEntry::Payload the entry carries; the static-face @ref Query folds the bucket away
+     * and emits the matching pointer adjustment directly, while the dynamic face reads @c kind to
+     * pick the matching @c case in its dispatch switch.
      *
      * @c DirectCast covers BOA — the impl C++-inherits the interface, so @c Query<I> is a fold to
      * `static_cast<I*>(p)` and the compiler emits the layout-required offset. @c InlineFacade
-     * covers the Hot facade subobjects aggregated inside the impl. @c CodeExtensionSingleton
-     * covers stateless code-extensions (Anno::Extension with no NSDM): a single facade lives in
-     * `.rodata` and is shared across instances. @c SideTableResolver covers DataExtensions whose
-     * storage hangs off a per-instance side table installed by the loader. @c FacadeList covers
-     * Cold/runtime-attached interfaces walked through @c RootObject's facade chain.
+     * covers the Hot facade subobjects aggregated inside the impl (offset folded at compile time).
+     * @c CodeExtensionSingleton covers stateless code-extensions (Anno::Extension with no NSDM):
+     * a single facade lives in `.rodata` and is shared across instances, reached via the
+     * @c singleton pointer-to-pointer. @c SideTableResolver covers DataExtensions whose storage
+     * hangs off a per-instance side table; the registrar emits a small @c resolver function that
+     * @c AttachUnique-installs (or finds) the per-closure facade and returns it. @c FacadeList
+     * covers Cold/runtime-attached interfaces walked through @c RootObject's facade chain — these
+     * entries exist for introspection only and carry no payload arm.
      */
     enum class DispatchKind : uint8_t {
         DirectCast,             ///< BOA: `static_cast<I*>(impl)` with C++-emitted offset.
         InlineFacade,           ///< Hot inline-aggregated facade subobject (offset known statically).
         CodeExtensionSingleton, ///< Stateless code-extension; shared facade in `.rodata`.
-        SideTableResolver,      ///< DataExtension storage looked up via per-instance side table.
+        SideTableResolver,      ///< DataExtension storage materialised by an emitted resolver fn.
         FacadeList,             ///< Cold/runtime-attached interface; walks the @c FacadeList chain.
     };
     static_assert(sizeof(DispatchKind) == 1);
 
-    /// @brief A perfect-hash dispatch entry: an interface IID mapped to its core, kind, and offset.
-    ///
-    /// `offset` is interpreted by @c kind: a byte offset from the host base for @c DirectCast and
-    /// @c InlineFacade, an opaque index into the side table for @c SideTableResolver, and 0 for
-    /// the singleton/facade-list kinds (which carry no offset because they don't need one).
+    /**
+     * @brief One row of an immutable @ref DispatchSnapshot — an interface IID with the recipe for
+     *        reaching it from a host pointer.
+     *
+     * The active payload arm is selected by @c kind. @c DirectCast and @c InlineFacade store a
+     * static byte offset folded by the metaclass pipeline; @c CodeExtensionSingleton stores a
+     * pointer-to-pointer-to-singleton (the indirection lets a stateless extension's facade live in
+     * `.rodata` and still be addressed uniformly); @c SideTableResolver stores a small emitted
+     * function that materialises (and caches) the per-closure facade. @c FacadeList entries are
+     * informational only — they're walked through @c RootObject's chain, not through this table —
+     * so any payload arm is fine and unread for that kind.
+     *
+     * Entries within a snapshot are sorted by @c iid, which is what @ref Detail::LookupEntry's
+     * binary search depends on. The registrar is the only writer of snapshots; once published,
+     * the entry array is immutable for the lifetime of that snapshot.
+     */
     struct DispatchEntry {
-        Iid iid{};                                ///< The interface's identity.
-        const MetaCore* iface{nullptr};           ///< The interface's core (for diagnostics / QI).
-        DispatchKind kind{DispatchKind::DirectCast};  ///< Which bucket reached the interface.
-        std::ptrdiff_t offset{0};                 ///< `this`-adjustment, kind-dependent meaning.
+        Iid          iid{};                                ///< The interface's identity (sort key).
+        DispatchKind kind{DispatchKind::DirectCast};       ///< Which arm of @c payload is live.
+        union Payload {
+            std::ptrdiff_t       staticOffset;             ///< DirectCast / InlineFacade byte offset.
+            RootObject* const*   singleton;                ///< CodeExtensionSingleton facade in .rodata.
+            RootObject* (*resolver)(RootObject* nucleus) noexcept;  ///< SideTableResolver materialiser.
+        } payload{.staticOffset = 0};                      ///< Default-init the staticOffset arm.
     };
+
+    /**
+     * @brief An immutable, atomically-published view of one metaclass's dispatch table.
+     *
+     * Per spec §2.1 of the Yuki Closure Architecture. The snapshot is the unit of publish: a
+     * registrar builds a fresh, sorted-by-iid entry array, wraps it in a snapshot, and CAS-installs
+     * it onto @ref MetaLinks::dispatch with release semantics. Readers acquire-load the pointer and
+     * treat the snapshot as immutable for the lifetime of their query — no locks on the hot path.
+     *
+     * Old snapshots chain via @c previous so the deferred-reclaim pass (Task 5) can walk back and
+     * free what readers no longer reference once the global epoch advances. The pointed-to entry
+     * array and the snapshot itself live on the registrar's arena; nothing here owns them, and the
+     * snapshot's destructor is therefore trivial.
+     */
+    struct DispatchSnapshot {
+        std::size_t              count;     ///< Number of entries; 0 is a valid empty snapshot.
+        const DispatchEntry*     entries;   ///< Sorted-by-iid; may be @c nullptr iff @c count == 0.
+        const DispatchSnapshot*  previous;  ///< Older retired snapshot in the epoch-retirement chain.
+    };
+
+    // The registrar's arena owns every snapshot and its entry array; no per-snapshot destructor
+    // runs. Locking the invariant in via static_assert parallels the FacadeNode triviality guard
+    // in FacadeList.h — any future field added with a non-trivial destructor will trip the build
+    // here so the arena-only lifetime story stays sound.
+    static_assert(std::is_trivially_destructible_v<DispatchEntry>,
+                  "DispatchEntry array lives in the registrar's arena; entries are POD by contract.");
+    static_assert(std::is_trivially_destructible_v<DispatchSnapshot>,
+                  "DispatchSnapshot lives in the registrar's arena; no per-snapshot destructor runs.");
+
+    /** @cond INTERNAL */
+    namespace Detail {
+
+        /**
+         * @brief Binary-search a @ref DispatchSnapshot for the entry whose @c iid matches @p id.
+         *
+         * Returns the matching entry, or @c nullptr on miss / empty / null snapshot. Entries must
+         * be sorted ascending by @c iid (the registrar guarantees this when it publishes); we rely
+         * on @c Iid::operator< for the comparison so the same total order used at sort time drives
+         * the search. The loop is the canonical lower-bound shape: half-open `[lo, hi)` window,
+         * mid biased toward `lo` to avoid overflow on hypothetical huge tables.
+         */
+        [[nodiscard]] inline const DispatchEntry* LookupEntry(
+                const DispatchSnapshot* s, Iid id) noexcept {
+            if (s == nullptr || s->count == 0) {
+                return nullptr;
+            }
+            std::size_t lo = 0;
+            std::size_t hi = s->count;
+            while (lo < hi) {
+                std::size_t mid = lo + (hi - lo) / 2;
+                const DispatchEntry& e = s->entries[mid];
+                if (e.iid < id) {
+                    lo = mid + 1;
+                } else if (id < e.iid) {
+                    hi = mid;
+                } else {
+                    return &e;
+                }
+            }
+            return nullptr;
+        }
+
+    } // namespace Detail
+    /** @endcond */
 
     /**
      * @brief Back-references and the dispatch table — written once at load time, then read-only.
@@ -228,11 +313,17 @@ namespace Yuki {
      * Self types cannot know at compile time who will later extend them, so `extendedBy` /
      * `implementedBy` are folded in single-threaded by the loader and thereafter read RCU-style
      * with no locking on the hot path (QI / method dispatch).
+     *
+     * @c dispatch is an atomic pointer to an immutable @ref DispatchSnapshot. Registrars publish
+     * fresh snapshots with release semantics (and chain the prior one via @c previous so the
+     * epoch-retirement pass can free it later); readers acquire-load and binary-search. The field
+     * is @c mutable so registrars holding a `const MetaLinks&` (the common shape on the QI hot
+     * path) can still CAS-install a new snapshot when a Lazy interface first materialises.
      */
     struct MetaLinks {
         std::span<const MetaCore* const> extendedBy{};     ///< Extensions that extend this class.
         std::span<const MetaCore* const> implementedBy{};  ///< Classes implementing this interface.
-        std::span<const DispatchEntry> dispatch{};         ///< Perfect-hash dispatch entries.
+        mutable std::atomic<const DispatchSnapshot*> dispatch{nullptr};  ///< Acquire-load, CAS-publish.
     };
 
     // =========================================================================
