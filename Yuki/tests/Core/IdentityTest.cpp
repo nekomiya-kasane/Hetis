@@ -31,14 +31,13 @@ namespace {
         int radius;
     };
 
-    // Extension is declaration-only: the kind is derived from NSDM presence, not spelled out.
-    // MoveExt declares data members -> resolves to DataExtension.
+    // Stateful extension: carries per-instance data, sizeof > 1.
     struct [[=Anno::Extension]] MoveExt {
         int dx;
         int dy;
     };
 
-    // DrawExt declares no data members -> resolves to CodeExtension.
+    // Stateless extension: empty class, sizeof == 1 (the C++ minimum).
     struct [[=Anno::Extension]] DrawExt {};
 
     struct [[=Anno::Imposter]] ShapeProxy {};
@@ -61,7 +60,7 @@ TEST_CASE("ClassType is a sequential, single-byte enum", AUTO_TAG) {
     STATIC_REQUIRE(T::SequentialEnum<ClassType>);
     STATIC_REQUIRE(sizeof(ClassType) == 1);
     STATIC_REQUIRE(std::same_as<T::EnumUnderlying<ClassType>, std::uint8_t>);
-    STATIC_REQUIRE(kClassTypeCount == 8);
+    STATIC_REQUIRE(kClassTypeCount == 6);
     STATIC_REQUIRE(kClassTypeCount == T::EnumeratorsCount<ClassType>);
 }
 
@@ -72,8 +71,8 @@ TEST_CASE("ClassType is a sequential, single-byte enum", AUTO_TAG) {
 TEST_CASE("ClassTypeOf reports the annotated role", AUTO_TAG) {
     STATIC_REQUIRE(ClassTypeOf<IShape> == ClassType::Interface);
     STATIC_REQUIRE(ClassTypeOf<CircleImpl> == ClassType::Implementation);
-    STATIC_REQUIRE(ClassTypeOf<MoveExt> == ClassType::DataExtension);
-    STATIC_REQUIRE(ClassTypeOf<DrawExt> == ClassType::CodeExtension);
+    STATIC_REQUIRE(ClassTypeOf<MoveExt> == ClassType::Extension);
+    STATIC_REQUIRE(ClassTypeOf<DrawExt> == ClassType::Extension);
     STATIC_REQUIRE(ClassTypeOf<ShapeProxy> == ClassType::Imposter);
     STATIC_REQUIRE(ClassTypeOf<ShapeBridge> == ClassType::Bridge);
 }
@@ -89,7 +88,7 @@ TEST_CASE("ClassTypeOf ignores cv-qualifiers and references", AUTO_TAG) {
     STATIC_REQUIRE(ClassTypeOf<const IShape> == ClassType::Interface);
     STATIC_REQUIRE(ClassTypeOf<IShape&> == ClassType::Interface);
     STATIC_REQUIRE(ClassTypeOf<const CircleImpl&> == ClassType::Implementation);
-    STATIC_REQUIRE(ClassTypeOf<volatile MoveExt> == ClassType::DataExtension);
+    STATIC_REQUIRE(ClassTypeOf<volatile MoveExt> == ClassType::Extension);
 }
 
 // =============================================================================
@@ -143,12 +142,12 @@ TEST_CASE("ImplementationClass is exact", AUTO_TAG) {
     STATIC_REQUIRE_FALSE(ImplementationClass<int>);
 }
 
-TEST_CASE("Extension concepts partition data and code extensions", AUTO_TAG) {
-    STATIC_REQUIRE(DataExtensionClass<MoveExt>);
-    STATIC_REQUIRE_FALSE(DataExtensionClass<DrawExt>);
+TEST_CASE("Extension concepts partition stateful and stateless extensions", AUTO_TAG) {
+    STATIC_REQUIRE(StatefulExtensionClass<MoveExt>);
+    STATIC_REQUIRE_FALSE(StatefulExtensionClass<DrawExt>);
 
-    STATIC_REQUIRE(CodeExtensionClass<DrawExt>);
-    STATIC_REQUIRE_FALSE(CodeExtensionClass<MoveExt>);
+    STATIC_REQUIRE(StatelessExtensionClass<DrawExt>);
+    STATIC_REQUIRE_FALSE(StatelessExtensionClass<MoveExt>);
 
     STATIC_REQUIRE(ExtensionClass<MoveExt>);
     STATIC_REQUIRE(ExtensionClass<DrawExt>);
@@ -176,8 +175,7 @@ TEST_CASE("Each fixture satisfies exactly one base-role concept", AUTO_TAG) {
         int n = 0;
         n += IsClassType<U, ClassType::Interface>;
         n += IsClassType<U, ClassType::Implementation>;
-        n += IsClassType<U, ClassType::DataExtension>;
-        n += IsClassType<U, ClassType::CodeExtension>;
+        n += IsClassType<U, ClassType::Extension>;
         n += IsClassType<U, ClassType::Imposter>;
         n += IsClassType<U, ClassType::Bridge>;
         return n;

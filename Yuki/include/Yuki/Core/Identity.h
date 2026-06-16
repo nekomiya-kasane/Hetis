@@ -16,6 +16,9 @@
  * unannotated or non-class types instead of being ill-formed, and the named role concepts
  * (@ref InterfaceClass, @ref ImplementationClass, …) partition types over that result.
  *
+ * Stateful vs. stateless extensions are *not* separate roles: the only difference is a sizeof
+ * question, decided at compile time from the type itself (see @ref StatefulExtensionClass).
+ *
  * This header owns **roles only**. Identity-by-IID, the three-layer @c MetaClass, and the
  * reflection pipeline that bakes a class's metadata into `.rodata` live in `MetaClass.h`; the
  * polymorphic anchor and CRTP injection layer live in `RootObject.h`.
@@ -43,29 +46,36 @@ namespace Yuki {
     // ClassType — the single source of truth for object-model roles
     // =========================================================================
 
-    /// @brief The role a class plays in the Yuki object model.
-    ///
-    /// @ref Extension is a *declaration-only* sentinel: a class is annotated as a plain
-    /// @ref Anno::Extension, and the role is **derived** at read time into @ref DataExtension
-    /// (the class declares at least one nonstatic data member) or @ref CodeExtension (it declares
-    /// none). @ref ClassTypeOf therefore never yields @ref Extension — it always resolves to one of
-    /// the two concrete kinds — so downstream code (BOA rules, storage, lifecycle) keeps the real
-    /// distinction without the author having to spell it out.
+    /**
+     * @brief The role a class plays in the Yuki object model.
+     *
+     * Doubles as the runtime tag stored in the low three bits of @c RootObject's tagged payload
+     * pointer — every value is in `[0, 7]`, so encoding is a single `or`/`and`-mask, never a
+     * vcall. Six roles plus the @ref None sentinel fit in three bits with one slot to spare.
+     *
+     * "Stateful vs. stateless" extension is *not* a role distinction — both are
+     * @ref ClassType::Extension. Whether an extension carries per-instance data (and therefore
+     * needs a refcount, side-table storage, etc.) is decided from `sizeof` at compile time; see
+     * @ref StatefulExtensionClass.
+     */
     enum class ClassType : uint8_t {
-        None,           ///< Not part of the object model (no @ref Anno::Meta annotation).
-        Interface,      ///< A behaviour contract.
-        Implementation, ///< A main component implementation.
-        Extension,      ///< Declaration-only: resolves to Data/CodeExtension by NSDM presence.
-        DataExtension,  ///< A per-instance stateful extension (derived: has nonstatic data).
-        CodeExtension,  ///< A stateless shared extension (derived: no nonstatic data).
-        Imposter,       ///< A stand-in / proxy class.
-        Bridge,         ///< A generated TIE/BOA adapter class.
+        None           = 0,  ///< Not part of the object model (no @ref Anno::Meta annotation).
+        Interface      = 1,  ///< A behaviour contract.
+        Implementation = 2,  ///< A main component implementation.
+        Extension      = 3,  ///< Extension; statefulness is a `sizeof` distinction, not a role.
+        Imposter       = 4,  ///< A stand-in / proxy class.
+        Bridge         = 5,  ///< A generated TIE/BOA adapter class.
     };
     static_assert(Traits::SequentialEnum<ClassType>);
     static_assert(sizeof(ClassType) == 1);
+    static_assert(static_cast<uint8_t>(ClassType::Bridge) <= 0b111,
+                  "ClassType must fit in three bits — RootObject payload encoding depends on it.");
 
     /// @brief Number of distinct @ref ClassType values (including @ref ClassType::None).
     inline constexpr size_t kClassTypeCount = Traits::EnumeratorsCount<ClassType>;
+
+    /// @brief Bit mask covering the three @ref ClassType bits in a tagged @c RootObject payload.
+    inline constexpr uintptr_t kClassTypeMask = 0b111u;
 
     // =========================================================================
     // Anno::Meta — the sole object-model annotation carrier
@@ -191,25 +201,10 @@ namespace Yuki {
     namespace Detail {
 
         /**
-         * @brief `true` if @p type declares at least one nonstatic data member.
-         *
-         * The discriminator that resolves the declaration-only @ref ClassType::Extension into a
-         * concrete kind: a stateful @ref ClassType::DataExtension carries per-instance data, a
-         * stateless @ref ClassType::CodeExtension carries none.
-         */
-        consteval bool HasNonStaticData(std::meta::info type) {
-            return !std::meta::nonstatic_data_members_of(type, std::meta::access_context::unchecked())
-                        .empty();
-        }
-
-        /**
          * @brief Total read of the @ref ClassType stamped on a type reflection.
          *
          * Accepts either annotation flavour — the edge-less @ref Anno::Role shorthand or the full
-         * @ref Anno::Meta — and projects both onto the single @ref ClassType source of truth. The
-         * declaration-only @ref ClassType::Extension is resolved here into @ref ClassType::DataExtension
-         * or @ref ClassType::CodeExtension by @ref HasNonStaticData, so callers never observe the
-         * sentinel.
+         * @ref Anno::Meta — and projects both onto the single @ref ClassType source of truth.
          *
          * @return The annotated role, or @ref ClassType::None when @p type carries neither
          *         annotation. Throws (⇒ hard compile error) when a type is stamped with multiple
@@ -242,10 +237,12 @@ namespace Yuki {
                 }
                 result = k;
             }
-            if (*result == ClassType::Extension) {
-                return HasNonStaticData(type) ? ClassType::DataExtension : ClassType::CodeExtension;
-            }
             return *result;
+        }
+
+        consteval bool IsObjectModelType(std::meta::info type) {
+            return !std::meta::annotations_of(type, ^^Anno::Meta).empty()
+                || !std::meta::annotations_of(type, ^^Anno::Role).empty();
         }
 
     } // namespace Detail
@@ -254,14 +251,6 @@ namespace Yuki {
     // =========================================================================
     // Public role queries — all total, cvref-insensitive
     // =========================================================================
-
-    /// @brief `true` if @p type carries either object-model annotation (@ref Anno::Role / Meta).
-    namespace Detail {
-        consteval bool IsObjectModelType(std::meta::info type) {
-            return !std::meta::annotations_of(type, ^^Anno::Meta).empty()
-                || !std::meta::annotations_of(type, ^^Anno::Role).empty();
-        }
-    }
 
     /// @brief The object-model role of @p T, or @ref ClassType::None if untagged.
     template<typename T>
@@ -291,22 +280,86 @@ namespace Yuki {
     template<typename T>
     concept ImplementationClass = IsClassType<T, ClassType::Implementation>;
 
-    /// @brief A per-instance stateful extension — an @ref Anno::Extension class that declares
-    ///        nonstatic data. The kind is derived, not declared (see @ref ClassType::Extension).
-    template<typename T>
-    concept DataExtensionClass = IsClassType<T, ClassType::DataExtension>;
-
-    /// @brief A stateless shared extension — an @ref Anno::Extension class with no nonstatic data.
-    ///        The kind is derived, not declared (see @ref ClassType::Extension).
-    template<typename T>
-    concept CodeExtensionClass = IsClassType<T, ClassType::CodeExtension>;
-
     /// @brief Either flavour of extension.
     template<typename T>
-    concept ExtensionClass = DataExtensionClass<T> || CodeExtensionClass<T>;
+    concept ExtensionClass = IsClassType<T, ClassType::Extension>;
+
+    /// @brief A *stateful* extension — an extension whose layout carries per-instance data.
+    ///
+    /// The compile-time discriminator that decides storage and refcounting policy: a stateful
+    /// extension needs side-table storage and an opt-in refcount; a stateless one is a
+    /// `.rodata`-resident singleton with refcounting that has no meaning. The check is purely
+    /// `sizeof`: extensions (which derive from a 1-byte polymorphic-anchor base) carry data
+    /// exactly when their footprint exceeds that base.
+    template<typename T>
+    concept StatefulExtensionClass = ExtensionClass<T> && (sizeof(T) > 1);
+
+    /// @brief A *stateless* extension — an extension with no per-instance data; singleton-shareable.
+    template<typename T>
+    concept StatelessExtensionClass = ExtensionClass<T> && (sizeof(T) <= 1);
 
     /// @brief Either flavour of component.
     template<typename T>
     concept ComponentClass = ImplementationClass<T> || ExtensionClass<T>;
+
+    // =========================================================================
+    // FacadeKind — per-interface storage policy for the QueryInterface system
+    // =========================================================================
+
+    /**
+     * @brief How an implementation should hold a facade for a given interface.
+     *
+     * The compile-time analogue of CATIA's "always-resident TIE vs. installed-on-demand TIE".
+     * @ref Hot interfaces are inline-aggregated as subobjects of the implementation, so that
+     * @ref Query yields a native interface pointer with a single `static_cast`-equivalent address
+     * adjustment and no runtime indirection. @ref Cold interfaces are queried infrequently and
+     * synthesised on demand through a runtime-attached @c FacadeList — saving per-instance bytes at
+     * the cost of a one-time hash lookup. Default for every interface is @ref Hot; switch to
+     * @ref Cold via @ref Anno::InterfaceTraits.
+     */
+    enum class FacadeKind : uint8_t {
+        Hot,   ///< Inline-aggregated facade subobject; zero-overhead Query.
+        Cold,  ///< Runtime-attached via the @c FacadeList; cold-path Query.
+    };
+    static_assert(Traits::SequentialEnum<FacadeKind>);
+
+    namespace Anno {
+
+        /**
+         * @brief Per-interface storage-policy override, stamped onto an @ref Anno::Interface class.
+         *
+         * @code
+         * struct [[=Anno::Interface]] [[=Anno::InterfaceTraits{.facade_kind = FacadeKind::Cold}]]
+         *        IRareInspect { virtual int Inspect() const = 0; };
+         * @endcode
+         *
+         * One field today (@c facade_kind); structurally extensible without breaking the annotation
+         * grammar. Reading is total: @ref FacadeKindOf returns @ref FacadeKind::Hot when no
+         * @c InterfaceTraits is present, so authors only spell it out for the rare Cold case.
+         */
+        struct InterfaceTraits {
+            FacadeKind facade_kind = FacadeKind::Hot;  ///< Storage policy. Default: @c Hot.
+        };
+
+    } // namespace Anno
+
+    /// @brief The storage policy declared for interface @p I — @ref FacadeKind::Hot by default,
+    ///        overridden by @ref Anno::InterfaceTraits when present.
+    template<typename I>
+    inline constexpr FacadeKind FacadeKindOf = [] consteval {
+        const auto annos = std::meta::annotations_of(^^I, ^^Anno::InterfaceTraits);
+        if (annos.empty()) {
+            return FacadeKind::Hot;
+        }
+        return std::meta::extract<Anno::InterfaceTraits>(annos[0]).facade_kind;
+    }();
+
+    /// @brief @p I is an interface stored as an inline-aggregated facade. Hot is the default.
+    template<typename I>
+    concept HotInterface = InterfaceClass<I> && (FacadeKindOf<I> == FacadeKind::Hot);
+
+    /// @brief @p I is an interface synthesised on demand via the runtime @c FacadeList.
+    template<typename I>
+    concept ColdInterface = InterfaceClass<I> && (FacadeKindOf<I> == FacadeKind::Cold);
 
 } // namespace Yuki

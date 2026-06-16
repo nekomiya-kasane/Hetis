@@ -61,13 +61,15 @@ TEST_CASE("AddRef/Release track the count; final release destroys", AUTO_TAG) {
 // Storage: opt-in costs a small counter; opting out costs nothing
 // =============================================================================
 
-TEST_CASE("Non-opt-in node carries no counter (vptr only)", AUTO_TAG) {
-    STATIC_REQUIRE(sizeof(PlainNode) == sizeof(void*) + sizeof(double));
+TEST_CASE("Non-opt-in node carries no counter beyond the anchor + facade head", AUTO_TAG) {
+    // PlainNode = RootObject (vptr + tagged payload) + FacadeListHead (one atomic word) + double.
+    // The MetaNode injection layer adds the facade head; no counter, no other per-instance field.
+    STATIC_REQUIRE(sizeof(PlainNode) == 4 * sizeof(void*));
 }
 
 TEST_CASE("Opt-in node adds only the counter width", AUTO_TAG) {
-    // SharedNode = PlainNode-shaped anchor (vptr) + RefCountedAtomic's uint16 counter.
-    // The exact size is layout-dependent, but it must exceed a bare vptr and stay small.
-    STATIC_REQUIRE(sizeof(SharedNode) > sizeof(void*));
-    STATIC_REQUIRE(sizeof(SharedNode) <= sizeof(void*) + 2 * sizeof(void*));
+    // SharedNode = PlainNode-shaped anchor + tie head + the RefCountedAtomic mixin counter.
+    // The exact size is layout-dependent, but it must exceed a bare anchor and stay bounded.
+    STATIC_REQUIRE(sizeof(SharedNode) > 2 * sizeof(void*));
+    STATIC_REQUIRE(sizeof(SharedNode) <= 5 * sizeof(void*));
 }
