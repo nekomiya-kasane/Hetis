@@ -405,6 +405,7 @@ namespace Mashiro {
         void DrainLoop();
         uint32_t DrainOnce();
         void DispatchToSinks(const LogEntry& entry);
+        void DispatchSerialized(std::span<const std::byte> data);
         static LogRing& GetThreadRing();
 
         struct RegisteredRing {

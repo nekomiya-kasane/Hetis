@@ -37,12 +37,28 @@ namespace Mashiro {
 
     /// @name Composite platform-bit aliases (sets of @ref PlatformBit).
     /// @{
-    inline constexpr PlatformBit PlatformBit_Linux =
-        PlatformBit::Linux_X11 | PlatformBit::Linux_Wayland;
-    inline constexpr PlatformBit PlatformBit_Desktop =
-        PlatformBit::Windows | PlatformBit_Linux | PlatformBit::macOS;
+    inline constexpr PlatformBit PlatformBit_Linux = PlatformBit::Linux_X11 | PlatformBit::Linux_Wayland;
+    inline constexpr PlatformBit PlatformBit_Desktop = PlatformBit::Windows | PlatformBit_Linux | PlatformBit::macOS;
     inline constexpr PlatformBit PlatformBit_All = Traits::kBitfieldMask<PlatformBit>;
     /// @}
+
+#ifdef _WIN32
+#    define PLATFORM_WINDOWS 1
+    inline constexpr PlatformBit CurrentPlatform = PlatformBit::Windows;
+#elif defined(__linux__)
+#    define PLATFORM_LINUX 1
+    inline constexpr PlatformBit CurrentPlatform = PlatformBit_Linux;
+#elif defined(__APPLE__)
+#    define PLATFORM_MACOS 1
+    inline constexpr PlatformBit CurrentPlatform = PlatformBit::macOS;
+#endif
+
+    constexpr bool IsWindows() {
+        return CurrentPlatform == PlatformBit::Windows;
+    }
+    constexpr bool IsLinux() {
+        return CurrentPlatform == PlatformBit_Linux;
+    }
 
     namespace Platform {
 

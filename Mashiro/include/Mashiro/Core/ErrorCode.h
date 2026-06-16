@@ -27,7 +27,7 @@
  * | Debug Infra        | `0xD000` – `0xDFFF`  |
  * | GPU Device         | `0xF000` – `0xFFFF`  |
  */
-enum class ErrorCode : uint16_t {
+enum class [[nodiscard]] ErrorCode : uint16_t {
 
     /// @name Success
     /// @{
@@ -113,9 +113,11 @@ enum class ErrorCode : uint16_t {
 
 // Compile-time invariant: no two ErrorCode enumerators share the same value.
 consteval {
+
     auto enums = std::meta::enumerators_of(^^ErrorCode);
     for (size_t i = 0; i < enums.size(); ++i)
         for (size_t j = i + 1; j < enums.size(); ++j)
             if (std::meta::constant_of(enums[i]) == std::meta::constant_of(enums[j]))
                 throw "ErrorCode: duplicate enumerator value detected";
+
 }

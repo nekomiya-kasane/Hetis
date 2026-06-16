@@ -229,6 +229,16 @@ namespace Mashiro {
             ~RingGuard() {
                 auto& logger = StructuredLogger::Instance();
                 std::lock_guard lock(logger.ringsMutex_);
+                // Drain any messages still pending in this thread's ring before deregistering.
+                // Without this, an exiting worker that wrote messages just before its
+                // RingGuard tear-down would lose them: the drain thread polls every 1 ms,
+                // a producer thread can comfortably push and exit between polls, and Flush()
+                // only drains rings that are still in `rings_`. Drain-then-deregister, under
+                // the same mutex DrainOnce() takes, makes the SPSC consumer single-threaded
+                // throughout the lifetime of the ring.
+                ring.ReadAll([&logger](std::span<const std::byte> data) {
+                    logger.DispatchSerialized(data);
+                });
                 std::erase_if(logger.rings_,
                     [this](const RegisteredRing& r) { return r.ring == &ring; });
             }
@@ -405,36 +415,38 @@ namespace Mashiro {
         }
     }
 
+    void StructuredLogger::DispatchSerialized(std::span<const std::byte> data) {
+        if (data.size() < sizeof(SerializedHeader)) return;
+
+        SerializedHeader hdr{};
+        std::memcpy(&hdr, data.data(), sizeof(hdr));
+
+        auto* bytes = reinterpret_cast<const char*>(data.data());
+        auto* filePtr = bytes + sizeof(SerializedHeader);
+        auto* funcPtr = filePtr + hdr.fileLen;
+        auto* msgPtr = funcPtr + hdr.funcLen;
+
+        LogEntry entry{};
+        entry.level = static_cast<LogLevel>(hdr.level);
+        entry.category = static_cast<LogCategory>(hdr.category);
+        entry.file = std::string_view{filePtr, hdr.fileLen};
+        entry.func = std::string_view{funcPtr, hdr.funcLen};
+        entry.message = std::string_view{msgPtr, hdr.msgLen};
+        entry.line = hdr.line;
+        entry.timestampNs = hdr.timestampNs;
+        entry.threadId = hdr.threadId;
+
+        DispatchToSinks(entry);
+    }
+
     uint32_t StructuredLogger::DrainOnce() {
         uint32_t total = 0;
         std::lock_guard lock(ringsMutex_);
 
         for (auto& reg : rings_) {
             if (!reg.ring) continue;
-
-            total += reg.ring->ReadAll([this](std::span<const std::byte> data) {
-                if (data.size() < sizeof(SerializedHeader)) return;
-
-                SerializedHeader hdr{};
-                std::memcpy(&hdr, data.data(), sizeof(hdr));
-
-                auto* bytes = reinterpret_cast<const char*>(data.data());
-                auto* filePtr = bytes + sizeof(SerializedHeader);
-                auto* funcPtr = filePtr + hdr.fileLen;
-                auto* msgPtr = funcPtr + hdr.funcLen;
-
-                LogEntry entry{};
-                entry.level = static_cast<LogLevel>(hdr.level);
-                entry.category = static_cast<LogCategory>(hdr.category);
-                entry.file = std::string_view{filePtr, hdr.fileLen};
-                entry.func = std::string_view{funcPtr, hdr.funcLen};
-                entry.message = std::string_view{msgPtr, hdr.msgLen};
-                entry.line = hdr.line;
-                entry.timestampNs = hdr.timestampNs;
-                entry.threadId = hdr.threadId;
-
-                DispatchToSinks(entry);
-            });
+            total += reg.ring->ReadAll(
+                [this](std::span<const std::byte> data) { DispatchSerialized(data); });
         }
         return total;
     }
