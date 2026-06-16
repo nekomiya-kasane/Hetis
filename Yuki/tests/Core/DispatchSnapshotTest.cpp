@@ -67,3 +67,13 @@ TEST_CASE("MetaLinks dispatch field is std::atomic<const DispatchSnapshot*>", AU
     STATIC_REQUIRE(std::is_same_v<decltype(std::declval<MetaLinks>().dispatch),
                                   std::atomic<const DispatchSnapshot*>>);
 }
+
+TEST_CASE("MetaLinks carries an atomic EagerSet pointer, initially empty", AUTO_TAG) {
+    // The construction-time materialisation hook (Task 10) acquire-loads this field on every
+    // nucleus construction; a default-constructed MetaLinks must therefore present a null pointer
+    // so impls that never register an eager extension pay nothing beyond the load itself.
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<MetaLinks>().eagerSet),
+                                  std::atomic<const EagerSetSnapshot*>>);
+    MetaLinks links;
+    REQUIRE(links.eagerSet.load(std::memory_order_acquire) == nullptr);
+}

@@ -308,6 +308,30 @@ namespace Yuki {
     /** @endcond */
 
     /**
+     * @brief An immutable, atomically-published list of stateful eager Extensions to materialise.
+     *
+     * Per spec §3.3 step 5. Each Implementation metaclass's @ref MetaLinks carries one of these:
+     * the Extension metacores marked @c Anno::Eager whose state must be allocated up-front at
+     * nucleus construction time (as opposed to @c Anno::Lazy Extensions, which materialise on
+     * first query). The registrar (Tasks 7–8) builds and publishes the snapshot; the construction
+     * hook in @c MetaNode (Task 10) walks @c entries and runs each Extension's @c MaterializeInto.
+     *
+     * Stateless code-extensions (zero NSDMs) are never listed here — they don't need per-instance
+     * storage, so a singleton facade in `.rodata` covers them.
+     *
+     * Old snapshots chain via @c previous for the same epoch-retirement reason as
+     * @ref DispatchSnapshot. The pointed-to entry array lives on the registrar's arena.
+     */
+    struct EagerSetSnapshot {
+        std::size_t                  count;     ///< Number of eager extension cores; 0 means none.
+        const MetaCore* const*       entries;   ///< Pointers to eager Extension metacores.
+        const EagerSetSnapshot*      previous;  ///< Older retired snapshot in the epoch chain.
+    };
+
+    static_assert(std::is_trivially_destructible_v<EagerSetSnapshot>,
+                  "EagerSetSnapshot lives in the registrar's arena; no per-snapshot destructor runs.");
+
+    /**
      * @brief Back-references and the dispatch table — written once at load time, then read-only.
      *
      * Self types cannot know at compile time who will later extend them, so `extendedBy` /
@@ -319,11 +343,17 @@ namespace Yuki {
      * epoch-retirement pass can free it later); readers acquire-load and binary-search. The field
      * is @c mutable so registrars holding a `const MetaLinks&` (the common shape on the QI hot
      * path) can still CAS-install a new snapshot when a Lazy interface first materialises.
+     *
+     * @c eagerSet mirrors @c dispatch's publish/retire discipline for the construction-time
+     * Extension materialisation list: the @c MetaNode CRTP hook (Task 10) acquire-loads it during
+     * nucleus construction and runs @c MaterializeInto for each entry. @c mutable for the same
+     * registrar-on-const-MetaLinks reason.
      */
     struct MetaLinks {
         std::span<const MetaCore* const> extendedBy{};     ///< Extensions that extend this class.
         std::span<const MetaCore* const> implementedBy{};  ///< Classes implementing this interface.
         mutable std::atomic<const DispatchSnapshot*> dispatch{nullptr};  ///< Acquire-load, CAS-publish.
+        mutable std::atomic<const EagerSetSnapshot*> eagerSet{nullptr};  ///< Stateful eager extensions.
     };
 
     // =========================================================================
