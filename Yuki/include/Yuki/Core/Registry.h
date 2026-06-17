@@ -175,12 +175,14 @@ namespace Yuki {
                         IidOf<I>(),
                         DispatchKind::DirectCast,
                         {.staticOffset = StaticCastOffset<T, I>()},
+                        &MetaClassOf<T>,
                     };
                 } else if constexpr (HasInlineFacadeFor<T, I>()) {
                     out[i++] = DispatchEntry{
                         IidOf<I>(),
                         DispatchKind::InlineFacade,
                         {.staticOffset = InlineFacadeOffset<T, I>()},
+                        &MetaClassOf<T>,
                     };
                 }
                 // else: I is advertised but not reachable through T's static layout — skipped here;
@@ -188,6 +190,33 @@ namespace Yuki {
             }
             std::ranges::sort(out, {}, &DispatchEntry::iid);
             return out;
+        }
+
+        /**
+         * @brief Idempotently install a function-static @ref MetaLinks for interface @p I, so the
+         *        per-metaclass writer mutex held at the call site is enough to serialise the
+         *        first-touch race. @c MetaClass::setLinks is a plain release store; correctness
+         *        depends on the caller holding @ref WriterMutexFor for @p mc.
+         *
+         * Some metaclasses — most commonly the metaclasses for plain interfaces — have no @c links
+         * until something registers a back-reference against them. Spec §3.5 / Task 14 asks
+         * registrars to populate @c implementedBy on each advertised interface; that requires a
+         * @c MetaLinks slot on the interface's metaclass. Since interfaces themselves do not run
+         * @c Install, the back-reference walk lazily attaches one here on first touch.
+         *
+         * The slot is a function-local @c static so its address is stable across calls and the
+         * lifetime is program-wide — no SIOF risk because the static is only constructed on first
+         * call (post-static-init by then).
+         *
+         * Templated on the interface type so each (T, I) pair gets a distinct static — the simple
+         * way to express "one MetaLinks per interface" without an out-of-line table.
+         */
+        template<typename I>
+        inline void EnsureLinks(MetaClass& mc) noexcept {
+            static MetaLinks links;
+            if (mc.links() == nullptr) {
+                mc.setLinks(&links);
+            }
         }
 
     } // namespace Detail
@@ -224,17 +253,87 @@ namespace Yuki {
             std::lock_guard guard{WriterMutexFor(mc)};
             if (AlreadyInstalled(id)) return;
 
-            static MetaLinks                       links;
-            static auto                            entries = Detail::BuildImplDispatchEntries<T>();
-            static const DispatchSnapshot          snap{entries.size(), entries.data(), nullptr};
-
+            // Use whatever @c MetaLinks the metaclass already references, if any. Static-init
+            // order across translation units is unspecified, so an Extension's @c Install<E> may
+            // have run first and lazily attached a @c MetaLinks to @p mc together with a dispatch
+            // snapshot containing the Extension's iid overrides. We must compose with that
+            // existing snapshot rather than overwrite it: Extension entries already present must
+            // win over the Implementation's @c DirectCast / @c InlineFacade entries for the same
+            // iid (spec §3.2 precedence). The composition shape mirrors
+            // @ref Detail::PublishExtensionEntries — drop same-iid old entries, append the new
+            // ones, sort.
+            static MetaLinks links;
             if (mc.links() == nullptr) {
                 mc.setLinks(&links);
             }
-            const auto* old = links.dispatch.exchange(&snap, std::memory_order_release);
-            if (old != nullptr) {
-                Detail::RetireSnapshot(old, [](const DispatchSnapshot*) noexcept {});
+            MetaLinks* active = mc.links();
+
+            static auto baseEntries = Detail::BuildImplDispatchEntries<T>();
+            const DispatchSnapshot* old = active->dispatch.load(std::memory_order_acquire);
+            const std::size_t oldCount = (old != nullptr) ? old->count : 0;
+
+            // Compose the new entry vector: every entry already present in @p old is kept (an
+            // Extension override outranks the Implementation's BOA / inline-facade arm by spec
+            // §3.2), then each Implementation entry whose iid is not yet covered is appended,
+            // and the whole vector is sorted by iid for the binary-search precondition of
+            // @ref Detail::LookupEntry.
+            std::vector<DispatchEntry> merged;
+            merged.reserve(oldCount + baseEntries.size());
+            for (std::size_t i = 0; i < oldCount; ++i) {
+                merged.push_back(old->entries[i]);
             }
+            for (const DispatchEntry& e : baseEntries) {
+                bool already = false;
+                for (std::size_t i = 0; i < oldCount; ++i) {
+                    if (old->entries[i].iid == e.iid) { already = true; break; }
+                }
+                if (!already) {
+                    merged.push_back(e);
+                }
+            }
+            std::ranges::sort(merged, {}, &DispatchEntry::iid);
+
+            // Heap-allocate the composed snapshot. The pre-T16 leak budget is one snapshot per
+            // Install — bounded by class count, drained by the snapshot retirement queue once
+            // arena ownership lands. The retired snapshot's deleter is a no-op for the same
+            // reason @ref PublishExtensionEntries uses one: for now the prior snapshot's
+            // storage is either function-static (T7's earlier shape) or heap-leaked.
+            auto* freshEntries = new DispatchEntry[merged.size()];
+            for (std::size_t i = 0; i < merged.size(); ++i) {
+                freshEntries[i] = merged[i];
+            }
+            auto* fresh = new DispatchSnapshot{merged.size(), freshEntries, old};
+            const auto* prior = active->dispatch.exchange(fresh, std::memory_order_release);
+            if (prior != nullptr) {
+                Detail::RetireSnapshot(prior, [](const DispatchSnapshot*) noexcept {});
+            }
+
+            // Spec §3.5 / Task 14: append @c &MetaClassOf<T> to each advertised interface's
+            // @c implementedBy snapshot so @ref RT::Implementations can answer "who implements I"
+            // without walking the registrar's bookkeeping. The interface metaclass may not have
+            // any links yet (interfaces are reflected but not installed); @ref Detail::EnsureLinks
+            // lazily attaches a per-interface @c MetaLinks. The append uses the same allocate-new-
+            // array + atomic-exchange shape @ref Detail::PublishExtensionEntries uses for
+            // @c extendedBy. Each interface's writer mutex is taken separately so unrelated
+            // implementations register in parallel.
+            template for (constexpr auto Iref : Detail::kImplementsInfos<T>) {
+                using I = [: Iref :];
+                auto& imc = MetaClassOf<I>;
+                std::lock_guard iguard{WriterMutexFor(imc)};
+                Detail::EnsureLinks<I>(imc);
+                MetaLinks* ilinks = imc.links();
+                const ExtendedListSnapshot* oldImpl =
+                        ilinks->implementedBy.load(std::memory_order_acquire);
+                const std::size_t oldImplCount = (oldImpl != nullptr) ? oldImpl->count : 0;
+                auto* arr = new const MetaClass*[oldImplCount + 1];
+                for (std::size_t i = 0; i < oldImplCount; ++i) {
+                    arr[i] = oldImpl->classes[i];
+                }
+                arr[oldImplCount] = &MetaClassOf<T>;
+                auto* freshImpl = new ExtendedListSnapshot{oldImplCount + 1, arr, oldImpl};
+                ilinks->implementedBy.store(freshImpl, std::memory_order_release);
+            }
+
             MarkInstalled(id);
             Detail::SweepRetirements();
         }
@@ -306,6 +405,7 @@ namespace Yuki {
         inline DispatchEntry MakeExtensionEntry() noexcept {
             DispatchEntry e{};
             e.iid = IidOf<I>();
+            e.providerClass = &MetaClassOf<E>;
             if constexpr (StatelessExtensionClass<E>) {
                 e.kind = DispatchKind::CodeExtensionSingleton;
                 e.payload.singleton = &SingletonAddrFor<E>;
@@ -385,6 +485,21 @@ namespace Yuki {
             if (prior != nullptr) {
                 RetireSnapshot(prior, [](const DispatchSnapshot*) noexcept {});
             }
+
+            // 6. Append @c &MetaClassOf<E> to @p mc's @c extendedBy snapshot — Spec §3.5 / Task 14.
+            //    Same allocate-new-array + atomic-exchange shape as the eager-set path; the
+            //    introspection surface (@ref RT::Extensions) acquire-loads this snapshot. Idempotent
+            //    against the AlreadyInstalled gate above: re-running Install<E> short-circuits in
+            //    @ref Registry::Install before we reach here.
+            const ExtendedListSnapshot* oldExt = links->extendedBy.load(std::memory_order_acquire);
+            const std::size_t oldExtCount = (oldExt != nullptr) ? oldExt->count : 0;
+            auto* extArr = new const MetaClass*[oldExtCount + 1];
+            for (std::size_t i = 0; i < oldExtCount; ++i) {
+                extArr[i] = oldExt->classes[i];
+            }
+            extArr[oldExtCount] = &MetaClassOf<E>;
+            auto* freshExt = new ExtendedListSnapshot{oldExtCount + 1, extArr, oldExt};
+            links->extendedBy.store(freshExt, std::memory_order_release);
         }
 
         /**
@@ -417,7 +532,7 @@ namespace Yuki {
             for (std::size_t i = 0; i < oldCount; ++i) {
                 entries[i] = old->entries[i];
             }
-            entries[oldCount] = EagerSetEntry{IidOf<E>(), &MaterializeIntoImpl<E>};
+            entries[oldCount] = EagerSetEntry{IidOf<E>(), &MaterializeIntoImpl<E>, &MetaClassOf<E>};
             auto* fresh = new EagerSetSnapshot{oldCount + 1, entries, old};
             links->eagerSet.store(fresh, std::memory_order_release);
         }

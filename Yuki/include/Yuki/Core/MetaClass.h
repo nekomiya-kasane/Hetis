@@ -217,6 +217,10 @@ namespace Yuki {
     };
     static_assert(sizeof(DispatchKind) == 1);
 
+    // Forward decl — DispatchEntry::providerClass and EagerSetEntry::extensionClass need a pointer
+    // to the metaclass that registered the entry.
+    class MetaClass;
+
     /**
      * @brief One row of an immutable @ref DispatchSnapshot — an interface IID with the recipe for
      *        reaching it from a host pointer.
@@ -241,6 +245,13 @@ namespace Yuki {
             RootObject* const*   singleton;                ///< CodeExtensionSingleton facade in .rodata.
             RootObject* (*resolver)(RootObject* nucleus) noexcept;  ///< SideTableResolver materialiser.
         } payload{.staticOffset = 0};                      ///< Default-init the staticOffset arm.
+        const MetaClass* providerClass{nullptr};           ///< The class that registered this entry —
+                                                           ///< the Implementation for @c DirectCast /
+                                                           ///< @c InlineFacade arms, or the Extension
+                                                           ///< for the singleton / resolver arms. Used
+                                                           ///< by @ref RT::ProviderClass to answer
+                                                           ///< "who provides @p I" without consulting
+                                                           ///< any closure instance.
     };
 
     /**
@@ -370,6 +381,12 @@ namespace Yuki {
     struct EagerSetEntry {
         Iid  iid{};                                            ///< The Extension's identity (key).
         void (*materializeInto)(RootObject&) noexcept{nullptr};///< Allocate + publish facades.
+        const MetaClass* extensionClass{nullptr};              ///< @ref MetaClassOf<E> for the entry's
+                                                               ///< Extension @c E — back-reference for
+                                                               ///< @ref RT::EagerExtensions, which
+                                                               ///< projects the metaclass pointer out
+                                                               ///< of the snapshot without an extra
+                                                               ///< (iid → metaclass) lookup.
     };
 
     static_assert(std::is_trivially_destructible_v<EagerSetEntry>,
@@ -400,11 +417,40 @@ namespace Yuki {
                   "EagerSetSnapshot lives in the registrar's arena; no per-snapshot destructor runs.");
 
     /**
+     * @brief An immutable, atomically-published list of class metacores back-referencing one host.
+     *
+     * Per spec §3.5. Holds the answer to "which classes extend @p m" or "which classes implement
+     * the interface @p im" — populated incrementally by Extension / Implementation registrars and
+     * read by @ref RT::Extensions / @ref RT::Implementations on the introspection surface. The
+     * snapshot is the unit of publish: a registrar allocates a fresh, immutable @c classes array,
+     * wraps it in an @ref ExtendedListSnapshot, and CAS-installs it onto the matching
+     * @ref MetaLinks slot with release semantics. Readers acquire-load the pointer and treat the
+     * snapshot as immutable for the lifetime of their query — same RCU-style discipline the
+     * dispatch and eager-set snapshots use.
+     *
+     * @c previous chains older retired snapshots so a future epoch sweep can free them; for now
+     * the registrar leaks the prior snapshot the same way @ref Detail::PublishExtensionEntries
+     * leaks the prior dispatch snapshot pre-T16. The pointed-to @c classes array lives on the
+     * heap (one @c new[] per publish); nothing in this struct owns it, and the destructor is
+     * therefore trivial.
+     */
+    struct ExtendedListSnapshot {
+        std::size_t                  count;     ///< Number of metaclass back-pointers; 0 is empty.
+        const MetaClass* const*      classes;   ///< Stable, immutable; may be @c nullptr iff count==0.
+        const ExtendedListSnapshot*  previous;  ///< Older retired snapshot in the epoch chain.
+    };
+
+    static_assert(std::is_trivially_destructible_v<ExtendedListSnapshot>,
+                  "ExtendedListSnapshot lives in the registrar's arena; no per-snapshot dtor runs.");
+
+    /**
      * @brief Back-references and the dispatch table — written once at load time, then read-only.
      *
-     * Self types cannot know at compile time who will later extend them, so `extendedBy` /
-     * `implementedBy` are folded in single-threaded by the loader and thereafter read RCU-style
-     * with no locking on the hot path (QI / method dispatch).
+     * Self types cannot know at compile time who will later extend them, so @c extendedBy /
+     * @c implementedBy are folded in by Extension / Implementation registrars and thereafter read
+     * RCU-style with no locking on the hot path (introspection / QI / method dispatch). Every
+     * back-reference list is a snapshot pointer published with release semantics; readers
+     * acquire-load and walk the immutable @c classes array.
      *
      * @c dispatch is an atomic pointer to an immutable @ref DispatchSnapshot. Registrars publish
      * fresh snapshots with release semantics (and chain the prior one via @c previous so the
@@ -418,10 +464,10 @@ namespace Yuki {
      * registrar-on-const-MetaLinks reason.
      */
     struct MetaLinks {
-        std::span<const MetaCore* const> extendedBy{};     ///< Extensions that extend this class.
-        std::span<const MetaCore* const> implementedBy{};  ///< Classes implementing this interface.
-        mutable std::atomic<const DispatchSnapshot*> dispatch{nullptr};  ///< Acquire-load, CAS-publish.
-        mutable std::atomic<const EagerSetSnapshot*> eagerSet{nullptr};  ///< Stateful eager extensions.
+        mutable std::atomic<const ExtendedListSnapshot*> extendedBy{nullptr};    ///< Extensions of @p m.
+        mutable std::atomic<const ExtendedListSnapshot*> implementedBy{nullptr}; ///< Implementations.
+        mutable std::atomic<const DispatchSnapshot*>     dispatch{nullptr};      ///< Acquire-load, CAS.
+        mutable std::atomic<const EagerSetSnapshot*>     eagerSet{nullptr};      ///< Eager extensions.
     };
 
     // =========================================================================
