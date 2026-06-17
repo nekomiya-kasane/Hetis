@@ -1,5 +1,5 @@
 #include <Yuki/Core/RootObject.h>
-#include <Yuki/Core/ClassType.h>
+#include <Yuki/Core/Identity.h>
 #include "Meta.h"
 #include <catch2/catch_test_macros.hpp>
 #include <type_traits>

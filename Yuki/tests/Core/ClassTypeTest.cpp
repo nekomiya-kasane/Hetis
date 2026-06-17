@@ -1,4 +1,4 @@
-#include <Yuki/Core/ClassType.h>
+#include <Yuki/Core/Identity.h>
 #include <Yuki/Core/Config.h>
 #include "Meta.h"
 #include <catch2/catch_test_macros.hpp>

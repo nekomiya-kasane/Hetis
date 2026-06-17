@@ -1,5 +1,5 @@
 #pragma once
-#include <Yuki/Core/ClassType.h>
+#include <Yuki/Core/Identity.h>
 #include <Yuki/Core/TaggedPayload.h>
 #include <atomic>
 
