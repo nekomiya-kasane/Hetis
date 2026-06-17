@@ -21,11 +21,13 @@
 
 #include <Yuki/Core/FacadeList.h>
 #include <Yuki/Core/MetaClass.h>
+#include <Yuki/Core/Query.h>
 #include <Yuki/Core/RootObject.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <meta>
 #include <mutex>
 #include <vector>
 
@@ -76,6 +78,7 @@ namespace Yuki {
          * implementation of @c offsetof for virtual / multiple inheritance.
          */
         template<typename T, typename I>
+            requires std::derived_from<T, I>
         inline std::ptrdiff_t StaticCastOffset() noexcept {
             constexpr std::uintptr_t kProbe = 0x1000;
             T* p  = reinterpret_cast<T*>(kProbe);
@@ -83,31 +86,105 @@ namespace Yuki {
             return static_cast<std::ptrdiff_t>(reinterpret_cast<std::uintptr_t>(ip) - kProbe);
         }
 
+        /// @brief Reflection-driven byte offset of @p T's first inline-facade NSDM that exposes
+        ///        interface @p I — the @c InlineFacade arm's static offset.
+        ///
+        /// Mirrors @ref HasInlineFacadeFor / @ref InlineFacadeAddress but returns the byte distance
+        /// from @p T's start to the @c I subobject reachable through the matching NSDM. The walk
+        /// uses @c std::meta::offset_of for the NSDM's start, then adds the C++-level upcast offset
+        /// from the NSDM's static type to @c I via @ref StaticCastOffset (the NSDM's type is a
+        /// subclass of @c InterfaceFacade<I, X>, which publicly inherits @p I).
+        ///
+        /// Not @c consteval: @ref StaticCastOffset uses @c reinterpret_cast (the canonical CATIA
+        /// offset trick) and so cannot run at constant evaluation. The function is invoked once at
+        /// first @c Install<T> call from @ref BuildImplDispatchEntries — the cost is amortised.
+        ///
+        /// Precondition: @ref HasInlineFacadeFor<T, I>() — caller must check, the body
+        /// @c std::unreachable()s on a missed walk.
+        template<typename T, typename I>
+        inline std::ptrdiff_t InlineFacadeOffset() noexcept {
+            template for (constexpr auto m : std::define_static_array(
+                              std::meta::nonstatic_data_members_of(
+                                  ^^T, std::meta::access_context::current()))) {
+                // Nested if constexpr so MatchesInlineFacade / StaticCastOffset never instantiate on
+                // non-class NSDMs (e.g. `int`) — `bases_of` would reject the reflection and the
+                // `requires std::derived_from<NsdmT, I>` constraint on StaticCastOffset would fail.
+                if constexpr (std::meta::is_class_type(std::meta::type_of(m))) {
+                    if constexpr (MatchesInlineFacade<T, I, std::meta::type_of(m)>()) {
+                        using NsdmT = [: std::meta::type_of(m) :];
+                        constexpr std::ptrdiff_t base =
+                            static_cast<std::ptrdiff_t>(std::meta::offset_of(m).bytes);
+                        return base + StaticCastOffset<NsdmT, I>();
+                    }
+                }
+            }
+            std::unreachable();
+        }
+
+        /// @brief How many @c DispatchEntry slots @p T's static interface set produces — a count of
+        ///        DirectCast (true subclass) plus InlineFacade (reflectable inline NSDM) matches.
+        ///
+        /// Iids that satisfy neither rule are dropped: they're advertised through some other path
+        /// (extension override, runtime-attached cold facade) which the static install pass does
+        /// not own. Matches the gating logic in @ref BuildImplDispatchEntries below.
+        template<typename T>
+        consteval std::size_t StaticDispatchEntryCount() {
+            std::size_t n = 0;
+            template for (constexpr auto Ireflect : kImplementsInfos<T>) {
+                using I = [: Ireflect :];
+                if constexpr (std::derived_from<T, I>) {
+                    ++n;
+                } else if constexpr (HasInlineFacadeFor<T, I>()) {
+                    ++n;
+                }
+            }
+            return n;
+        }
+
         /**
          * @brief Build the @ref DispatchEntry array for an Implementation @p T at registration time.
          *
          * Walks @c kImplementsInfos<T> (the annotation-driven static list of interfaces) and emits
-         * one @ref DispatchKind::DirectCast entry per interface. The array is sorted by @ref Iid so
-         * the snapshot satisfies the binary-search precondition of @ref Detail::LookupEntry. The
-         * returned @c std::array has size known at compile time but values computed at first call.
+         * one entry per advertised interface, picking the arm by reflection over @p T:
          *
-         * @note Only the DirectCast arm is filled here. @c InlineFacade entries — for interfaces the
-         *       impl does *not* C++-inherit but instead routes through a small adapter — land in
-         *       Task 11 once the static-face facade probe is in place.
+         *   - @c DirectCast when @p T C++-inherits the interface — `static_cast<I*>(p)` is well-formed
+         *     and the layout offset is folded by @ref StaticCastOffset.
+         *   - @c InlineFacade when @p T does NOT inherit the interface but carries an inline-aggregated
+         *     @c InterfaceFacade<I, X> NSDM (@ref HasInlineFacadeFor) — the offset is the NSDM's
+         *     start plus the upcast-to-I offset, both compile-time constants.
+         *   - dropped otherwise (advertised but not statically reachable through @p T's layout —
+         *     extension overrides install their own entries; cold facades attach at runtime).
+         *
+         * The array is sorted by @ref Iid so the snapshot satisfies the binary-search precondition of
+         * @ref Detail::LookupEntry.
+         *
+         * @note Gating @c DirectCast on @c std::derived_from<T, I> is load-bearing: without it, the
+         *       compiler tries to emit `static_cast<I*>(T*)` for every advertised interface — which
+         *       is ill-formed (compile error) when @p T advertises @p I via inline facade only.
+         *       Adaptation 7 of the T11 task spec.
          */
         template<typename T>
         inline auto BuildImplDispatchEntries() noexcept {
-            constexpr auto N = kImplementsInfos<T>.size();
+            constexpr std::size_t N = StaticDispatchEntryCount<T>();
             std::array<DispatchEntry, N> out{};
             std::size_t i = 0;
             template for (constexpr auto Ireflect : kImplementsInfos<T>) {
-                using I = [:Ireflect:];
-                out[i] = DispatchEntry{
-                    IidOf<I>(),
-                    DispatchKind::DirectCast,
-                    {.staticOffset = StaticCastOffset<T, I>()},
-                };
-                ++i;
+                using I = [: Ireflect :];
+                if constexpr (std::derived_from<T, I>) {
+                    out[i++] = DispatchEntry{
+                        IidOf<I>(),
+                        DispatchKind::DirectCast,
+                        {.staticOffset = StaticCastOffset<T, I>()},
+                    };
+                } else if constexpr (HasInlineFacadeFor<T, I>()) {
+                    out[i++] = DispatchEntry{
+                        IidOf<I>(),
+                        DispatchKind::InlineFacade,
+                        {.staticOffset = InlineFacadeOffset<T, I>()},
+                    };
+                }
+                // else: I is advertised but not reachable through T's static layout — skipped here;
+                // a cold runtime-attached facade or an extension's later Install<E> will cover it.
             }
             std::ranges::sort(out, {}, &DispatchEntry::iid);
             return out;
