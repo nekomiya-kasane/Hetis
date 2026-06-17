@@ -149,59 +149,12 @@ namespace Yuki {
     /** @cond INTERNAL */
     namespace Detail {
 
-        /// @brief Stub — the real dispatch lookup lands with the Task 12 kernel rewrite.
-        ///
-        /// TODO(task-12): rewrite kernel against DispatchSnapshot. The previous body iterated
-        /// `links->dispatch` as a `std::span<const DispatchEntry>` with a per-entry `offset` arm;
-        /// Task 3 swapped that span out for an atomically-published @ref DispatchSnapshot and
-        /// reshaped @c DispatchEntry around a payload union. Rather than half-port the kernel here,
-        /// the lookup is stubbed to @c nullptr so the build stays green — Task 12 owns the rewrite
-        /// of @c QueryDynamicRaw against @c Detail::LookupEntry plus the new payload arms.
-        inline const DispatchEntry* FindDispatch(const MetaClass& /*mc*/, Iid /*iid*/) noexcept {
-            return nullptr;
-        }
-
         /// @brief Type-erased dynamic Query implementation; the public templates wrap it for type.
-        inline RootObject* QueryDynamicRaw(RootObject* p, Iid iid) noexcept {
-            while (p != nullptr) {
-                const MetaClass& mc = p->MetaClassDynamic();
-
-                // Identity short-circuit: a Query for the host's own metaclass-iid returns p.
-                if (mc.iid() == iid) {
-                    return p;
-                }
-
-                // TODO(task-12): rewrite kernel against DispatchSnapshot — call the stub for now so
-                // the build stays green; the real per-kind dispatch lands with Task 12.
-                (void) FindDispatch(mc, iid);
-
-                switch (p->TypeDynamic()) {
-                    case ClassType::Implementation: {
-                        // Cold facade chain.
-                        if (FacadeListHead* facades = RT::Facades(p)) {
-                            if (RootObject* facade = facades->Lookup(iid)) {
-                                return facade;
-                            }
-                        }
-                        return nullptr;  // exhausted; no further redirection.
-                    }
-                    case ClassType::Interface:
-                    case ClassType::Imposter:
-                    case ClassType::Bridge:
-                        // Facade arms are transparent — re-query through the underlying object.
-                        p = RT::Target(p);
-                        continue;
-                    case ClassType::Extension:
-                        // "Augment, do not hide": fall back to the extendee.
-                        p = RT::Extendee(p);
-                        continue;
-                    case ClassType::None:
-                    default:
-                        return nullptr;
-                }
-            }
-            return nullptr;
-        }
+        ///
+        /// Forwards to @ref RT::QueryDynamicRaw — the real kernel body lives there with the
+        /// rest of the @c RT namespace. This wrapper survives so the legacy public
+        /// @c Yuki::Query<I>(RootObject*) overloads below keep their existing call shape.
+        inline RootObject* QueryDynamicRaw(RootObject* p, Iid iid) noexcept;
 
     } // namespace Detail
     /** @endcond */
@@ -235,6 +188,110 @@ namespace Yuki {
     }
 
     namespace RT {
+
+        // =====================================================================
+        // Dynamic kernel (Task 12, spec §4.2 + §6.4)
+        // =====================================================================
+        //
+        // One switch over @ref DispatchKind, reading the published @ref DispatchSnapshot through
+        // an acquire load. The only arm that branches on the @ref Materialize policy is
+        // @c SideTableResolver: under @c Materialize::No the kernel reads the facade chain
+        // directly (so @ref Has answers @c false for an unmaterialised lazy Extension); under
+        // @c Materialize::Yes it calls the resolver, which AttachUnique-publishes the per-closure
+        // facade and returns it. Every other arm produces a real pointer regardless of policy.
+        //
+        // Steering through @ref Nucleus before the lookup makes the kernel total over the role
+        // space: a query handed an Interface/Imposter/Bridge facade transparently re-targets to
+        // the underlying object, and an Extension hops to its Extendee — the same role-walk
+        // contract @ref Underlying / @ref Extendee already encode, but composed once at the top
+        // of the kernel rather than spread across the switch.
+
+        /// @brief Whether the dynamic kernel may materialise lazy state on miss.
+        ///
+        /// Spelled as a strongly-typed boolean so the policy parameter cannot be confused with a
+        /// pointer/integer at the call site, while still bridging via @c bool's value space —
+        /// the @c switch arm reads `M == Materialize::No` as the constexpr discriminator.
+        enum class Materialize : bool { No = false, Yes = true };
+
+        /// @brief Type-erased dynamic Query implementation, parameterised on the materialise
+        ///        policy. @ref QueryDynamicRaw and @ref Has are the two named entry points; both
+        ///        sites delegate here so the per-arm logic stays in one place.
+        template<Materialize M = Materialize::Yes>
+        [[nodiscard]] inline RootObject* QueryDynamicRawPolicy(RootObject* p, Iid id) noexcept {
+            RootObject* n = Nucleus(p);
+            if (n == nullptr) {
+                return nullptr;
+            }
+            const MetaLinks* links = n->MetaClassDynamic().links();
+            if (links == nullptr) {
+                // No registrar has installed a snapshot for this metaclass — only the cold,
+                // user-attached facade chain can produce an answer.
+                if (FacadeListHead* head = Facades(n)) {
+                    return FacadeListLookup(*head, id);
+                }
+                return nullptr;
+            }
+            const DispatchSnapshot* snap = links->dispatch.load(std::memory_order_acquire);
+            const DispatchEntry*    e    = (snap != nullptr) ? Detail::LookupEntry(snap, id) : nullptr;
+            if (e != nullptr) {
+                switch (e->kind) {
+                case DispatchKind::DirectCast:
+                case DispatchKind::InlineFacade:
+                    // BOA / inline-facade: the offset is a compile-time constant baked into the
+                    // entry; one byte add lands on a real I-typed subobject of @c n.
+                    return reinterpret_cast<RootObject*>(
+                            reinterpret_cast<std::byte*>(n) + e->payload.staticOffset);
+
+                case DispatchKind::CodeExtensionSingleton:
+                    // Stateless extension: the entry holds a pointer-to-pointer-to-singleton so
+                    // the registrar can update the slot without rewriting the snapshot. Until the
+                    // singleton-publication path lands the slot may carry a sentinel @c nullptr.
+                    return (e->payload.singleton != nullptr) ? *e->payload.singleton : nullptr;
+
+                case DispatchKind::SideTableResolver:
+                    // The only Materialize-sensitive arm. @c No probes the chain directly — a
+                    // miss is the contract for "lazy and not yet materialised". @c Yes calls the
+                    // resolver, which is the same lookup-then-materialise primitive @c Has would
+                    // need to be promoted to a Query.
+                    if constexpr (M == Materialize::No) {
+                        if (FacadeListHead* head = Facades(n)) {
+                            return FacadeListLookup(*head, id);
+                        }
+                        return nullptr;
+                    } else {
+                        return (e->payload.resolver != nullptr) ? e->payload.resolver(n) : nullptr;
+                    }
+
+                case DispatchKind::FacadeList:
+                    // Cold/runtime-attached interface — the entry exists for introspection only;
+                    // the actual answer lives on the facade chain.
+                    if (FacadeListHead* head = Facades(n)) {
+                        return FacadeListLookup(*head, id);
+                    }
+                    return nullptr;
+                }
+            }
+            // No dispatch entry — fall through to user-attached facades. This is the path a Cold
+            // interface that never made it onto the snapshot takes, so spec §4.2's "cold-path
+            // facade lookup" stays reachable even after the snapshot rewrite.
+            if (FacadeListHead* head = Facades(n)) {
+                return FacadeListLookup(*head, id);
+            }
+            return nullptr;
+        }
+
+        /// @brief Type-erased dynamic Query — the @c Materialize::Yes entry point.
+        [[nodiscard]] inline RootObject* QueryDynamicRaw(RootObject* p, Iid id) noexcept {
+            return QueryDynamicRawPolicy<Materialize::Yes>(p, id);
+        }
+
+        /// @brief @c true iff @p p exposes interface @p I without materialising new state — the
+        ///        @c Materialize::No entry into the dynamic kernel. Spec §6.4: lazy + unmaterialised
+        ///        answers @c false; every other arm answers exactly as @ref QueryDynamicRaw would.
+        template<InterfaceClass I>
+        [[nodiscard]] inline bool Has(RootObject* p) noexcept {
+            return QueryDynamicRawPolicy<Materialize::No>(p, IidOf<I>()) != nullptr;
+        }
 
         /**
          * @brief Static-face @c Query — host's concrete type @p C is visible, so the answer folds.
@@ -291,5 +348,20 @@ namespace Yuki {
         }
 
     } // namespace RT
+
+    /** @cond INTERNAL */
+    namespace Detail {
+
+        // Definition of the forward declaration above. Lives at namespace scope (out of @c RT)
+        // because the legacy public @c Yuki::Query<I>(RootObject*) overloads name it with the
+        // @c Detail:: qualifier and we keep their call sites unchanged. The forward in this
+        // header was needed so those overloads compiled before @c RT was even opened; the body
+        // here closes that loop now that @ref RT::QueryDynamicRaw is defined.
+        inline RootObject* QueryDynamicRaw(RootObject* p, Iid iid) noexcept {
+            return RT::QueryDynamicRaw(p, iid);
+        }
+
+    } // namespace Detail
+    /** @endcond */
 
 } // namespace Yuki
