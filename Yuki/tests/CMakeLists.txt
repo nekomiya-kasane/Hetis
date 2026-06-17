@@ -18,3 +18,4 @@ function(add_yuki_test CATEGORY TEST_NAME)
 endfunction()
 
 add_yuki_test(Core ClassTypeTest)
+add_yuki_test(Core TaggedPayloadTest)
