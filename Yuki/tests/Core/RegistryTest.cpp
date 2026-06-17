@@ -123,3 +123,127 @@ TEST_CASE("Registry::Install is idempotent across repeated calls", AUTO_TAG) {
     const auto* s2 = MetaClassOf<BoaImpl>.links()->dispatch.load(std::memory_order_acquire);
     REQUIRE(s1 == s2);
 }
+
+// =============================================================================
+// Install<E> for Extension classes (Task 8)
+// =============================================================================
+//
+// Fixtures intentionally diverge from the plan's literal `struct ... : Anno::Extension {}` spelling
+// — `Anno::Extension` is a `Role` *value*, not a base class. Roles are stamped via the `[[=Anno::X]]`
+// annotation syntax, matching the convention from MetaClassTest.cpp / IdentityTest.cpp.
+//
+// Each TEST_CASE uses its own implementation + extension types so the shared, process-static
+// registry state never carries cross-test pollution. Sharing one Steak across the three tests
+// would let the third test's extra Install<>s leak into the first test under Catch2's random
+// ordering — and the entry kinds the tests inspect depend on which extension last won the
+// snapshot composition.
+
+namespace {
+
+    // -- Fixture A: stateless-extension test -------------------------------------------------
+    struct [[=Anno::Interface]] ICookable {
+        virtual void Cook() = 0;
+        virtual ~ICookable() = default;
+    };
+    struct [[=Anno::Implementation]] [[=Anno::Implements{^^ICookable}]]
+           Steak : MetaNode<Steak>, ICookable {
+        void Cook() override {}
+    };
+    // Stateless Extension: zero own NSDMs => StatelessExtensionClass<SaltShaker> holds, so the
+    // registrar picks the CodeExtensionSingleton arm. The singleton-pointer payload is a
+    // `nullptr` sentinel until T10's real singleton materialisation; the tests never dereference
+    // it, only check the entry kind.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^Steak}]] [[=Anno::Implements{^^ICookable}]]
+           [[=Anno::Eager{}]]
+           SaltShaker {};
+
+    // -- Fixture B: stateful-extension test --------------------------------------------------
+    struct [[=Anno::Interface]] ISearable {
+        virtual void Sear() = 0;
+        virtual ~ISearable() = default;
+    };
+    struct [[=Anno::Implementation]] [[=Anno::Implements{^^ISearable}]]
+           Brisket : MetaNode<Brisket>, ISearable {
+        void Sear() override {}
+    };
+    // Stateful Extension: one own NSDM => StatefulExtensionClass<Cooked>, so the registrar picks
+    // SideTableResolver. No Eager annotation => default lazy. The resolver body emitted by the
+    // registrar calls FacadeListLookup only; the materialisation-on-miss step lands in T10.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^Brisket}]] [[=Anno::Implements{^^ISearable}]]
+           Cooked {
+        int temperatureC = 0;
+    };
+
+    // -- Fixture C: EagerSet "no entries" test -----------------------------------------------
+    struct [[=Anno::Interface]] IFlavour {
+        virtual void Taste() = 0;
+        virtual ~IFlavour() = default;
+    };
+    struct [[=Anno::Implementation]] [[=Anno::Implements{^^IFlavour}]]
+           Ribeye : MetaNode<Ribeye>, IFlavour {
+        void Taste() override {}
+    };
+    // Stateless + eager: stateless wins the discriminator => no EagerSet entry per spec §3.3
+    // step 5 (stateless ones share a singleton facade and need no per-closure storage).
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^Ribeye}]] [[=Anno::Implements{^^IFlavour}]]
+           [[=Anno::Eager{}]]
+           Smoky {};
+    // Stateful + lazy: no Eager annotation => the lazy SideTableResolver path applies; the
+    // construction-time eager-set is not touched either.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^Ribeye}]] [[=Anno::Implements{^^IFlavour}]]
+           Marinated {
+        int saltyness = 0;
+    };
+
+} // namespace
+
+TEST_CASE("Install<E> for stateless extension publishes CodeExtensionSingleton", AUTO_TAG) {
+    Registry::Install<Steak>();
+    Registry::Install<SaltShaker>();
+
+    auto& mc = MetaClassOf<Steak>;
+    const auto* links = mc.links();
+    REQUIRE(links != nullptr);
+    const auto* snap = links->dispatch.load(std::memory_order_acquire);
+    REQUIRE(snap != nullptr);
+
+    // Steak's install left a DirectCast entry for ICookable. SaltShaker overrides it: spec §3.2
+    // says Extensions win for the same (target, iid) pair, so the entry kind must flip to
+    // CodeExtensionSingleton even though Steak C++-inherits ICookable.
+    const auto* e = Detail::LookupEntry(snap, IidOf<ICookable>());
+    REQUIRE(e != nullptr);
+    REQUIRE(e->kind == DispatchKind::CodeExtensionSingleton);
+}
+
+TEST_CASE("Install<E> for stateful extension publishes SideTableResolver", AUTO_TAG) {
+    Registry::Install<Brisket>();
+    Registry::Install<Cooked>();
+
+    auto& mc = MetaClassOf<Brisket>;
+    const auto* links = mc.links();
+    REQUIRE(links != nullptr);
+    const auto* snap = links->dispatch.load(std::memory_order_acquire);
+    REQUIRE(snap != nullptr);
+
+    // Cooked is stateful => SideTableResolver. The resolver pointer comes from
+    // Detail::SideTableResolverFor<Cooked> and must be non-null so the dynamic-kernel switch in
+    // T12 can dispatch through it.
+    const auto* e = Detail::LookupEntry(snap, IidOf<ISearable>());
+    REQUIRE(e != nullptr);
+    REQUIRE(e->kind == DispatchKind::SideTableResolver);
+    REQUIRE(e->payload.resolver != nullptr);
+}
+
+TEST_CASE("Install<E> skips EagerSet for stateless and for lazy stateful extensions", AUTO_TAG) {
+    Registry::Install<Ribeye>();
+    Registry::Install<Smoky>();      // stateless + eager => no EagerSet entry (spec §3.3 step 5)
+    Registry::Install<Marinated>();  // stateful  + lazy  => no EagerSet entry either
+
+    auto& mc = MetaClassOf<Ribeye>;
+    const auto* links = mc.links();
+    REQUIRE(links != nullptr);
+    const auto* es = links->eagerSet.load(std::memory_order_acquire);
+    // No stateful-and-eager extension extends Ribeye in this test suite, so the eager set stays
+    // empty: either an uninstalled null pointer or a snapshot with zero entries.
+    REQUIRE((es == nullptr || es->count == 0));
+}
