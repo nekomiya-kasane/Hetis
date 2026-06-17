@@ -26,10 +26,16 @@
  */
 #pragma once
 
+#include <Yuki/Core/FacadeList.h>
 #include <Yuki/Core/Identity.h>
 #include <Yuki/Core/MetaClass.h>
 #include <Yuki/Core/Registry.h>
+#include <Yuki/Core/RootObject.h>
 
+#include <array>
+#include <concepts>
+#include <cstddef>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -170,6 +176,169 @@ namespace Yuki::RT {
         std::span<const EagerSetEntry> entries =
             (s != nullptr) ? std::span<const EagerSetEntry>{s->entries, s->count} : std::span<const EagerSetEntry>{};
         return entries | std::views::transform([](const EagerSetEntry& e) noexcept { return e.extensionClass; });
+    }
+
+    // =========================================================================
+    // Instance-level introspection (Task 15, spec §6.1 / §6.3)
+    // =========================================================================
+    //
+    // The metaclass-level surface above answers "what *can* a closure of M
+    // resolve". The four entries below answer "what does *this particular*
+    // closure carry, right now" — every one reads the runtime facade chain on
+    // a @c RootObject (the cold-path arm @ref FacadeListHead manages), not the
+    // dispatch snapshot. Nothing here ever fires a SideTableResolver; the
+    // results are stable across calls until something else publishes a fresh
+    // facade node (e.g. an explicit @ref Reify or a Materialize::Yes Query).
+
+    /**
+     * @brief Forward-iterable view over a closure's *currently materialised* facade pointers,
+     *        deduplicated by @c RootObject identity.
+     *
+     * The chain head publishes the SAME Extension instance pointer under multiple FacadeNodes
+     * (one for the Extension's own iid, one per advertised interface iid — see
+     * @ref Detail::MaterializeIntoImpl). A naive forward walk would therefore yield the same
+     * @c RootObject* multiple times; this view drops duplicates by keeping an inline
+     * fixed-capacity "seen" set on the iterator (see @ref Iterator::kSeenCapacity). The capacity
+     * is intentionally generous for typical closures and falls out of dedup on overflow —
+     * closures with more than @ref Iterator::kSeenCapacity distinct facades are an outlier and
+     * can be reshaped if the limit ever bites.
+     *
+     * All operations are @c noexcept and inline; iteration never allocates.
+     */
+    class MaterializedFacadesView : public std::ranges::view_interface<MaterializedFacadesView> {
+        FacadeListHead* head_;
+
+    public:
+        constexpr MaterializedFacadesView() noexcept : head_(nullptr) {}
+        explicit constexpr MaterializedFacadesView(FacadeListHead* h) noexcept : head_(h) {}
+
+        class Sentinel {};
+
+        class Iterator {
+        public:
+            /// Inline dedup capacity. Closures with more distinct facades than this lose dedup
+            /// on the overflow tail — see @ref MaterializedFacadesView class doc for rationale.
+            static constexpr std::size_t kSeenCapacity = 32;
+
+        private:
+            FacadeNode* cur_{nullptr};
+            std::array<RootObject*, kSeenCapacity> seen_{};
+            std::size_t seenCount_{0};
+
+            bool SeenBefore(RootObject* p) const noexcept {
+                for (std::size_t i = 0; i < seenCount_; ++i) {
+                    if (seen_[i] == p) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            void SkipDupes() noexcept {
+                while (cur_ != nullptr && SeenBefore(cur_->facade)) {
+                    cur_ = cur_->next;
+                }
+                if (cur_ != nullptr && seenCount_ < seen_.size()) {
+                    seen_[seenCount_++] = cur_->facade;
+                }
+            }
+
+        public:
+            using iterator_concept = std::input_iterator_tag;
+            using value_type       = RootObject*;
+            using difference_type  = std::ptrdiff_t;
+
+            Iterator() noexcept = default;
+            explicit Iterator(FacadeNode* start) noexcept : cur_(start) { SkipDupes(); }
+
+            RootObject* operator*() const noexcept { return cur_->facade; }
+            Iterator& operator++() noexcept {
+                cur_ = cur_->next;
+                SkipDupes();
+                return *this;
+            }
+            Iterator operator++(int) noexcept {
+                auto t = *this;
+                ++*this;
+                return t;
+            }
+
+            friend bool operator==(const Iterator& i, const Sentinel&) noexcept {
+                return i.cur_ == nullptr;
+            }
+        };
+
+        Iterator begin() const noexcept {
+            return head_ != nullptr ? Iterator{head_->Head()} : Iterator{};
+        }
+        Sentinel end() const noexcept { return {}; }
+    };
+
+    /**
+     * @brief View over the currently-materialised facades on @p n's closure — every facade pointer
+     *        appears exactly once.
+     *
+     * Resolves @p n's facade chain head via @ref Facades (so @p n may be the nucleus itself or
+     * any Implementation / Extension whose nucleus owns the chain) and wraps it in a
+     * @ref MaterializedFacadesView. An Implementation that has never had a Cold facade
+     * materialised yields an empty view; a non-Implementation @p n (Extension, Interface
+     * facade, @c nullptr) also yields empty — the role-arm mismatch is silent so callers do not
+     * need to pre-classify @p n.
+     *
+     * No SideTableResolver fires; the view is observation-only.
+     */
+    [[nodiscard]] inline MaterializedFacadesView MaterializedFacades(RootObject* n) noexcept {
+        return MaterializedFacadesView{Facades(n)};
+    }
+
+    /**
+     * @brief View filtered to facades whose dynamic role is @ref ClassType::Extension.
+     *
+     * Filters @ref MaterializedFacades by @c RootObject::TypeDynamic — the role bits in the
+     * tagged payload, decoded without a vcall. Every Extension instance lands in the chain with
+     * role @c Extension because @ref ExtensionNode (its CRTP base) makes the payload via
+     * @c TaggedPayload::Make(ClassType::Extension, extendee). Implementations that have never
+     * been extended yield an empty view.
+     */
+    [[nodiscard]] inline auto MaterializedExtensions(RootObject* n) noexcept {
+        return MaterializedFacades(n) | std::views::filter([](RootObject* p) noexcept {
+                   return p != nullptr && p->TypeDynamic() == ClassType::Extension;
+               });
+    }
+
+    /**
+     * @brief @c true iff @p anyNode and @p candidate share the same closure nucleus.
+     *
+     * The closure-identity test spec §6.3 calls for: every facade, Extension and Implementation
+     * in one closure walks to the same @ref Nucleus, so identity at the nucleus is identity at
+     * the closure. The body is one comparison after two @ref Nucleus walks; both walks accept
+     * @c nullptr and return @c nullptr, so @c InClosure(nullptr, nullptr) is @c true — useful as
+     * an identity element when composing closure-aware algorithms.
+     */
+    [[nodiscard]] inline bool InClosure(RootObject* anyNode, RootObject* candidate) noexcept {
+        return Nucleus(anyNode) == Nucleus(candidate);
+    }
+
+    /**
+     * @brief Visit the nucleus of @p anyNode and every materialised facade exactly once.
+     *
+     * @p visit is invoked first with @c (nucleus, nucleus->TypeDynamic()) — the
+     * Implementation arm — and then with @c (facade, facade->TypeDynamic()) for each
+     * facade yielded by @ref MaterializedFacades (which already dedups by pointer identity, so
+     * no facade is visited twice even though the underlying chain publishes the same Extension
+     * under multiple iids). Null @p anyNode is a no-op. No SideTableResolver fires; the walk
+     * sees exactly the closure's current observable state.
+     */
+    template<std::invocable<RootObject*, ClassType> F>
+    inline void WalkClosure(RootObject* anyNode, F&& visit) noexcept {
+        RootObject* n = Nucleus(anyNode);
+        if (n == nullptr) {
+            return;
+        }
+        visit(n, n->TypeDynamic());
+        for (RootObject* facade : MaterializedFacades(n)) {
+            visit(facade, facade->TypeDynamic());
+        }
     }
 
 } // namespace Yuki::RT

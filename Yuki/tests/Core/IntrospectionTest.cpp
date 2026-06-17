@@ -173,3 +173,155 @@ TEST_CASE("RT::EagerExtensions enumerates Anno::Eager extensions", AUTO_TAG) {
     REQUIRE(seen);
 }
 
+// =============================================================================
+// Instance-level introspection (Task 15, spec §6.1 / §6.3)
+// =============================================================================
+//
+// The metaclass-level tests above ask "what *can* a closure of M resolve"; the
+// four cases below ask "what does *this particular* closure carry right now",
+// driven through @ref MaterializedFacades, @ref MaterializedExtensions,
+// @ref InClosure and @ref WalkClosure. Fixtures are T15-suffixed so Catch2's
+// randomiser cannot interleave them with the same-conceptual T14 fixtures
+// above.
+
+namespace {
+
+    struct [[=Anno::Interface]] IAT15 {
+        virtual ~IAT15() = default;
+    };
+    struct [[=Anno::Interface]] IBT15 {
+        virtual ~IBT15() = default;
+    };
+
+    struct [[=Anno::Implementation]] [[=Anno::Implements{^^IAT15}]]
+           AImplT15 : MetaNode<AImplT15>, IAT15 {};
+
+    // Stateful (one NSDM) + lazy (no Anno::Eager) => SideTableResolver arm. We
+    // explicitly @c Reify it in tests to populate the facade chain without
+    // firing a Query that would also materialise; the introspection surface
+    // can then observe the chain in a predictable state.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^AImplT15}]]
+           [[=Anno::Implements{^^IBT15}]]
+           BExtT15 : ExtensionNode<BExtT15, AImplT15> {
+        using ExtensionNode::ExtensionNode;
+        int n = 0;
+    };
+
+} // namespace
+
+TEST_CASE("MaterializedExtensions yields exactly the live extension instances", AUTO_TAG) {
+    Registry::Install<AImplT15>();
+    Registry::Install<BExtT15>();
+
+    AImplT15 a;
+
+    // Pre: nothing has been materialised onto this nucleus yet; the facade
+    // chain is empty so the dedup-aware view yields no elements.
+    {
+        auto exts = RT::MaterializedExtensions(&a);
+        std::size_t count = 0;
+        for (RootObject* p : exts) {
+            (void)p;
+            ++count;
+        }
+        REQUIRE(count == 0);
+    }
+
+    RT::Reify<BExtT15>(&a);
+
+    // Post: exactly one extension instance is published. The view dedups by
+    // RootObject* identity, so even though the underlying chain holds the same
+    // pointer under two iids (BExtT15's own + IBT15), we see it once. The
+    // visited pointer's dynamic role is @c ClassType::Extension because
+    // @ref ExtensionNode set @c TaggedPayload::Make(Extension, extendee).
+    std::size_t count = 0;
+    RootObject* seen = nullptr;
+    for (RootObject* p : RT::MaterializedExtensions(&a)) {
+        ++count;
+        seen = p;
+    }
+    REQUIRE(count == 1);
+    REQUIRE(seen != nullptr);
+    REQUIRE(seen->TypeDynamic() == ClassType::Extension);
+}
+
+TEST_CASE("InClosure groups nodes by nucleus identity", AUTO_TAG) {
+    Registry::Install<AImplT15>();
+    Registry::Install<BExtT15>();
+
+    AImplT15 a1;
+    AImplT15 a2;
+    RT::Reify<BExtT15>(&a1);  // only a1's chain receives the extension
+
+    RootObject* ext = nullptr;
+    for (RootObject* p : RT::MaterializedExtensions(&a1)) {
+        ext = p;
+    }
+    REQUIRE(ext != nullptr);
+
+    // The extension's nucleus is @c a1 (its extendee arm), so it groups with
+    // @c a1 and not with the unrelated @c a2 instance. Spec §6.3 closure-
+    // identity table.
+    REQUIRE(RT::InClosure(&a1, ext) == true);
+    REQUIRE(RT::InClosure(&a2, ext) == false);
+    // Identity edge cases — both nuclei walk to themselves, both nulls walk to
+    // null. @c InClosure is the equality of those two walks.
+    REQUIRE(RT::InClosure(&a1, &a1) == true);
+    REQUIRE(RT::InClosure(nullptr, nullptr) == true);
+}
+
+TEST_CASE("WalkClosure visits nucleus first then every materialized facade exactly once",
+          AUTO_TAG) {
+    Registry::Install<AImplT15>();
+    Registry::Install<BExtT15>();
+
+    AImplT15 a;
+    RT::Reify<BExtT15>(&a);
+
+    std::vector<RootObject*> visited;
+    std::vector<ClassType> roles;
+    RT::WalkClosure(&a, [&](RootObject* p, ClassType t) noexcept {
+        visited.push_back(p);
+        roles.push_back(t);
+    });
+
+    REQUIRE(visited.size() >= 1);
+    REQUIRE(visited[0] == static_cast<RootObject*>(&a));
+    REQUIRE(roles[0] == ClassType::Implementation);
+
+    // No duplicates — @ref MaterializedFacades dedups by RootObject*, so the
+    // extension instance appears at most once even though the chain published
+    // it under multiple iids.
+    for (std::size_t i = 0; i < visited.size(); ++i) {
+        for (std::size_t j = i + 1; j < visited.size(); ++j) {
+            REQUIRE(visited[i] != visited[j]);
+        }
+    }
+}
+
+TEST_CASE("Potential vs runtime symmetry table holds", AUTO_TAG) {
+    Registry::Install<AImplT15>();
+    Registry::Install<BExtT15>();
+
+    auto& m = MetaClassOf<AImplT15>;
+
+    // Pre: the dispatch snapshot has an entry for IBT15 (Provides == true);
+    // the facade chain has not been touched, so the Materialize::No probe
+    // through @ref RT::Has finds no chain node and answers @c false.
+    AImplT15 a;
+    REQUIRE(RT::Provides<IBT15>(m) == true);
+    REQUIRE(RT::Has<IBT15>(&a) == false);
+
+    // Drive the dynamic kernel directly: the static face Query<I, C> only
+    // enters the kernel branch when @c std::derived_from<I, RootObject>, and
+    // plain interfaces (IBT15 has no RootObject base) miss that branch and
+    // return nullptr without firing the SideTableResolver. Using the
+    // type-erased kernel form sidesteps that — matches the canonical
+    // SteakLazyT12 / CookedLazyT12 pattern in QueryTest.cpp.
+    (void)RT::QueryDynamicRaw(&a, IidOf<IBT15>());
+
+    // Post: the resolver published the BExtT15 facade under the IBT15 iid, so
+    // @ref RT::Has now answers @c true through the chain probe.
+    REQUIRE(RT::Has<IBT15>(&a) == true);
+}
+
