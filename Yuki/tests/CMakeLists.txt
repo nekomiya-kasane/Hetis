@@ -19,3 +19,4 @@ endfunction()
 
 add_yuki_test(Core ClassTypeTest)
 add_yuki_test(Core TaggedPayloadTest)
+add_yuki_test(Core RootObjectTest)
