@@ -304,3 +304,118 @@ TEST_CASE("Named YukiRegister_<iid> symbol exists and installs", AUTO_TAG) {
     YukiRegister_YukiTest__Steak();
     REQUIRE(Registry::AlreadyInstalled(IidOf<Steak>()));
 }
+
+// =============================================================================
+// MaterializeInto + MaterializeEagerSet construction hook (Task 10)
+// =============================================================================
+//
+// Spec refs: §1.5 (eager/lazy instantiation policy); §3.3 closure-construction hook; §6.4
+// lazy materialisation kernel. The T10 contract: when a class @c B has stateful + eager
+// Extensions registered, constructing one @c B materialises every such Extension *during
+// nucleus construction* via the @c MetaNode<Self>::MetaNode() body, and a subsequent
+// FacadeListLookup on @c IidOf<E>() finds the published facade node. Lazy Extensions, by
+// contrast, leave the facade chain empty until the dynamic-kernel @c Query path runs the
+// SideTableResolver.
+//
+// The fixtures below are *fresh* (T10-suffixed) so the tests don't depend on whether T8's
+// Install<Steak> or Install<Brisket> happened to run before this section under Catch2's
+// randomiser. Anonymous namespaces are unique per block, so a redeclared @c ICookableT10
+// in a fresh block is a distinct interface from the one above — no double-registration risk.
+
+namespace {
+
+    struct [[=Anno::Interface]] ICookableT10 {
+        virtual void Cook() = 0;
+        virtual ~ICookableT10() = default;
+    };
+
+    // The nucleus to extend. Plain Implementation that C++-inherits ICookableT10 (and so
+    // owns a DirectCast entry for it) — the extension below will override that entry to a
+    // SideTableResolver and also publish a FacadeNode at construction time.
+    struct [[=Anno::Implementation]] [[=Anno::Implements{^^ICookableT10}]]
+           SteakT10 : MetaNode<SteakT10>, ICookableT10 {
+        void Cook() override {}
+    };
+
+    // Eager + stateful Extension. The `[[=Anno::Eager{}]]` tag flips the default-for-stateful
+    // (lazy) to eager; the single @c garnishCount NSDM makes it stateful, so the
+    // @c AppendToEagerSet path runs and the closure-construction hook is what we exercise.
+    // Inherits ExtensionNode so it has the conforming `(SteakT10*)` ctor and a RootObject
+    // base — both required by MaterializeIntoImpl.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^SteakT10}]]
+           [[=Anno::Implements{^^ICookableT10}]] [[=Anno::Eager{}]]
+           PlatedT10 : ExtensionNode<PlatedT10, SteakT10> {
+        using ExtensionNode::ExtensionNode;
+        int garnishCount = 0;
+        // ICookableT10 is not a C++ base of PlatedT10 — the extension publishes a facade
+        // node for that iid but the actual interface call doesn't ride through PlatedT10's
+        // vtable; QI's downstream dispatch (T11–T13) consults the FacadeList entry instead.
+    };
+
+    // Stateful + lazy Extension (no Eager). Verifies the negative path: even after Install
+    // runs (so the SideTableResolver entry is published), a fresh SteakT10 starts with no
+    // FacadeNode for SaltedT10 — the lazy path stays inert until Query/Reify materialises.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^SteakT10}]]
+           [[=Anno::Implements{^^ICookableT10}]]
+           SaltedT10 : ExtensionNode<SaltedT10, SteakT10> {
+        using ExtensionNode::ExtensionNode;
+        int saltCount = 0;
+    };
+
+} // namespace
+
+TEST_CASE("Eager stateful Extension materializes during nucleus construction", AUTO_TAG) {
+    // Both classes need their registrars to have run before we observe the side-effect.
+    // The CRTP hook would normally have fired at static-init, but be explicit for clarity.
+    Registry::Install<SteakT10>();
+    Registry::Install<PlatedT10>();
+
+    SteakT10 s;  // <-- the construction hook is the contract under test.
+    auto* head = RT::Facades(&s);
+    REQUIRE(head != nullptr);
+
+    // The eager hook published a FacadeNode keyed on IidOf<PlatedT10>() — looking it up
+    // returns a non-null facade pointer.
+    REQUIRE(FacadeListLookup(*head, IidOf<PlatedT10>()) != nullptr);
+
+    // It also published one for each iid PlatedT10 implements — ICookableT10 in this test.
+    REQUIRE(FacadeListLookup(*head, IidOf<ICookableT10>()) != nullptr);
+
+    // Both facade pointers resolve to the same @c PlatedT10 instance — the construction hook
+    // allocates exactly one @c PlatedT10 per nucleus and attaches it under multiple iids.
+    REQUIRE(FacadeListLookup(*head, IidOf<PlatedT10>())
+            == FacadeListLookup(*head, IidOf<ICookableT10>()));
+}
+
+TEST_CASE("Eager materialization is idempotent across MaterializeInto calls", AUTO_TAG) {
+    Registry::Install<SteakT10>();
+    Registry::Install<PlatedT10>();
+
+    SteakT10 s;  // construction hook publishes once.
+    auto* head = RT::Facades(&s);
+    REQUIRE(head != nullptr);
+
+    RootObject* first = FacadeListLookup(*head, IidOf<PlatedT10>());
+    REQUIRE(first != nullptr);
+
+    // Hand-calling @c MaterializeInto a second time must be a no-op: the pre-flight
+    // FacadeListLookup inside MaterializeIntoImpl short-circuits before allocating a second
+    // copy, and AttachUnique would dedup anyway. The published pointer stays identical.
+    PlatedT10::MaterializeInto(s);
+    RootObject* second = FacadeListLookup(*head, IidOf<PlatedT10>());
+    REQUIRE(second == first);
+}
+
+TEST_CASE("Lazy Extension is absent until Query/Reify materializes it", AUTO_TAG) {
+    Registry::Install<SteakT10>();
+    Registry::Install<SaltedT10>();  // stateful + lazy => not in SteakT10's eager set
+
+    SteakT10 s;  // construction hook runs, but SaltedT10 is not enrolled in the eager set.
+    auto* head = RT::Facades(&s);
+    REQUIRE(head != nullptr);
+
+    // No FacadeNode for SaltedT10 yet — the lazy path stays inert until Query/Reify lands.
+    // The T12/T13 dynamic kernel will route through SideTableResolver to materialize on
+    // demand; that path is exercised in its own tests.
+    REQUIRE(FacadeListLookup(*head, IidOf<SaltedT10>()) == nullptr);
+}

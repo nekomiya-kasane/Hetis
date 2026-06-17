@@ -306,15 +306,29 @@ namespace Yuki {
         };
 
         /**
-         * @brief T9 stub for the construction-time eager-extension materialiser.
+         * @brief Walk @p self's metaclass @c eagerSet snapshot and run every entry's
+         *        @c materializeInto function — the construction-time eager-extension hook.
          *
-         * Task 10 will replace this no-op with the reflection-driven codegen that walks
-         * @c MetaLinks::eagerSet and instantiates each entry into the new nucleus's facade list.
-         * For now @ref MetaNode's constructor still calls it so the call site is wired up — when
-         * T10 promotes this to a real overload set, no further CRTP-base edits are needed.
+         * Per spec §3.3 step 5. Declared here so @ref MetaNode's ctor body can name it; the
+         * body lives in @c Yuki/Core/Registry.h (re-included at the bottom of this file) where
+         * the full @ref MetaLinks / @ref EagerSetSnapshot / @ref FacadeListHead machinery is in
+         * scope without a cycle. @p self is the freshly-constructed nucleus; the call is
+         * @c noexcept because nucleus construction is on the static-init path and must never
+         * throw.
          */
-        template<class T>
-        inline void MaterializeEagerSet(T&) noexcept {}
+        void MaterializeEagerSet(RootObject& self) noexcept;
+
+        /**
+         * @brief Allocate one @p E and publish its facade entries onto @p nucleus's chain.
+         *
+         * Forward declaration so @ref ExtensionNode's @c MaterializeInto static member can
+         * name it; the body lives in @c Yuki/Core/Registry.h (re-included at the bottom of
+         * this file). Both the eager hook (via @c EagerSetEntry::materializeInto) and the
+         * lazy @ref SideTableResolverFor cold path bottom out here, so eager and lazy
+         * resolution remain structurally identical.
+         */
+        template<typename E>
+        inline void MaterializeIntoImpl(RootObject& nucleus) noexcept;
 
     } // namespace Detail
     /** @endcond */
@@ -417,6 +431,22 @@ namespace Yuki {
         }
 
         [[nodiscard]] const MetaClass& MetaClassDynamic() const noexcept override { return MetaClassOf<Self>; }
+
+        /**
+         * @brief Allocate one @p Self into @p nucleus's facade chain — the closure-construction
+         *        hook spec §3.3 step 5 demands and the @c EagerSetEntry function-pointer slot
+         *        binds to.
+         *
+         * The body lives in @c Yuki/Core/Registry.h (re-included at the bottom of this file) as
+         * @c Detail::MaterializeIntoImpl<Self>. Two-phase lookup defers the body of this static
+         * member until it is named — by which time Registry.h's @c MaterializeIntoImpl is fully
+         * visible. Both the eager construction hook (via @c EagerSetEntry::materializeInto) and
+         * the lazy @c SideTableResolverFor cold path bottom out here so eager and lazy paths
+         * remain structurally equivalent.
+         */
+        static void MaterializeInto(RootObject& nucleus) noexcept {
+            Detail::MaterializeIntoImpl<Self>(nucleus);
+        }
     };
 
 } // namespace Yuki

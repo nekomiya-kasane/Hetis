@@ -342,6 +342,39 @@ namespace Yuki {
     } // namespace Detail
     /** @endcond */
 
+    // Forward declaration — @ref EagerSetEntry's function-pointer slot takes a @c RootObject&,
+    // but MetaClass.h must not include RootObject.h (cycle risk: RootObject.h depends on
+    // MetaClass.h). The full type is satisfied at the point each entry's slot is actually
+    // invoked, which is in @c Detail::MaterializeEagerSet inside RootObject.h's translation
+    // unit, where @c RootObject is a complete type.
+    class RootObject;
+
+    /**
+     * @brief One entry of an @ref EagerSetSnapshot — an Extension iid paired with the function
+     *        that materialises that Extension into a freshly-constructed nucleus.
+     *
+     * Per spec §3.3 step 5 + Task 10. Replaces the older "raw @c MetaCore* per eager extension"
+     * shape used in T4–T8 (a vestige from when the construction hook was speculated to take an
+     * extra metaclass lookup before dispatch). The function-pointer arm collapses that to one
+     * indirect call per eager extension on the construction hot path.
+     *
+     * The function pointer points at @c Detail::MaterializeIntoImpl<E> for the specific
+     * Extension @c E recorded in @c iid — the same routine @c ExtensionNode<E,...>::MaterializeInto
+     * forwards to, so eager and lazy paths converge on a single allocation/AttachUnique
+     * sequence and the same idempotency invariants.
+     *
+     * @c iid is the Extension's own identity (not an interface iid the Extension implements); the
+     * entry is keyed on it so reflection-driven tooling can re-identify the originating type from
+     * the snapshot without consulting the function pointer at all.
+     */
+    struct EagerSetEntry {
+        Iid  iid{};                                            ///< The Extension's identity (key).
+        void (*materializeInto)(RootObject&) noexcept{nullptr};///< Allocate + publish facades.
+    };
+
+    static_assert(std::is_trivially_destructible_v<EagerSetEntry>,
+                  "EagerSetEntry array lives in the registrar's arena; entries are POD by contract.");
+
     /**
      * @brief An immutable, atomically-published list of stateful eager Extensions to materialise.
      *
@@ -358,8 +391,8 @@ namespace Yuki {
      * @ref DispatchSnapshot. The pointed-to entry array lives on the registrar's arena.
      */
     struct EagerSetSnapshot {
-        std::size_t                  count;     ///< Number of eager extension cores; 0 means none.
-        const MetaCore* const*       entries;   ///< Pointers to eager Extension metacores.
+        std::size_t                  count;     ///< Number of eager extension entries; 0 means none.
+        const EagerSetEntry*         entries;   ///< Iid + materialiser-fn-ptr; immutable.
         const EagerSetSnapshot*      previous;  ///< Older retired snapshot in the epoch chain.
     };
 

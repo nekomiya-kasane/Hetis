@@ -179,11 +179,18 @@ namespace Yuki {
         template<typename E>
         inline RootObject* const SingletonAddrFor = nullptr;
 
+        // Forward declaration of @ref MaterializeIntoImpl lives in @c Yuki/Core/RootObject.h —
+        // necessary because @c ExtensionNode<Self,...>::MaterializeInto names it inside the
+        // header that this header transitively includes (the include cycle is closed at the
+        // bottom of RootObject.h, and RootObject.h's static member needs to see the forward
+        // decl before its own definition is parsed).
+
         // Stateful Extensions take the @c SideTableResolver arm. The resolver walks the nucleus's
-        // facade chain and returns the first match. On a miss, the resolver should call
-        // E::MaterializeInto(*n) and retry — but MaterializeInto lands in T10, so we leave the
-        // miss path returning nullptr with a TODO. The T8 tests only check that the resolver is
-        // non-null and the entry kind is correct.
+        // facade chain and returns the first match. On a miss it calls @ref MaterializeIntoImpl
+        // for @p E and retries the lookup — the same publish path the eager hook drives at nucleus
+        // construction, so the resolver remains structurally equivalent to "we constructed an
+        // eager copy belatedly". Returns the materialised facade pointer (idempotent — repeat
+        // calls find the existing entry without allocating a second copy).
         template<typename E>
         inline RootObject* SideTableResolverFor(RootObject* n) noexcept {
             if (n == nullptr) {
@@ -196,8 +203,8 @@ namespace Yuki {
             if (RootObject* hit = FacadeListLookup(*head, IidOf<E>())) {
                 return hit;
             }
-            // TODO(task-10): on miss, call E::MaterializeInto(*n) and retry the lookup.
-            return nullptr;
+            MaterializeIntoImpl<E>(*n);
+            return FacadeListLookup(*head, IidOf<E>());
         }
 
         /// @brief All iids advertised by an Extension @p E (from `kImplementsInfos<E>`), baked
@@ -324,13 +331,120 @@ namespace Yuki {
             const EagerSetSnapshot* old = links->eagerSet.load(std::memory_order_acquire);
             const std::size_t oldCount = (old != nullptr) ? old->count : 0;
 
-            auto** entries = new const MetaCore*[oldCount + 1];
+            // Each entry carries (iid, fn-ptr) so the construction hook (Task 10) dispatches
+            // without an extra metaclass lookup. The fn-ptr lands at @ref MaterializeIntoImpl<E>
+            // — the same allocate-then-AttachUnique sequence the lazy SideTableResolver also
+            // drives, so eager and lazy paths agree structurally on what "this Extension is
+            // materialised for this nucleus" means.
+            auto* entries = new EagerSetEntry[oldCount + 1];
             for (std::size_t i = 0; i < oldCount; ++i) {
                 entries[i] = old->entries[i];
             }
-            entries[oldCount] = &MetaCoreOf<E>;
+            entries[oldCount] = EagerSetEntry{IidOf<E>(), &MaterializeIntoImpl<E>};
             auto* fresh = new EagerSetSnapshot{oldCount + 1, entries, old};
             links->eagerSet.store(fresh, std::memory_order_release);
+        }
+
+        /**
+         * @brief Allocate one @p E instance and publish it on @p nucleus's facade chain.
+         *
+         * Spec §3.3 closure construction hook + §6.4 lazy materialisation kernel. Drives the
+         * single allocate-then-AttachUnique sequence that both the eager construction hook
+         * (T10, via @ref MaterializeEagerSet) and the lazy @ref SideTableResolverFor cold path
+         * funnel through.
+         *
+         * Steps:
+         *  1. Resolve @p nucleus's facade chain head via @c RT::Facades. A null head means the
+         *     payload arm is not @c ClassType::Implementation — Extensions only attach to real
+         *     implementations, so silently bail.
+         *  2. Idempotency check: if a node for @c IidOf<E>() is already linked, do nothing.
+         *     The eager hook calls us *after* @c Install runs (which can race with the lazy
+         *     path through @c SideTableResolverFor), and @c AttachUnique itself dedups, but a
+         *     pre-flight @c FacadeListLookup avoids the cost of allocating a stillborn @p E
+         *     when a winner has already published.
+         *  3. Resolve the Extendee type from @c kExtendsInfos<E> — Extensions extend exactly
+         *     one class in this implementation; the @c template-for loop handles that uniformly
+         *     even though only the first edge is used.
+         *  4. Allocate the Extension instance via @c new — its ctor takes @c Extendee*, matching
+         *     the @c ExtensionNode CRTP base ctor. The pointer is leaked here; T16 introduces
+         *     the per-nucleus side-table ownership pass that frees these at nucleus destruction.
+         *  5. Publish via @c AttachUnique for the Extension's own iid and for every iid in
+         *     @c kImplementsInfos<E> — the same set of names a @c Query<I> for any interface
+         *     advertised by @p E will probe on the FacadeList cold path. The facade pointer is
+         *     the same @c RootObject* in every entry (the @p E instance itself); @ref Query
+         *     downstream selects the right arm by iid.
+         */
+        template<typename E>
+        inline void MaterializeIntoImpl(RootObject& nucleus) noexcept {
+            // The `if constexpr (std::is_base_of_v<RootObject, E>)` gate guards the legacy
+            // T8-era fixtures that are plain aggregate structs (not @ref ExtensionNode
+            // derivatives). Those types cannot become facades — they have no @c RootObject
+            // base — and silently bailing matches the T8 contract that the materialiser is a
+            // best-effort cold path. Production Extension code is required to inherit
+            // @c ExtensionNode<Self, Extendee>, which supplies both the @c RootObject base
+            // and the conforming @c (Extendee*) ctor.
+            if constexpr (std::is_base_of_v<RootObject, E>) {
+                FacadeListHead* head = RT::Facades(&nucleus);
+                if (head == nullptr) {
+                    return;
+                }
+                if (FacadeListLookup(*head, IidOf<E>()) != nullptr) {
+                    return;  // idempotent fast path
+                }
+
+                // Extract the (unique) Extendee type. kExtendsInfos<E> is a static array of
+                // std::meta::info; the template-for over it gives us a concrete C++ type per
+                // iteration even though it is logically a one-entry loop.
+                E* ext = nullptr;
+                template for (constexpr auto Breflect : kExtendsInfos<E>) {
+                    using Extendee = [: Breflect :];
+                    if constexpr (std::is_constructible_v<E, Extendee*>) {
+                        if (ext == nullptr) {
+                            ext = new E(static_cast<Extendee*>(&nucleus));
+                        }
+                    }
+                }
+                if (ext == nullptr) {
+                    return;  // E lacks an (Extendee*) ctor — legacy or ill-formed
+                }
+                RootObject* facade = static_cast<RootObject*>(ext);
+
+                // Publish under E's own iid first; AttachUnique handles the CAS dedup.
+                FacadeNode* selfNode = FacadeNodeArena().Allocate(IidOf<E>(), facade, nullptr);
+                (void)AttachUnique(*head, selfNode);
+
+                // Then one entry per advertised interface. The facade pointer is the same
+                // @c RootObject* in every case — Query resolves the appropriate arm by iid.
+                template for (constexpr auto Ireflect : kImplementsInfos<E>) {
+                    using I = [: Ireflect :];
+                    FacadeNode* node = FacadeNodeArena().Allocate(IidOf<I>(), facade, nullptr);
+                    (void)AttachUnique(*head, node);
+                }
+            }
+        }
+
+        /**
+         * @brief Walk @p self's eager-set and run every materialiser.
+         *
+         * Called from the @ref MetaNode CRTP base's ctor (Task 10) once during nucleus
+         * construction. Acquire-loads the current @ref EagerSetSnapshot off the metaclass's
+         * @ref MetaLinks; @c nullptr means "no eager Extensions registered for this class",
+         * a common and cheap case. Each entry's @c materializeInto pointer runs in turn —
+         * idempotency lives inside @ref MaterializeIntoImpl, so re-entry from a racing lazy
+         * path is safe.
+         */
+        inline void MaterializeEagerSet(RootObject& self) noexcept {
+            const MetaLinks* links = self.MetaClassDynamic().links();
+            if (links == nullptr) {
+                return;
+            }
+            const EagerSetSnapshot* snap = links->eagerSet.load(std::memory_order_acquire);
+            if (snap == nullptr) {
+                return;
+            }
+            for (std::size_t i = 0; i < snap->count; ++i) {
+                snap->entries[i].materializeInto(self);
+            }
         }
 
     } // namespace Detail
