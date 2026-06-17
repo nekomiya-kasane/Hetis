@@ -289,6 +289,33 @@ namespace Yuki {
                 : RootObject(TaggedPayload::Make(ClassType::Extension, extendee)) {}
         };
 
+        /**
+         * @brief CRTP-hook trigger object — one @c inline @c static per @p T forces
+         *        @ref Yuki::Registry::Install<T> to run at program-startup static-init time.
+         *
+         * The struct is forward-declared here so the CRTP bases (@ref MetaNode and friends) can name
+         * it as the type of their @c _registrar member without dragging @ref Yuki::Core::Registry
+         * "above" them in the dependency graph. The constructor body lives in
+         * @ref Yuki::Core::Registry — which this header re-includes at the bottom, after every
+         * symbol the registrar's body might need is already complete — closing the cycle without
+         * the cost of a third coordinator header.
+         */
+        template<class T>
+        struct Registrar {
+            Registrar() noexcept;
+        };
+
+        /**
+         * @brief T9 stub for the construction-time eager-extension materialiser.
+         *
+         * Task 10 will replace this no-op with the reflection-driven codegen that walks
+         * @c MetaLinks::eagerSet and instantiates each entry into the new nucleus's facade list.
+         * For now @ref MetaNode's constructor still calls it so the call site is wired up — when
+         * T10 promotes this to a real overload set, no further CRTP-base edits are needed.
+         */
+        template<class T>
+        inline void MaterializeEagerSet(T&) noexcept {}
+
     } // namespace Detail
     /** @endcond */
 
@@ -305,6 +332,40 @@ namespace Yuki {
     template<ImplementationClass Self, typename Base = Detail::ImplAnchorBase>
     struct MetaNode : Base {
         using Base::Base;
+
+        /**
+         * @brief CRTP-injected registrar trigger — @c inline @c static guarantees one definition
+         *        per @p Self across DLL boundaries, so a class loaded twice (host + plugin) still
+         *        installs at most once.
+         *
+         * The variable's @em initialisation runs at static-init time, calling
+         * @ref Detail::Registrar<Self>::Registrar() — whose body, defined in
+         * @ref Yuki/Core/Registry.h, dispatches to @ref Registry::Install<Self>. Install is
+         * idempotent (spec §3.3 step 4), so the re-entry from a manifest-driven
+         * @c YukiRegister_<iid> call is harmless.
+         */
+        inline static Detail::Registrar<Self> _registrar{};
+
+        /**
+         * @brief Anchor that forces ODR-use of @ref _registrar so the static actually gets emitted.
+         *
+         * The constexpr address-take is itself a constant expression (the address of a static
+         * object is constant in C++26), but it ODR-uses @c _registrar — which in turn ODR-uses
+         * the variable's definition, kicking off the static-init chain. Without this, a TU that
+         * names @c MetaNode<X> as a base but never touches any of its members would optimise the
+         * registrar away. Spec §3.3 step 3.
+         */
+        static constexpr void* _registrar_anchor = static_cast<void*>(&_registrar);
+
+        // Unconditionally @c noexcept rather than @c noexcept(noexcept(Base())) — the deduced form
+        // forces the compiler to evaluate the @c Base() expression, but @c Detail::ImplAnchorBase
+        // is abstract (its @ref RootObject::MetaClassDynamic override is only supplied by @c Self),
+        // and "construct an abstract type as a complete object" is ill-formed. Both anchor bases
+        // ship noexcept ctors anyway, so the explicit unconditional spec is correct.
+        MetaNode() noexcept {
+            (void)_registrar_anchor;             // force ODR-use of the CRTP registrar hook
+            Detail::MaterializeEagerSet(*this);  // T10 supplies the real codegen body
+        }
 
         [[nodiscard]] const MetaClass& MetaClassDynamic() const noexcept override { return MetaClassOf<Self>; }
     };
@@ -346,9 +407,22 @@ namespace Yuki {
      */
     template<ExtensionClass Self, typename Extendee, typename Base = Detail::ExtensionAnchorBase>
     struct ExtensionNode : Base {
-        explicit ExtensionNode(Extendee* extendee) noexcept : Base(extendee) {}
+        /// @brief Same CRTP-hook trigger as @ref MetaNode::_registrar — see that doc for the full
+        ///        rationale. Per-extension @c inline @c static + ODR-use anchor in the ctor body.
+        inline static Detail::Registrar<Self> _registrar{};
+        static constexpr void* _registrar_anchor = static_cast<void*>(&_registrar);
+
+        explicit ExtensionNode(Extendee* extendee) noexcept : Base(extendee) {
+            (void)_registrar_anchor;
+        }
 
         [[nodiscard]] const MetaClass& MetaClassDynamic() const noexcept override { return MetaClassOf<Self>; }
     };
 
 } // namespace Yuki
+
+// The CRTP bases above ODR-use @c Detail::Registrar<Self>::Registrar(), whose body lives in
+// @ref Yuki/Core/Registry.h together with @c Install<T>. Including Registry.h *here* — after every
+// type Registry.h itself needs (RootObject, FacadeListHead, MetaClass) is already complete —
+// closes the cycle. Registry.h's own @c #include of RootObject.h then becomes a pragma-once no-op.
+#include <Yuki/Core/Registry.h>

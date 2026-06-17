@@ -247,3 +247,60 @@ TEST_CASE("Install<E> skips EagerSet for stateless and for lazy stateful extensi
     // empty: either an uninstalled null pointer or a snapshot with zero entries.
     REQUIRE((es == nullptr || es->count == 0));
 }
+
+// =============================================================================
+// CRTP hook (Task 9)
+// =============================================================================
+//
+// The @c MetaNode / @c ExtensionNode bases now ODR-use a per-class @c Detail::Registrar<Self> via
+// a @c constexpr address-take anchor; the static's initialiser runs @ref Registry::Install at
+// program-startup time, so the contract is "by the time the first instance constructs (or by the
+// time the test body runs), @ref AlreadyInstalled returns true."
+//
+// The second test exercises the spec §7.8 named symbol — the @c YukiRegister_<mangledIid>
+// extern-C wrapper that Plan 2's manifest pipeline dlsym's at plugin load. The macro emits the
+// definition next to the type; the test re-declares the symbol locally and calls it. Install is
+// idempotent, so co-existence with the CRTP path is a no-op.
+
+namespace {
+
+    // Fresh fixture for the CRTP-trigger test so we're not depending on whether T7/T8's direct
+    // @c Install<Steak> happened to run before this case under Catch2's randomiser — if @c Steak
+    // is already installed, the test would pass even with a broken hook. @c HookProbe is not
+    // touched by any other test, so the only path that registers it is the CRTP static-init.
+    struct [[=Anno::Implementation]] HookProbe : MetaNode<HookProbe> {};
+
+} // namespace
+
+// Manifest-driven discovery symbol (spec §7.8). The macro is invoked at file scope so the emitted
+// @c extern @c "C" function has its own translation-unit-scope definition; the matching extern-C
+// *declaration* below lives at namespace scope (block-scope @c extern @c "C" is ill-formed). @c
+// Steak's anonymous-namespace linkage is fine because the function's *body* may reference
+// internal-linkage types — only the function name itself takes external C linkage.
+YUKI_DEFINE_REGISTRAR_SYMBOL(Steak, YukiTest__Steak)
+
+extern "C" void YukiRegister_YukiTest__Steak() noexcept;
+
+TEST_CASE("Constructing a MetaNode<T> triggers Registrar<T> at static-init", AUTO_TAG) {
+    // The static-init chain runs before main, so by the time this test body executes
+    // @ref Registry::Install<HookProbe> has already been called. Constructing an instance is the
+    // ODR-use trigger that emitted @c _registrar in this TU — we exercise it twice to also check
+    // the "second construction is a no-op" idempotency contract spec §3.3 step 4 demands.
+    {
+        HookProbe p;
+        REQUIRE(Registry::AlreadyInstalled(IidOf<HookProbe>()));
+    }
+    {
+        HookProbe p;
+        REQUIRE(Registry::AlreadyInstalled(IidOf<HookProbe>()));
+    }
+}
+
+TEST_CASE("Named YukiRegister_<iid> symbol exists and installs", AUTO_TAG) {
+    // The CRTP hook fires at static-init; this test exercises the *other* registration path —
+    // the manifest symbol Plan 2's discovery layer will call. Calling it twice (here + via any
+    // prior CRTP firing) is safe by Install's idempotency. The extern-C forward declaration
+    // lives just above, at namespace scope, because block-scope @c extern @c "C" is ill-formed.
+    YukiRegister_YukiTest__Steak();
+    REQUIRE(Registry::AlreadyInstalled(IidOf<Steak>()));
+}

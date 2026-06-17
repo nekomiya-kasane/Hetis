@@ -375,4 +375,47 @@ namespace Yuki {
 
     } // namespace Registry
 
+    /// @cond INTERNAL
+    namespace Detail {
+
+        /**
+         * @brief Body for @ref Detail::Registrar<T>::Registrar (forward-declared in
+         *        @ref Yuki/Core/RootObject.h) — dispatches to @ref Registry::Install<T>.
+         *
+         * The body lives here, not in RootObject.h, because @c Install<T> needs the full
+         * @c MetaClass / @c MetaLinks / @c DispatchSnapshot machinery already in scope. The
+         * include-cycle break is described at the bottom of @ref Yuki/Core/RootObject.h —
+         * the short version: RootObject.h includes Registry.h *after* its own definitions are
+         * complete, so by the time this template body is parsed every Install<T> overload is
+         * fully available.
+         */
+        template<class T>
+        inline Registrar<T>::Registrar() noexcept {
+            ::Yuki::Registry::Install<T>();
+        }
+
+    } // namespace Detail
+    /// @endcond
+
 } // namespace Yuki
+
+/**
+ * @def YUKI_DEFINE_REGISTRAR_SYMBOL
+ * @brief Emit a named @c extern @c "C" wrapper around @ref Yuki::Registry::Install<T> for the
+ *        manifest-driven discovery layer (spec §7.8, Plan 2).
+ *
+ * The discovery layer dlsym's @c YukiRegister_<mangledIid> out of a freshly loaded plugin and
+ * calls it without depending on the plugin's static-init order — a guarantee the CRTP hook alone
+ * can not provide on platforms where static-init may be lazy across DSO boundaries. @c Install is
+ * idempotent, so calling both the CRTP-init path and the manifest-driven symbol is a no-op the
+ * second time.
+ *
+ * @param T          Fully-qualified type to install (visible at the macro use site).
+ * @param mangledIid Already-mangled iid token (no leading underscore, no special characters);
+ *                   the manifest pipeline emits these from @c Iid via a small consteval helper —
+ *                   until that lands, hand-author them as in the @c RegistryTest.cpp test surface.
+ */
+#define YUKI_DEFINE_REGISTRAR_SYMBOL(T, mangledIid)                                              \
+    extern "C" void YukiRegister_##mangledIid() noexcept {                                       \
+        ::Yuki::Registry::Install<T>();                                                          \
+    }
