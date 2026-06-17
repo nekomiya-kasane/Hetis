@@ -16,3 +16,5 @@ function(add_yuki_test CATEGORY TEST_NAME)
     vk_tp_deploy_runtime(${TEST_TARGET})
     catch_discover_tests(${TEST_TARGET})
 endfunction()
+
+add_yuki_test(Core ClassTypeTest)
