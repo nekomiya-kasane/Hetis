@@ -45,12 +45,48 @@
     - `Mashiro::Platform::stop_source` / `stop_token` — typedef for `stdexec::inplace_stop_source` / `inplace_stop_token`. Heap-free, op-state-scoped lifetime; threaded through every Manager call's environment via `get_stop_token`. `RequestStop()` calls `stop_.request_stop()`; in-flight senders surface as `set_stopped()` and unwind structurally — no `closed_` / sentinel proliferation.
     - `Mashiro::Platform::scope` — typedef for `stdexec::counting_scope` (P3149). Owns the lifetime of all spawned senders; shutdown awaits `scope.on_empty()` instead of hand-rolled drain loops.
     - `Mashiro::Platform::domain` — a stdexec domain (P2999/P3826) registered with `platform_scheduler`. `transform_sender` rewrites `continues_on(plat, _)` into a `PostThreadMessage`-based wake on Win32 and `dispatch_async(main_q, _)` on macOS, so OS-specific transport never leaks into client code.
-  - **`OwnerExecutor` is recast as scheduler-internal state**, not a public component. The Treiber-stack handle queue and `wakeEvent_` become the implementation of `platform_scheduler::schedule()`'s sender — the queue/wake are still there, but they are reached only through `stdexec::schedule(plat)` / `stdexec::continues_on(s, plat)`, never by name. `kPoolSize` and the heap-fallback counter survive as scheduler diagnostics.
+  - **`OwnerExecutor` is recast as scheduler-internal state**, not a public component. The MPSC handle queue and `wakeEvent_` become the implementation of `platform_scheduler::schedule()`'s sender — the queue/wake are still there, but they are reached only through `stdexec::schedule(plat)` / `stdexec::continues_on(s, plat)`, never by name. (See §6.5 for the storage decision: bounded `MpscQueue<coroutine_handle<>, 256>`, no heap fallback; pool path retired.)
   - **`EventChannel` exposes senders alongside its awaitables.** `channel.next_event()` and `channel.next_batch()` are senders that complete with `set_value(SystemEvent)` / `set_value(BatchView)` on a fresh event, or `set_stopped()` on close *or* on stop-token request. Coroutine clients can still write `co_await channel.Next()` because senders are awaitable; non-coroutine clients now compose with `then` / `let_value` / `when_any`.
   - **Cross-thread wake stays direct.** Client coroutines complete a sender by calling `inplace_stop_callback`-style notifications that route directly to the platform thread's `wakeEvent_` (or the Win32 message queue, via `domain`). The earlier "main thread mediates client → platform handoff" idea is retired — there is no third thread between a client coroutine and the platform thread.
   - **Cancellation propagation is no longer hand-rolled.** Stop tokens flow naturally through every sender pipeline: `RequestStop()` ⇒ `stop_.request_stop()` ⇒ all in-flight `Task<T>` op-states observe their stop-callback and complete with `set_stopped` ⇒ `scope.on_empty()` settles ⇒ Manager destructors run on the platform thread.
   - **`Mashiro/Schedular/MainLoop.h` is removed.** It is empty in the working tree and represents an abstraction the design has converged away from. `PlatformThread.h` is the sole loop owner.
   - **Net deletions vs v1.4:** `OwnerTask<T>` (replaced by `Task<T>` typedef), `TransferToOwner` (folded into scheduler-affinity), public `OwnerExecutor` interface (recast as scheduler-internal), `EventChannel::Close()` (replaced by stop-token propagation), `closed_` / sentinel resume paths in §6.3.
+- **v1.6** — bring-up corrections from the first end-to-end compile of `EventPump<Managers...>`:
+  - **Owner-mailbox storage finalised as `MpscQueue<std::coroutine_handle<>, 256>`.** Earlier
+    drafts (through v1.5) carried over the v1.4 Treiber-stack of pre-allocated nodes plus the
+    `kPoolSize = 256` heap-fallback path. When the pump-side mailbox concretely landed it
+    was re-evaluated off-spec and the pool was found to add cost with no observable benefit:
+    bounded-array Vyukov makes ABA structurally impossible without a free-list CAS, the dequeued
+    payload is an opaque `coroutine_handle<>` that the consumer resumes once and never re-
+    references (so generation guards do not buy use-after-free protection), and overflow is
+    handled by `TryPush` returning `false` (which `SubmitResume` escalates to `std::terminate`
+    per the design-invariant contract — silently dropping a handle would leak the coroutine).
+    The pool stays in the codebase for its real customers (waiter lists, slot-id-keyed
+    registries); §6.5 and `MpscQueue.h`'s header doc record the rationale so the next reader
+    does not re-litigate it.
+  - **Bookkeep convention canonicalised on `m.On(const P&)`.** The earlier `EventPump`-scoped
+    `HandlesBookkeep<M, P>` concept that required `m.Bookkeep(p)` was a synonym for the
+    `Mashiro::Traits::Event::HandlesBookkeep` concept already published in `SystemEvent.h` —
+    it is removed, and the dispatch site in `EventPump::DispatchEvent` is the same
+    fold-expanded `if constexpr` that `Mashiro::DispatchBookkeep` uses, lifted across the
+    Manager pack.
+  - **`Window` Manager landed as the first concrete bookkeeper.** Owns a flat `vector<Entry>`
+    registry of `(WindowId, NativeWindowHandle, size, dpiScale)`; `Adopt` mints monotonic
+    `WindowId`s on `WM_NCCREATE` (no reuse — banning reuse sidesteps generation-counter
+    overhead at the cost of 32 bits per destroyed window); `On(WindowCreate / WindowResize /
+    WindowDpiChange / WindowDestroy)` keeps the entry up to date. Reverse lookup (`IdOf(native)`)
+    is the path the Win32 translator takes on every native message that carries an HWND.
+  - **`PlatformBackendWindows.cpp` landed.** Cross-thread Wake is a manual-reset
+    `HANDLE` plus `MsgWaitForMultipleObjectsEx(QS_ALLINPUT, MWMO_INPUTAVAILABLE)` — chosen over
+    `PostMessage(WM_NULL)` because the latter requires a hidden message-only window, can hit
+    the per-thread 10000-message cap, and marshals through ALPC. Stop-token integration is an
+    `inplace_stop_callback` that routes through the same `SetEvent` so the wait has exactly one
+    exit path. Rationale is in the file's header comment.
+  - **Run-loop adapter is `exec::repeat_until`.** The deprecated `repeat_effect_until` from
+    earlier drafts is replaced; the body sender returns `stop_.stop_requested()` on each
+    iteration so the surrounding adapter re-runs the wait+drain cycle until stop fires. The
+    drain-after-stop guarantee is unchanged — the three drains run on the iteration that
+    observes stop before the body returns `true`.
 
 ---
 
@@ -197,7 +233,7 @@ namespace Mashiro::Platform {
     inline constexpr ThreadContract kAnyThread   {.domain = ThreadDomain::Any};
 
     enum class ScheduleMode : uint8_t {
-        PlatformThread,    // Lives on Platform thread; mutators return OwnerTask<T>.
+        PlatformThread,    // Lives on Platform thread; mutators return Task<T>.
         DedicatedThread,   // Owns its own thread; emits via the event inbox.
         FreeThreaded,      // Stateless or atomically-protected; callable anywhere.
     };
@@ -369,9 +405,7 @@ namespace Mashiro::Platform {
 
 ### 6.3 `Mashiro/Platform/EventChannel.h`
 
-Awaitable SPSC channel. The Platform thread is the sole producer for every channel. A consumer coroutine on a client thread can `co_await channel.Next()` (single event) or `co_await channel.NextBatch()` (drain-as-range).
-
-**Precondition (per-channel):** at most one outstanding `Next()` / `NextBatch()` on a given channel. SPSC's contract is single *thread*, not single *coroutine*; two coroutines on the same client thread that both `co_await` the same channel would race on `waiter_`. Debug builds enforce this with an atomic flag set on suspend and cleared on resume; release builds rely on caller discipline. The intended pattern is one consumer coroutine per channel; clients that want multiple readers attach multiple channels.
+SPSC channel from the Platform thread to one client thread. The Platform thread is the sole producer for every channel. Consumption is **sender-first**, with awaitable shims so coroutines read naturally:
 
 ```cpp
 namespace Mashiro::Platform {
@@ -381,22 +415,34 @@ namespace Mashiro::Platform {
     public:
         // Producer (Platform thread only). SystemEvent is a (possibly non-trivial)
         // variant, so events are *moved* into the ring rather than memcpy'd.
-        bool Emit(SystemEvent&& event) noexcept;            // move into ring + wake waiter
+        bool     Emit(SystemEvent&& event) noexcept;
         uint32_t EmitBatch(std::span<SystemEvent>) noexcept;
-        void Close() noexcept;
 
-        // Consumer (client thread, single outstanding await)
+        // Consumer surface — senders. Each is a stdexec sender that completes with:
+        //   - set_value(SystemEvent)   on a fresh event,
+        //   - set_value(BatchView)     for the batch sender, on a non-empty drain,
+        //   - set_stopped()            when the platform stop_token observes a stop
+        //                              request, OR the channel is detached on
+        //                              shutdown.
+        // No set_error: there is no error path on the consumer side.
+        [[nodiscard]] auto next_event() noexcept -> next_event_sender;
+        [[nodiscard]] auto next_batch() noexcept -> next_batch_sender;
+
+        // Coroutine ergonomics — both senders are awaitable, but the legacy short
+        // form is kept as a thin alias.
+        auto Next()      noexcept { return next_event(); }
+        auto NextBatch() noexcept { return next_batch(); }
+
+        // Polling fast-path; never suspends.
         std::optional<SystemEvent> TryReceive() noexcept;
-        auto Next()      noexcept -> NextAwaiter;          // suspends until event or close
-        auto NextBatch() noexcept -> BatchAwaiter;         // suspends, returns BatchView
-        bool IsClosed()  const noexcept;
+
+        // Producer / shutdown observers.
         uint32_t PendingCount() const noexcept;
-        uint64_t DropCount()    const noexcept;            // diagnostic: # events dropped on overflow
+        uint64_t DropCount()    const noexcept;   // diagnostic: events dropped on overflow
 
     private:
-        SpscQueue<SystemEvent, Capacity> ring_;   // stores moved variant values
+        SpscQueue<SystemEvent, Capacity> ring_;          // stores moved variant values
         std::atomic<std::coroutine_handle<>> waiter_{nullptr};
-        std::atomic<bool>     closed_{false};
         std::atomic<uint64_t> dropCount_{0};
         // Producer-side coalescing memory (only touched by platform thread).
         // lastIndex_ is the routing key of the last push, taken from event.index().
@@ -415,80 +461,293 @@ namespace Mashiro::Platform {
 } // namespace Mashiro::Platform
 ```
 
+**Precondition (per-channel):** at most one outstanding `next_event()` / `next_batch()` op-state on a given channel. SPSC's contract is single *thread*, not single *coroutine*; two coroutines on the same client thread that both `start()` a sender on the same channel would race on `waiter_`. Debug builds enforce this with the `awaiting_` flag set on `start` and cleared on completion; release builds rely on caller discipline. The intended pattern is one consumer coroutine per channel; clients that want multiple readers attach multiple channels.
+
+**Why senders, not just awaiters.** Senders compose. `when_any(channel.next_event(), timer.after(50ms))` gives a per-frame cap on event-await blocking with no extra type. `let_value(channel.next_event(), [&](auto& e) { … })` is a non-coroutine handler. The awaiter is preserved for the common `co_await` case, but it is now derived from the sender, not a separate code path.
+
+**Stop-token integration replaces `Close()`.** A channel does not own its lifetime; `PlatformThread` does. On shutdown, the platform stop-source is requested; every `next_event_sender` op-state has registered a `stop_callback` against the receiver's stop token (which is the platform stop token, threaded through the receiver's environment). The callback exchanges the waiter handle out, completes the receiver with `set_stopped()`, and unwinds. There is no `closed_` flag, no per-channel sentinel, no `IsClosed()` polling. A client coroutine that wants to know "is the platform shutting down?" queries `stdexec::get_stop_token(get_env(*this))` — the same token surfaces through every layer.
+
 **Wake protocol (lost-wake-free):**
 
-1. `await_ready()` returns true if `!ring_.Empty() || closed_`.
-2. `await_suspend(h)` stores `h` into `waiter_` (release).
-3. After the store, re-check `!ring_.Empty() || closed_`. If true, attempt to reclaim the handle via `compare_exchange_strong(h, nullptr)`. Success → return `false` (don't suspend). Failure → producer already took the handle and will resume — stay suspended.
-4. Producer's `Emit()` does `TryPush()`, then `waiter_.exchange(nullptr)` → `resume()` if non-null. The handle resume happens on the platform thread; coroutines may co-await an executor of their own to migrate back to their owning client thread (ApplicationLayer concern, not Platform's).
+1. `start()` checks `!ring_.Empty()`. If non-empty, complete with `set_value(ring_.Pop())` synchronously — no suspension.
+2. If empty, register `stop_callback` against the receiver's stop token, then `waiter_.store(receiver_resume_handle)` (release).
+3. After the store, re-check `!ring_.Empty()`. If true, attempt to reclaim the handle via `compare_exchange_strong(h, nullptr)`. Success → drop the callback, complete with `set_value`. Failure → producer already took the handle and will resume — stay suspended.
+4. Producer's `Emit()` does `TryPush()`, then `waiter_.exchange(nullptr)` → resume handle if non-null. The handle resume runs the receiver's continuation; if the receiver belongs to a `Task<T>` bound to a different scheduler, P3552's transition machinery forwards the value to that scheduler.
 
-**`BatchAwaiter::await_resume()` returns `BatchView`** — a lightweight non-coroutine input range that pops events from `ring_` lazily on iteration. No coroutine frame allocation. Iteration ends when the ring is observed empty *or* a configurable batch cap is hit. `BatchView` is move-only and tied to the channel's lifetime; it must be fully consumed (or destroyed) before the next `co_await`.
+**`next_batch_sender` completes with `BatchView`** — a lightweight non-coroutine input range that pops events from `ring_` lazily on iteration. No coroutine frame allocation. Iteration ends when the ring is observed empty *or* a configurable batch cap is hit. `BatchView` is move-only and tied to the channel's lifetime; it must be fully consumed (or destroyed) before the next sender on the channel is started.
 
 **Producer-side coalescing for high-rate payloads.** For `MouseMoveEvent` and similar payloads where only the latest sample matters, the producer (`EventPump`) checks before push: if the *unpublished* tail slot would coincide with the previous push of the same alternative (`event.index() == lastIndex_`) for the same window AND the consumer has not yet advanced past `lastSlot_`, the previous slot is move-assigned the new event before re-publishing the same `tail_`. This is sound because (a) only the producer touches unpublished slots, and (b) the consumer's view of `tail_` cannot regress. If the consumer has already advanced past `lastSlot_`, coalescing is skipped and a new event is pushed normally. Coalescing is opt-in per payload type via a constexpr predicate keyed on the variant alternative.
 
 **Overflow.** When `TryPush` fails (ring full), `Emit` increments `dropCount_` and returns `false`; the event is lost. `EventPump` logs structured drops at info level. Clients can query `PendingCount()` and `DropCount()` for back-pressure diagnostics.
 
-### 6.4 `Mashiro/Platform/OwnerTask.h`
+### 6.4 `Mashiro/Platform/Scheduler.h` — `Mashiro::Platform::scheduler`
 
-Owner-affine coroutine task. `co_await`-able from any coroutine on any thread.
-
-```cpp
-namespace Mashiro::Platform {
-
-    struct TransferToOwner {
-        bool await_ready() noexcept;                     // IsOnPlatformThread()
-        void await_suspend(std::coroutine_handle<>) noexcept;  // executor_.Enqueue(h)
-        void await_resume() noexcept {}
-    };
-
-    template<typename T = void>
-    class [[nodiscard]] OwnerTask {
-    public:
-        struct Promise; using promise_type = Promise;
-        using handle_type = std::coroutine_handle<Promise>;
-
-        bool await_ready() const noexcept;
-        std::coroutine_handle<> await_suspend(std::coroutine_handle<> caller) noexcept;
-        T    await_resume();
-        // ... move-only, destroys handle on destruction
-    };
-
-} // namespace Mashiro::Platform
-```
-
-`Promise::initial_suspend()` returns `TransferToOwner{}`. Result: when a Manager method that returns `OwnerTask<T>` is called from a worker thread, the body of that coroutine executes on the Platform thread; the caller is resumed on its own thread when the result is ready.
-
-If the caller is already on the Platform thread, `TransferToOwner::await_ready()` returns true and the body runs synchronously with zero suspension.
-
-**Lifetime contract.** The caller must keep the `OwnerTask` object alive until `co_await` completes. Destroying a task while its handle is queued in `OwnerExecutor` or actively suspended on another thread is undefined behaviour. The natural usage — `co_await Manager().Method(...)` as a temporary — is safe because the temporary persists across the suspension. Storing a task into a struct and destroying that struct while pending is the violation to avoid.
-
-**Coroutine frame allocation.** `OwnerTask` carries a coroutine frame. The compiler can elide the allocation (HALO) only when it proves the frame does not escape — for cross-thread transfer it always escapes, so each cross-thread call allocates one frame on the heap. The "no heap on hot paths" goal in §4 applies to *event distribution* (the per-frame mouse/key event flood), not to one-shot Manager calls. If a future profile shows Manager-call frame allocation is hot, we can add a custom `Promise::operator new` backed by an `Mashiro::LinearAllocator` per worker.
-
-### 6.5 `Mashiro/Platform/OwnerExecutor.h`
-
-MPSC queue of coroutine handles. Multiple worker threads submit; the Platform thread drains.
+The platform scheduler is the public face of the cross-thread call flow. It is a copyable, equality-comparable handle (model of `stdexec::scheduler`) whose `schedule()` returns a sender that completes on the Platform thread.
 
 ```cpp
 namespace Mashiro::Platform {
 
-    class OwnerExecutor {
+    class PlatformThread;            // forward decl; defined in §6.12.
+
+    class scheduler {
     public:
-        void Initialize(uint32_t ownerThreadId, void* wakeEvent) noexcept;
-        void Enqueue(std::coroutine_handle<> h) noexcept;  // any thread
-        void DrainAll() noexcept;                          // platform thread
-        bool HasPending() const noexcept;
-        bool IsOnPlatformThread() const noexcept;
-        static OwnerExecutor& Instance() noexcept;
+        using __id   = scheduler;
+        using __t    = scheduler;
+
+        scheduler() = default;       // an empty scheduler equates to "no platform thread"
+        explicit scheduler(PlatformThread& owner) noexcept : owner_{&owner} {}
+
+        bool operator==(const scheduler&) const noexcept = default;
+
+        // The schedule sender. Awaiting it on a non-platform thread enqueues the
+        // continuation onto the platform thread's MPSC handle queue and signals
+        // wakeEvent_. Awaiting it from the platform thread completes synchronously
+        // (await_ready == true) — zero suspension, zero kernel call.
+        struct sender;
+        [[nodiscard]] sender schedule() const noexcept;
+
+        // Environment query — lets adaptors fold transitions away when the upstream
+        // already completes here. `continues_on(plat, just(x))` becomes `just(x)`
+        // after `transform_sender` because the inner sender already advertises
+        // `get_completion_scheduler<set_value_t>(env) == plat`.
+        struct env {
+            PlatformThread* owner;
+            template<class Tag>
+            friend scheduler tag_invoke(stdexec::get_completion_scheduler_t<Tag>,
+                                        env e) noexcept { return scheduler{*e.owner}; }
+        };
+
+        // Domain hook — see §6.8. The domain rewrites cross-thread `continues_on`
+        // into a wake that uses Win32 PostThreadMessage / macOS dispatch_async, so
+        // OS-specific transport never leaks into client code.
+        friend domain tag_invoke(stdexec::get_domain_t, scheduler) noexcept { return {}; }
+
+    private:
+        PlatformThread* owner_ = nullptr;
     };
+
+    // Free function for callers that prefer the verb form.
+    [[nodiscard]] inline auto schedule_on(scheduler s) noexcept { return s.schedule(); }
 
 } // namespace Mashiro::Platform
 ```
 
-Implementation: intrusive Treiber stack of pre-allocated nodes, sized by `kPoolSize = 256`. The pool covers the steady-state burst — tens of in-flight calls per worker thread — while the heap fallback covers genuinely bursty contention (e.g., a worker dispatching hundreds of file-watch unsubscribes during shutdown). The fallback is documented and counted, not exceptional. If the counter shows steady use, raise `kPoolSize`; do not treat it as a bug.
+The scheduler is the **only** way client code names the Platform thread. There is no `IsOnPlatformThread()` test exposed publicly — code that needs to know "am I here?" composes a sender and lets the scheduler answer at the appropriate suspension point. The `await_ready` fast path covers the common case (already on the platform thread → no suspension).
 
-`Enqueue` ends with `SetEvent(wakeEvent_)` only when the queue transitioned from empty to non-empty (CAS on the head observed null), avoiding redundant kernel calls.
+`scheduler::sender` is the implementation surface that owns the cross-thread queue/wake; see §6.5.
 
-### 6.6 `Mashiro/Platform/SeqLock.h`
+### 6.5 `Mashiro/Platform/Scheduler.cpp` — schedule sender internals (recasts the v1.4 `OwnerExecutor`)
+
+The schedule sender's `start` enqueues the receiver's stop-aware completion handle onto a bounded
+`Mashiro::MpscQueue<std::coroutine_handle<>, 256>` (the project's Vyukov-style MPSC ring); the
+platform thread drains the queue between pump iterations. `wakeEvent_` is preserved from the v1.4
+`OwnerExecutor` and signalled through `MpscQueue`'s `TryPush` returning `true`. Internals are
+reached exclusively through `stdexec::schedule(plat)` / `stdexec::continues_on(s, plat)` /
+awaiting `Task<T>`; there is no `OwnerExecutor::Instance()` or `OwnerExecutor::Enqueue` to call by
+name.
+
+**Storage choice — re-confirmed off-spec.** The v1.4 spec proposed a Treiber-stack of pre-allocated
+nodes (drawn from `ConcurrentObjectPool<Node, 256>`) with a heap fallback for bursts. That choice
+was re-evaluated when the pump-side mailbox concretely landed, and the pool was found to add cost
+with no observable benefit:
+
+- The pool's first guarantee, **ABA safety on a free list**, is moot — `MpscQueue` is bounded-array
+  Vyukov, whose per-cell `seq` handshake makes ABA structurally impossible without ever using a
+  pointer-CAS free list. A pool-backed implementation would add a hot-path free-list CAS for no
+  correctness benefit.
+- The pool's second guarantee, **generation-guarded slot identity that survives past dequeue**,
+  decomposes for this workload too: the dequeued payload is a `std::coroutine_handle<>`, an opaque
+  pointer the consumer resumes exactly once and never re-references; there is no node identity to
+  preserve, no slot to keep alive, no use-after-free window to guard.
+- The pool's third feature, **a heap fallback past `kPoolSize`**, is replaced by `TryPush` returning
+  `false` on a full ring — i.e. observable back-pressure rather than silent allocation. Cross-thread
+  awaiters are required to honour the back-pressure (terminate or retry), which is consistent with
+  the same contract the external inbox already exposes (spec §6.8).
+
+The bounded `MpscQueue` is therefore the *cheaper* primitive at every axis: no free-list CAS, no
+per-slot generation counter, no fallback path, no allocation past initialisation, deterministic
+256-slot capacity. The pool stays in the codebase for its real customers (waiter lists, slot-id-
+keyed registries) and the rationale for not reusing it here is captured in `MpscQueue.h`'s header
+doc so the next reader does not re-litigate it.
+
+```cpp
+struct scheduler::sender {
+    using sender_concept = stdexec::sender_t;
+    using completion_signatures = stdexec::completion_signatures<
+        stdexec::set_value_t(),
+        stdexec::set_stopped_t()>;
+
+    PlatformThread* owner;
+
+    template<class Rcvr> struct op_state {
+        Rcvr   rcvr;
+        std::optional<stdexec::inplace_stop_callback<StopFn>> cb;
+
+        void start() noexcept {
+            if (owner_->IsOnPlatformThread()) {
+                stdexec::set_value(std::move(rcvr));
+                return;
+            }
+            cb.emplace(stdexec::get_stop_token(stdexec::get_env(rcvr)), StopFn{this});
+            // SubmitResume pushes our coroutine_handle<> onto MpscQueue<…, 256>
+            // and signals wakeEvent_; back-pressure is observable as TryPush=false.
+            owner_->SubmitResume(stdexec::__coro::__continuation_handle(this));
+        }
+        // resume_on_platform() is invoked from PlatformThread::DrainHandles().
+        void resume_on_platform() noexcept {
+            cb.reset();
+            stdexec::set_value(std::move(rcvr));
+        }
+        // StopFn runs on whatever thread requested the stop; cancellation is
+        // best-effort once the handle is in the mailbox — losing the race
+        // means the platform thread will resume the coroutine, which is then
+        // expected to read the stop token at its next suspension point.
+    };
+
+    template<class Rcvr>
+    op_state<Rcvr> connect(Rcvr rcvr) const { return {std::move(rcvr), std::nullopt}; }
+
+    env get_env() const noexcept { return {owner}; }
+};
+```
+
+The bounded ring's 256-slot capacity covers steady-state bursts (tens of in-flight calls per
+worker thread). `TryPush` returning `false` on a full ring is the documented back-pressure signal;
+cross-thread awaiters that sized for the worst case observe the failure and `std::terminate` per
+the design-invariant contract on `EventPump::SubmitResume`. There is no heap fallback — if profiling
+shows the cap is hit, raise the constant; do not paper over it with a fallback path. `wakeEvent_` is
+signalled inside `SubmitResume` after the push succeeds; coalescing under `MsgWaitForMultipleObjectsEx`
+collapses redundant signals at the kernel boundary, so producers do not need to rate-limit.
+
+### 6.6 `Mashiro/Platform/Task.h` — `Mashiro::Platform::Task<T>`
+
+`Task<T>` is the coroutine return type for any work that must run on the platform thread. It is a thin alias around `exec::task<T>` (P3552) bound to `scheduler` via P3941 scheduler-affinity:
+
+```cpp
+namespace Mashiro::Platform {
+
+    template<class T = void>
+    using Task = exec::task<T, exec::default_task_context<scheduler>>;
+    //                                              ^^^^^^^^^^^^^^
+    //   P3941 scheduler-affinity — every co_await sender re-schedules
+    //   onto `scheduler` after the awaited sender completes, so the
+    //   coroutine body always runs on the platform thread regardless
+    //   of which scheduler the awaited sender completes on.
+} // namespace Mashiro::Platform
+```
+
+What scheduler-affinity buys, semantically:
+
+- **Initial suspend ≡ schedule on platform thread.** When a Manager method that returns `Task<T>` is called from a worker thread, the *first* resume happens on the platform thread automatically — the same effect the v1.4 `TransferToOwner` initial-suspend awaiter used to provide, but now derived from `task<T>`'s contract instead of bolted on. If the caller is already on the platform thread, the initial schedule sender's `await_ready()` returns true and the body runs synchronously with zero suspension.
+- **Every `co_await` returns to the platform thread.** A Manager method that does `co_await platform.Surfaces().AttachVulkan(*window, inst);` does *not* leak the surface scheduler back into the surrounding body — `task<T>` re-schedules onto `scheduler` after the inner sender completes. This eliminates the v1.4 hand-rolled "remember to switch back" idiom.
+- **Final suspend ≡ resume caller on caller's scheduler.** When the body finishes, `task<T>` resumes the awaiting receiver using *its* environment's scheduler — for a `co_await Manager().Method(...)` call from a worker coroutine running under a separate scheduler, the worker is resumed on its own scheduler, not on the platform thread.
+
+`Task<T>` is awaitable (it satisfies the `awaitable` concept by inheriting from `task<T>`), so client coroutines write `co_await platform.Windows().Create(...)` exactly as before. It is also a sender — non-coroutine clients can `stdexec::start_detached(platform.Windows().Create(...))` or compose with `when_all` / `let_value`.
+
+**Lifetime.** Same rule as v1.4 `OwnerTask`: the caller must keep the `Task<T>` alive until `co_await` (or `start_detached`) completes. Destroying a task whose body has been scheduled but not yet completed is undefined behaviour. The natural usage `co_await Manager().Method(...)` as a temporary remains safe because the temporary persists across the suspension. For "fire and forget" call sites that cannot keep the task alive, route through `Mashiro::Platform::scope` (§6.7) — its `spawn(token, sender)` adopts ownership.
+
+**Coroutine frame allocation.** `task<T>` carries a coroutine frame; the compiler can elide the allocation only when HALO proves the frame does not escape. Cross-thread transfer always escapes, so each cross-thread call allocates one frame on the heap. Same rationale as v1.4: the "no heap on hot paths" goal targets event distribution, not one-shot Manager calls. If profiling shows Manager-call frame allocation is hot, slot a custom allocator into `task<T>`'s `default_task_context` — the P3552 envelope already exposes the allocator hook through `get_allocator(env)`.
+
+### 6.7 `Mashiro/Platform/Scope.h` — `Mashiro::Platform::scope`
+
+`scope` owns the lifetime of every sender that is started without an explicit `co_await` in client code — Manager-internal background work, dedicated-thread shutdown handshakes, and any "fire and forget" call site that cannot keep a `Task<T>` alive. It is a thin alias around `exec::counting_scope` (P3149):
+
+```cpp
+namespace Mashiro::Platform {
+
+    using scope = exec::counting_scope;
+
+    // Convenience: spawn and forget, with structured ownership.
+    template<stdexec::sender S>
+    void Spawn(scope& sc, stop_token stop, S&& s) noexcept {
+        sc.spawn(stop, std::forward<S>(s));
+    }
+
+    // Convenience: spawn-with-future for senders whose result the caller wants.
+    template<stdexec::sender S>
+    [[nodiscard]] auto SpawnFuture(scope& sc, stop_token stop, S&& s) noexcept {
+        return sc.spawn_future(stop, std::forward<S>(s));
+    }
+
+    // Settles when every sender owned by the scope has completed (set_value /
+    // set_error / set_stopped). Used in shutdown — see §6.12.
+    [[nodiscard]] auto Joined(scope& sc) noexcept { return sc.on_empty(); }
+
+} // namespace Mashiro::Platform
+```
+
+Why `counting_scope` and not a hand-rolled "list of in-flight handles":
+
+- **Structured.** `on_empty()` is a sender that completes when the scope's count drops to zero. Shutdown becomes `co_await scope.on_empty()` — a single suspension that resumes when every spawned sender has settled. No manual `while (count_ > 0)` polling, no missed wake-ups, no dangling continuations.
+- **Cancellation flows in.** `spawn(stop_source.get_token(), s)` registers the token with the spawned sender's environment; `request_stop()` propagates to every alive child. Combined with the platform `stop_source` (§6.8), one `RequestStop()` call cancels every spawned background sender at once.
+- **Allocation policy is configurable.** P3149 leaves the spawn allocator a customisation point; we slot the project's existing pool allocator into the scope so spawned coroutine frames come from the same arena as the rest of the platform thread's work.
+
+Public API surface that takes a scope: `PlatformThread::scope()` returns the platform-thread-owned scope; Managers that need to spawn background work (e.g., `FileWatchManager`'s IOCP completion fan-out) take `scope&` via constructor and use `Spawn` / `SpawnFuture` instead of holding `std::jthread`s directly. The two dedicated-thread Managers (`GamepadManager`, `FileWatchManager`) keep their `std::jthread` because their bodies are blocking syscalls outside stdexec's reach; their *event-emit* paths route through `pump_.SubmitExternal`, which is already in scope.
+
+### 6.8 `Mashiro/Platform/Stop.h` and `Mashiro/Platform/Domain.h` — cancellation + domain rewrites
+
+#### `Mashiro::Platform::stop_source` / `stop_token`
+
+```cpp
+namespace Mashiro::Platform {
+
+    using stop_source   = stdexec::inplace_stop_source;
+    using stop_token    = stdexec::inplace_stop_token;
+
+    template<class Fn>
+    using stop_callback = stdexec::inplace_stop_callback<Fn>;
+
+} // namespace Mashiro::Platform
+```
+
+`inplace_stop_source` is preferred over `std::stop_source` for two reasons:
+
+- **No heap allocation.** Storage is inline in the source; tokens are pointer-sized and refer to the source's address. The platform `stop_source` lives as a member of `PlatformThread`, so its lifetime is bounded by the loop and tokens never outlive it.
+- **Designed for op-state-scoped lifetime.** Receivers expose stop tokens through `get_stop_token(get_env(rcvr))`; sender op-states register `stop_callback`s on `start` and unregister on completion. The whole pattern is heap-free and observable — every `Task<T>`, every `EventChannel` await, every spawned sender gets the platform stop token through its receiver's environment.
+
+`PlatformThread::Run()` constructs the source on entry, exposes its token through `PlatformThread::stop_token() noexcept` and `PlatformThread::scope()` (which adopts it), and calls `request_stop()` on shutdown (§6.12). Manager methods that internally spawn senders pass `stop_token()` into their `Spawn` calls; that one call point is the boundary between the platform's stop-source and any client environment.
+
+#### `Mashiro::Platform::domain`
+
+A stdexec domain (P2999/P3826) registered with `scheduler` so adaptors can be customised per-platform without leaking OS-specific transport into client code:
+
+```cpp
+namespace Mashiro::Platform {
+
+    struct domain {
+        // Default rule: forward to the algorithm's default lowering.
+        template<stdexec::sender_expr S, class Env>
+        decltype(auto) transform_sender(S&& s, const Env& env) const {
+            return stdexec::default_domain{}.transform_sender(std::forward<S>(s), env);
+        }
+
+        // Specialise `continues_on(plat, _)` so the wake uses the OS-appropriate
+        // path: Win32 PostThreadMessage when the calling thread is *not* the
+        // platform thread (avoids the wakeEvent + MsgWaitForMultipleObjects
+        // round-trip when we already have the message queue handy); macOS
+        // dispatch_async to the main queue.
+        template<stdexec::sender Inner, class Env>
+            requires stdexec::__is_continues_on<Inner>
+        auto transform_sender(Inner&& s, const Env& env) const {
+            return Detail::RewriteContinuesOnPlatform(std::forward<Inner>(s), env);
+        }
+    };
+
+    // Free hook: schedulers expose their domain via tag_invoke(get_domain_t, …).
+    inline domain get_domain(scheduler) noexcept { return {}; }
+
+} // namespace Mashiro::Platform
+```
+
+What the domain achieves:
+
+- **OS-specific transport is local to one rewrite point.** `continues_on(plat, sender)` is the canonical "transition back to the platform thread" expression; without a domain, every backend would need to teach the algorithm how to wake the platform thread. With the domain, every `continues_on` to the platform scheduler funnels through `Detail::RewriteContinuesOnPlatform`, which knows about `PostThreadMessage` (Win32) and `dispatch_async(main_q, _)` (macOS). Client code never names either API.
+- **Compile-time customisation, zero runtime overhead.** `transform_sender` is consteval at the algorithm level; the rewrite happens at sender-pipeline construction, not at execution.
+- **Open for extension.** A future `RtPlatform` thread (real-time audio, e.g.) declares its own `rt_domain` and registers different rewrites. Client code does not change.
+
+The default lowering is the same MPSC + `wakeEvent_` mechanism as the schedule sender (§6.5); the domain only takes over when the OS exposes a more efficient path for the specific algorithm being lowered.
+
+### 6.9 `Mashiro/Platform/SeqLock.h`
 
 Single-writer, multi-reader lock-free reader for composite values. Used for any-thread queries on Manager state (e.g., `WindowManager::GetDesc`).
 
@@ -510,30 +769,34 @@ namespace Mashiro::Platform {
 
 Writers bump `seq_` to odd before mutation, even after; readers retry while seq is odd or differs across the read.
 
-### 6.7 `Mashiro/Platform/ManagerTraits.h`
+### 6.10 `Mashiro/Platform/ManagerTraits.h`
 
 Compile-time verification of Manager API contracts via P2996 reflection on P3394 annotations.
 
 ```cpp
 namespace Mashiro::Platform::Detail {
 
-    consteval bool IsOwnerTaskSpecialization(std::meta::info type);
+    consteval bool IsTaskSpecialization(std::meta::info type);
+    // True iff `type` is a specialisation of `Mashiro::Platform::Task<T>`
+    // (which itself is `exec::task<T, exec::default_task_context<scheduler>>`).
+    // The check is structural — it walks the alias chain, so direct
+    // `exec::task<...>` returns from a Manager are also accepted.
 
     template<typename Manager>
     consteval void VerifyManagerContracts();
     // For each public function member m of Manager:
     //   - if annotations_of(m, ^^ThreadContract) yields kPlatformOnly:
-    //       static_assert return_type_of(m) is OwnerTask<T>
+    //       static_assert IsTaskSpecialization(return_type_of(m))
     //   - if it yields kAnyThread:
-    //       static_assert return_type_of(m) is NOT OwnerTask<T>
+    //       static_assert NOT IsTaskSpecialization(return_type_of(m))
 
     template<typename... Managers>
     consteval void VerifySchedulingContracts();
     // For each Manager M in Managers:
     //   - require exactly one ManagerSchedule annotation on ^^M
-    //   - if PlatformThread: every Platform-domain method returns OwnerTask
-    //   - if FreeThreaded:   no method returns OwnerTask
-    //   - if DedicatedThread: no public method returns OwnerTask
+    //   - if PlatformThread: every Platform-domain method returns Task<T>
+    //   - if FreeThreaded:   no method returns Task<T>
+    //   - if DedicatedThread: no public method returns Task<T>
 
 } // namespace Mashiro::Platform::Detail
 ```
@@ -582,31 +845,41 @@ What this gives, mechanically:
 
 `EventPump` calls `DispatchBookkeep<M>(mgr, event)` once per Platform-thread Manager between translate / timestamp and `Broadcast`. The bookkeep-before-broadcast invariant is preserved by ordering, not by the annotation set: when a client coroutine wakes on `co_await channel.Next()`, every Manager's any-thread query already reflects the post-event state.
 
-### 6.8 `Mashiro/Platform/EventPump.h`
+### 6.11 `Mashiro/Platform/EventPump.h`
 
-OS message translator. Sole producer for all attached `EventChannel`s. Updates Manager bookkeeping in line with translation.
+OS message translator. Sole producer for all attached `EventChannel`s. Updates Manager bookkeeping in line with translation. Receives the platform fabric (scheduler, stop-token, scope) at bind time so it can produce stop-aware sender completions for in-flight `next_event` op-states.
 
 ```cpp
 namespace Mashiro::Platform {
 
     class EventPump {
     public:
+        // Bind the pump to its execution fabric and the Manager set. Called by
+        // PlatformThread::Run() after the scheduler / stop-source / scope are
+        // constructed. References to Managers come from a parameter pack that
+        // PlatformThread expands once at bind time.
+        template<class... Managers>
+        void Bind(scheduler plat, stop_token stop, scope& sc, Managers&... mgrs) noexcept;
+
         void AttachChannel(EventChannel<>& channel) noexcept;
-        void DetachChannel(EventChannel<>& channel) noexcept;
-        void BindManagers(/* references to all platform-thread managers */) noexcept;
 
-        // Platform thread loop entry points
-        void PumpOsMessages();      // PeekMessage + translate + bookkeep + broadcast
-        void DrainExternalInbox();  // dedicated-thread mgrs → bookkeep + broadcast
+        // Platform thread loop entry points (called by Run()).
+        void PumpOsMessages();         // PeekMessage + translate + bookkeep + broadcast
+        void DrainExternalInbox();     // dedicated-thread mgrs → bookkeep + broadcast
         void WaitForWork(void* wakeEvent) noexcept;  // MsgWaitForMultipleObjects
+        bool HasPending() const noexcept;
 
-        // Dedicated-thread managers call this from their own thread
+        // Dedicated-thread managers call this from their own thread.
         void SubmitExternal(SystemEvent&& event) noexcept;
 
     private:
+        scheduler  plat_{};
+        stop_token stop_{};
+        scope*     scope_ = nullptr;
+
         static constexpr size_t kMaxChannels = 8;
         EventChannel<>* channels_[kMaxChannels]{};
-        uint8_t channelCount_ = 0;
+        uint8_t         channelCount_ = 0;
 
         MpscQueue<SystemEvent> externalInbox_;   // stores moved variant values
 
@@ -620,17 +893,30 @@ namespace Mashiro::Platform {
 
 Per-event order on the Platform thread: translate → stamp `TimestampedEvent::timestamp` (only on alternatives that opted into the mixin, via a `template for` over `SystemEvent`'s alternative list) → dispatch bookkeep to all managers (`template for`) → broadcast (move) to all channels. This guarantees that when a client reads an event from its channel, every Manager's any-thread query already reflects the post-event state. Time-insensitive alternatives skip the stamp step entirely — the `if constexpr (Timestamped<T>)` arm is pruned at compile time.
 
-### 6.9 `Mashiro/Platform/PlatformThread.h`
+There is no `DetachChannel` and no `Close`. A channel's lifetime is bounded by `PlatformThread`'s; on shutdown, the pump simply stops calling `Emit`, and `next_event` op-states observe `stop_token` and complete with `set_stopped()`. Removing channels mid-run was never used and would have raced with `Broadcast`; the simplification is intentional.
 
-Owns the Platform thread, its Pump, Executor, and all Managers.
+### 6.12 `Mashiro/Platform/PlatformThread.h`
+
+Owns the Platform thread, its Pump, scheduler, scope, stop-source, and all Managers. `Run()` *takes over* the calling thread — there is no inner thread spawn.
 
 ```cpp
 namespace Mashiro::Platform {
 
     class PlatformThread {
     public:
-        void Run();                               // does not return until RequestStop
+        // Run on the calling thread (= main). Does not return until the platform
+        // stop_source has been requested AND every spawned sender owned by scope_
+        // has settled. Throws on construction failure of the wake event; never
+        // throws after Run() begins.
+        void Run();
+
+        // Cancellation entry point. Idempotent. Safe to call from any thread.
         void RequestStop() noexcept;
+
+        // stdexec fabric handles. Lifetimes match PlatformThread's.
+        [[nodiscard]] scheduler  Scheduler()   noexcept;        // platform_scheduler
+        [[nodiscard]] stop_token StopToken()   const noexcept;  // observes stop_source_
+        [[nodiscard]] scope&     Scope()       noexcept;        // counting_scope
 
         // Platform-thread managers
         WindowManager&             Windows();
@@ -653,55 +939,85 @@ namespace Mashiro::Platform {
         PowerManager&          Power();
         AudioDeviceManager&    AudioDevices();
 
-        // Channel attach / detach
+        // Channel attach (no detach — lifetime is shutdown-driven via stop_token)
         void AttachChannel(EventChannel<>& channel) noexcept;
-        void DetachChannel(EventChannel<>& channel) noexcept;
 
-        OwnerExecutor& Executor() noexcept;
+        // Implementation hook used by scheduler::sender; not for client code.
+        bool IsOnPlatformThread() const noexcept;
+
+    private:
+        stop_source                 stop_;
+        scope                       scope_;          // exec::counting_scope
+        EventPump                   pump_;
+        Detail::HandleQueue         queue_;          // MPSC handle queue (was OwnerExecutor)
+        void*                       wakeEvent_ = nullptr;
+        std::thread::id             owner_{};
+
+        // ... Manager members (declaration order = teardown order, reversed)
     };
 
 } // namespace Mashiro::Platform
 ```
 
-`Run()`:
+`Run()` body:
 
 ```text
 SetCurrentThreadName("Platform")
-wakeEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr)
-executor_.Initialize(GetCurrentThreadId(), wakeEvent)
-pump_.BindManagers(...)
+owner_      = std::this_thread::get_id()
+wakeEvent_  = CreateEventW(nullptr, FALSE, FALSE, nullptr)
+queue_.Initialize(owner_, wakeEvent_)
+pump_.Bind(this->Scheduler(), this->StopToken(), this->Scope())
 
-while (running_) {
-    pump_.PumpOsMessages();
-    pump_.DrainExternalInbox();
-    executor_.DrainAll();
-    if (!pump_.HasPending() && !executor_.HasPending()) {
-        pump_.WaitForWork(wakeEvent);
+while (!stop_.stop_requested()) {
+    pump_.PumpOsMessages();          // PeekMessage + translate + bookkeep + broadcast
+    pump_.DrainExternalInbox();      // dedicated-thread events → bookkeep + broadcast
+    queue_.Drain();                  // resume coroutine handles enqueued via plat_scheduler
+    if (!pump_.HasPending() && queue_.IsEmpty() && !stop_.stop_requested()) {
+        pump_.WaitForWork(wakeEvent_);   // MsgWaitForMultipleObjects
     }
 }
 
-// Shutdown ordering — every step runs on the platform thread:
-// 1. Drain executor one last time so any in-flight OwnerTasks complete.
-executor_.DrainAll();
-
-// 2. Stop dedicated-thread managers and join their threads. Their inbox is
-//    no longer fed; remaining inbox events are drained next.
-gamepadMgr_.Stop();
-fileWatchMgr_.Stop();
+// === Shutdown — structured, driven by stop_source + scope ==================
+//
+// All steps run on the platform thread. Each is one suspension point at most;
+// nothing blocks indefinitely.
+//
+// 1. Drain queue + inbox once more so the *current* set of in-flight handles
+//    observes the stop request through their receivers' environments. They
+//    complete with set_stopped (cancellable senders) or set_value (already-
+//    decided senders that were just waiting on the queue).
+queue_.Drain();
 pump_.DrainExternalInbox();
 
-// 3. Close client channels. Each Close() wakes its waiter so client
-//    coroutines see std::nullopt / closed and unwind.
-for each channel attached: channel.Close();
+// 2. Stop dedicated-thread managers — they live on std::jthread because their
+//    bodies are blocking syscalls (XInputGetState, ReadDirectoryChangesW) that
+//    stdexec cannot suspend. Their event-emit path is already cancelled by the
+//    stop_token; here we just join.
+gamepadMgr_.Stop();
+fileWatchMgr_.Stop();
+pump_.DrainExternalInbox();          // last pass for in-flight emits
 
-// 4. Destroy platform-thread managers. Their destructors run here, on the
-//    platform thread, so DestroyWindow / clipboard cleanup / OLE revoke
-//    happen on the owning thread.
-//    (Manager members are destroyed in reverse declaration order when
-//    PlatformThread itself is destroyed; this Run() simply returns.)
+// 3. Wait for every spawned sender to settle. scope_.on_empty() is a sender
+//    that completes when the count drops to zero. We sync_wait on it from the
+//    platform thread itself, with the platform's run_loop draining anything
+//    that needs the platform thread to finish (e.g., a Manager-internal sender
+//    that re-schedules onto the platform thread to release an OS handle).
+stdexec::sync_wait(stdexec::on(this->Scheduler(), stdexec::Joined(scope_)));
+
+// 4. Manager destructors run when PlatformThread itself is destroyed — they
+//    run on the platform thread by definition, so DestroyWindow / clipboard
+//    cleanup / OLE revoke happen on the owning thread.
+//    Run() simply returns; the caller (= main) is now free to destroy the
+//    PlatformThread object on its way out of scope.
+//
+// === End of shutdown ========================================================
 ```
 
-`RequestStop()` flips `running_ = false` and `SetEvent(wakeEvent_)` so the wait wakes immediately. Callers must not destroy `PlatformThread` until `Run()` returns.
+`RequestStop()` is a single line: `stop_.request_stop(); SetEvent(wakeEvent_);`. The stop request is observed by every receiver downstream of the platform stop-token (every `Task<T>`, every channel sender, every `scope`-owned spawn) at its next suspension point; the `SetEvent` ensures the platform thread wakes from `MsgWaitForMultipleObjects` even when there are no pending OS messages or queued handles. Idempotent: `request_stop()` is a no-op the second time.
+
+Callers must not destroy `PlatformThread` until `Run()` returns. The structured-shutdown sequence above guarantees that when `Run()` returns, every spawned sender has settled and every dedicated thread has been joined — destruction is safe with no further synchronisation.
+
+The "MainLoop" abstraction is gone. `Mashiro/Schedular/MainLoop.h` (currently empty) is removed in this change. `PlatformThread.h` is the sole loop owner.
 
 ## 7. Managers
 
@@ -719,7 +1035,7 @@ High-precision timing (QPC, timer resolution, waitable timers) is not a Manager 
 | `ClipboardManager` | Set/get text, HTML, RTF, image, custom formats; change notifications | `OpenClipboard`, `Get/SetClipboardData`, `RegisterClipboardFormatW`, `AddClipboardFormatListener` | `ClipboardUpdate` |
 | `CursorManager` | Cursor shape, hide, custom image, confine, lock (FPS) | `SetCursor`, `LoadCursorW`, `CreateIconIndirect`, `ClipCursor`, `SetCursorPos`, `GetCursorPos` | (none — pure command target) |
 | `DragDropManager` | Register drop targets, deliver drag events, initiate drags | OLE `RegisterDragDrop`, `IDropTarget`, `DoDragDrop`, `IDataObject` | `DragEnter`, `DragOver`, `DragDrop`, `DragLeave` |
-| `DialogManager` | Native file open / save / folder picker, color picker, message box, font picker | `IFileOpenDialog`, `IFileSaveDialog`, `ChooseColorW`, `MessageBoxW`, `ChooseFontW` | (none — returns `OwnerTask<Result<...>>`) |
+| `DialogManager` | Native file open / save / folder picker, color picker, message box, font picker | `IFileOpenDialog`, `IFileSaveDialog`, `ChooseColorW`, `MessageBoxW`, `ChooseFontW` | (none — returns `Task<Result<...>>`) |
 | `SurfaceManager` | Vulkan WSI surface create / destroy bound to a `WindowHandle` | `vkCreateWin32SurfaceKHR`, `vkDestroySurfaceKHR` | (none) |
 | `SystemAppearanceManager` | Dark/light, accent color, high contrast, theme change subscription, immersive dark window attribute | Registry `Themes\Personalize`, `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)`, `WM_SETTINGCHANGE` | `AppearanceChange` |
 | `AccessibilityManager` | UI Automation provider per window, focus / live-region announcements | `IRawElementProviderSimple`, `UiaReturnRawElementProvider`, `UiaRaiseAutomationEvent` | (none — responds to AT-SPI / UIA queries) |
@@ -753,13 +1069,13 @@ namespace Mashiro::Platform {
 
     class [[=kOnPlatformThread]] WindowManager {
     public:
-        [[=kPlatformOnly]] OwnerTask<Result<WindowHandle>> Create(Window::WindowDesc desc);
-        [[=kPlatformOnly]] OwnerTask<VoidResult>          Destroy(WindowHandle window);
-        [[=kPlatformOnly]] OwnerTask<VoidResult>          SetTitle(WindowHandle window, std::string title);
-        [[=kPlatformOnly]] OwnerTask<VoidResult>          SetSize(WindowHandle window, Window::Size size);
-        [[=kPlatformOnly]] OwnerTask<VoidResult>          SetMode(WindowHandle window, Window::Mode mode);
-        [[=kPlatformOnly]] OwnerTask<VoidResult>          Show(WindowHandle window);
-        [[=kPlatformOnly]] OwnerTask<VoidResult>          Hide(WindowHandle window);
+        [[=kPlatformOnly]] Task<Result<WindowHandle>> Create(Window::WindowDesc desc);
+        [[=kPlatformOnly]] Task<VoidResult>          Destroy(WindowHandle window);
+        [[=kPlatformOnly]] Task<VoidResult>          SetTitle(WindowHandle window, std::string title);
+        [[=kPlatformOnly]] Task<VoidResult>          SetSize(WindowHandle window, Window::Size size);
+        [[=kPlatformOnly]] Task<VoidResult>          SetMode(WindowHandle window, Window::Mode mode);
+        [[=kPlatformOnly]] Task<VoidResult>          Show(WindowHandle window);
+        [[=kPlatformOnly]] Task<VoidResult>          Hide(WindowHandle window);
 
         [[=kAnyThread]] Window::WindowDesc GetDesc(WindowHandle window) const noexcept;
         [[=kAnyThread]] Window::Size       GetSize(WindowHandle window) const noexcept;
@@ -804,14 +1120,15 @@ namespace Mashiro::Platform {
 
 #### 7.4.1 `WindowManager` lifecycle — internal ordering
 
-`Create` and `Destroy` are the two methods whose body must interleave with OS message traffic correctly. Both are `OwnerTask<…>`, so their bodies always run on the platform thread under `executor_.DrainAll()`; the ordering below is *within* a single body, between the platform thread's own steps.
+`Create` and `Destroy` are the two methods whose body must interleave with OS message traffic correctly. Both are `Task<…>`, so their bodies always run on the platform thread under `queue_.Drain()` (the platform scheduler's queued-continuation drain step in §6.12); the ordering below is *within* a single body, between the platform thread's own steps.
 
-##### `Create(WindowDesc) → OwnerTask<Result<WindowHandle>>`
+##### `Create(WindowDesc) → Task<Result<WindowHandle>>`
 
 ```text
 0. (caller, any thread)  co_await platform.Windows().Create(desc)
-                         → TransferToOwner schedules the body on the platform
-                           thread (§8.1). The body resumes inside DrainAll().
+                         → Task<T>'s initial-suspend sender (= schedule(plat))
+                           enqueues the body's resume handle on platform_scheduler;
+                           the body resumes inside queue_.Drain() (§6.12).
 
 On the platform thread, in order, atomic with respect to OS messages
 (no PeekMessage runs between steps 1–7):
@@ -840,7 +1157,7 @@ On the platform thread, in order, atomic with respect to OS messages
 
 The bookkeep events fired *inside* `CreateWindowExW` (step 4) reach attached `EventChannel`s via `Broadcast` in the normal way. A client coroutine can therefore observe a `WindowResizeEvent` for a window before its own `co_await Create(...)` resumes — the platform thread has already published the size, but the worker thread hasn't been rescheduled yet. This is correct: `IsValid(handle)` returns `true` (the slot is alive from step 1) and `GetSize(handle)` returns the size that was just broadcast. There is no `WindowCreateEvent`; the first observable signal of a new window is whichever OS event fires first inside step 4 (`WindowMoveEvent` / `WindowResizeEvent` / `WindowDpiChangeEvent`, in that typical order).
 
-##### `Destroy(WindowHandle) → OwnerTask<VoidResult>`
+##### `Destroy(WindowHandle) → Task<VoidResult>`
 
 ```text
 0. (caller, any thread)  co_await platform.Windows().Destroy(handle)
@@ -885,24 +1202,37 @@ If the OS surfaces `WM_CLOSE` first (user clicked the close box), `EventPump` pr
 ### 8.1 Cross-thread call (worker → Manager)
 
 ```text
-Worker coroutine:
+Worker coroutine (running under some client scheduler client_sch):
     co_await platform.Windows().Create(desc)
 
 Steps:
-1. OwnerTask<Result<WindowHandle>> is created.
-2. Promise::initial_suspend returns TransferToOwner{}.
-3. TransferToOwner::await_ready() == false (not on platform thread).
-4. await_suspend(h) → executor_.Enqueue(h); SetEvent(wakeEvent_) (if was empty).
-5. Worker coroutine remains suspended.
-6. Platform thread wakes from MsgWaitForMultipleObjects.
-7. PumpOsMessages → DrainExternalInbox → executor_.DrainAll().
-8. DrainAll resumes the OwnerTask body — runs Create(desc) on platform thread.
-9. Create allocates HWND, fills SeqLock, return_value(...) — final_suspend resumes the caller.
-10. Caller (worker thread) wakes when its scheduler runs h.
-11. await_resume returns Result<WindowHandle> to the worker.
+1. Task<Result<WindowHandle>> is created. exec::task<T>'s promise constructs an
+   environment whose `get_scheduler` query returns `platform.Scheduler()` (the
+   `default_task_context<scheduler>` binding from §6.6).
+2. `initial_suspend()` produces a sender equivalent to
+   `stdexec::schedule(platform.Scheduler())`. await_ready() returns true iff
+   `platform.IsOnPlatformThread()`. Same-thread fast path: zero suspension.
+3. Cross-thread case: the schedule sender's `start` enqueues the resume handle
+   on `queue_` (CAS-on-empty triggers `SetEvent(wakeEvent_)`). The receiver's
+   environment carries `platform.StopToken()`, so the schedule op-state
+   registers an `inplace_stop_callback` against it; if a stop request arrives
+   before the platform thread picks up the handle, the callback removes the
+   handle from the queue and completes with `set_stopped`, unwinding the task
+   without ever entering the body.
+4. Platform thread wakes from MsgWaitForMultipleObjects.
+5. PumpOsMessages → DrainExternalInbox → queue_.Drain().
+6. queue_.Drain() resumes the Task body — runs Create(desc) on platform thread.
+7. Create allocates HWND, fills SeqLock, `co_return Result<WindowHandle>{...}`.
+   `final_suspend` schedules the caller's resume on the *caller's* scheduler
+   (`get_completion_scheduler<set_value_t>` of the awaiting receiver), which is
+   `client_sch` for a worker coroutine.
+8. Caller wakes on client_sch when its scheduler runs the resume handle.
+9. await_resume returns Result<WindowHandle> to the worker.
 ```
 
-If the caller is already on the platform thread (e.g., a Manager calling another Manager), step 3 returns true and the body runs synchronously with no enqueue, no kernel call, no resume.
+If the caller is already on the platform thread (e.g., a Manager calling another Manager), step 2's `await_ready()` returns true and the body runs synchronously with no enqueue, no kernel call, no resume. Stop-token observation also collapses: the body's first `co_await` checks the token at suspension and either continues or completes with `set_stopped()`.
+
+This whole flow is `Mashiro::Platform`'s contribution; the rest is `exec::task<T>`. There is no bespoke "TransferToOwner", no `OwnerTask::Promise::await_transform` — `task<T>` already does the transformation that re-schedules onto `scheduler` after every awaited inner sender, which is what scheduler-affinity (P3941) means.
 
 ### 8.2 OS event flow (OS → client)
 
@@ -923,7 +1253,7 @@ If the caller is already on the platform thread (e.g., a Manager calling another
    - Each Emit pushes to SPSC ring + waiter_.exchange(nullptr) → resume.
 7. Client coroutines (one per channel) wake on their own threads.
 8. Their schedulers resume the suspended `co_await channel.Next()`.
-9. await_resume returns std::optional<SystemEvent> (or yields a Generator).
+9. The sender completes with `set_value(SystemEvent)` (or `set_value(BatchView)` for the batch sender). On shutdown, the platform stop-token's request causes the same op-state to complete with `set_stopped()` instead, and the awaiting coroutine unwinds.
 ```
 
 The client coroutine sees a fully consistent state: when it reads `WindowResize`, calling `platform.Windows().GetSize(window)` returns the new size because step 5 ran before step 6. The same ordering applies to `WindowDestroyEvent`: by the time a client wakes on it, `WindowManager::On(const WindowDestroyEvent&)` has already retired the slot (see §7.4.1), so `IsValid(handle)` returns `false` and any racing `GetSize` either retries the SeqLock and bails on `alive == false` or observes the pre-destroy state of an already-doomed slot — both are acceptable, since the handle is dead either way.
@@ -951,32 +1281,45 @@ Latency added by the inbox hop is one MPSC push + one SetEvent + drain (≪ 1 µ
 ### 8.4 Shutdown
 
 ```text
-Caller: platform.RequestStop()
-    sets running_ = false
-    SetEvent(wakeEvent_)
+Caller (any thread, often a client coroutine reacting to WindowCloseEvent):
+    platform.RequestStop()
+        stop_.request_stop()           // observable through every receiver
+        SetEvent(wakeEvent_)            // ensure the platform thread wakes
 
-Run() exits the loop after the next iteration.
-For each attached EventChannel<>: channel.Close();
-    closed_.store(true)
-    waiter_.exchange(nullptr) → resume (returns nullopt)
+Run() exits the loop on the next iteration (stop_.stop_requested() is true).
 
-Each client coroutine sees `std::nullopt` from its `co_await Next()` (or empty Generator from NextBatch) and exits.
+Structured shutdown — driven by stop_token + scope.on_empty(), not bespoke
+Close() / closed_ machinery:
 
-GamepadManager.Stop() → request_stop() on jthread; join.
-FileWatchManager.Stop() → CancelIoEx + close handle; join.
-
-All Managers destructors release OS resources (DestroyWindow for live windows, etc.).
+1. queue_.Drain()  — in-flight Task<T> handles either resume their body once
+   (if they had already been picked off the queue) or complete with set_stopped
+   via their schedule-sender's stop_callback. No handle is leaked.
+2. pump_.DrainExternalInbox() — last-pass for events submitted by dedicated
+   threads up to the moment they were stopped.
+3. gamepadMgr_.Stop() / fileWatchMgr_.Stop()  — request_stop() on each jthread,
+   then join. Their event-emit path was already cancelled by the stop_token;
+   here we just release the OS handle (CancelIoEx + close, etc.) and join.
+4. sync_wait(on(scheduler, scope_.on_empty()))  — every spawned sender owned by
+   scope_ has either set_value'd or set_stopped'd. The platform thread itself
+   drains its own queue while waiting (the `on(scheduler, …)` wraps the wait
+   so the platform thread keeps servicing in-flight platform-affine work).
+5. Manager destructors run when PlatformThread itself is destroyed (after Run()
+   returns). They run on the platform thread by definition, so DestroyWindow,
+   clipboard cleanup, OLE revoke, etc., happen on the owning thread.
 ```
+
+For each `EventChannel<>` that has an outstanding `next_event` / `next_batch` op-state, the platform stop-token's request fires the registered `inplace_stop_callback`, which exchanges the waiter handle out of `waiter_` and completes the receiver with `set_stopped()`. Client coroutines awaiting the channel see their `co_await` return into a `set_stopped` continuation — `Task<void>`-style coroutines unwind through their own `final_suspend` and propagate `set_stopped` upward, terminating cleanly. There is no `std::nullopt` sentinel and no `closed_` flag.
 
 ## 9. Error handling
 
-- Fallible Manager APIs return `OwnerTask<Result<T>>` (where `Result<T> = std::expected<T, ErrorCode>`). Callers chain with `.and_then` / `.or_else` after `co_await`.
-- Infallible Manager APIs (`Show`, `Hide`, `SetTitle` after window is alive) return `OwnerTask<VoidResult>` — they can still report errors (e.g., `WindowHandle` is invalid).
+- Fallible Manager APIs return `Task<Result<T>>` (where `Result<T> = std::expected<T, ErrorCode>`). Callers chain with `.and_then` / `.or_else` after `co_await`, or compose with `let_value` / `let_error` for sender-style pipelines.
+- Infallible Manager APIs (`Show`, `Hide`, `SetTitle` after window is alive) return `Task<VoidResult>` — they can still report errors (e.g., `WindowHandle` is invalid).
 - Any-thread queries (`GetSize`, `GetDesc`) have a precondition: caller must call `IsValid(handle)` first. Calling them on an invalid handle returns a default-constructed value silently — no error path. This keeps the hot read path free of error-handling code; safety is the caller's contract obligation.
-- Coroutine exceptions (`unhandled_exception` in `OwnerTask::Promise`) are stored and rethrown in `await_resume()`. The Platform thread itself never propagates exceptions out of `Run()`; it logs and continues.
-- Channel overflow: `Emit` returns `false` when the SPSC ring is full and increments `dropCount_`. `EventPump` emits a structured log entry per drop (kind, channel index, total drop count) at info level. Clients can query `PendingCount()` and `DropCount()` and respond to back-pressure (e.g., a render thread that has stalled). Producer-side coalescing (§6.3) reduces drops for high-rate kinds like `InputMouseMove`.
-- Pool exhaustion in `OwnerExecutor`: `Enqueue` falls back to a heap-allocated node and increments a counter. As §6.5 documents, this is an expected path under bursty contention, not exceptional.
-- Silent caps (`kMaxChannels = 8`, `kPoolSize = 256`, `kMaxLiveWindows = 256`): when exceeded, log a structured warning and assert in debug builds. Release builds degrade gracefully (channel attach fails, executor uses heap fallback, window query falls through to slow path) rather than crashing.
+- Coroutine exceptions (`unhandled_exception` in `Task<T>`'s promise) are forwarded as `set_error(std::exception_ptr)` and rethrown when the awaiting receiver consumes the value. The Platform thread itself never propagates exceptions out of `Run()`; it logs and continues. Senders spawned through `Spawn(scope, …)` route their `set_error` to the scope's error-handling policy (default: log + drop), since there is no awaiter to rethrow to.
+- Cancellation is *not* an error. `set_stopped` flows through `Task<T>` and channel senders without involving `Result<T>`; callers that want to react to cancellation use `let_stopped` or `stopped_as_optional`. The `Result<T>` contract is for *operation* errors (`InvalidHandle`, `WindowCapExceeded`, OS error codes), not for "we shut down before the operation completed".
+- Channel overflow: `Emit` returns `false` when the SPSC ring is full and increments `dropCount_`. `EventPump` emits a structured log entry per drop (payload type name via `NameOf`, channel index, total drop count) at info level. Clients can query `PendingCount()` and `DropCount()` and respond to back-pressure (e.g., a render thread that has stalled). Producer-side coalescing (§6.3) reduces drops for high-rate payloads like `MouseMoveEvent`.
+- Mailbox overflow in `platform_scheduler`'s handle queue (the recast `OwnerExecutor` storage): the schedule sender's `start` calls `EventPump::SubmitResume`, which `std::terminate`s on a full ring. As §6.5 documents, the ring is sized for steady-state bursts and a full ring is a design-invariant violation, not a runtime condition; silently dropping a coroutine handle would leak the coroutine.
+- Silent caps (`kMaxChannels = 8`, `kMaxLiveWindows = 256`): when exceeded, log a structured warning and assert in debug builds. Release builds degrade gracefully (channel attach fails, window query falls through to slow path) rather than crashing. The cross-thread coroutine mailbox (`MpscQueue<coroutine_handle<>, 256>`, §6.5) is *not* a soft cap — overflow `std::terminate`s, since silently dropping a handle would leak a coroutine.
 
 ## 10. Testing
 
@@ -984,14 +1327,15 @@ Unit tests live under `Mashiro/tests/Platform/`. Tests are written with the proj
 
 | Test target | Verifies |
 |---|---|
-| `EventChannelTest.cpp` | Single-event `co_await`, batch drain, lost-wake protocol under thread interleave (ASan + UBSan), close while waiting, ring overflow |
-| `OwnerTaskTest.cpp` | Same-thread fast path produces zero suspensions, cross-thread transfer resumes correctly, exception propagation, void specialisation |
-| `OwnerExecutorTest.cpp` | MPSC enqueue from many threads, drain order, pool exhaustion fallback, wake-event coalescing |
+| `EventChannelTest.cpp` | `co_await channel.Next()` and `next_event()`-as-sender, batch drain, lost-wake protocol under thread interleave (ASan + UBSan), `set_stopped` on stop-token request, ring overflow |
+| `TaskTest.cpp` | Same-thread fast path produces zero suspensions, cross-thread transfer resumes on the platform thread, scheduler-affinity returns to platform thread after each `co_await`, set_value / set_error / set_stopped channels exercised, void specialisation |
+| `SchedulerTest.cpp` | Recasts the v1.4 `OwnerExecutorTest`: MPSC enqueue from many threads via `stdexec::schedule(plat)`, drain order, pool exhaustion fallback, wake-event coalescing (CAS-on-empty), `get_completion_scheduler` query, `transform_sender` of `continues_on(plat, _)` collapses when upstream already completes there |
+| `StopAndScopeTest.cpp` | `inplace_stop_source.request_stop()` propagates to a chain of `Task<T>`s and channel senders, `counting_scope.on_empty()` settles after every spawned sender completes, ordering-under-cancellation matches §8.4 |
 | `SeqLockTest.cpp` | Single-writer multi-reader correctness under contention; tearing detection in stress tests |
-| `ManagerTraitsTest.cpp` | A deliberately-mis-annotated Manager fails to compile (verified via `try_compile` CMake probes) |
+| `ManagerTraitsTest.cpp` | A deliberately-mis-annotated Manager fails to compile (verified via `try_compile` CMake probes); the same probes assert that `Task<T>` is recognised by `IsTaskSpecialization` |
 | `EventPumpTest.cpp` | Translation, timestamp stamping on `Timestamped` alternatives only, broadcast cardinality, bookkeeping precedes broadcast |
 | `WindowManagerTest.cpp` | Create / destroy, title / size / mode mutations, `GetSize` returns post-event state after `WindowResize` is broadcast |
-| `PlatformThreadIntegrationTest.cpp` | Spin up the thread, attach a channel, call `Create` from a worker coroutine, observe `WindowResize` from the channel, shut down cleanly |
+| `PlatformThreadIntegrationTest.cpp` | Drive `Run()` from the test thread (Run = main = test thread), attach a channel, call `Create` from a worker `std::jthread` coroutine, observe `WindowResize` from the channel, exercise structured shutdown via `RequestStop` + `scope.on_empty()` |
 
 The negative compile probes for `ManagerTraitsTest.cpp` follow the pattern of `cmake/ReflectionFeatureProbes.cmake`: each negative case is its own tiny TU that *must* fail; CMake asserts the compile failure.
 
@@ -1002,11 +1346,16 @@ The negative compile probes for `ManagerTraitsTest.cpp` follow the pattern of `c
 | Sole producer = Platform thread | Per-producer-per-client SPSC (cartesian product of channels) | Cartesian explodes channel count to `O(producers × clients)`; inbox model keeps it `O(clients)` and reuses existing SPSC primitives |
 | Manager as state owner, not event consumer | Pub/sub Manager subscribing to events | The user's original intent was "Platform forwards events to clients; Managers only execute requests". Pub/sub mixed two orthogonal data flows and required Manager-side dispatch tables that duplicated client-side handling |
 | Phase-less main loop (Pump → Drain → Wait) | 7-phase loop with consteval phase table | No real per-frame work justified phases; phases added complexity without preventing the only real reentrancy hazard (WndProc), which is already prevented by running coroutine bodies only between Pump and Wait |
-| `OwnerTask<T>` with `TransferToOwner` initial_suspend | Explicit `co_await SwitchToPlatform()` inside every method | Implicit transfer at coroutine entry is harder to forget; the contract verification ensures the return type matches the annotation |
+| `Task<T>` = `exec::task<T>` bound to `platform_scheduler` via P3941 scheduler-affinity | (a) bespoke `OwnerTask<T>` + `TransferToOwner` initial_suspend (v1.4); (b) explicit `co_await SwitchToPlatform()` inside every method | The bespoke initial-suspend was a re-derivation of what scheduler-affinity already provides. With P3941, every `co_await sender` automatically resumes on `platform_scheduler` — so a Manager method that awaits `Surfaces().AttachVulkan(…)` doesn't need to remember to switch back. Explicit per-method switches are a forgetting hazard. The contract verification (`IsTaskSpecialization` over the return type's annotation set) keeps the same compile-time guarantee with one fewer concept |
+| `platform_scheduler` is a stdexec scheduler; the v1.4 `OwnerExecutor` becomes its private state | Keep `OwnerExecutor` as a public component | Public knowledge of the executor leaked an implementation detail (the MPSC handle queue) into client code. Naming the abstraction `scheduler` lets clients reach for stdexec adaptors (`continues_on`, `schedule`, `schedule_from`) instead of a Manager-level API; the queue/wake stay, hidden behind the schedule sender |
+| Cancellation via `inplace_stop_source` threaded through receiver environments | Per-channel `Close()` + `closed_` flag + `std::optional<SystemEvent>` sentinel; bespoke `RequestStop` propagation | One stop-source for the whole platform layer expresses one operational fact (the platform is shutting down). Channels, tasks, and spawned senders all observe it through their receivers' environments — no per-component "is this thing closed?" flag, no sentinel value distinguishing "stopped" from "no event yet". Heap-free (`inplace_*`), op-state-scoped, and integrates with `let_stopped` / `stopped_as_optional` for clients that want to differentiate cancellation from value |
+| Structured shutdown via `exec::counting_scope::on_empty()` | Hand-rolled in-flight handle list + manual drain loop | `counting_scope` is the stdexec primitive for "I want to spawn senders without `start_detached`'s leak risk". Its `on_empty()` is a sender, so shutdown is one `sync_wait(on(scheduler, scope.on_empty()))` line and the platform thread services its own queue while waiting — no missed wake-ups, no manual count, no off-by-one |
+| `Mashiro::Platform::domain` (P2999/P3826) for OS-specific `transform_sender` rewrites | Hard-code OS-specific paths inside each algorithm | Domains let one rewrite point teach every algorithm about Win32 `PostThreadMessage` / macOS `dispatch_async`. Without it, a hypothetical `bulk(plat, n, fn)` would need its own OS dispatch story; with it, the domain folds the transition into whatever the OS does best |
+| `main` thread is the Platform thread; client work runs on `std::jthread`s | "OS thread + main thread" split where main spawns Platform | Win32 routes HWND messages to the *creating* thread, AppKit pins its run-loop to the OS-blessed first thread, and X11/Wayland event-pumping libraries assume single-thread invariants. The only role assignment that satisfies all three is "main = Platform". The earlier "main mediates client → platform handoff" idea was a third thread that added latency without buying isolation; client coroutines now `SetEvent(wakeEvent_)` directly through the platform scheduler |
 | Bookkeeping by member-function-name convention (`On(const P&)`) discovered via reflection-driven concept | (a) annotation + consteval table, (b) `IEventConsumer` virtual interface | The parameter type is the kind tag — adding `[[=BookkeepFor{kind}]]` only invites drift. The convention-based design folds the dispatch table into a single `std::visit` whose arms are `if constexpr`-pruned by `HandlesBookkeep<M, P>`; after inlining it produces the same switch the annotation-driven `template for` did, with one fewer concept to maintain. The virtual interface lost on indirection cost and on losing the typed-alternative call signature |
 | Single waiter per channel (atomic handle) | Waiter list / multiplex | Channels are SPSC by construction; consumer affinity is single-threaded, so multiple waiters on one channel cannot exist |
 | `SeqLock` for composite any-thread queries | Mutex / shared_mutex | Lock-free read; writer is the Platform thread (single writer); composite values fit in one or two cache lines |
-| Close-as-broadcast (broadcast `Close()` on shutdown) | Per-channel sentinel `SystemEvent` | Close already wakes the waiter and is observable via `IsClosed()`; injecting a sentinel pollutes the event schema |
+| Stop-token-as-shutdown (one `inplace_stop_source` for the whole platform) | (v1.4) per-channel `Close()` broadcast on shutdown; (older) per-channel sentinel `SystemEvent` | One stop-source observable through every receiver's environment is a single source of truth — channels, `Task<T>`s, and `scope`-owned spawns all see the same fact. `Close()` was a per-channel re-derivation of the same signal, plus a `closed_` flag that needed its own ordering against `waiter_`. Sentinel events polluted the event schema for shutdown bookkeeping |
 | 15 Managers split by scheduling mode | Single monolithic `PlatformManager` | Each Manager owns one OS resource family; small files, focused tests, independent compile units |
 | `SystemEvent` is a `std::variant` of one struct per leaf payload type, materialised structurally via reflection over the `Detail::EventPayloadBase` derivation graph | Tagged union with reflection-generated accessor (v1.0); enum-tagged variant with `[[=PayloadFor{kind}]]` (v1.1–v1.3) | The variant *is* the discriminator; `std::visit` over an exhaustive overload set is a compile-time check, and per-payload owning containers (`std::string`, `std::vector`) keep events self-contained — no side ring for variable-length data. Plain payloads stay `is_trivially_copyable_v`, preserving the v1.0 hot-path property. Dropping the `EventKind` enum and `PayloadFor` annotation eliminates the discriminator/payload drift class entirely; persistence consumers (keybinding configs) name the payload *types* through `Traits::PayloadTypeName<T>()` |
 | Per-event opt-in mixins (`WindowSpecificEvent` / `TimestampedEvent`) | Shared `EventHeader { window, sequence, timestamp, flags }` block on every alternative (v1.1) | Of the four header fields, only the discriminator (now the variant's active alternative) and `timestamp` (kept on the time-sensitive subset only) had consumers. `windowId` on a non-window-scoped event invites a `== 0` sentinel that contradicts the variant-as-discriminator principle; `sequence` and `flags` had no consumer. Mixins make the participation set type-driven and let `std::visit` lambdas guard cross-cutting queries with `if constexpr (WindowScoped<T> / Timestamped<T>)` — non-participating alternatives are pruned at compile time |
@@ -1017,11 +1366,51 @@ The negative compile probes for `ManagerTraitsTest.cpp` follow the pattern of `c
 
 ## 12. Examples
 
-### 12.1 Minimal client coroutine
+### 12.1 Minimal `int main()` — `main` is the Platform thread
 
 ```cpp
-Task<void> RunRenderClient(PlatformThread& platform) {
-    EventChannel<> events;
+#include <Mashiro/Platform/PlatformThread.h>
+#include <stdexec/execution.hpp>
+#include <thread>
+
+int main() {
+    Mashiro::Platform::PlatformThread platform;
+
+    // Client work runs on jthreads spawned BEFORE Run() takes over main.
+    // Each jthread owns its own scheduler (e.g., a static_thread_pool::scheduler
+    // or its own run_loop); the platform scheduler reaches them through
+    // continues_on at the end of every Task<T>'s body.
+    std::jthread render{[&](std::stop_token st) {
+        // RunRenderClient returns a Mashiro::Platform::Task<void>, but we
+        // start it on a per-thread run_loop because the render thread has its
+        // own scheduler. sync_wait runs the task to completion on that loop.
+        stdexec::run_loop loop;
+        std::stop_callback cb{st, [&] { loop.finish(); }};
+        stdexec::sync_wait(stdexec::on(loop.get_scheduler(),
+                                       RunRenderClient(platform)));
+    }};
+
+    // Run() takes over `main` for the lifetime of the platform. It returns
+    // when RequestStop() has been called and every spawned sender has
+    // settled (see §6.12 / §8.4).
+    platform.Run();
+
+    // render's destructor signals its stop_token and joins. By construction
+    // RunRenderClient observed platform.StopToken() (it derived from the
+    // platform stop-source via its receiver's environment) and unwound
+    // before Run() returned.
+    return 0;
+}
+```
+
+The role assignment is explicit: `main` becomes the Platform thread inside `Run()`, the render jthread runs the client coroutine, and the only synchronisation between them is `Mashiro::Platform::scheduler` (for client → platform calls) plus `EventChannel<>` senders (for platform → client events).
+
+### 12.2 Render client coroutine
+
+```cpp
+Mashiro::Platform::Task<void>
+RunRenderClient(Mashiro::Platform::PlatformThread& platform) {
+    Mashiro::Platform::EventChannel<> events;
     platform.AttachChannel(events);
 
     auto window = co_await platform.Windows().Create({
@@ -1031,8 +1420,12 @@ Task<void> RunRenderClient(PlatformThread& platform) {
     });
     if (!window) co_return;  // Result<WindowHandle> — error path
 
-    while (!events.IsClosed()) {
-        for (const auto& event : co_await events.NextBatch()) {
+    // Sender-style loop. when_any of the batch sender + a stop_token-aware
+    // never_sender lets the platform's stop_token cancel the wait without
+    // a per-channel close call. set_stopped propagates to co_return.
+    for (;;) {
+        auto batch = co_await events.NextBatch();   // set_stopped → break
+        for (const auto& event : batch) {
             std::visit([&]<typename P>(const P& payload) {
                 if constexpr (std::is_same_v<P, WindowResizeEvent>) {
                     RecreateSwapchain(payload.size.x, payload.size.y);
@@ -1042,7 +1435,7 @@ Task<void> RunRenderClient(PlatformThread& platform) {
             }, event);
         }
         if (platform.Windows().IsValid(*window)) {
-            auto size = platform.Windows().GetSize(*window);  // any-thread, SeqLock
+            auto size = platform.Windows().GetSize(*window);  // SeqLock, any-thread
             RenderFrame(size);
         }
     }
@@ -1051,10 +1444,13 @@ Task<void> RunRenderClient(PlatformThread& platform) {
 }
 ```
 
-### 12.2 Polling style (no coroutine)
+`co_await events.NextBatch()` completes with `set_stopped()` when the platform stop-source is requested; `Task<void>`'s coroutine machinery turns that into a `co_return` and unwinds — the loop exits structurally without an `IsClosed()` poll.
+
+### 12.3 Polling style (no coroutine)
 
 ```cpp
-void GameTick(PlatformThread& platform, EventChannel<>& events) {
+void GameTick(Mashiro::Platform::PlatformThread& platform,
+              Mashiro::Platform::EventChannel<>& events) {
     while (auto event = events.TryReceive()) {
         gameWorld.HandleSystemEvent(*event);
     }
@@ -1062,28 +1458,58 @@ void GameTick(PlatformThread& platform, EventChannel<>& events) {
 }
 ```
 
-### 12.3 Cross-Manager call from a Manager method
+### 12.4 Cross-Manager call from a Manager method
 
 ```cpp
-OwnerTask<Result<WindowHandle>>
+Mashiro::Platform::Task<Result<WindowHandle>>
 WindowManager::CreateWithSurface(Window::WindowDesc desc, vk::Instance inst) {
     auto window = co_await Create(desc);     // already on platform thread → no transfer
     if (!window) co_return std::unexpected{window.error()};
-    co_await platform.Surfaces().AttachVulkan(*window, inst);
+    co_await platform_.Surfaces().AttachVulkan(*window, inst);
     co_return *window;
 }
 ```
 
+Scheduler-affinity (P3941) means the body returns to `platform_scheduler` after `AttachVulkan` completes, so `co_return *window` runs on the platform thread regardless of which scheduler `AttachVulkan`'s sender completed on. No manual switch-back.
+
+### 12.5 Sender-only client (no coroutine, full stdexec composition)
+
+```cpp
+auto run_console_client(Mashiro::Platform::PlatformThread& platform) {
+    using namespace stdexec;
+    Mashiro::Platform::EventChannel<> events;
+    platform.AttachChannel(events);
+
+    return platform.Windows().Create(/* desc */)
+         | let_value([&](auto& window) {
+               return events.next_event()
+                    | let_value([&](const SystemEvent& e) {
+                          // Handle e on whichever scheduler the channel
+                          // completed on; client orchestrates its own
+                          // continues_on(...) to migrate as needed.
+                          return just();
+                      })
+                    | repeat()                           // until set_stopped
+                    | let_stopped([&]{ return platform.Windows().Destroy(window); });
+           });
+}
+```
+
+Demonstrates that nothing in the platform requires a coroutine — `Task<T>` is convenience, not necessity.
+
 ## 13. Glossary
 
-- **Platform thread:** Single OS thread that owns thread-affine OS resources (HWND, IME, clipboard, OLE DnD, system dialogs, Vulkan surfaces).
-- **Client thread:** Any non-Platform thread that runs application logic — render, logic, UI, networking. Multiple are expected.
-- **Worker thread:** Thread submitting an `OwnerTask` request. Same as client thread when it happens to be running coroutines.
+- **Platform thread:** Single OS thread that owns thread-affine OS resources (HWND, IME, clipboard, OLE DnD, system dialogs, Vulkan surfaces). Concretely: whichever thread enters `PlatformThread::Run()`. The only ergonomic placement is `main`.
+- **Client thread:** Any non-Platform thread that runs application logic — render, logic, UI, networking. Multiple are expected. Typically `std::jthread`s spawned before `main` enters `Run()`.
+- **Worker thread:** Thread submitting a `Task<T>` request. Same as client thread when it happens to be running coroutines.
 - **Manager:** A class owning one OS resource family (windows, input, clipboard, …). Either platform-thread, dedicated-thread, or free-threaded.
 - **Bookkeeping:** Manager state updates performed by `EventPump` during translation, before `Broadcast`. Distinct from event consumption.
-- **EventChannel:** SPSC ring + atomic waiter handle. Platform thread is the sole producer.
-- **OwnerTask\<T\>:** Coroutine return type whose body runs on the Platform thread. Result is delivered to the caller's thread.
-- **OwnerExecutor:** MPSC mailbox of suspended coroutine handles awaiting Platform-thread resumption.
+- **EventChannel:** SPSC ring + atomic waiter handle. Platform thread is the sole producer. Exposes both senders (`next_event` / `next_batch`) and awaiters (`Next` / `NextBatch`).
+- **`Mashiro::Platform::scheduler`:** stdexec scheduler whose `schedule()` sender completes on the Platform thread. The public face of the cross-thread call flow; clients never name `OwnerExecutor` directly. (See §6.4–§6.5.)
+- **`Mashiro::Platform::Task<T>`:** Typedef for `exec::task<T, exec::default_task_context<scheduler>>`. P3941 scheduler-affinity guarantees the body resumes on the Platform thread after every `co_await sender`. Replaces v1.4's bespoke `OwnerTask<T>`. (See §6.6.)
+- **`Mashiro::Platform::stop_source` / `stop_token`:** Typedef for `stdexec::inplace_stop_source` / `inplace_stop_token`. Heap-free; the platform stop-source's token is threaded through every receiver's environment, so `RequestStop()` cancels every in-flight sender at once. (See §6.8.)
+- **`Mashiro::Platform::scope`:** Typedef for `exec::counting_scope`. Owns the lifetime of every spawned background sender; `scope.on_empty()` settles when all spawned senders have completed. Used by structured shutdown. (See §6.7.)
+- **`Mashiro::Platform::domain`:** stdexec domain registered with `scheduler` so `transform_sender` can rewrite OS-specific transitions (Win32 `PostThreadMessage`, macOS `dispatch_async`) at sender-pipeline construction time, not at execution. (See §6.8.)
 - **Bookkeep handler:** A Manager member function `On(const P&) noexcept` that updates state when payload `P` is being broadcast. Discovered by `Event::Traits::HandlesBookkeep<M, P>`; no annotation tags it.
 - **Free-threaded Manager:** Holds OS state but exposes only any-thread queries; mutation events arrive via Platform-thread bookkeeping into a `SeqLock`.
 
