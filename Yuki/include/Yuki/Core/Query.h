@@ -347,6 +347,102 @@ namespace Yuki {
             }
         }
 
+        // =====================================================================
+        // Convenience layer (Task 13, spec §1.3)
+        // =====================================================================
+        //
+        // Thin wrappers over the dynamic kernel + role-walk helpers — no new
+        // mechanism, just named projections of what @ref QueryDynamicRawPolicy,
+        // @ref Underlying, @ref Nucleus, @ref Facades and @ref FacadeListLookup
+        // already do. Spec §1.3 lists each as a one-liner; the bodies below
+        // match those derivations modulo the post-T11/T12 plumbing names.
+
+        /**
+         * @brief @c Provider<I>(p) — the @c RootObject whose state actually answers @p I for @p p.
+         *
+         * Spec §4.2: `Provider := Underlying ∘ Query`. The kernel arm fixes which object backs the
+         * answer — DirectCast/InlineFacade lands on a real subobject of the nucleus, the singleton
+         * arm reads a published @c RootObject*, the resolver arm returns an Extension instance —
+         * and @ref Underlying then walks any Interface/Imposter/Bridge facade layers down to the
+         * underlying object the facade was built over. For the typical Implementation/Extension
+         * answer this is identity (those roles are already "bottom"), so the call collapses to a
+         * single kernel invocation.
+         *
+         * @c C is parameterised so call sites with a concrete host type compile without a manual
+         * upcast, but the body only handles the @c std::derived_from<C, RootObject> branch — that
+         * is the only case where the kernel can take the host and @ref Underlying can take its
+         * return value. For non-RootObject hosts (e.g. plain @ref InterfaceFacade subobjects) the
+         * call is intentionally @c nullptr; T11's static face does not project facade subobjects
+         * back to their hosts, so there is no path to a @c RootObject* to drive @ref Underlying.
+         */
+        template<InterfaceClass I, class C = RootObject>
+        [[nodiscard]] inline RootObject* Provider(C* p) noexcept {
+            if constexpr (std::derived_from<C, RootObject>) {
+                RootObject* hit = QueryDynamicRaw(static_cast<RootObject*>(p), IidOf<I>());
+                return (hit != nullptr) ? Underlying(hit) : nullptr;
+            } else {
+                (void)p;
+                return nullptr;
+            }
+        }
+
+        /**
+         * @brief @c IsMaterialized<E>(p) — has the lazy Extension @p E already been published onto
+         *        @p p's facade chain?
+         *
+         * Spec §6.4: a single @ref FacadeListLookup keyed on @c IidOf<E>(), the self-iid the
+         * resolver (and @ref Reify) stamp at materialise time. No kernel call — even the dispatch
+         * snapshot is irrelevant; the question is purely about chain membership. Steers through
+         * @ref Nucleus first so a query handed an Interface/Imposter/Bridge facade (or an
+         * Extension on some other nucleus) re-targets to the right facade list.
+         */
+        template<ExtensionClass E>
+        [[nodiscard]] inline bool IsMaterialized(RootObject* p) noexcept {
+            RootObject* n = Nucleus(p);
+            if (n == nullptr) {
+                return false;
+            }
+            FacadeListHead* head = Facades(n);
+            if (head == nullptr) {
+                return false;
+            }
+            return FacadeListLookup(*head, IidOf<E>()) != nullptr;
+        }
+
+        /**
+         * @brief @c Reify<E>(p) — force-materialise the lazy Extension @p E onto @p p's nucleus.
+         *
+         * Spec §6.2: the same @ref Detail::MaterializeIntoImpl primitive the
+         * @c SideTableResolver kernel arm invokes on a miss, but called directly without going
+         * through any specific Interface iid. Idempotent: @ref Detail::MaterializeIntoImpl bails
+         * on the FacadeListLookup hit before allocating, so a second @c Reify is a no-op.
+         * Stateless / aggregate Extensions silently no-op (the @c std::is_base_of_v<RootObject, E>
+         * gate inside @ref Detail::MaterializeIntoImpl).
+         */
+        template<ExtensionClass E>
+        inline void Reify(RootObject* p) noexcept {
+            RootObject* n = Nucleus(p);
+            if (n == nullptr) {
+                return;
+            }
+            Detail::MaterializeIntoImpl<E>(*n);
+        }
+
+        /**
+         * @brief @c Materialized<I>(p) — observation-only @c Query that never materialises.
+         *
+         * Spec §6.4: the @c Materialize::No instantiation of @ref QueryDynamicRawPolicy. Every
+         * non-resolver arm answers exactly as @ref QueryDynamicRaw would (those arms have nothing
+         * to materialise); the @c SideTableResolver arm probes the facade chain directly instead
+         * of firing the resolver, so a lazy + unmaterialised Extension surfaces as @c nullptr.
+         * Useful for diagnostics and for fast-path early-outs that must not pay the
+         * materialisation cost.
+         */
+        template<InterfaceClass I>
+        [[nodiscard]] inline RootObject* Materialized(RootObject* p) noexcept {
+            return QueryDynamicRawPolicy<Materialize::No>(p, IidOf<I>());
+        }
+
     } // namespace RT
 
     /** @cond INTERNAL */

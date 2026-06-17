@@ -395,3 +395,125 @@ TEST_CASE("RT::Has<I> with Materialize::No does not materialise a lazy Extension
     REQUIRE(FacadeListLookup(*head, IidOf<CookedLazyT12>()) == nullptr);
     REQUIRE(FacadeListLookup(*head, IidOf<ICookableLazyT12>()) == nullptr);
 }
+
+// =============================================================================
+// Convenience layer (Task 13) — Provider, IsMaterialized, Reify, Materialized
+// =============================================================================
+//
+// Spec refs: §1.3 (convenience derivations), §4.2 (Provider one-liner),
+// §6.2/§6.4 (Reify, IsMaterialized). Each is a thin wrapper over the kernel
+// (@ref RT::QueryDynamicRawPolicy) and the role-walk helpers (@ref RT::Nucleus,
+// @ref RT::Underlying, @ref RT::Facades). Fixtures here are T13-suffixed so
+// Catch2's random ordering cannot interleave with the T12 cases above.
+
+namespace {
+
+    struct [[=Anno::Interface]] ICookableT13 {
+        virtual void Cook() = 0;
+        virtual ~ICookableT13() = default;
+    };
+    // SteakT13 deliberately does NOT inherit ICookableT13. If it did, the
+    // static-face @ref RT::Query<I, C> would fold to a BOA `static_cast<I*>(p)`
+    // and never enter the dynamic kernel — the SideTableResolver arm we want
+    // to exercise here would stay dormant. Without the inheritance, the fold
+    // falls through to the kernel, which then routes the override the
+    // Extension installs.
+    struct [[=Anno::Implementation]] SteakT13 : MetaNode<SteakT13> {};
+    // Stateful + lazy => SideTableResolver entry, materialised on first
+    // Materialize::Yes Query. The constructor-takes-Extendee* ctor comes from
+    // ExtensionNode<Self, Extendee>, mirroring the canonical T8/T12 fixture
+    // style. The Extension itself need not inherit ICookableT13 — Provider /
+    // Materialized return @c RootObject*, no downcast happens at the test
+    // boundary.
+    struct [[=Anno::Extension]] [[=Anno::Extends{^^SteakT13}]]
+           [[=Anno::Implements{^^ICookableT13}]]
+           CookedT13 : ExtensionNode<CookedT13, SteakT13> {
+        using ExtensionNode::ExtensionNode;
+        int temperatureC = 0;
+    };
+
+} // namespace
+
+TEST_CASE("RT::Provider<I> returns the underlying provider for a materialised lazy Extension",
+          AUTO_TAG) {
+    Registry::Install<SteakT13>();
+    Registry::Install<CookedT13>();
+
+    SteakT13 s;
+    // Drive a Materialize::Yes pass through the dynamic kernel directly so the
+    // SideTableResolver fires and the per-instance CookedT13 facade lands on
+    // the chain. We bypass @ref RT::Query<I, C> here because the static face
+    // folds to the kernel only when @c I derives from @c RootObject —
+    // @c ICookableT13 is a plain interface, so the kernel entry point is the
+    // most direct way to exercise the resolver arm.
+    (void)RT::QueryDynamicRaw(&s, IidOf<ICookableT13>());
+
+    RootObject* who = RT::Provider<ICookableT13>(&s);
+    REQUIRE(who != nullptr);
+
+    // Identity stable across calls — Provider is a pure projection over the
+    // kernel + Underlying, so two consecutive invocations agree.
+    RootObject* again = RT::Provider<ICookableT13>(&s);
+    REQUIRE(again == who);
+
+    // Null host yields null (the kernel's first-thing null-check).
+    SteakT13* nullHost = nullptr;
+    REQUIRE(RT::Provider<ICookableT13>(nullHost) == nullptr);
+}
+
+TEST_CASE("RT::IsMaterialized<E> reflects facades_ membership without materialising", AUTO_TAG) {
+    Registry::Install<SteakT13>();
+    Registry::Install<CookedT13>();
+
+    SteakT13 s;
+    // Lazy: the construction hook does not run the resolver, so the facade
+    // chain has no node keyed on IidOf<CookedT13>() yet — IsMaterialized is
+    // a single FacadeListLookup, so it answers @c false.
+    REQUIRE(RT::IsMaterialized<CookedT13>(&s) == false);
+
+    // Drive the Materialize::Yes kernel arm; the resolver AttachUniques the
+    // facade under the Extension's own iid (and each advertised interface
+    // iid), so the next IsMaterialized answers @c true.
+    (void)RT::QueryDynamicRaw(&s, IidOf<ICookableT13>());
+    REQUIRE(RT::IsMaterialized<CookedT13>(&s) == true);
+}
+
+TEST_CASE("RT::Reify<E> materialises without going through a specific Interface", AUTO_TAG) {
+    Registry::Install<SteakT13>();
+    Registry::Install<CookedT13>();
+
+    SteakT13 s;
+    REQUIRE(RT::IsMaterialized<CookedT13>(&s) == false);
+
+    // Reify routes straight to @ref Detail::MaterializeIntoImpl<E> on the
+    // nucleus — no Interface iid involved. After the call, the same chain
+    // membership a SideTableResolver-driven Query would have produced is in
+    // place.
+    RT::Reify<CookedT13>(&s);
+    REQUIRE(RT::IsMaterialized<CookedT13>(&s) == true);
+
+    // Idempotent: a second Reify is a no-op (MaterializeIntoImpl bails on the
+    // FacadeListLookup hit before allocating).
+    RT::Reify<CookedT13>(&s);
+    REQUIRE(RT::IsMaterialized<CookedT13>(&s) == true);
+}
+
+TEST_CASE("RT::Materialized<I> returns nullptr for lazy, ptr after Query", AUTO_TAG) {
+    Registry::Install<SteakT13>();
+    Registry::Install<CookedT13>();
+
+    SteakT13 s;
+    // Materialize::No kernel arm — the SideTableResolver entry is read, but
+    // the resolver is not invoked; the lookup falls back to the facade chain,
+    // which is still empty for the lazy Extension.
+    REQUIRE(RT::Materialized<ICookableT13>(&s) == nullptr);
+
+    // Drive a Materialize::Yes pass so the resolver publishes the facade onto
+    // the chain under @c IidOf<ICookableT13>().
+    (void)RT::QueryDynamicRaw(&s, IidOf<ICookableT13>());
+
+    // Now the Materialize::No re-probe sees the facade — Materialized is
+    // observation-only, so it must surface the same node the resolver
+    // published.
+    REQUIRE(RT::Materialized<ICookableT13>(&s) != nullptr);
+}
