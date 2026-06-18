@@ -13,6 +13,7 @@ using namespace Yuki;
 namespace {
     struct [[=Anno::Implementation]] D : RootObject {
         Y_OBJECT;
+        D() : RootObject(ClassType::Implementation, nullptr, /*external=*/true) {}
     };
 }
 

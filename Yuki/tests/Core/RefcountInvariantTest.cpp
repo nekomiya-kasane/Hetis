@@ -1,6 +1,7 @@
 #include <Yuki/Core/RootObject.h>
 #include <Yuki/Core/ComPtr.h>
 #include <Yuki/Core/MakeOwned.h>
+#include <Yuki/Core/TaggedPayload.h>
 
 #include "Meta.h"
 
@@ -55,4 +56,28 @@ TEST_CASE("Saturation guard at kSaturationLimit", AUTO_TAG) {
     cur = w.load();
     cur.word = (cur.word & ~(0xFFFFull << 4)) | (std::uint64_t(1) << 4);
     w.store(cur);
+}
+
+namespace {
+    // External-lifetime variant: marks refcount as the sentinel 0xFFFF so Acquire/Release
+    // become no-ops and Release never signals a 0-transition (the holder owns the object).
+    struct ExtImpl : RootObject {
+        ExtImpl() : RootObject(ClassType::Implementation, nullptr, /*external=*/true) {}
+        ~ExtImpl() override = default;
+    };
+}
+
+TEST_CASE("kExternalSentinel: Acquire/Release are no-ops, never signal delete", AUTO_TAG) {
+    // Stack-allocated on purpose — the contract for external-lifetime objects is that
+    // their storage owner (here, this stack frame) controls destruction, NOT the refcount
+    // machinery. If Release ever returned true here, the surrounding scope would attempt
+    // to delete a stack address, which is the exact bug this invariant guards against.
+    ExtImpl stackImpl;
+    RootObject* p = &stackImpl;
+
+    REQUIRE(p->PayloadRelaxed().refcount() == TaggedPayload::kExternalSentinel);
+    Acquire(p);
+    REQUIRE(p->PayloadRelaxed().refcount() == TaggedPayload::kExternalSentinel);
+    REQUIRE(Release(p) == false);
+    REQUIRE(p->PayloadRelaxed().refcount() == TaggedPayload::kExternalSentinel);
 }
