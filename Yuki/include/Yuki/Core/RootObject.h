@@ -31,15 +31,20 @@ namespace Yuki {
     static_assert(sizeof(RootObject) == 2 * sizeof(void*));
 
     /**
-     * @brief ComPtr / MakeOwned reference-count hooks (D12).
+     * @brief ComPtr / MakeOwned reference-count hooks — T10 temporary forwarders (D12).
      *
-     * These are the temporary T10 forwarders to TaggedPayload::TryIncrement / TryDecrement.
-     * Task 12 (D8/D9/D10/D13) will replace them with hierarchical semantics: facade/arm coalescing,
-     * external-lifetime sentinel handling, and sub-object lifetime — until then the TaggedPayload
-     * CAS implementation already handles the external-sentinel no-op and saturation correctly.
+     * @warning These bodies are temporary. Task 12 replaces them with hierarchical
+     *          D8/D9/D10/D13 semantics (facade/arm coalescing, external-lifetime
+     *          propagation, sub-object deallocation). Do not add logic here — extend
+     *          Task 12 instead.
+     *
+     * Currently thin wrappers over TaggedPayload::TryIncrement / TryDecrement. The
+     * TaggedPayload CAS implementation already handles the external-sentinel no-op
+     * and saturation correctly, which is why the temp bodies are safe to ship.
      *
      * @param p  Non-null pointer to any RootObject-derived instance.
-     * @return   Release returns true iff the decrement transitioned refcount to 0 (caller deletes).
+     * @return   Release returns true iff the decrement transitioned refcount to 0
+     *           (caller must delete p).
      */
     void Acquire(RootObject* p) noexcept;
     bool Release(RootObject* p) noexcept;
