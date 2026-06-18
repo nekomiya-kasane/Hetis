@@ -162,10 +162,18 @@ namespace Yuki {
          * @c static_assert by Tasks 8 and 9 (the layers that look @c kMetaCore up by
          * reflection) so that the diagnostic fires at the offending class, not deep
          * inside the link layer.
+         *
+         * @note Uses @c std::meta::access_context::unchecked() to enumerate members
+         *       regardless of the *caller's* access. Using @c ::current() here would
+         *       silently hide a private @c kMetaCore from the very predicate meant
+         *       to catch it (the caller is namespace scope / sibling code), turning
+         *       the invariant into a no-op. @c is_public(m) still reports the actual
+         *       declared access of the member, so the predicate fails correctly
+         *       when @c kMetaCore was placed in a non-public section.
          */
         template<class T>
         consteval bool YObjectIsPublic() {
-            for (auto m : std::meta::members_of(^^T, std::meta::access_context::current())) {
+            for (auto m : std::meta::members_of(^^T, std::meta::access_context::unchecked())) {
                 if (std::meta::is_static_member(m)
                     && std::meta::identifier_of(m) == std::string_view{"kMetaCore"}) {
                     return std::meta::is_public(m);
@@ -202,6 +210,9 @@ namespace Yuki {
             consteval MetaHook() {
                 static_assert(std::has_virtual_destructor_v<T>,
                               "Y_OBJECT requires a virtual destructor on the enclosing class");
+                static_assert(YObjectIsPublic<T>(),
+                              "Y_OBJECT's kMetaCore must be declared in a public section "
+                              "(D3 invariant: kMetaCore is the canonical identity hook).");
             }
         };
 
