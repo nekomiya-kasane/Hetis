@@ -22,7 +22,6 @@ namespace Yuki {
             return metaWord_.load(std::memory_order_relaxed);
         }
 
-        // Acquire/Release defined in Task 12.
         std::atomic<TaggedPayload>& MetaWord() noexcept { return metaWord_; }
 
       private:
@@ -31,18 +30,15 @@ namespace Yuki {
     static_assert(sizeof(RootObject) == 2 * sizeof(void*));
 
     /**
-     * @brief ComPtr / MakeOwned reference-count hooks — T10 temporary forwarders (D12).
+     * @brief ComPtr / MakeOwned reference-count hooks — final D8/D9/D10/D13 form.
      *
-     * @warning These bodies are temporary. Task 12 replaces them with hierarchical
-     *          D8/D9/D10/D13 semantics (facade/arm coalescing, external-lifetime
-     *          propagation, sub-object deallocation). Do not add logic here — extend
-     *          Task 12 instead.
+     * @note Null-tolerant: Acquire(nullptr) is a no-op; Release(nullptr) returns false,
+     *       so callers with "maybe-null" handles need no guard branch.
+     *       Saturation assert: in kDebug builds, Acquire fires assert if TryIncrement
+     *       returns false (refcount at kSaturationLimit = 0xFFFE, indicating an
+     *       unbounded-acquire bug). Release builds silently saturate.
      *
-     * Currently thin wrappers over TaggedPayload::TryIncrement / TryDecrement. The
-     * TaggedPayload CAS implementation already handles the external-sentinel no-op
-     * and saturation correctly, which is why the temp bodies are safe to ship.
-     *
-     * @param p  Non-null pointer to any RootObject-derived instance.
+     * @param p  Pointer to any RootObject-derived instance; may be null.
      * @return   Release returns true iff the decrement transitioned refcount to 0
      *           (caller must delete p).
      */
