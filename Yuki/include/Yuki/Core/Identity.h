@@ -36,6 +36,7 @@
 #include <span>
 
 #include <Mashiro/Core/TypeTraits.h>
+#include <Mashiro/Core/Hash.h>
 
 namespace Yuki {
 
@@ -80,6 +81,63 @@ namespace Yuki {
 
     /// @brief Bit mask covering the three @ref ClassType bits in a tagged @c RootObject payload.
     inline constexpr uintptr_t kClassTypeMask = 0b111u;
+
+    // =========================================================================
+    // Iid — 128-bit stable type identifier (RFC-4122 v8 / FNV-1a 128 over type name)
+    // =========================================================================
+
+    /**
+     * @brief 128-bit stable type identifier.
+     *
+     * Wraps @c Mashiro::Uuid so Yuki can stamp its own RFC-4122 version nibble on the
+     * digest without leaking the underlying hash algorithm into the public API. Equality,
+     * ordering, and hashing all forward to the wrapped Uuid. Constructed by @ref IidOf
+     * from a type's reflected display name (FNV-1a 128, v8 stamped), so two distinct
+     * types — even with the same unqualified name in different namespaces — produce
+     * different @c Iid values.
+     */
+    struct Iid {
+        Mashiro::Uuid value{};
+
+        constexpr Iid() noexcept = default;
+        explicit constexpr Iid(Mashiro::Uuid u) noexcept : value(u) {}
+
+        constexpr bool operator==(const Iid&) const noexcept = default;
+        constexpr auto operator<=>(const Iid&) const noexcept = default;
+    };
+    static_assert(sizeof(Iid) == 16);
+
+    /** @cond INTERNAL */
+    namespace Detail {
+        /// @brief Synthesise an @ref Iid from a static type name (FNV-1a 128, v8 stamped).
+        consteval Iid IidFromName(std::string_view name) {
+            const auto digest = Mashiro::Hashing::Detail::HashString(
+                Mashiro::Hashing::Fnv1a128{}, name);
+            return Iid{Mashiro::Uuid::FromUint128(digest).WithRfc4122(8)};
+        }
+    } // namespace Detail
+    /** @endcond */
+
+    /// @brief The @ref Iid for the type denoted by reflection @p type.
+    ///
+    /// Normalises @p type with @c std::meta::dealias before stringifying, so a reflection
+    /// captured through an alias (e.g. @c ^^std::remove_cvref_t<IZ>) and a reflection
+    /// captured directly (e.g. @c ^^IZ inside an annotation) hash to the same @ref Iid.
+    consteval Iid IidOfMeta(std::meta::info type) {
+        return Detail::IidFromName(
+            std::meta::display_string_of(std::meta::dealias(type)));
+    }
+
+    /// @brief The @ref Iid for type @p T, derived from its reflected display name.
+    ///
+    /// Routed through @ref IidOfMeta so the @c IidOf<T> and the @c IidOfMeta(^^T) paths
+    /// always agree byte-for-byte — the bake pipeline in @ref MetaCore consumes the
+    /// reflection-driven path, while user code consumes the type-driven one. Strips
+    /// cvref so @c IidOf<const T&> matches @c IidOf<T>.
+    template<typename T>
+    consteval Iid IidOf() {
+        return IidOfMeta(^^std::remove_cvref_t<T>);
+    }
 
     // =========================================================================
     // Anno::Meta — the sole object-model annotation carrier
