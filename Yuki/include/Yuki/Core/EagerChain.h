@@ -34,6 +34,11 @@ namespace Yuki {
     ///
     /// Called by the eager-chain installer after constructing the extension. @p ext must
     /// have @c refcount == 1 on entry (the post-ctor count from RootObject(external=false)).
+    ///
+    /// @pre @p ext MUST be a non-external-lifetime @ref RootObject (constructed with
+    ///      @c external=false). Parking an externally-managed RootObject would clobber the
+    ///      @c kExternalSentinel refcount window and corrupt external-lifetime tracking;
+    ///      @c kDebug builds assert.
     void ParkEager(RootObject* ext) noexcept;
 
     /// @brief Bump a parked eager's refcount to 1 and Acquire @p extendee.
@@ -42,12 +47,20 @@ namespace Yuki {
     /// Precondition: @p ext is currently parked (refcount == 0). On return:
     ///  - @p ext has refcount == 1
     ///  - @p extendee has been Acquired by exactly one ref on behalf of @p ext.
+    ///
+    /// @warning The @c refcount == 0 precondition is asserted only in @c kDebug builds; in
+    ///          release builds a violation is silent and double-Acquires @p extendee on the
+    ///          next park/hot cycle, leaking an @p extendee ref.
     void HotAcquireEager(RootObject* ext, RootObject* extendee) noexcept;
 
     /// @brief Re-park @p ext and Release @p extendee.
     ///
     /// Called by the user-side ComPtr last-Release path when an eager's refcount
     /// transitions to 0. Does NOT delete the extension — the chain still owns it.
+    ///
+    /// @warning The @c refcount == 1 precondition is asserted only in @c kDebug builds; in
+    ///          release builds a violation under-counts @p extendee refs (a Release with no
+    ///          paired HotAcquire) and may prematurely free @p extendee.
     void DetachEagerOnRelease(RootObject* ext, RootObject* extendee) noexcept;
 
 } // namespace Yuki

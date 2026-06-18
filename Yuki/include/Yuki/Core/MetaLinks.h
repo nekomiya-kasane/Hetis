@@ -30,7 +30,7 @@ namespace Yuki {
     struct MergedDispatchSnapshot;     ///< Defined in Task 17.
     struct ExtendedListSnapshot;       ///< Defined in Task 17.
     struct ImplementedListSnapshot;    ///< Defined in Task 17.
-    struct EagerSetSnapshot;           ///< Defined in Task 17.
+    struct EagerSetSnapshot;           ///< Defined in Task 19.
     /** @endcond */
 
     /**
