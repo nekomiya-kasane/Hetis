@@ -20,7 +20,10 @@
 
 namespace Yuki {
 
-    /** @cond INTERNAL — snapshot types defined in Tasks 13 and 17 */
+    /** @cond INTERNAL — snapshot types forward-declared here so MetaLinks.h compiles before Tasks 13
+     *  and 17 land; do NOT replace with includes prematurely. The decoupling is deliberate: MetaLinks
+     *  is consumed by MetaDynamic (Task 9) and Y_OBJECT, both of which must build before the dispatch
+     *  and extendedBy machinery exists. */
     struct DispatchSnapshot;           ///< Defined in Task 13.
     struct MergedDispatchSnapshot;     ///< Defined in Task 17.
     struct ExtendedListSnapshot;       ///< Defined in Task 17.
@@ -64,6 +67,15 @@ namespace Yuki {
          * Readers use the epoch value to drive L1 fingerprint cache invalidation: if the
          * epoch observed at lookup time differs from the epoch at result-use time, the
          * cached result is discarded. Must be called after every snapshot pointer swap.
+         *
+         * @note The @c acq_rel ordering is load-bearing: readers acquire the epoch to
+         *       establish a happens-before edge over their subsequent snapshot-pointer
+         *       @c load(acquire) against the writer's @c store(release) of those pointers.
+         *       @c memory_order_release alone would leave a reader that observes the new
+         *       epoch without an ordering guarantee over the pointer stores that preceded
+         *       the bump — they could appear to predate the bump, causing the reader to
+         *       trust a stale snapshot. The acquire side is therefore required, not
+         *       cosmetic. Do not weaken to @c release or @c relaxed.
          */
         void BumpCacheEpoch() noexcept { cacheEpoch.fetch_add(1, std::memory_order_acq_rel); }
     };

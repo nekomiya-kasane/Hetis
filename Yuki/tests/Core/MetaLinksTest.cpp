@@ -6,7 +6,7 @@
 
 using namespace Yuki;
 
-TEST_CASE("MetaLinks defaults", AUTO_TAG) {
+TEST_CASE("MetaLinks: default state and epoch bump", AUTO_TAG) {
     MetaLinks l{};
     REQUIRE(l.dispatch.load() == nullptr);
     REQUIRE(l.mergedDispatch.load() == nullptr);
