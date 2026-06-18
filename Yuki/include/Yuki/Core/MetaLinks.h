@@ -15,6 +15,8 @@
  */
 #pragma once
 
+#include <Yuki/Core/FingerprintCache.h>
+
 #include <atomic>
 #include <cstdint>
 
@@ -59,7 +61,8 @@ namespace Yuki {
         /// D15 monotonic gate counter — bumped on any link mutation; drives L1 invalidation.
         std::atomic<std::uint64_t>                  cacheEpoch{0};
 
-        // L1 fingerprint cache slot lands in Task 15 (D15).
+        /// D15 L1 — per-class 4-slot lock-free fingerprint ring.
+        FingerprintCache l1{};
 
         /**
          * @brief Monotonically increment @ref cacheEpoch under @c acq_rel ordering.
