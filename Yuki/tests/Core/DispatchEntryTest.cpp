@@ -24,16 +24,14 @@ TEST_CASE("DispatchEntry stores iid / kind / seal-bits / arm", AUTO_TAG) {
     DispatchEntry e{
         .iid           = i1,
         .kind          = DispatchKind::InlineFacade,
-        .important     = true,
-        .unique        = false,
-        .final_        = false,
+        .seal          = {.final = false, .unique = false, .important = true},
         .armOffset     = 0x40,
         .providerClass = &probe,
         .arm           = &armStorage,
     };
     REQUIRE(e.iid == i1);
     REQUIRE(e.kind == DispatchKind::InlineFacade);
-    REQUIRE(e.important == true);
+    REQUIRE(e.seal.important == true);
     REQUIRE(e.armOffset == 0x40);
     REQUIRE(e.providerClass == &probe);
     REQUIRE(e.arm == &armStorage);

@@ -8,7 +8,7 @@
  *   - @c SideTableResolver      — pointer to a resolver function `RootObject*(*)(RootObject*)`
  *   - @c CodeExtensionSingleton — pointer to the singleton stateless-extension instance
  *
- * @c important / @c unique / @c final_ replicate the D7 seal bits onto the entry so dispatch
+ * @c seal replicates the D7 seal bits (final / unique / important) onto the entry so dispatch
  * and the cross-module Install<E> check (D7.2) can read them without re-walking annotations.
  *
  * @ingroup Core
@@ -22,7 +22,13 @@
 
 namespace Yuki {
 
-    struct MetaCore;  // forward-decl avoids include cycle with MetaCore.h.
+    // Forward-declared: DispatchEntry stores `const MetaCore*` but never dereferences it.
+    // All dereferences live in Query / Install consumers (T18, T20) that already include
+    // MetaCore.h. Adding any inline accessor here (e.g., `const MetaCore* provider() const`
+    // that touches members of *providerClass) would silently reintroduce the cycle, since
+    // MetaCore.h must eventually pull in DispatchEntry.h once MetaLinks's dispatch slot
+    // is typed against DispatchSnapshot.
+    struct MetaCore;
 
     /// @brief The three Y2 dispatch arms (D14).
     enum class DispatchKind : std::uint8_t {
@@ -36,17 +42,19 @@ namespace Yuki {
      *
      * Plain aggregate; lives in rodata when published as part of a @ref DispatchSnapshot.
      * Field order is stable — the binary search in @ref LookupMergedDispatch only touches
-     * @ref iid and @ref important, so future fields appended at the tail are non-breaking.
+     * @ref iid and @c seal.important, so future fields appended at the tail are non-breaking.
      */
     struct DispatchEntry {
-        Iid              iid{};
-        DispatchKind     kind{DispatchKind::InlineFacade};
-        bool             important{false};
-        bool             unique{false};
-        bool             final_{false};
-        std::uint32_t    armOffset{0};
-        const MetaCore*  providerClass{nullptr};
-        void*            arm{nullptr};
+        Iid               iid{};
+        DispatchKind      kind{DispatchKind::InlineFacade};
+        /// Matches A1's @c ImplementsInfo::flags convention so T18 Install / T20 Query can copy
+        /// seal state with a single assignment (`e.seal = info.flags;`) instead of field-by-field.
+        Detail::SealFlags seal{};
+        std::uint32_t     armOffset{0};  ///< Per-kind offset: InlineFacade subobject offset within the
+                                         ///< impl frame; ignored by SideTableResolver /
+                                         ///< CodeExtensionSingleton (which use @ref arm directly).
+        const MetaCore*   providerClass{nullptr};
+        void*             arm{nullptr};
     };
 
     /// @brief Iid-sorted (or insertion-order) view over a contiguous @ref DispatchEntry array.
