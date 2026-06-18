@@ -182,6 +182,47 @@ namespace Yuki {
             consteval Extends(const std::meta::info (&arr)[N]) noexcept : bases(arr) {}
         };
 
+        /**
+         * @brief Inheritance seal: no subclass may re-implement @p iface.
+         *
+         * Stamped on an @ref Anno::Implementation (or @ref Anno::Extension): a derived class that
+         * re-declares the same interface is a hard compile error at MetaCore-bake time. Orthogonal
+         * to @ref Unique / @ref Important — those are closure-level seals (one nucleus + its
+         * Extensions), whereas @c Final restricts inheritance independently of closure membership.
+         */
+        struct Final {
+            std::meta::info iface;  ///< Interface reflection sealed against re-implementation.
+        };
+
+        /**
+         * @brief Closure seal: at most one class in this nucleus's closure implements @p iface.
+         *
+         * The closure registrar enforces uniqueness across the @c Anno::Implementation + its
+         * Extensions, diagnosing conflicting providers at bake time.
+         */
+        struct Unique {
+            std::meta::info iface;  ///< Interface reflection sealed against multi-provider closure.
+        };
+
+        /**
+         * @brief Closure seal: this provider always wins dispatch for @p iface.
+         *
+         * Resolves ambiguity in favour of the @c Important provider when multiple closure members
+         * implement the same interface. Pairs naturally with an Extension that overrides an
+         * Implementation's interface.
+         */
+        struct Important {
+            std::meta::info iface;  ///< Interface reflection elevated for closure dispatch.
+        };
+
+        /**
+         * @brief Field-level marker: this NSDM participates in closure serialization (P2-D4).
+         *
+         * Empty struct so the annotation reads as a prvalue: `[[=Anno::Pickled{}]]`. Discoverable
+         * via reflection today; full @c PicklePump semantics land in Plan B's closure serializer.
+         */
+        struct Pickled {};
+
         /// @name Edge-less role shorthands
         /// @brief Ready-made @ref Role values for the common case of a class with no `extends` /
         ///        `implements` edges, so the annotation reads `[[=Anno::Implementation]]` instead of
@@ -288,6 +329,43 @@ namespace Yuki {
         consteval bool IsObjectModelType(std::meta::info type) {
             return !std::meta::annotations_of(type, ^^Anno::Meta).empty()
                 || !std::meta::annotations_of(type, ^^Anno::Role).empty();
+        }
+
+        /**
+         * @brief Triple-orthogonal seal state for the (class, interface) pair.
+         *
+         * Returned by @ref SealFlagsFor; consumed by Task 7's MetaCore bake.
+         */
+        struct SealFlags {
+            bool final = false;      ///< Carries an @ref Anno::Final{^^I} annotation.
+            bool unique = false;     ///< Carries an @ref Anno::Unique{^^I} annotation.
+            bool important = false;  ///< Carries an @ref Anno::Important{^^I} annotation.
+        };
+
+        /**
+         * @brief Read the seal flags stamped on class @p T for interface @p I.
+         *
+         * Walks @c std::meta::annotations_of(^^T), recognising @ref Anno::Final / @ref Anno::Unique
+         * / @ref Anno::Important whose @c iface reflection equals @c ^^I. Total — silently returns
+         * the zero-initialised result for an untagged pair.
+         */
+        template<class T, class I>
+        consteval SealFlags SealFlagsFor() {
+            SealFlags f{};
+            for (auto a : std::meta::annotations_of(^^T)) {
+                auto t = std::meta::type_of(a);
+                if (t == (^^Anno::Final)
+                    && std::meta::extract<Anno::Final>(a).iface == (^^I)) {
+                    f.final = true;
+                } else if (t == (^^Anno::Unique)
+                    && std::meta::extract<Anno::Unique>(a).iface == (^^I)) {
+                    f.unique = true;
+                } else if (t == (^^Anno::Important)
+                    && std::meta::extract<Anno::Important>(a).iface == (^^I)) {
+                    f.important = true;
+                }
+            }
+            return f;
         }
 
     } // namespace Detail
