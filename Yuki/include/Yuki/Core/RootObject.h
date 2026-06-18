@@ -43,5 +43,5 @@ namespace Yuki {
      *           (caller must delete p).
      */
     void Acquire(RootObject* p) noexcept;
-    bool Release(RootObject* p) noexcept;
+    [[nodiscard]] bool Release(RootObject* p) noexcept;
 }

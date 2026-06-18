@@ -40,7 +40,7 @@ namespace Yuki {
         /// @note Use only when the source owns the +1 (factory return, Detach, MakeOwned).
         ///       Wrapping a borrowed or observer pointer via Adopt silently under-counts —
         ///       use the explicit ComPtr(T*) ctor for that case.
-        static ComPtr Adopt(T* p) noexcept {
+        [[nodiscard]] static ComPtr Adopt(T* p) noexcept {
             ComPtr c;
             c.p_ = p;
             return c;
@@ -66,7 +66,7 @@ namespace Yuki {
         ~ComPtr() noexcept { if (p_ && Release(p_)) delete p_; }
 
         T*  Get()    const noexcept { return p_; }                         ///< Raw pointer accessor.
-        T*  Detach()       noexcept { return std::exchange(p_, nullptr); } ///< Surrender ownership.
+        [[nodiscard]] T* Detach() noexcept { return std::exchange(p_, nullptr); } ///< Surrender ownership.
         T&  operator*()  const noexcept { return *p_; }
         T*  operator->() const noexcept { return p_; }
         explicit operator bool() const noexcept { return p_ != nullptr; }
