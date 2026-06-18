@@ -29,4 +29,18 @@ namespace Yuki {
         std::atomic<TaggedPayload> metaWord_;
     };
     static_assert(sizeof(RootObject) == 2 * sizeof(void*));
+
+    /**
+     * @brief ComPtr / MakeOwned reference-count hooks (D12).
+     *
+     * These are the temporary T10 forwarders to TaggedPayload::TryIncrement / TryDecrement.
+     * Task 12 (D8/D9/D10/D13) will replace them with hierarchical semantics: facade/arm coalescing,
+     * external-lifetime sentinel handling, and sub-object lifetime — until then the TaggedPayload
+     * CAS implementation already handles the external-sentinel no-op and saturation correctly.
+     *
+     * @param p  Non-null pointer to any RootObject-derived instance.
+     * @return   Release returns true iff the decrement transitioned refcount to 0 (caller deletes).
+     */
+    void Acquire(RootObject* p) noexcept;
+    bool Release(RootObject* p) noexcept;
 }
