@@ -1,6 +1,7 @@
 #pragma once
 #include <Yuki/Core/Identity.h>
 #include <Yuki/Core/MetaCore.h>
+#include <Yuki/Core/MetaDynamic.h>
 #include <meta>
 #include <type_traits>
 
@@ -10,6 +11,9 @@
         typename [: ::std::meta::access_context::current().scope() :];                 \
     static constexpr ::Yuki::MetaCore kMetaCore =                                      \
         ::Yuki::Detail::MakeMetaCoreFor<YukiSelf>();                                   \
+    static const ::Yuki::MetaDynamic& Meta() noexcept {                                \
+        return ::Yuki::MetaDynamicOf<YukiSelf>;                                        \
+    }                                                                                  \
     friend struct ::Yuki::Detail::MetaHook<YukiSelf>;                                  \
   private:                                                                             \
     [[no_unique_address, msvc::no_unique_address]]                                     \
