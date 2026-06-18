@@ -406,6 +406,10 @@ namespace Yuki {
          * Walks @c std::meta::annotations_of(^^T), recognising @ref Anno::Final / @ref Anno::Unique
          * / @ref Anno::Important whose @c iface reflection equals @c ^^I. Total — silently returns
          * the zero-initialised result for an untagged pair.
+         *
+         * @note The parentheses around @c (^^Anno::Final) etc. are load-bearing under clang-p2996:
+         *       the splice operator @c ^^ greedily glues onto the next token, so @c ^^Anno::Final
+         *       && @c ... parses as @c ^^(Anno::Final && ...). Do not "simplify" them away.
          */
         template<class T, class I>
         consteval SealFlags SealFlagsFor() {

@@ -72,6 +72,16 @@ namespace Yuki {
         }
 
         /// @brief Read @ref SealFlags stamped on @p T for the interface denoted by reflection @p iface.
+        ///
+        /// @note This *mirrors* @ref Yuki::Detail::SealFlagsFor "SealFlagsFor<T, I>" (Identity.h)
+        ///       but takes a @c std::meta::info instead of a type parameter. The duplication is
+        ///       necessary, not accidental: the bake loops in @ref MakeImplementsArrayFor iterate
+        ///       reflections produced by @c Anno::Implements{InfoList}.ifaces, and you cannot
+        ///       template-instantiate over a runtime-iterated reflection at constant evaluation.
+        ///       Do not consolidate these two into one.
+        ///
+        /// @note Parentheses around @c (^^Anno::Final) etc. are load-bearing — see the matching
+        ///       note on @ref Yuki::Detail::SealFlagsFor "SealFlagsFor<T, I>" in Identity.h.
         template<class T>
         consteval SealFlags SealFlagsForInfo(std::meta::info iface) {
             SealFlags f{};
