@@ -27,6 +27,18 @@
  * synchronises-with the Publish's iidHi store and thereby observes the prior epoch,
  * entry, and iidLo stores from the same Publish call.
  *
+ * This synchronises-with edge is only sufficient when Probe observes the *new* iidHi.
+ * The abstract C++ model permits independent release stores from one thread to be observed
+ * out of order by a reader (release ordering pins each store to *its own* atomic, not to
+ * sibling atomics), so in principle a Probe could see a stale @c (iidHi, iidLo) pair from
+ * a prior publisher AND the new @c (epoch, entry) from a concurrent in-flight Publish,
+ * returning the new entry mislabeled as the prior iid. We rely on x86-64 TSO — the only
+ * supported target, enforced by the @c static_assert below — where independent stores from
+ * one thread are observed in program order by any reader, making the four release stores
+ * of a single Publish visible as an atomic group and foreclosing the race. A future port
+ * to a weaker target (ARM64 with relaxed reordering) would need either a seqlock retry on
+ * iidHi mismatch or a wide-CAS-backed publish.
+ *
  * @ingroup Core
  */
 #pragma once
@@ -41,6 +53,11 @@
 namespace Yuki {
 
     struct DispatchEntry;
+
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
+                  "FingerprintCache split-halves design requires lock-free uint64 atomics.");
+    static_assert(std::atomic<const DispatchEntry*>::is_always_lock_free,
+                  "FingerprintCache slot.entry must be a lock-free atomic pointer.");
 
     /** @cond INTERNAL */
     namespace Detail {
