@@ -10,4 +10,8 @@
         typename [: ::std::meta::access_context::current().scope() :];                 \
     static constexpr ::Yuki::MetaCore kMetaCore =                                      \
         ::Yuki::Detail::MakeMetaCoreFor<YukiSelf>();                                   \
-    friend struct ::Yuki::Detail::MetaHook<YukiSelf>
+    friend struct ::Yuki::Detail::MetaHook<YukiSelf>;                                  \
+  private:                                                                             \
+    [[no_unique_address, msvc::no_unique_address]]                                     \
+    ::Yuki::Detail::MetaHook<YukiSelf> _yukiHook_{};                                   \
+  public:
