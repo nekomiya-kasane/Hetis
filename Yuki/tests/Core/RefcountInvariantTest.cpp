@@ -36,7 +36,6 @@ TEST_CASE("Facade-like Acquire pins underlying for its lifetime", AUTO_TAG) {
         auto f = MakeOwned<Facadeish>(rawImpl);
         REQUIRE(rawImpl->PayloadRelaxed().refcount() == 2);   // facade pinned underlying
         REQUIRE(f->PayloadRelaxed().refcount() == 1);
-        REQUIRE(f->PayloadRelaxed().refcount() >= rawImpl->PayloadRelaxed().refcount() - 1);
     }
     REQUIRE(rawImpl->PayloadRelaxed().refcount() == 1);       // facade gone, underlying released
 }
