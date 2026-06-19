@@ -53,7 +53,16 @@ namespace Yuki {
         std::uint32_t     armOffset{0};  ///< Per-kind offset: InlineFacade subobject offset within the
                                          ///< impl frame; ignored by SideTableResolver /
                                          ///< CodeExtensionSingleton (which use @ref arm directly).
+        /// @brief Class-level identity of the provider (T21 introspection — @c ProviderClass /
+        ///        @c RoleOf read this). Stable: a single provider class per (interface, impl) pair.
         const MetaCore*   providerClass{nullptr};
+        /// @brief Per-kind payload (T23 arm wiring):
+        ///   - @c InlineFacade           : per-instance facade subobject pointer (when @c armOffset==0
+        ///                                 the runtime falls back to @c static_cast<I*>(node)).
+        ///   - @c SideTableResolver      : function pointer @c RootObject*(*)(RootObject* node);
+        ///                                 reinterpret-cast at install time and on the Query hot path.
+        ///   - @c CodeExtensionSingleton : function pointer @c RootObject*(*)(); returns a singleton
+        ///                                 with external-lifetime payload (Acquire/Release no-ops).
         void*             arm{nullptr};
     };
 

@@ -1,8 +1,11 @@
 #pragma once
+
 #include <Yuki/Core/Identity.h>
 #include <atomic>
 #include <cstdint>
+
 namespace Yuki {
+
     struct TaggedPayload {
         static constexpr std::uint16_t kExternalSentinel = 0xFFFF;
         static constexpr std::uint16_t kSaturationLimit  = 0xFFFE;

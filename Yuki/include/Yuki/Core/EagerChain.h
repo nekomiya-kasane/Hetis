@@ -63,4 +63,34 @@ namespace Yuki {
     ///          paired HotAcquire) and may prematurely free @p extendee.
     void DetachEagerOnRelease(RootObject* ext, RootObject* extendee) noexcept;
 
+    /// @brief T23 §7 — final teardown walker. Called from @c ~RootObject when the dying
+    ///        instance is an @c Implementation: delete every parked eager extension owned by
+    ///        @p nucleus's @c MetaLinks::eagerSet, clear the slot, retire the snapshot.
+    ///
+    /// **D11 invariant (§7.3):** live (refcount > 0) eager extensions can never reach this
+    /// path. @p ext->refcount >= @p extendee->refcount whenever @p extendee > 0; a live
+    /// extension holds the deferred @c Acquire(extendee), so the nucleus cannot reach 0
+    /// while any live ext exists. Only parked ones (refcount == 0) survive to here. The
+    /// walker @c kDebug-asserts that invariant on each parked entry.
+    ///
+    /// **Locking:** takes @c links->writerMu so a concurrent @c Install or
+    /// @c RegisterSideTable on a base flattening through this metaclass (D16) serialises
+    /// cleanly. The dying nucleus is not visible to in-flight @c Query (its refcount just
+    /// hit zero, so no @c ComPtr can race) — @c RcuReadGuard protects the snapshot, not the
+    /// nucleus itself.
+    ///
+    /// No-op for null @p nucleus, null @c links, or null @c eagerSet snapshot.
+    void DeleteParkedEagers(RootObject* nucleus) noexcept;
+
+    namespace Detail {
+        /// @brief Allocate an @ref EagerSetSnapshot with @p count uninitialised slots in a
+        ///        single block (header + trailing @c RootObject* array).
+        ///
+        /// The returned snapshot's @c parked array points at the trailing storage. Both the
+        /// header and the array are freed by the single deleter that the dtor walker passes
+        /// to @ref RetireSnapshot, so callers do NOT free the array separately. Used by the
+        /// A4 eager-set publisher and by the A3 NucleusDtorWalker tests.
+        [[nodiscard]] EagerSetSnapshot* AllocEagerSetSnapshot(std::size_t count) noexcept;
+    }
+
 } // namespace Yuki

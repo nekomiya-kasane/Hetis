@@ -19,8 +19,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 
 namespace Yuki {
+
+    struct MetaCore;
 
     /** @cond INTERNAL — snapshot types forward-declared here so MetaLinks.h compiles before Tasks 13
      *  and 17 land; do NOT replace with includes prematurely. The decoupling is deliberate: MetaLinks
@@ -32,6 +35,22 @@ namespace Yuki {
     struct ImplementedListSnapshot;    ///< Defined in Task 17.
     struct EagerSetSnapshot;           ///< Defined in Task 19.
     /** @endcond */
+
+    /// @brief T23 / D16 reverse-edge snapshot: the concrete subclasses of this MetaClass.
+    ///
+    /// Holds @c const @c MetaCore* (class-level identity), not @c RootObject*. Populated at
+    /// @c Registry::Install<T>() time by walking @p T's C++ bases via reflection and
+    /// CAS-appending @p T's MetaCore onto each base's slot. Read by the D16 base-chain
+    /// flatten in @c RegisterSideTable / @c RegisterCodeExt to push extension entries down
+    /// into every subclass's mergedDispatch table.
+    ///
+    /// Snapshots are immutable once published; mutation produces a fresh snapshot and
+    /// retires the old one via @c RetireSnapshot. Iid-sorted for stable diff + binary
+    /// search (rare; the typical caller walks the array linearly).
+    struct SubclassSnapshot {
+        std::size_t           count{0};
+        const MetaCore* const* data{nullptr};
+    };
 
     /**
      * @brief Runtime-mutable RCU snapshot layer for a Yuki class (D18 layer 2 of 3).
@@ -58,11 +77,22 @@ namespace Yuki {
         /// RCU slot for the eager-materialise set. Filled by Task 17.
         std::atomic<const EagerSetSnapshot*>        eagerSet{nullptr};
 
+        /// T23 / D16 RCU slot: concrete subclasses of this class. Populated by Install<D>()
+        /// for each base B of D. Walked by RegisterSideTable / RegisterCodeExt to flatten
+        /// extension entries down into subclass mergedDispatch tables.
+        std::atomic<const SubclassSnapshot*>        subclassedBy{nullptr};
+
         /// D15 monotonic gate counter — bumped on any link mutation; drives L1 invalidation.
         std::atomic<std::uint64_t>                  cacheEpoch{0};
 
         /// D15 L1 — per-class 4-slot lock-free fingerprint ring.
         FingerprintCache l1{};
+
+        /// T23 — per-class writer mutex. Acquired by Install / RegisterSideTable /
+        /// RegisterCodeExt / DeleteParkedFor to serialise snapshot mutations. Acquired in
+        /// subclassedBy iid-sort order to prevent deadlock when a base + subclass are both
+        /// being written concurrently (§5.4). Replaces A2's external @c MutexFor table.
+        std::mutex writerMu{};
 
         /**
          * @brief Monotonically increment @ref cacheEpoch under @c acq_rel ordering.

@@ -4,6 +4,8 @@
 #include <atomic>
 
 namespace Yuki {
+    struct MetaDynamic;
+
     struct RootObject {
         explicit RootObject(ClassType role, void* arm, bool external) noexcept
           : metaWord_(external
@@ -23,6 +25,21 @@ namespace Yuki {
         }
 
         std::atomic<TaggedPayload>& MetaWord() noexcept { return metaWord_; }
+
+        /// @brief Type-erased access to the instance's MetaDynamic. Y_OBJECT overrides this
+        ///        to return the per-class @c MetaDynamicOf<SelfType>. The base default
+        ///        returns a sentinel @c {nullptr,nullptr} for direct-derivations without
+        ///        Y_OBJECT (test fixtures, abstract interface bases). T21 introspection
+        ///        helpers guard against null arms.
+        virtual const MetaDynamic& MetaDyn() const noexcept;
+
+        /// @brief T22 — closure up-pointer. The base returns @c nullptr (impls / standalone
+        ///        nodes have no upstream). Materialized facade / extension subclasses override
+        ///        to return the nucleus they were materialized against; @ref Yuki::Nucleus
+        ///        follows this pointer chain to the closure root. Defaulting to @c nullptr
+        ///        keeps Impl instances at zero extra storage per the spec §3 "Up-pointer
+        ///        storage" note.
+        virtual RootObject* Upstream() const noexcept { return nullptr; }
 
       private:
         std::atomic<TaggedPayload> metaWord_;

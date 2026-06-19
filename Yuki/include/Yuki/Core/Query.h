@@ -19,6 +19,7 @@
 
 #include <Yuki/Core/ComPtr.h>
 #include <Yuki/Core/DispatchEntry.h>
+#include <Yuki/Core/EpochRcu.h>
 #include <Yuki/Core/FingerprintCache.h>
 #include <Yuki/Core/Identity.h>
 #include <Yuki/Core/MergedDispatch.h>
@@ -48,6 +49,11 @@ namespace Yuki {
             // L0 fast path: I is statically known to be a base subobject of T.
             return ComPtr<I>(static_cast<I*>(node));
         } else {
+            // T23: scope an RCU read guard around the L1/L2 probe + arm invocation so the
+            // snapshot pointers we read remain live for the duration of the call. The guard
+            // is cheap (one relaxed-load of @c tlSlot->epoch on the nested-call fast path) and
+            // gates @c TryReclaim from freeing the snapshots backing @p e.
+            RcuReadGuard g;
             MetaLinks* links = T::Meta().links;
             const DispatchEntry* e = QueryDynamicRaw(links, IidOf<I>());
             if (!e) return {};
@@ -62,12 +68,29 @@ namespace Yuki {
                     } else {
                         return {};
                     }
-                case DispatchKind::SideTableResolver:
-                    // A3 plumbs the resolver invocation; A2 stubs to null.
-                    return {};
-                case DispatchKind::CodeExtensionSingleton:
-                    // A3 routes through HotAcquireEager; A2 stubs to null.
-                    return {};
+                case DispatchKind::SideTableResolver: {
+                    // T23 §6.2: invoke the registered resolver. Resolver returns +1 reference
+                    // to a materialised heap facade, OR @c nullptr if it chose not to
+                    // materialise (§6.4). @c ComPtr::Adopt consumes the +1; the empty result
+                    // is shape-equivalent to Provides==false.
+                    using ResolverFn = RootObject* (*)(RootObject*);
+                    auto fn = reinterpret_cast<ResolverFn>(e->arm);
+                    if (!fn) return {};
+                    RootObject* mat = fn(static_cast<RootObject*>(node));
+                    if (!mat) return {};
+                    return ComPtr<I>::Adopt(static_cast<I*>(mat));
+                }
+                case DispatchKind::CodeExtensionSingleton: {
+                    // T23 §6.2: invoke the registered singleton thunk. Returns a borrowed ptr
+                    // to an external-lifetime singleton (payload carries external sentinel so
+                    // @c Acquire is a no-op).
+                    using SingletonFn = RootObject* (*)();
+                    auto fn = reinterpret_cast<SingletonFn>(e->arm);
+                    if (!fn) return {};
+                    RootObject* s = fn();
+                    if (!s) return {};
+                    return ComPtr<I>(static_cast<I*>(s));
+                }
             }
             return {};
         }
