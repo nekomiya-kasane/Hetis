@@ -68,8 +68,15 @@ namespace Mashiro {
          * @ref TimestampedEvent) by every struct that participates in
          * @ref Mashiro::SystemEvent. Used by the variant materialiser
          * to discover payload types via reflection without an annotation.
+         *
+         * The defaulted @c operator== exists so derived payloads that defaulte
+         * their own @c operator== are not implicitly deleted by the absence of
+         * a base comparator (the marker contributes zero bytes, so the
+         * comparison is genuinely vacuous).
          */
-        struct EventPayloadBase {};
+        struct EventPayloadBase {
+            constexpr bool operator==(const EventPayloadBase&) const = default;
+        };
 
         /**
          * @brief Mixin: payload targets a specific window.
