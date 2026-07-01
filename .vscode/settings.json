@@ -16,8 +16,9 @@
   "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}",
 
   // ─── IntelliSense (clangd) ───
+  "clangd.path": "T:\\toolchains\\coca-toolchain-p2996\\bin\\clangd.exe",
   "clangd.arguments": [
-    "--compile-commands-dir=${workspaceFolder}/build/x64-debug",
+    "--compile-commands-dir=${workspaceFolder}/build/x64-asan",
     "--background-index",
     "--clang-tidy"
   ],

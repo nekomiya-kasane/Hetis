@@ -38,6 +38,7 @@ set(CMAKE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/thirdparty thirdparty)
 
+add_subdirectory(Sora)
 add_subdirectory(Nova)
 add_subdirectory(Mashiro)
 add_subdirectory(Yuki)

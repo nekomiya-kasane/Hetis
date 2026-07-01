@@ -12,7 +12,7 @@
  * one visitor would tangle the most bug-prone code on each side. They share only @c Detail::*, a stateless
  * reflection-classification layer.
  *
- * Runtime demangling lives in @ref Mashiro::ABI::Runtime. Windows uses DbgHelp's @c UnDecorateSymbolName; POSIX uses
+ * Runtime demangling lives in @ref Sora::ABI::Runtime. Windows uses DbgHelp's @c UnDecorateSymbolName; POSIX uses
  * @c abi::__cxa_demangle.
  *
  * @see docs/superpowers/specs/2026-06-13-abi-name-mangling-design.md
@@ -26,10 +26,10 @@
 #include <string_view>
 #include <vector>
 
-namespace Mashiro::ABI {
+namespace Sora::Meta::ABI {
 
     /** @brief Which ABI's mangling scheme to apply. */
-    enum class Kind { Itanium, MSVC };
+    enum class Kind : uint8_t { Itanium, MSVC };
 
     /** @cond INTERNAL */
     namespace Detail {
@@ -42,14 +42,30 @@ namespace Mashiro::ABI {
          * cv-stripped reflection against a fixed @c ^^ reference table; this lets the manglers distinguish Itanium
          * @c i versus @c l, MSVC @c H versus @c J, and @c char / @c signed @c char / @c unsigned @c char.
          */
-        enum class Builtin {
+        enum class Builtin : uint8_t {
             None = 0,
-            Void, Bool,
-            Char, SChar, UChar,
-            Char8, Char16, Char32, WChar,
-            Short, UShort, Int, UInt, Long, ULong, LongLong, ULongLong,
-            Int128, UInt128,
-            Float, Double, LongDouble,
+            Void,
+            Bool,
+            Char,
+            SChar,
+            UChar,
+            Char8,
+            Char16,
+            Char32,
+            WChar,
+            Short,
+            UShort,
+            Int,
+            UInt,
+            Long,
+            ULong,
+            LongLong,
+            ULongLong,
+            Int128,
+            UInt128,
+            Float,
+            Double,
+            LongDouble,
             NullPtr,
         };
 
@@ -61,29 +77,75 @@ namespace Mashiro::ABI {
         consteval Builtin ClassifyBuiltin(std::meta::info t) {
             t = std::meta::remove_cv(std::meta::dealias(t));
             // Order: most common first; identity comparison is exact and cheap.
-            if (t == ^^void)               return Builtin::Void;
-            if (t == ^^bool)               return Builtin::Bool;
-            if (t == ^^char)               return Builtin::Char;
-            if (t == ^^signed char)        return Builtin::SChar;
-            if (t == ^^unsigned char)      return Builtin::UChar;
-            if (t == ^^char8_t)            return Builtin::Char8;
-            if (t == ^^char16_t)           return Builtin::Char16;
-            if (t == ^^char32_t)           return Builtin::Char32;
-            if (t == ^^wchar_t)            return Builtin::WChar;
-            if (t == ^^short)              return Builtin::Short;
-            if (t == ^^unsigned short)     return Builtin::UShort;
-            if (t == ^^int)                return Builtin::Int;
-            if (t == ^^unsigned int)       return Builtin::UInt;
-            if (t == ^^long)               return Builtin::Long;
-            if (t == ^^unsigned long)      return Builtin::ULong;
-            if (t == ^^long long)          return Builtin::LongLong;
-            if (t == ^^unsigned long long) return Builtin::ULongLong;
-            if (t == ^^__int128)           return Builtin::Int128;
-            if (t == ^^unsigned __int128)  return Builtin::UInt128;
-            if (t == ^^float)              return Builtin::Float;
-            if (t == ^^double)             return Builtin::Double;
-            if (t == ^^long double)        return Builtin::LongDouble;
-            if (t == ^^decltype(nullptr))  return Builtin::NullPtr;
+            if (t == ^^void) {
+                return Builtin::Void;
+            }
+            if (t == ^^bool) {
+                return Builtin::Bool;
+            }
+            if (t == ^^char) {
+                return Builtin::Char;
+            }
+            if (t == ^^signed char) {
+                return Builtin::SChar;
+            }
+            if (t == ^^unsigned char) {
+                return Builtin::UChar;
+            }
+            if (t == ^^char8_t) {
+                return Builtin::Char8;
+            }
+            if (t == ^^char16_t) {
+                return Builtin::Char16;
+            }
+            if (t == ^^char32_t) {
+                return Builtin::Char32;
+            }
+            if (t == ^^wchar_t) {
+                return Builtin::WChar;
+            }
+            if (t == ^^short) {
+                return Builtin::Short;
+            }
+            if (t == ^^unsigned short) {
+                return Builtin::UShort;
+            }
+            if (t == ^^int) {
+                return Builtin::Int;
+            }
+            if (t == ^^unsigned int) {
+                return Builtin::UInt;
+            }
+            if (t == ^^long) {
+                return Builtin::Long;
+            }
+            if (t == ^^unsigned long) {
+                return Builtin::ULong;
+            }
+            if (t == ^^long long) {
+                return Builtin::LongLong;
+            }
+            if (t == ^^unsigned long long) {
+                return Builtin::ULongLong;
+            }
+            if (t == ^^__int128) {
+                return Builtin::Int128;
+            }
+            if (t == ^^unsigned __int128) {
+                return Builtin::UInt128;
+            }
+            if (t == ^^float) {
+                return Builtin::Float;
+            }
+            if (t == ^^double) {
+                return Builtin::Double;
+            }
+            if (t == ^^long double) {
+                return Builtin::LongDouble;
+            }
+            if (t == ^^decltype(nullptr)) {
+                return Builtin::NullPtr;
+            }
             return Builtin::None;
         }
 
@@ -96,7 +158,7 @@ namespace Mashiro::ABI {
             std::vector<std::meta::info> chain;
             chain.push_back(t);
             auto parent = std::meta::parent_of(t);
-            while (parent != ^^:: && std::meta::has_identifier(parent)) {
+            while (parent != ^^::&&std::meta::has_identifier(parent)) {
                 chain.push_back(parent);
                 parent = std::meta::parent_of(parent);
             }
@@ -159,13 +221,12 @@ namespace Mashiro::ABI {
     } // namespace Detail
     /** @endcond */
 
-} // namespace Mashiro::ABI
+} // namespace Sora::Meta::ABI
 
-#include "Mashiro/Core/ABI/Itanium.h"
-#include "Mashiro/Core/ABI/MSVC.h"
-#include "Mashiro/Core/ABI/Runtime.h"
+#include "Sora/Core/ABI/Itanium.h"
+#include "Sora/Core/ABI/MSVC.h"
 
-namespace Mashiro::ABI {
+namespace Sora::Meta::ABI {
 
     /**
      * @brief Mangle @p entity under ABI @p K.
@@ -173,7 +234,7 @@ namespace Mashiro::ABI {
      * @param[in] entity A reflection of a type, function, or variable.
      * @return A @c std::string_view over static storage, so the result is a stable compile-time constant.
      */
-    template <Kind K>
+    template<Kind K>
     [[nodiscard]] consteval std::string_view Mangle(std::meta::info entity) {
         if constexpr (K == Kind::Itanium) {
             return Itanium::Mangle(entity);
@@ -182,4 +243,30 @@ namespace Mashiro::ABI {
         }
     }
 
-} // namespace Mashiro::ABI
+    /**
+     * @brief Demangle @p mangled when the platform demangler accepts it.
+     * @param[in] mangled Symbol spelling to demangle.
+     * @return Human-readable symbol spelling, or @c std::nullopt when parsing fails.
+     */
+    [[nodiscard]] std::optional<std::string> TryDemangle(std::string_view mangled) noexcept;
+
+    /**
+     * @brief Demangle @p mangled, or return @p mangled unchanged on failure.
+     * @param[in] mangled Symbol spelling to demangle.
+     * @return Human-readable symbol spelling, or @p mangled when demangling fails.
+     */
+    [[nodiscard]] std::string Demangle(std::string_view mangled);
+
+} // namespace Sora::Meta::ABI
+
+namespace Sora::ABI {
+
+    using Sora::Meta::ABI::Kind;
+    using Sora::Meta::ABI::Mangle;
+    using Sora::Meta::ABI::TryDemangle;
+    using Sora::Meta::ABI::Demangle;
+
+    namespace Itanium = Sora::Meta::ABI::Itanium;
+    namespace MSVC = Sora::Meta::ABI::MSVC;
+
+} // namespace Sora::ABI
