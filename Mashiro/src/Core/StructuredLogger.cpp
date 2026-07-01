@@ -40,7 +40,7 @@ namespace Mashiro {
 
         tapioca::style GetLevelStyle(LogLevel level) {
             using namespace tapioca;
-            
+
             constexpr auto buildStyleTable = [] consteval {
                 std::array<tapioca::style, 6> table{};
                 for (int i = 0; i < 6; ++i) {
@@ -61,14 +61,12 @@ namespace Mashiro {
             auto tp = sys_time<milliseconds>{duration_cast<milliseconds>(nanoseconds{ns})};
             auto dp = floor<days>(tp);
             auto tod = hh_mm_ss{tp - dp};
-            return std::format("{:02}:{:02}:{:02}.{:03}",
-                tod.hours().count(), tod.minutes().count(),
-                tod.seconds().count(), tod.subseconds().count());
+            return std::format("{:02}:{:02}:{:02}.{:03}", tod.hours().count(), tod.minutes().count(),
+                               tod.seconds().count(), tod.subseconds().count());
         }
 
         tapioca::basic_console& GetStderrConsole() {
-            thread_local tapioca::basic_console console{
-                tapioca::console_config{tapioca::pal::stderr_sink()}};
+            thread_local tapioca::basic_console console{tapioca::console_config{tapioca::pal::stderr_sink()}};
             return console;
         }
 
@@ -86,19 +84,26 @@ namespace Mashiro {
 
         std::string line;
         line.reserve(256);
-        line += '['; line += ts; line += "] [";
-        line += levelStr; line += "] [";
-        line += catStr; line += "] ";
+        line += '[';
+        line += ts;
+        line += "] [";
+        line += levelStr;
+        line += "] [";
+        line += catStr;
+        line += "] ";
 
         if (!entry.file.empty()) {
             // Extract basename
             auto pos = entry.file.find_last_of("\\/");
             auto fname = (pos != std::string_view::npos) ? entry.file.substr(pos + 1) : entry.file;
-            line += fname; line += ':';
-            line += std::to_string(entry.line); line += " | ";
+            line += fname;
+            line += ':';
+            line += std::to_string(entry.line);
+            line += " | ";
         }
         if (!entry.func.empty()) {
-            line += entry.func; line += " | ";
+            line += entry.func;
+            line += " | ";
         }
         line += entry.message;
 
@@ -106,7 +111,9 @@ namespace Mashiro {
         console.newline();
     }
 
-    void ConsoleSink::Flush() { std::fflush(stderr); }
+    void ConsoleSink::Flush() {
+        std::fflush(stderr);
+    }
 
     // =========================================================================
     // FileSink
@@ -117,31 +124,43 @@ namespace Mashiro {
         file_ = std::fopen(basePath_.string().c_str(), "a");
     }
 
-    FileSink::~FileSink() { if (file_) std::fclose(file_); }
+    FileSink::~FileSink() {
+        if (file_) {
+            std::fclose(file_);
+        }
+    }
 
-    FileSink::FileSink(FileSink&& o) noexcept
-        : file_(o.file_), basePath_(std::move(o.basePath_)), rotate_(o.rotate_) {
+    FileSink::FileSink(FileSink&& o) noexcept : file_(o.file_), basePath_(std::move(o.basePath_)), rotate_(o.rotate_) {
         o.file_ = nullptr;
     }
 
     FileSink& FileSink::operator=(FileSink&& o) noexcept {
         if (this != &o) {
-            if (file_) std::fclose(file_);
-            file_ = o.file_; basePath_ = std::move(o.basePath_); rotate_ = o.rotate_;
+            if (file_) {
+                std::fclose(file_);
+            }
+            file_ = o.file_;
+            basePath_ = std::move(o.basePath_);
+            rotate_ = o.rotate_;
             o.file_ = nullptr;
         }
         return *this;
     }
 
     void FileSink::Write(const LogEntry& entry) {
-        if (!file_) return;
+        if (!file_) {
+            return;
+        }
         auto ts = FormatTimestamp(entry.timestampNs);
-        std::println(file_, "[{}] [{}] [{}] {} | {}",
-            ts, ToStringView(entry.level), ToStringView(entry.category),
-            entry.func, entry.message);
+        std::println(file_, "[{}] [{}] [{}] {} | {}", ts, ToStringView(entry.level), ToStringView(entry.category),
+                     entry.func, entry.message);
     }
 
-    void FileSink::Flush() { if (file_) std::fflush(file_); }
+    void FileSink::Flush() {
+        if (file_) {
+            std::fflush(file_);
+        }
+    }
 
     // =========================================================================
     // JsonSink
@@ -151,7 +170,11 @@ namespace Mashiro {
         file_ = std::fopen(path_.string().c_str(), "a");
     }
 
-    JsonSink::~JsonSink() { if (file_) std::fclose(file_); }
+    JsonSink::~JsonSink() {
+        if (file_) {
+            std::fclose(file_);
+        }
+    }
 
     JsonSink::JsonSink(JsonSink&& o) noexcept : file_(o.file_), path_(std::move(o.path_)) {
         o.file_ = nullptr;
@@ -159,8 +182,11 @@ namespace Mashiro {
 
     JsonSink& JsonSink::operator=(JsonSink&& o) noexcept {
         if (this != &o) {
-            if (file_) std::fclose(file_);
-            file_ = o.file_; path_ = std::move(o.path_);
+            if (file_) {
+                std::fclose(file_);
+            }
+            file_ = o.file_;
+            path_ = std::move(o.path_);
             o.file_ = nullptr;
         }
         return *this;
@@ -172,16 +198,27 @@ namespace Mashiro {
             out.reserve(sv.size() + 8);
             for (char c : sv) {
                 switch (c) {
-                case '"': out += "\\\""; break;
-                case '\\': out += "\\\\"; break;
-                case '\n': out += "\\n"; break;
-                case '\r': out += "\\r"; break;
-                case '\t': out += "\\t"; break;
+                case '"':
+                    out += "\\\"";
+                    break;
+                case '\\':
+                    out += "\\\\";
+                    break;
+                case '\n':
+                    out += "\\n";
+                    break;
+                case '\r':
+                    out += "\\r";
+                    break;
+                case '\t':
+                    out += "\\t";
+                    break;
                 default:
-                    if (static_cast<unsigned char>(c) < 0x20)
+                    if (static_cast<unsigned char>(c) < 0x20) {
                         out += std::format("\\u{:04x}", static_cast<unsigned>(c));
-                    else
+                    } else {
                         out += c;
+                    }
                     break;
                 }
             }
@@ -190,26 +227,31 @@ namespace Mashiro {
     } // anonymous namespace
 
     void JsonSink::Write(const LogEntry& entry) {
-        if (!file_) return;
+        if (!file_) {
+            return;
+        }
         std::println(file_,
-            R"({{"ts":{},"level":"{}","cat":"{}","func":"{}","msg":"{}","file":"{}","line":{},"tid":{}}})",
-            entry.timestampNs,
-            ToStringView(entry.level),
-            ToStringView(entry.category),
-            EscapeJson(entry.func),
-            EscapeJson(entry.message),
-            EscapeJson(entry.file),
-            entry.line, entry.threadId);
+                     R"({{"ts":{},"level":"{}","cat":"{}","func":"{}","msg":"{}","file":"{}","line":{},"tid":{}}})",
+                     entry.timestampNs, ToStringView(entry.level), ToStringView(entry.category), EscapeJson(entry.func),
+                     EscapeJson(entry.message), EscapeJson(entry.file), entry.line, entry.threadId);
     }
 
-    void JsonSink::Flush() { if (file_) std::fflush(file_); }
+    void JsonSink::Flush() {
+        if (file_) {
+            std::fflush(file_);
+        }
+    }
 
     // =========================================================================
     // CallbackSink
     // =========================================================================
 
     CallbackSink::CallbackSink(Callback cb) : cb_(std::move(cb)) {}
-    void CallbackSink::Write(const LogEntry& entry) { if (cb_) cb_(entry); }
+    void CallbackSink::Write(const LogEntry& entry) {
+        if (cb_) {
+            cb_(entry);
+        }
+    }
     void CallbackSink::Flush() {}
 
     // =========================================================================
@@ -218,8 +260,7 @@ namespace Mashiro {
 
     namespace {
         uint32_t GetCurrentThreadIdHash() {
-            return static_cast<uint32_t>(
-                std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
         }
     } // anonymous namespace
 
@@ -236,11 +277,8 @@ namespace Mashiro {
                 // only drains rings that are still in `rings_`. Drain-then-deregister, under
                 // the same mutex DrainOnce() takes, makes the SPSC consumer single-threaded
                 // throughout the lifetime of the ring.
-                ring.ReadAll([&logger](std::span<const std::byte> data) {
-                    logger.DispatchSerialized(data);
-                });
-                std::erase_if(logger.rings_,
-                    [this](const RegisteredRing& r) { return r.ring == &ring; });
+                ring.ReadAll([&logger](std::span<const std::byte> data) { logger.DispatchSerialized(data); });
+                std::erase_if(logger.rings_, [this](const RegisteredRing& r) { return r.ring == &ring; });
             }
         };
 
@@ -264,13 +302,15 @@ namespace Mashiro {
         // Initialize per-category levels from [[=LogAnno::DefaultLevel{N}]] annotations.
         for (size_t i = 0; i < categoryLevels_.size(); ++i) {
             uint8_t defaultLvl = (i < std::size(Detail::Log::kDefaultCategoryLevels))
-                ? Detail::Log::kDefaultCategoryLevels[i]
-                : 0; // Trace for user-extended categories
+                                     ? Detail::Log::kDefaultCategoryLevels[i]
+                                     : 0; // Trace for user-extended categories
             categoryLevels_[i].store(defaultLvl, std::memory_order_relaxed);
         }
     }
 
-    StructuredLogger::~StructuredLogger() { Shutdown(); }
+    StructuredLogger::~StructuredLogger() {
+        Shutdown();
+    }
 
     StructuredLogger& StructuredLogger::Instance() {
         static StructuredLogger instance;
@@ -289,21 +329,23 @@ namespace Mashiro {
 
     void StructuredLogger::SetCategoryLevel(LogCategory cat, LogLevel level) {
         auto idx = static_cast<size_t>(cat);
-        if (idx < categoryLevels_.size())
+        if (idx < categoryLevels_.size()) {
             categoryLevels_[idx].store(static_cast<uint8_t>(level), std::memory_order_relaxed);
+        }
     }
 
     LogLevel StructuredLogger::GetCategoryLevel(LogCategory cat) const {
         auto idx = static_cast<size_t>(cat);
-        if (idx < categoryLevels_.size())
+        if (idx < categoryLevels_.size()) {
             return static_cast<LogLevel>(categoryLevels_[idx].load(std::memory_order_relaxed));
+        }
         return LogLevel::Trace;
     }
 
     void StructuredLogger::SetBackpressurePolicy(BackpressurePolicy policy) {
         policy_.store(policy, std::memory_order_relaxed);
     }
-    
+
     BackpressurePolicy StructuredLogger::GetBackpressurePolicy() const {
         return static_cast<BackpressurePolicy>(policy_.load(std::memory_order_relaxed));
     }
@@ -322,24 +364,22 @@ namespace Mashiro {
 
     void StructuredLogger::ResetRings() {
         std::lock_guard lock(ringsMutex_);
-        for (auto& reg : rings_)
-            if (reg.ring) reg.ring->Reset();
+        for (auto& reg : rings_) {
+            if (reg.ring) {
+                reg.ring->Reset();
+            }
+        }
     }
 
-    void StructuredLogger::Submit(LogLevel level, LogCategory cat,
-                                     SourceLoc loc, std::string_view message)
-    {
+    void StructuredLogger::Submit(LogLevel level, LogCategory cat, SourceLoc loc, std::string_view message) {
         auto ns = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count());
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+                .count());
         WriteToRing(level, cat, loc.file, loc.line, loc.function, ns, message);
     }
 
-    void StructuredLogger::WriteToRing(
-        LogLevel level, LogCategory cat,
-        std::string_view file, uint32_t line, std::string_view func,
-        uint64_t timestampNs, std::string_view message)
-    {
+    void StructuredLogger::WriteToRing(LogLevel level, LogCategory cat, std::string_view file, uint32_t line,
+                                       std::string_view func, uint64_t timestampNs, std::string_view message) {
         auto& ring = GetThreadRing();
 
         SerializedHeader hdr{};
@@ -358,17 +398,21 @@ namespace Mashiro {
         payload.resize(totalPayload);
 
         auto* dst = payload.data();
-        std::memcpy(dst, &hdr, sizeof(hdr)); dst += sizeof(hdr);
-        std::memcpy(dst, file.data(), hdr.fileLen); dst += hdr.fileLen;
-        std::memcpy(dst, func.data(), hdr.funcLen); dst += hdr.funcLen;
+        std::memcpy(dst, &hdr, sizeof(hdr));
+        dst += sizeof(hdr);
+        std::memcpy(dst, file.data(), hdr.fileLen);
+        dst += hdr.fileLen;
+        std::memcpy(dst, func.data(), hdr.funcLen);
+        dst += hdr.funcLen;
         std::memcpy(dst, message.data(), hdr.msgLen);
 
         auto payloadSpan = std::span<const std::byte>{payload.data(), totalPayload};
         bool ok = ring.TryWrite(payloadSpan);
         if (!ok) {
             if (policy_.load(std::memory_order_relaxed) == BackpressurePolicy::Block) {
-                while (!ring.TryWrite(payloadSpan))
+                while (!ring.TryWrite(payloadSpan)) {
                     std::this_thread::yield();
+                }
             } else {
                 droppedCount_.fetch_add(1, std::memory_order_relaxed);
             }
@@ -378,7 +422,9 @@ namespace Mashiro {
     }
 
     void StructuredLogger::StartDrainThread() {
-        if (running_.load(std::memory_order_acquire)) return;
+        if (running_.load(std::memory_order_acquire)) {
+            return;
+        }
         running_.store(true, std::memory_order_release);
         drainThread_ = std::thread([this] { DrainLoop(); });
     }
@@ -395,8 +441,9 @@ namespace Mashiro {
                 DrainOnce();
                 {
                     std::lock_guard lock(sinksMutex_);
-                    for (auto& sink : sinks_)
+                    for (auto& sink : sinks_) {
                         std::visit([](auto& s) { s.Flush(); }, sink);
+                    }
                 }
                 flushRequested_.store(false, std::memory_order_release);
                 {
@@ -410,13 +457,16 @@ namespace Mashiro {
         DrainOnce();
         {
             std::lock_guard lock(sinksMutex_);
-            for (auto& sink : sinks_)
+            for (auto& sink : sinks_) {
                 std::visit([](auto& s) { s.Flush(); }, sink);
+            }
         }
     }
 
     void StructuredLogger::DispatchSerialized(std::span<const std::byte> data) {
-        if (data.size() < sizeof(SerializedHeader)) return;
+        if (data.size() < sizeof(SerializedHeader)) {
+            return;
+        }
 
         SerializedHeader hdr{};
         std::memcpy(&hdr, data.data(), sizeof(hdr));
@@ -444,25 +494,28 @@ namespace Mashiro {
         std::lock_guard lock(ringsMutex_);
 
         for (auto& reg : rings_) {
-            if (!reg.ring) continue;
-            total += reg.ring->ReadAll(
-                [this](std::span<const std::byte> data) { DispatchSerialized(data); });
+            if (!reg.ring) {
+                continue;
+            }
+            total += reg.ring->ReadAll([this](std::span<const std::byte> data) { DispatchSerialized(data); });
         }
         return total;
     }
 
     void StructuredLogger::DispatchToSinks(const LogEntry& entry) {
         std::lock_guard lock(sinksMutex_);
-        for (auto& sink : sinks_)
+        for (auto& sink : sinks_) {
             std::visit([&entry](auto& s) { s.Write(entry); }, sink);
+        }
     }
 
     void StructuredLogger::Flush() {
         if (!running_.load(std::memory_order_acquire)) {
             DrainOnce();
             std::lock_guard lock(sinksMutex_);
-            for (auto& sink : sinks_)
+            for (auto& sink : sinks_) {
                 std::visit([](auto& s) { s.Flush(); }, sink);
+            }
             return;
         }
 
@@ -475,12 +528,16 @@ namespace Mashiro {
     }
 
     void StructuredLogger::Shutdown() {
-        if (!running_.load(std::memory_order_acquire)) return;
+        if (!running_.load(std::memory_order_acquire)) {
+            return;
+        }
         running_.store(false, std::memory_order_release);
         drainCv_.notify_all();
-        if (drainThread_.joinable()) drainThread_.join();
+        if (drainThread_.joinable()) {
+            drainThread_.join();
+        }
         flushRequested_.store(false, std::memory_order_relaxed);
         flushDone_.store(false, std::memory_order_relaxed);
     }
 
-}  // namespace Mashiro
+} // namespace Mashiro

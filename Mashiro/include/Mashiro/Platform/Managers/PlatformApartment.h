@@ -1,64 +1,58 @@
 /**
  * @file PlatformApartment.h
- * @brief Platform-thread-apartment Manager skeletons (Window split out).
+ * @brief Platform-thread manager declarations that have not yet grown into dedicated headers.
  *
- * @c Window has graduated to its own header (@c Managers/Window.h) — it owns the
- * @c WindowId allocator, the HWND/xdg-surface registry, and the lifecycle book-
- * keeping that the rest of the Platform stack reads back through. The Managers
- * remaining in this file are the bring-up stubs that have not yet been wired up;
- * each one will move out into its own header on the same path the moment its
- * implementation grows past a few overloads (per the @c ManagerSet.h note).
+ * WindowManager already owns its own header because it carries identity, native-handle lookup, and lifecycle
+ * bookkeeping. The remaining managers are lightweight bring-up declarations; each manager moves to its own header
+ * when it gains real state or more than trivial bookkeep overloads.
  *
- * Each Manager declares:
- *   - the @c [[=ScheduleMode]] annotation that puts it in the Platform apartment;
- *   - zero or more @c On(const P&) overloads — the canonical bookkeep convention
- *     established in @c SystemEvent.h. EventPump's compile-time table picks them
- *     up via @c Mashiro::Traits::Event::HandlesBookkeep without any registry,
- *     enum, or annotation on the overload itself.
+ * @ingroup Platform
  */
 #pragma once
 
-#include "Mashiro/Platform/Managers/Window.h"
+#include "Mashiro/Platform/Managers/WindowManager.h"
 #include "Mashiro/Platform/SystemEvent.h"
 #include "Mashiro/Platform/ThreadContract.h"
 
 namespace Mashiro::Platform {
 
-    /// @brief Aggregates keyboard / mouse / pen / touch state per window.
-    ///
-    /// Bookkeep contract is empty until the v1 Win32 translator wires actual
-    /// payloads through. The apartment annotation is what EventPump cares about
-    /// — once @c On overloads land here they are picked up automatically.
+    /**
+     * @brief Aggregates keyboard, mouse, pen, and touch state per window.
+     *
+     * The apartment annotation is the scheduling fact EventPump needs; matching @c On overloads are discovered
+     * structurally by @c Traits::Event::HandlesBookkeep.
+     */
     struct [[=OnPlatformThread]] Input {};
 
-    /// @brief Composition window, candidate list, IME-on/off state.
+    /** @brief Composition window, candidate list, and IME activation state. */
     struct [[=OnPlatformThread]] Ime {};
 
-    /// @brief Owns the system clipboard mirror and clipboard-format negotiations.
+    /** @brief System clipboard mirror and clipboard-format negotiations. */
     struct [[=OnPlatformThread]] Clipboard {};
 
-    /// @brief Cursor visibility / shape / capture state per window.
+    /** @brief Cursor visibility, shape, and capture state per window. */
     struct [[=OnPlatformThread]] Cursor {};
 
-    /// @brief In-flight drag state, accept/reject feedback, drop targets.
+    /** @brief Drag session state, accept/reject feedback, and drop targets. */
     struct [[=OnPlatformThread]] DragDrop {};
 
-    /// @brief Native modal dialog lifecycle (file open / save / message box).
+    /** @brief Native modal dialog lifecycle, including file-open, save, and message boxes. */
     struct [[=OnPlatformThread]] Dialog {};
 
-    /// @brief Surface (swapchain handle / DPI / colour space) per window.
-    ///
-    /// Surface tracks DPI/extent on a per-window basis and reuses @c Window's
-    /// registry indirectly via the broadcast — it does not need its own HWND
-    /// table. The resize handler is a stub until the swapchain bridge lands.
+    /**
+     * @brief Surface state per window.
+     *
+     * Surface consumes window lifecycle facts through EventPump broadcast and does not need a separate native-handle
+     * table. The resize hook is a stub until the swapchain bridge lands.
+     */
     struct [[=OnPlatformThread]] Surface {
         void On(const Event::WindowResizeEvent&) noexcept {}
     };
 
-    /// @brief Theme / accent colour / reduced-motion state.
+    /** @brief Theme, accent colour, and reduced-motion state. */
     struct [[=OnPlatformThread]] Appearance {};
 
-    /// @brief Screen-reader / high-contrast / a11y-tree liaison.
+    /** @brief Screen-reader, high-contrast, and accessibility-tree liaison. */
     struct [[=OnPlatformThread]] Accessibility {};
 
-} // namespace Mashiro::Platform
+} /* namespace Mashiro::Platform */

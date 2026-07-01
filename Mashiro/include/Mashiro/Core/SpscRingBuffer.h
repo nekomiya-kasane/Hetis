@@ -10,7 +10,7 @@
  *   cache lines (`hardware_destructive_interference_size`), *proven* at
  *   compile time by a reflection-driven layout audit (see below).
  * - **Power-of-2 capacity** enforced at compile time via constraints.
- * - **Typed variant** (`SpscQueue<T, N>`) for structured elements — no
+ * - **Typed variant** (`SpscRingBuffer<T, N>`) for structured elements — no
  *   serialize/deserialize overhead, plus zero-copy `Front()`/`PopFront()`.
  * - **Byte variant** (`SpscByteRing<N>`) for variable-length messages (logger),
  *   with zero-copy consumption of non-wrapping messages.
@@ -55,7 +55,7 @@
 namespace Mashiro {
 
     // =========================================================================
-    // SpscQueue<T, Capacity> — typed fixed-size element queue
+    // SpscRingBuffer<T, Capacity> — typed fixed-size element queue
     // =========================================================================
 
     /**
@@ -72,7 +72,7 @@ namespace Mashiro {
      * fast path.
      *
      * @code
-     * SpscQueue<int, 1024> q;
+     * SpscRingBuffer<int, 1024> q;
      * q.TryPush(42);       // producer
      * int val;
      * q.TryPop(val);       // consumer
@@ -81,17 +81,17 @@ namespace Mashiro {
     template<typename T, uint32_t Capacity>
         requires(std::has_single_bit(Capacity) && Capacity >= 2 && std::is_object_v<T> &&
                  std::is_nothrow_destructible_v<T>)
-    class SpscQueue {
+    class SpscRingBuffer {
         static constexpr uint32_t kMask = Capacity - 1;
 
         static_assert(std::atomic<uint32_t>::is_always_lock_free,
-                      "SpscQueue requires lock-free 32-bit atomics");
+                      "SpscRingBuffer requires lock-free 32-bit atomics");
 
     public:
         /// @name Construction
         /// @{
-        SpscQueue() = default;
-        ~SpscQueue() {
+        SpscRingBuffer() = default;
+        ~SpscRingBuffer() {
             // Destroy remaining elements (single-threaded teardown, no atomics needed)
             uint32_t head = head_.load(std::memory_order_relaxed);
             uint32_t tail = tail_.load(std::memory_order_relaxed);
@@ -100,8 +100,8 @@ namespace Mashiro {
                 ++head;
             }
         }
-        SpscQueue(const SpscQueue&) = delete;
-        SpscQueue& operator=(const SpscQueue&) = delete;
+        SpscRingBuffer(const SpscRingBuffer&) = delete;
+        SpscRingBuffer& operator=(const SpscRingBuffer&) = delete;
         /// @}
 
         /// @name Producer (single thread)
@@ -199,6 +199,35 @@ namespace Mashiro {
             }
         }
 
+        /**
+         * @brief Drain every element committed at one consumer-side snapshot into @p sink.
+         *
+         * Consumer-only. The drain boundary is one acquire snapshot of @c tail_: events committed
+         * before that snapshot enter this batch, while later producer pushes wait for the next drain.
+         * Slots are released back to the producer by one final release-store to @c head_.
+         *
+         * @tparam Sink Nothrow callable accepting a single @c T&& argument.
+         * @param sink Invoked once per drained element in FIFO order.
+         * @return Number of elements drained.
+         */
+        template<typename Sink>
+            requires std::invocable<Sink&, T&&> && std::is_nothrow_invocable_v<Sink&, T&&>
+        uint32_t Drain(Sink&& sink) noexcept {
+            const uint32_t begin = head_.load(std::memory_order_relaxed);
+            const uint32_t end   = tail_.load(std::memory_order_acquire);
+            cachedTail_ = end;
+            if (begin == end) {
+                return 0;
+            }
+
+            for (uint32_t pos = begin; pos != end; ++pos) {
+                T* ptr = SlotPtr(pos);
+                sink(std::move(*ptr));
+                std::destroy_at(ptr);
+            }
+            head_.store(end, std::memory_order_release);
+            return end - begin;
+        }
         /// @brief Zero-copy peek at the front element, or nullptr if empty.
         ///
         /// The pointer stays valid until the element is consumed via
@@ -288,7 +317,7 @@ namespace Mashiro {
      * Each message is prefixed with a 4-byte length header. Supports wrap-around
      * via two-part copy. Designed for the structured logger's serialized entries.
      *
-     * Uses the same cached-counter technique as `SpscQueue` for minimal
+     * Uses the same cached-counter technique as `SpscRingBuffer` for minimal
      * cross-core traffic. Consumption is **zero-copy** whenever a message is
      * contiguous in the ring (the common case); only messages that wrap the
      * ring boundary are reassembled into a private staging buffer.
@@ -533,8 +562,8 @@ namespace Mashiro {
 
     /** @cond INTERNAL */
     consteval {
-        static_assert(Concurrency::AuditFalseSharing<SpscQueue<uint64_t, 1024>>(),
-                      "SpscQueue layout exhibits cross-role false sharing");
+        static_assert(Concurrency::AuditFalseSharing<SpscRingBuffer<uint64_t, 1024>>(),
+                      "SpscRingBuffer layout exhibits cross-role false sharing");
         static_assert(Concurrency::AuditFalseSharing<SpscByteRing<64 * 1024>>(),
                       "SpscByteRing layout exhibits cross-role false sharing");
     }

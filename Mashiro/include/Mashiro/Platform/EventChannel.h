@@ -85,7 +85,7 @@ namespace Mashiro::Platform {
             }
 
         private:
-            EventBatch*  batch_{nullptr};
+            EventBatch* batch_{nullptr};
             std::size_t index_{0};
         };
 
@@ -284,7 +284,7 @@ namespace Mashiro::Platform {
                 stopCb.emplace(token, OnStop{owner});
                 auto snapshot = owner->LoadEpoch();
 
-                for (;;) {
+                while (true) {
                     if (!owner->Empty()) {
                         stopCb.reset();
                         stdexec::set_value(std::move(receiver), owner->DrainBatch());

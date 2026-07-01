@@ -177,7 +177,7 @@ namespace Mashiro {
 
         /** @name Event Payloads @{ */
 
-        inline namespace Window {
+        inline namespace Wind {
 
             /** @brief Window has been created and is ready for first draw. */
             struct WindowCreateEvent : WindowSpecificEvent {
@@ -254,7 +254,7 @@ namespace Mashiro {
                 bool compositionEnabled = false;
             };
 
-        } /* namespace Window */
+        } /* namespace Wind */
 
         /**
          * @brief Logical key identifier.

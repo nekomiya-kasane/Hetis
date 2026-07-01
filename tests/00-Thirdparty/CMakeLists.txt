@@ -73,6 +73,11 @@ target_compile_definitions(probe PRIVATE
 # stdexec (P2300) — header-only but MSVC support is experimental upstream, so it
 # gets its own switch: flip VK_TP_PROBE_STDEXEC off if a compiler update regresses
 # without losing coverage of the other libraries.
+if(VK_TP_BUILD_PERFETTO)
+    target_link_libraries(probe PRIVATE perfetto)
+    target_compile_definitions(probe PRIVATE VK_TP_PROBE_PERFETTO)
+endif()
+
 target_link_libraries(probe PRIVATE stdexec)
 target_compile_definitions(probe PRIVATE VK_TP_PROBE_STDEXEC)
 if(VK_TP_BUILD_KTX)

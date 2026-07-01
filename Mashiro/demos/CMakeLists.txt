@@ -2,7 +2,7 @@ function(add_mashiro_demo CATEGORY DEMO_NAME)
     set(DEMO_TARGET Demo.${CATEGORY}.${DEMO_NAME})
 
     add_executable(${DEMO_TARGET} ${CATEGORY}/${DEMO_NAME}.cpp)
-    target_link_libraries(${DEMO_TARGET} PRIVATE Mashiro Catch2::Catch2WithMain)
+    target_link_libraries(${DEMO_TARGET} PRIVATE Mashiro Catch2::Catch2WithMain TBB::tbb)
     set_target_properties(${DEMO_TARGET} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
@@ -19,3 +19,6 @@ add_mashiro_demo(Core ToJsonDemo)
 
 add_mashiro_demo(Playground VulkanCube)
 add_mashiro_demo(Playground OpenGLCube)
+add_mashiro_demo(Playground StdexecPlay)
+add_mashiro_demo(Playground IocpTimer)
+add_mashiro_demo(Playground Main)

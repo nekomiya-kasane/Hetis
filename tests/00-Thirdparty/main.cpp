@@ -54,6 +54,13 @@
 #include <tinyfiledialogs.h>
 #include <renderdoc_app.h>
 
+#if defined(VK_TP_PROBE_PERFETTO)
+#include <perfetto.h>
+PERFETTO_DEFINE_CATEGORIES(
+    perfetto::Category("vulkan.thirdparty").SetDescription("Vulkan thirdparty dependency probe"));
+PERFETTO_TRACK_EVENT_STATIC_STORAGE();
+#endif
+
 #if defined(VK_TP_PROBE_KTX)
 #include <ktx.h>
 #endif
@@ -112,6 +119,7 @@ const char* probe_stdexec();
 
 #include <cstdio>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include <string>
 #include <atomic>
@@ -229,6 +237,30 @@ int main() {
     pRENDERDOC_GetAPI rd = nullptr;
     (void)rd;
     std::printf("renderdoc   : pRENDERDOC_GetAPI declared\n");
+
+#if defined(VK_TP_PROBE_PERFETTO)
+    // 22. Perfetto: initialise the in-process backend and write one track event.
+    {
+        perfetto::TracingInitArgs args;
+        args.backends = perfetto::kInProcessBackend;
+        perfetto::Tracing::Initialize(args);
+        perfetto::TrackEvent::Register();
+
+        perfetto::TraceConfig cfg;
+        cfg.add_buffers()->set_size_kb(64);
+        auto* ds = cfg.add_data_sources()->mutable_config();
+        ds->set_name("track_event");
+
+        std::unique_ptr<perfetto::TracingSession> session =
+            perfetto::Tracing::NewTrace(perfetto::kInProcessBackend);
+        session->Setup(cfg);
+        session->StartBlocking();
+        TRACE_EVENT("vulkan.thirdparty", "perfetto_probe");
+        session->StopBlocking();
+        std::vector<char> trace = session->ReadTraceBlocking();
+        std::printf("perfetto    : trace bytes=%zu\n", trace.size());
+    }
+#endif
 
     // 22. stb — exercise stb_image, stb_image_write, stb_image_resize2 symbols.
     //          (Use memory-based APIs; fopen(NULL,...) trips the MSVC invalid

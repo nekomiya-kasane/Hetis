@@ -78,15 +78,15 @@
     {
       "name": "x64-ubsan",
       "displayName": "x64 UBSan (clang-p2996)",
-      "description": "UndefinedBehaviorSanitizer only (static runtime, no DLL) on a Debug base. Lighter than ASan; use when ASan's memory cost is prohibitive. The static clang_rt.ubsan_standalone runtime's Windows stack-unwinder references SymFunctionTableAccess64 / SymGetModuleBase64, so dbghelp must be linked. It is pulled in with `-Xclang --dependent-lib=dbghelp` (embeds /DEFAULTLIB:dbghelp in every object) rather than a bare `-ldbghelp` linker flag, so CMake's compiler-ABI try_compile probes resolve it too. ASan gets dbghelp transitively via its dynamic runtime DLL; UBSan-only does not.",
+      "description": "UndefinedBehaviorSanitizer only (static runtime, no DLL) on a Debug base. Lighter than ASan; use when ASan's memory cost is prohibitive. Two infrastructure fixes vs the bare `-fsanitize=undefined` recipe: (1) the static clang_rt.ubsan_standalone runtime's Windows stack-unwinder calls SymFunctionTableAccess64 / SymGetModuleBase64, so dbghelp must be linked — pulled in via `-Xclang --dependent-lib=dbghelp` (embeds /DEFAULTLIB:dbghelp in every object, including CMake's compiler-ABI try_compile probes). (2) The MSVC sysroot at `msvc/lib/x64` ships a vendored clang_rt.ubsan_standalone-x86_64.lib that references undefined `__coe_win::*` and `QueryVirtualMemoryInformation` symbols; the clean copy lives in the LLVM resource dir at `lib/clang/21/lib/windows`. Because the toolchain prepends `msvc/lib/x64` to LIBPATH, we re-prepend the LLVM resource dir so clang's `--dependent-lib=clang_rt.ubsan_standalone-x86_64.lib` resolves to the working copy.",
       "inherits": "windows-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all -Xclang --dependent-lib=dbghelp",
         "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all -Xclang --dependent-lib=dbghelp",
-        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined",
-        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fsanitize=undefined",
-        "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined"
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined -Xlinker /LIBPATH:T:/toolchains/coca-toolchain-p2996/lib/clang/21/lib/windows",
+        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-fsanitize=undefined -Xlinker /LIBPATH:T:/toolchains/coca-toolchain-p2996/lib/clang/21/lib/windows",
+        "CMAKE_MODULE_LINKER_FLAGS_DEBUG": "-fsanitize=undefined -Xlinker /LIBPATH:T:/toolchains/coca-toolchain-p2996/lib/clang/21/lib/windows"
       }
     },
     {

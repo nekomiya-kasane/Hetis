@@ -2,7 +2,7 @@
  * @file ConcurrentSlabArena.h
  * @brief Append-only, multi-producer slab arena for fixed-layout, non-recycled nodes.
  *
- * Many concurrent data structures in this project — @c Yuki::TieList, future side-table entries,
+ * Many concurrent data structures in this project — @c Yuki::FacadeList, future side-table entries,
  * scheduler waiter chains — share one allocation pattern: any thread may publish a small
  * fixed-layout node, the node is *never* relinked or freed individually, and the entire chain dies
  * with the host. The pool / generation-checked allocator (@ref ConcurrentObjectPool) is the wrong
@@ -30,7 +30,7 @@
  *   @ref Concurrency::Immutable. The audit runs in a `consteval` block at the bottom of this file.
  * - **Trivially-destructible payload**: nodes are never destroyed individually. The element type
  *   must therefore be either trivially destructible or model the
- *   @ref Traits::SlabArenaSlot concept (which permits a no-op destructor for nodes that own no
+ *   @ref Traits::SlabArenaSlotable concept (which permits a no-op destructor for nodes that own no
  *   resources). The arena does not run per-node destructors on teardown — that responsibility is
  *   the caller's, and it is exactly the contract the use sites want.
  * - **Compile-time diagnostics**: the slab is `alignas(std::hardware_destructive_interference_size)`,
@@ -54,6 +54,7 @@
 
 #include "Mashiro/Core/FalseSharing.h"
 #include "Mashiro/Core/TypeTraits.h"
+#include "Mashiro/Math/TrivialOps.h"
 
 #include <atomic>
 #include <bit>
@@ -79,35 +80,23 @@ namespace Mashiro {
          * leaking the slot ticket. The minimal contract is a pair of standard traits.
          */
         template<typename T>
-        concept SlabArenaSlot =
-            std::is_trivially_destructible_v<T> ||
-            std::is_nothrow_destructible_v<T>;
+        concept SlabArenaSlotable = std::is_trivially_destructible_v<T> || std::is_nothrow_destructible_v<T>;
 
     } // namespace Traits
 
     namespace Detail {
 
         /**
-         * @brief Round @p n up to the next power of two; @p n itself if already one.
-         *
-         * Used to enforce the @c NodesPerSlab invariant at compile time so that the
-         * @c (slab_index, slot_in_slab) decomposition is a shift+mask rather than a div+mod.
-         */
-        constexpr std::size_t CeilPow2(std::size_t n) noexcept {
-            return n <= 1 ? 1 : std::bit_ceil(n);
-        }
-
-        /**
          * @brief Default slab capacity for type @p T — picks the smallest power of two such that the
          *        slab payload occupies at least one cache line.
          *
          * Hand-tuning per use site is rarely worth the noise; this default produces 64-element slabs
-         * for a 16-byte node on a 64-byte cache line, which is what the @c TieList workload wants.
+         * for a 16-byte node on a 64-byte cache line, which is what the @c FacadeList workload wants.
          */
         template<typename T>
         constexpr std::size_t DefaultNodesPerSlab() noexcept {
             constexpr std::size_t kLine = std::hardware_destructive_interference_size;
-            return CeilPow2((kLine + sizeof(T) - 1) / sizeof(T) * 4);
+            return Math::CeilPow2((kLine + sizeof(T) - 1) / sizeof(T) * 4);
         }
 
     } // namespace Detail
@@ -119,7 +108,7 @@ namespace Mashiro {
     /**
      * @brief Append-only, multi-producer slab allocator for fixed-layout, non-recycled nodes.
      *
-     * @tparam T             Element type. Must satisfy @ref Traits::SlabArenaSlot.
+     * @tparam T             Element type. Must satisfy @ref Traits::SlabArenaSlotable.
      * @tparam NodesPerSlab  Power-of-two slab capacity. Default chooses a cache-line-friendly value.
      *
      * @par Thread safety
@@ -129,7 +118,7 @@ namespace Mashiro {
      * stopped, which is the natural state when a consumer scans the chain.
      */
     template<typename T, std::size_t NodesPerSlab = Detail::DefaultNodesPerSlab<T>()>
-        requires Traits::SlabArenaSlot<T>
+        requires Traits::SlabArenaSlotable<T>
     class ConcurrentSlabArena {
         static_assert(std::has_single_bit(NodesPerSlab),
                       "NodesPerSlab must be a power of two for shift+mask decomposition.");
@@ -163,6 +152,30 @@ namespace Mashiro {
          * Exception safety: requires @c T to be @c nothrow_constructible from @p Args; a throwing
          * constructor would leak the ticket. The wait-free common path is one @c fetch_add and one
          * placement new into a cache-resident slab slot.
+         *
+         * @par Ticket layout
+         * Each producer's ticket is a single @c size_t — a monotonic global slot index. With
+         * @c NodesPerSlab a power of two, the ticket decomposes into @c (slab_index, slot) by a
+         * shift and a mask:
+         *
+         * @verbatim
+         * ticket bits (NodesPerSlab = 2^kSlotShift):
+         *
+         *  high                                              low
+         *  +----------------------------------+--------------+
+         *  |          slab index              |   slot in    |
+         *  |  ticket >> kSlotShift            |    slab      |
+         *  |                                  | ticket &     |
+         *  |                                  | kSlotMask    |
+         *  +----------------------------------+--------------+
+         *  ^                                  ^              ^
+         *  |                                  |              |
+         *  bit (sizeof(size_t)*8 - 1)         kSlotShift     bit 0
+         *
+         * Example  NodesPerSlab = 4 → kSlotShift = 2, kSlotMask = 0b11:
+         *   ticket  6 → slab 1, slot 2
+         *   ticket 17 → slab 4, slot 1
+         * @endverbatim
          */
         template<typename... Args>
             requires std::constructible_from<T, Args&&...>

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 //
-// Tests for Mashiro::Platform::SystemEvent — the reflection-driven event
+// Tests for Mashiro::SystemEvent - the reflection-driven event
 // vocabulary. Verifies the marker base + mixins (EventPayloadBase /
 // WindowSpecificEvent / TimestampedEvent), the platform-filter trait, the
 // cross-cutting accessors (NameOf / WindowOf / TimestampOf), the variant
 // materialisation, and convention-based bookkeep dispatch.
 //
-// There is intentionally no `EventKind` enum and no `[[=PayloadFor{...}]]`
-// annotation: the payload type *is* the discriminator on `SystemEvent`.
+// There is intentionally no EventKind enum and no [[=PayloadFor{...}]]
+// annotation: the payload type is the discriminator on SystemEvent.
 
 #include <Mashiro/Platform/SystemEvent.h>
 
@@ -21,12 +21,10 @@
 #include <type_traits>
 #include <variant>
 
-// clang-format off
-
 using namespace Mashiro;
 
 // =========================================================================
-// Section 1 — Categorisation enums (TouchPhase / ScrollUnit / …)
+// Section 1 - Categorisation enums (TouchPhase / ScrollUnit / ...)
 // =========================================================================
 
 TEST_CASE("Categorisation enums round-trip via reflection", AUTO_TAG) {
@@ -39,7 +37,7 @@ TEST_CASE("Categorisation enums round-trip via reflection", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 2 — Bitfield enums: operator| / & / mask / static categorisation
+// Section 2 - Bitfield enums: operator| / & / mask / static categorisation
 // =========================================================================
 
 TEST_CASE("PenButton, FileChangeFlags, DragKind, PlatformBit are BitfieldEnums", AUTO_TAG) {
@@ -77,7 +75,7 @@ TEST_CASE("Composite PlatformBit aliases match expected component sets", AUTO_TA
 }
 
 // =========================================================================
-// Section 3 — Modifiers bitfield + factories
+// Section 3 - Modifiers bitfield + factories
 // =========================================================================
 
 TEST_CASE("Modifiers factories produce expected one-shot states", AUTO_TAG) {
@@ -96,7 +94,7 @@ TEST_CASE("Modifiers factories produce expected one-shot states", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 4 — KeyCode preserves ASCII identity for letters and digits
+// Section 4 - KeyCode preserves ASCII identity for letters and digits
 // =========================================================================
 
 TEST_CASE("KeyCode letters and digits map to ASCII code points", AUTO_TAG) {
@@ -110,7 +108,7 @@ TEST_CASE("KeyCode letters and digits map to ASCII code points", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 5 — Marker base + mixins: opt-in via inheritance
+// Section 5 - Marker base + mixins: opt-in via inheritance
 // =========================================================================
 
 TEST_CASE("EventPayloadBase is an empty marker; mixins inherit it", AUTO_TAG) {
@@ -128,7 +126,7 @@ TEST_CASE("SystemEventPayload concept identifies every payload, rejects anything
     STATIC_REQUIRE(Traits::SystemEventPayload<FileCreatedEvent>);
     STATIC_REQUIRE(Traits::SystemEventPayload<TimerTickEvent>);
 
-    // Plain types are not payloads — anything that doesn't derive from the
+    // Plain types are not payloads; anything that doesn't derive from the
     // marker base is excluded.
     STATIC_REQUIRE_FALSE(Traits::SystemEventPayload<int>);
     STATIC_REQUIRE_FALSE(Traits::SystemEventPayload<Modifiers>);
@@ -186,7 +184,7 @@ TEST_CASE("Timestamped concept identifies time-sensitive payloads", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 6 — Mixin defaults + base-class composition
+// Section 6 - Mixin defaults + base-class composition
 // =========================================================================
 
 TEST_CASE("Mixin fields default-construct to documented sentinels", AUTO_TAG) {
@@ -219,7 +217,7 @@ TEST_CASE("FileSpecificEvent base inherits the marker but no mixin", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 7 — Trivial-copyability holds for plain payloads (no std::string)
+// Section 7 - Trivial-copyability holds for plain payloads (no std::string)
 // =========================================================================
 
 TEST_CASE("Plain payloads remain trivially copyable", AUTO_TAG) {
@@ -235,7 +233,7 @@ TEST_CASE("Plain payloads remain trivially copyable", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 8 — Reflection traits — type name / availability / platforms
+// Section 8 - Reflection traits - type name / availability / platforms
 // =========================================================================
 
 TEST_CASE("Traits::PayloadTypeName returns the unqualified struct name", AUTO_TAG) {
@@ -245,13 +243,13 @@ TEST_CASE("Traits::PayloadTypeName returns the unqualified struct name", AUTO_TA
 }
 
 TEST_CASE("Traits::AvailableOn filters by Platform::OnPlatform annotation", AUTO_TAG) {
-    // Portable payloads — present on every platform.
+    // Portable payloads: present on every platform.
     STATIC_REQUIRE(Traits::AvailableOn<WindowResizeEvent, PlatformBit::Windows>);
     STATIC_REQUIRE(Traits::AvailableOn<WindowResizeEvent, PlatformBit::macOS>);
     STATIC_REQUIRE(Traits::AvailableOn<WindowResizeEvent, PlatformBit::Linux_X11>);
     STATIC_REQUIRE(Traits::AvailableOn<WindowResizeEvent, PlatformBit::Linux_Wayland>);
 
-    // Linux-only — both X11 and Wayland.
+    // Linux-only: both X11 and Wayland.
     STATIC_REQUIRE(Traits::AvailableOn<WindowExposedEvent, PlatformBit::Linux_X11>);
     STATIC_REQUIRE(Traits::AvailableOn<WindowExposedEvent, PlatformBit::Linux_Wayland>);
     STATIC_REQUIRE_FALSE(Traits::AvailableOn<WindowExposedEvent, PlatformBit::Windows>);
@@ -283,7 +281,7 @@ TEST_CASE("Traits::PlatformsOf reports the raw bit set", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 9 — TouchGestureEvent::Kind nested enum
+// Section 9 - TouchGestureEvent::Kind nested enum
 // =========================================================================
 
 TEST_CASE("TouchGestureEvent carries a typed Kind subenum", AUTO_TAG) {
@@ -297,7 +295,7 @@ TEST_CASE("TouchGestureEvent carries a typed Kind subenum", AUTO_TAG) {
 }
 
 // =========================================================================
-// Section 10 — SystemEvent variant + cross-cutting accessors
+// Section 10 - SystemEvent variant + cross-cutting accessors
 // =========================================================================
 
 TEST_CASE("SystemEvent is a std::variant whose alternatives are the payload types", AUTO_TAG) {
@@ -349,12 +347,12 @@ TEST_CASE("TimestampOf(SystemEvent) returns the ns timestamp only when carried",
 }
 
 // =========================================================================
-// Section 11 — Convention-based bookkeep dispatch
+// Section 11 - Convention-based bookkeep dispatch
 //
-// `DispatchBookkeep<M>(mgr, ev)` visits the active alternative and, for any
-// payload type `P` for which `mgr.On(p)` is well-formed, instantiates and
-// calls the matching arm. Payloads the manager does not handle are pruned
-// at compile time via `if constexpr`, so dispatch is zero-cost on
+// DispatchBookkeep<M>(mgr, ev) visits the active alternative and, for any
+// payload type P for which mgr.On(p) is noexcept and returns void, instantiates
+// and calls the matching arm. Payloads the manager does not handle are pruned
+// at compile time via if constexpr, so dispatch is zero-cost on
 // alternatives outside the manager's responsibility.
 // =========================================================================
 
@@ -376,13 +374,17 @@ namespace {
         }
     };
 
+    struct ThrowingResizeBookkeeper {
+        void On(const WindowResizeEvent&) {}
+    };
+
     struct InertManager {
         int callCount = 0;
     };
 
 } // namespace
 
-TEST_CASE("HandlesBookkeep concept is purely structural", AUTO_TAG) {
+TEST_CASE("HandlesBookkeep concept accepts only noexcept structural handlers", AUTO_TAG) {
     using namespace Traits;
     STATIC_REQUIRE(HandlesBookkeep<ResizeBookkeeper, WindowResizeEvent>);
     STATIC_REQUIRE(HandlesBookkeep<ResizeBookkeeper, WindowFocusEvent>);
@@ -391,6 +393,7 @@ TEST_CASE("HandlesBookkeep concept is purely structural", AUTO_TAG) {
     STATIC_REQUIRE_FALSE(HandlesBookkeep<ResizeBookkeeper, DisplayChangeEvent>);
     STATIC_REQUIRE_FALSE(HandlesBookkeep<ResizeBookkeeper, MouseMoveEvent>);
 
+    STATIC_REQUIRE_FALSE(HandlesBookkeep<ThrowingResizeBookkeeper, WindowResizeEvent>);
     STATIC_REQUIRE_FALSE(HandlesBookkeep<InertManager, WindowResizeEvent>);
     STATIC_REQUIRE_FALSE(HandlesBookkeep<InertManager, KeyDownEvent>);
 
@@ -440,5 +443,3 @@ TEST_CASE("DispatchBookkeep on a manager with no handlers compiles and is a no-o
     DispatchBookkeep(mgr, ev);
     REQUIRE(mgr.callCount == 0);
 }
-
-// clang-format on

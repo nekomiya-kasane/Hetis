@@ -17,7 +17,7 @@ target_include_directories(Mashiro PUBLIC
 target_link_libraries(Mashiro PRIVATE tapioca)
 target_link_libraries(Mashiro PUBLIC nlohmann_json::nlohmann_json stdexec)
 if(WIN32)
-    target_link_libraries(Mashiro PRIVATE dbghelp)
+    target_link_libraries(Mashiro PRIVATE advapi32 dbghelp dwmapi imm32 ole32 shell32 user32)
 endif()
 set_target_properties(Mashiro PROPERTIES
     CXX_STANDARD 26

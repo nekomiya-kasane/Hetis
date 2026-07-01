@@ -12,21 +12,32 @@
  * @par Why bounded-array Vyukov, not pool-backed nodes
  * @ref Mashiro::ConcurrentObjectPool is the project's ABA-safe, generation-checked, MPMC-friendly
  * slot allocator. Building MPSC on top of it (pool-backed Vyukov linked queue: each node drawn
- * from the pool, linked by a `next` slot index) is a valid design and *is* the right tool for any
- * MPSC whose payloads are objects with stable node identity — explicitly the @c OwnerExecutor
- * mailbox of pre-allocated coroutine-handle nodes called out in spec §6.5. That use case wants
- * the pool's slot lifetime, generation guard, and ABA-safe free list, and `OwnerExecutor` should
- * therefore be implemented over @ref ConcurrentObjectPool directly, not through this header.
+ * from the pool, linked by a @c next slot index) is a valid design and is the right tool for any
+ * MPSC whose payloads are *objects with stable node identity that survive past dequeue* — the
+ * canonical example is a wait-list where one CAS detaches a parked waiter and the consumer keeps
+ * a pointer to that node alive across multiple state transitions.
  *
- * For a general MPSC of *moved-in payload values* (the @c EventPump external inbox per spec §6.8 —
- * `SystemEvent` variants flowing through and out, no stable node identity), the pool's two main
+ * No mailbox in this project meets that bar. Specifically:
+ *  - The @c EventPump external inbox (spec §6.8) drains @c SystemEvent values by move; the cell
+ *    payload is destructively read and ceases to exist after @c TryPop. There is no node, so
+ *    "node identity" is undefined.
+ *  - The @c OwnerMailbox (the recast-of-v1.4 @c OwnerExecutor handle queue, spec §6.5) drains
+ *    @c std::coroutine_handle<> values — opaque pointers that the consumer reads exactly once
+ *    and resumes; there is no slot, no generation, and the producer never inspects a previously-
+ *    enqueued handle. The decision to back this mailbox with @ref MpscQueue (not the pool) was
+ *    re-confirmed off-spec: the pool's two guarantees decompose to *no observable benefit* for
+ *    this workload, and bounded-array Vyukov is strictly cheaper on every axis (no free-list CAS,
+ *    no per-slot generation, no allocation, deterministic capacity).
+ *
+ * For both of these — and for any future MPSC of moved-in payload values — the pool's two
  * guarantees decompose:
  *  - **ABA safety** is unnecessary: bounded-array Vyukov uses a per-cell monotonic sequence
- *    counter, never a pointer, and the `seq == pos+1` / `seq == pos+Capacity` handshake makes ABA
- *    structurally impossible. A pool-backed implementation would add a hot-path free-list CAS for
- *    no correctness benefit.
- *  - **Generation guard / use-after-free** is moot when the consumer drains by value and the
- *    payload no longer exists after `TryPop`.
+ *    counter, never a pointer, and the @c seq @c == @c pos+1 / @c seq @c == @c pos+Capacity
+ *    handshake makes ABA structurally impossible. A pool-backed implementation would add a
+ *    hot-path free-list CAS for no correctness benefit.
+ *  - **Generation guard / use-after-free** is moot when the consumer drains by value (or by
+ *    opaque pointer that is consumed at the call site) and the payload no longer exists after
+ *    @c TryPop.
  *
  * What @em is shared with the pool — the project-wide cache-line domain audit
  * (@c Concurrency::Contended / @c ConsumerOwned / @c SharedStorage tags + @c AuditFalseSharing)
@@ -68,7 +79,7 @@
 #pragma once
 
 #include "Mashiro/Core/FalseSharing.h"
-#include "Mashiro/Core/Result.h"
+#include "Mashiro/Core/Annotation.h"
 #include "Mashiro/Core/TypeTraits.h"
 
 #include <atomic>
@@ -155,7 +166,7 @@ namespace Mashiro {
      * inbox.Drain([&](SystemEvent&& ev) { Bookkeep(ev); Broadcast(std::move(ev)); });
      * @endcode
      */
-    template<typename T, size_t Capacity = 256>
+    template<typename T, size_t Capacity = 1024> 
         requires(Traits::Mpscable<T> && Detail::ValidateMpscCapacity(Capacity))
     class MpscQueue {
     public:
@@ -230,9 +241,8 @@ namespace Mashiro {
         }
 
         /// @brief Push a copyable @p value, returning @c false if the ring is full.
-        [[nodiscard]] bool TryPush(const T& value)
-            noexcept(std::is_nothrow_copy_constructible_v<T>)
-            requires std::copy_constructible<T> {
+        [[nodiscard]] bool TryPush(const T& value) 
+            noexcept(std::is_nothrow_copy_constructible_v<T>) requires std::copy_constructible<T> {
             return TryEmplace(value);
         }
         /// @}
@@ -280,9 +290,11 @@ namespace Mashiro {
             requires std::invocable<Sink&, T&&>
         size_t Drain(Sink&& sink) noexcept(std::is_nothrow_invocable_v<Sink&, T&&>) {
             size_t drained = 0;
-            for (;;) {
+            while (true) {
                 std::optional<T> value = TryPop();
-                if (!value.has_value()) break;
+                if (!value.has_value()) {
+                    break;
+                }
                 sink(std::move(*value));
                 ++drained;
             }
@@ -305,8 +317,7 @@ namespace Mashiro {
          * advanced the tail.
          */
         [[nodiscard]] bool Empty() const noexcept {
-            return head_.load(std::memory_order_relaxed)
-                == tail_.load(std::memory_order_acquire);
+            return head_.load(std::memory_order_relaxed) == tail_.load(std::memory_order_acquire);
         }
 
         /**
@@ -357,11 +368,11 @@ namespace Mashiro {
 
         // Internal false sharing: the contended tail, the consumer-owned head, and the cold cell
         // array are three distinct write domains and must never overlap a cache line.
-        static_assert(AuditFalseSharing<MpscQueue<std::uint64_t, 256>>(),
-                      "MpscQueue<uint64_t, 256> failed the internal false-sharing audit");
-        static_assert(DomainStartsLine<MpscQueue<std::uint64_t, 256>, Contended>(),
+        static_assert(AuditFalseSharing<MpscQueue<std::uint64_t>>(),
+                      "MpscQueue<uint64_t> failed the internal false-sharing audit");
+        static_assert(DomainStartsLine<MpscQueue<std::uint64_t>, Contended>(),
                       "MpscQueue tail must start its own cache line");
-        static_assert(DomainStartsLine<MpscQueue<std::uint64_t, 256>, ConsumerOwned>(),
+        static_assert(DomainStartsLine<MpscQueue<std::uint64_t>, ConsumerOwned>(),
                       "MpscQueue head must start its own cache line");
 
     }

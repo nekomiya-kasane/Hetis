@@ -124,7 +124,7 @@ public:
 ```
 
 对比旧 `CATBaseUnknown`:**砍掉** `IDispatch` 基类、`QueryInterface`/`AddRef`/`Release`/
-`GetMetaObject`/`IsA`/`IsAKindOf`/`IsEqual` 八个虚函数,**砍掉** per-instance 的
+`GetMeta`/`IsA`/`IsAKindOf`/`IsEqual` 八个虚函数,**砍掉** per-instance 的
 `m_cRef`/`NecessaryData`/`delegate`/`m_reserved`(每实例省 ~24B)。RootObject 只剩 1 个 vptr。
 
 > 命名:Legacy 旧基类 `RootClass.h` 中的 `RootClass` 重命名/取代为 `RootObject`——"物"的根

@@ -3,22 +3,22 @@
  * @brief Project-wide, reflection-driven compile-time false-sharing audit for concurrent types.
  *
  * One vocabulary, one analyzer, zero runtime cost. Every concurrent data structure tags each of its
- * non-static data members with a *contention domain* — the set of agents that may write it — and a
+ * non-static data members with a *contention domain* â€” the set of agents that may write it â€” and a
  * single `consteval` analyzer proves, via C++26 P2996 static reflection, that the physical layout
  * cannot exhibit false sharing. This supersedes the per-class audits previously hand-rolled in
  * `SpscRingBuffer.h`, `SeqLock.h` and `ConcurrentObjectPool.h`.
  *
  * @section model The model: false sharing has exactly two faces
- * - **Internal** — two members written by *distinct concurrent agents* land on one cache line, so
+ * - **Internal** â€” two members written by *distinct concurrent agents* land on one cache line, so
  *   each agent's write invalidates the other's cached line. Audited by @ref AuditFalseSharing:
  *   members of *different active domains* must never overlap a cache line.
- * - **External** — an object does not occupy whole cache lines, so neighbouring instances in an
+ * - **External** â€” an object does not occupy whole cache lines, so neighbouring instances in an
  *   array straddle a shared boundary line. Audited by @ref OccupiesWholeLines.
  *
  * @section domains Contention domains
  * A *domain* is a type deriving from @ref ContentionDomain, used as a P3394 annotation on a member:
  * `[[=Concurrency::ProducerOwned{}]]`. Domain *identity is type identity*, so the vocabulary is
- * **open** — a new container may declare `struct Whatever : Concurrency::ContentionDomain {}` and the
+ * **open** â€” a new container may declare `struct Whatever : Concurrency::ContentionDomain {}` and the
  * analyzer handles it with no central change. Two members in the *same* domain may freely share a
  * line (one writer, no conflict). A domain deriving from @ref InertContentionDomain (e.g.
  * @ref Immutable) is never written concurrently, so it is exempt from internal-conflict checks: the
@@ -52,8 +52,7 @@ namespace Mashiro::Concurrency {
     /// @brief Root of the contention-domain hierarchy. Derive to declare a write-ownership role.
     struct ContentionDomain {};
 
-    /// @brief Domains whose members are never written concurrently (read-only after construction),
-    ///        hence exempt from internal false-sharing conflict checks.
+    /// @brief Domains whose members are never written concurrently, hence exempt from conflict checks.
     struct InertContentionDomain : ContentionDomain {};
 
     /// @brief A type usable as a member contention-domain annotation.
@@ -66,11 +65,10 @@ namespace Mashiro::Concurrency {
     struct ConsumerOwned : ContentionDomain {};
     /// @brief Hot word hammered by all threads (CAS/RMW); must own its cache line.
     struct Contended : ContentionDomain {};
-    /// @brief Bulk storage touched by several agents at disjoint offsets (e.g. a slot array).
+    /// @brief Bulk storage touched by several agents at disjoint offsets, such as a slot array.
     struct SharedStorage : ContentionDomain {};
-    /// @brief Read-only after construction; co-locatable with anything (no concurrent write).
+    /// @brief Read-only after construction; co-locatable with anything because there is no concurrent write.
     struct Immutable : InertContentionDomain {};
-
     // =========================================================================
     // Layout report
     // =========================================================================

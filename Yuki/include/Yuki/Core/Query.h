@@ -1,99 +1,158 @@
 /**
  * @file Query.h
- * @brief D14 / D15 — Query<I>(node) static face + the QueryDynamicRaw L2 kernel.
- *
- * The user-facing entry point of the four-level cache. The static face is templated on
- * the target interface so the L0 consteval shortcut (@ref Detail::IsBoaProvider) can
- * resolve against @c kImplementsArr<Impl> whenever the impl type is statically known; on
- * a miss, the call falls through to the runtime kernel that probes L1, then L2, then
- * publishes the result (positive or negative) back into L1.
- *
- * Per-arm result production (D14):
- *  - @c InlineFacade           — @p node is itself an @c I subobject (D5); static_cast wraps it.
- *  - @c SideTableResolver      — stubbed in A2; resolver invocation lands in A3.
- *  - @c CodeExtensionSingleton — stubbed in A2; HotAcquireEager wiring lands in A3.
- *
+ * @brief QueryInterface, closure attachment, bound facet lists, and introspection views.
  * @ingroup Core
  */
 #pragma once
 
+#include <Yuki/Core/Object.h>
 #include <Yuki/Core/ComPtr.h>
-#include <Yuki/Core/DispatchEntry.h>
-#include <Yuki/Core/EpochRcu.h>
-#include <Yuki/Core/FingerprintCache.h>
-#include <Yuki/Core/Identity.h>
-#include <Yuki/Core/MergedDispatch.h>
-#include <Yuki/Core/MetaLinks.h>
-#include <Yuki/Core/QueryL0.h>
-#include <Yuki/Core/RootObject.h>
 
-#include <type_traits>
+#include <cassert>
+#include <cstddef>
+#include <memory>
+#include <span>
+#include <utility>
+#include <vector>
+
+#include "Yuki/Core/Dispatcher.h"
 
 namespace Yuki {
 
-    /// @brief Runtime kernel: probe L1, then L2; publish L2 result into L1; return entry or null.
-    [[nodiscard]] const DispatchEntry* QueryDynamicRaw(MetaLinks* links, Iid iid) noexcept;
+    /** @brief Lifetime-pinned immutable span backed by shared vector storage. */
+    template<class T>
+    class PinnedView {
+    public:
+        /** @brief Construct an empty pinned view. */
+        PinnedView() : owner_(std::make_shared<std::vector<T>>()) {}
 
-    /**
-     * @brief Resolve a @c ComPtr<I> for @p node by walking the four-level cache.
-     *
-     * Templated on the static type @c T of @p node so L0 can probe @c kImplementsArr<T>
-     * and @c Meta().links is reachable without a virtual hook. (The type-erased
-     * @c Query<I>(RootObject*) entry point — needed for true closure-walking from a
-     * generic node — lands in A3 once Y_OBJECT exposes a virtual MetaLinks accessor.)
-     */
-    template<class I, class T>
-    [[nodiscard]] ComPtr<I> Query(T* node) noexcept {
-        if (!node) return {};
-        if constexpr (Detail::IsBoaProvider<T, I>()) {
-            // L0 fast path: I is statically known to be a base subobject of T.
-            return ComPtr<I>(static_cast<I*>(node));
-        } else {
-            // T23: scope an RCU read guard around the L1/L2 probe + arm invocation so the
-            // snapshot pointers we read remain live for the duration of the call. The guard
-            // is cheap (one relaxed-load of @c tlSlot->epoch on the nested-call fast path) and
-            // gates @c TryReclaim from freeing the snapshots backing @p e.
-            RcuReadGuard g;
-            MetaLinks* links = T::Meta().links;
-            const DispatchEntry* e = QueryDynamicRaw(links, IidOf<I>());
-            if (!e) return {};
-            switch (e->kind) {
-                case DispatchKind::InlineFacade:
-                    // D5: an InlineFacade entry guarantees @c node is an @c I subobject. The
-                    // compile-time guard keeps the template well-formed for unrelated (T, I)
-                    // pairs whose merged dispatch correctly returns null entries — the runtime
-                    // branch is unreachable in that case, but the body must still type-check.
-                    if constexpr (std::is_base_of_v<I, T>) {
-                        return ComPtr<I>(static_cast<I*>(node));
-                    } else {
-                        return {};
-                    }
-                case DispatchKind::SideTableResolver: {
-                    // T23 §6.2: invoke the registered resolver. Resolver returns +1 reference
-                    // to a materialised heap facade, OR @c nullptr if it chose not to
-                    // materialise (§6.4). @c ComPtr::Adopt consumes the +1; the empty result
-                    // is shape-equivalent to Provides==false.
-                    using ResolverFn = RootObject* (*)(RootObject*);
-                    auto fn = reinterpret_cast<ResolverFn>(e->arm);
-                    if (!fn) return {};
-                    RootObject* mat = fn(static_cast<RootObject*>(node));
-                    if (!mat) return {};
-                    return ComPtr<I>::Adopt(static_cast<I*>(mat));
-                }
-                case DispatchKind::CodeExtensionSingleton: {
-                    // T23 §6.2: invoke the registered singleton thunk. Returns a borrowed ptr
-                    // to an external-lifetime singleton (payload carries external sentinel so
-                    // @c Acquire is a no-op).
-                    using SingletonFn = RootObject* (*)();
-                    auto fn = reinterpret_cast<SingletonFn>(e->arm);
-                    if (!fn) return {};
-                    RootObject* s = fn();
-                    if (!s) return {};
-                    return ComPtr<I>(static_cast<I*>(s));
-                }
-            }
-            return {};
-        }
+        /** @brief Construct a pinned view by taking ownership of @p values. */
+        explicit PinnedView(std::vector<T> values) : owner_(std::make_shared<std::vector<T>>(std::move(values))) {}
+
+        /** @brief Return the view as a span. */
+        [[nodiscard]] std::span<const T> Span() const noexcept { return *owner_; }
+
+        /** @brief Return an iterator to the first element. */
+        [[nodiscard]] const T* begin() const noexcept { return owner_->data(); }
+
+        /** @brief Return an iterator one past the last element. */
+        [[nodiscard]] const T* end() const noexcept { return owner_->data() + owner_->size(); }
+
+        /** @brief Return whether the view is empty. */
+        [[nodiscard]] bool Empty() const noexcept { return owner_->empty(); }
+
+        /** @brief Return the number of elements in the view. */
+        [[nodiscard]] std::size_t Size() const noexcept { return owner_->size(); }
+
+        /** @brief Return the element at @p index. */
+        [[nodiscard]] const T& operator[](std::size_t index) const noexcept { return (*owner_)[index]; }
+
+    private:
+        std::shared_ptr<const std::vector<T>> owner_;
+    };
+
+    /** @brief Return @p object's closure nucleus, or null for a null input. */
+    [[nodiscard]] BaseUnknown* Nucleus(BaseUnknown* object) noexcept;
+
+    /** @brief Return @p object's closure nucleus, or null for a null input. */
+    [[nodiscard]] const BaseUnknown* Nucleus(const BaseUnknown* object) noexcept;
+
+    /** @brief Return whether @p lhs and @p rhs belong to the same non-null closure nucleus. */
+    [[nodiscard]] bool InClosure(const BaseUnknown* lhs, const BaseUnknown* rhs) noexcept;
+
+    /** @brief Return whether two owning handles are anchored in the same non-null closure nucleus. */
+    template<class Lhs, class Rhs>
+    [[nodiscard]] bool InClosure(const ComPtr<Lhs>& lhs, const ComPtr<Rhs>& rhs) noexcept {
+        return lhs.Anchor() && rhs.Anchor() && lhs.Anchor()->Nucleus() == rhs.Anchor()->Nucleus();
     }
+
+    /** @brief Return a lifetime-safe snapshot of extension nodes attached to @p object. */
+    [[nodiscard]] PinnedView<BaseUnknown*> Extensions(const BaseUnknown* object);
+
+    /** @brief Return a lifetime-safe snapshot of bound facet nodes attached to @p object. */
+    [[nodiscard]] PinnedView<BaseUnknown*> BoundFacets(const BaseUnknown* object);
+
+    namespace Detail {
+
+        /** @brief Return whether @p extensionClass may be attached to @p object under its Extends declarations. */
+        [[nodiscard]] bool CanAttachExtension(const BaseUnknown* object, const MetaClass& extensionClass) noexcept;
+
+        /** @brief Resolve @p iid from @p object, retain its anchor on success, and return the facet address. */
+        [[nodiscard]] BaseUnknown* QueryInterfaceFacet(BaseUnknown* object, Iid iid,
+                                                       BaseUnknown*& retainedAnchor) noexcept;
+
+    } // namespace Detail
+
+    /** @brief Attach @p extension to @p object's nucleus and transfer ownership to the closure. */
+    template<class Extension>
+        requires Traits::ExtensionClass<Extension>
+    void AttachExtension(BaseUnknown* object, ComPtr<Extension>&& extension) {
+        if (!object || !extension) {
+            return;
+        }
+        Extension* raw = extension.Get();
+        assert(raw->Nucleus() == raw);
+        assert(raw->StorageCountForDebug() == 1);
+        if (raw->Nucleus() != raw || raw->StorageCountForDebug() != 1) {
+            return;
+        }
+        BaseUnknown* nucleus = object->Nucleus();
+        if (!Detail::CanAttachExtension(nucleus, raw->GetMeta())) {
+            return;
+        }
+        raw = extension.Detach();
+        raw->BindExtendee(nucleus);
+        nucleus->AdoptExtensionNode(raw);
+    }
+
+    /** @brief Attach @p facet to @p object's nucleus and transfer ownership to the closure. */
+    template<class Facet>
+        requires(YObjectClass<Facet> && IsTie(ClassTypeOf<Facet>))
+    void AttachBoundFacet(BaseUnknown* object, ComPtr<Facet>&& facet) {
+        if (!object || !facet) {
+            return;
+        }
+        Facet* raw = facet.Get();
+        assert(raw->StorageCountForDebug() == 1);
+        if (raw->StorageCountForDebug() != 1) {
+            return;
+        }
+        if (raw->BoundTarget() && raw->BoundTarget()->Nucleus() != object->Nucleus()) {
+            return;
+        }
+        raw = facet.Detach();
+        if (!raw->BoundTarget()) {
+            raw->BindBoundTarget(object);
+        }
+        object->Nucleus()->AdoptBoundFacetNode(raw);
+    }
+
+    /** @brief Resolve interface or object facet @p Interface from @p object and return an owning pointer. */
+    template<class Interface>
+        requires BaseUnknownClass<Interface>
+    [[nodiscard]] ComPtr<Interface> QueryInterface(BaseUnknown* object) noexcept {
+        BaseUnknown* retainedAnchor = nullptr;
+        BaseUnknown* facet = Detail::QueryInterfaceFacet(object, IidOf<Interface>(), retainedAnchor);
+        return Detail::ComPtrAccess::AdoptRetained(static_cast<Interface*>(facet), retainedAnchor);
+    }
+
+    /** @brief Resolve interface or object facet @p Interface from an owning handle. */
+    template<class Interface, class T>
+        requires BaseUnknownClass<Interface>
+    [[nodiscard]] ComPtr<Interface> QueryInterface(const ComPtr<T>& object) noexcept {
+        return QueryInterface<Interface>(object.Anchor());
+    }
+
+    /** @brief Return @p object's direct runtime metaclass, or null for a null input. */
+    [[nodiscard]] const MetaClass* TypeOf(const BaseUnknown* object) noexcept;
+
+    /** @brief Return whether @p object's closure provides @p iid. */
+    [[nodiscard]] bool Provides(const BaseUnknown* object, Iid iid) noexcept;
+
+    /** @brief Return a lifetime-safe snapshot of provider entries visible from @p object's closure. */
+    [[nodiscard]] PinnedView<ProviderEntry> IidsOf(const BaseUnknown* object);
+
+    /** @brief Return the class that contributes provider @p iid in @p object's closure. */
+    [[nodiscard]] const MetaClass* ProviderClass(const BaseUnknown* object, Iid iid) noexcept;
 
 } // namespace Yuki

@@ -4,7 +4,7 @@
  *
  * Static expectations
  * ===================
- * - @ref Mashiro::Traits::SlabArenaSlot accepts trivially-destructible payloads (the canonical
+ * - @ref Mashiro::Traits::SlabArenaSlotable accepts trivially-destructible payloads (the canonical
  *   case) and rejects non-`noexcept` destructors (which would unwind in @c ~Arena).
  * - The (slab_index, slot_in_slab) decomposition is shift+mask: NodesPerSlab is a power of two,
  *   @c kSlotMask == NodesPerSlab - 1, @c (1 << kSlotShift) == NodesPerSlab.
@@ -74,14 +74,14 @@ namespace {
 // Section 1 — Compile-time guarantees
 // =============================================================================
 
-TEST_CASE("Concept SlabArenaSlot accepts trivially-destructible nodes", AUTO_TAG) {
-    STATIC_REQUIRE(Traits::SlabArenaSlot<LinkNode>);
-    STATIC_REQUIRE(Traits::SlabArenaSlot<AlignedNode>);
-    STATIC_REQUIRE(Traits::SlabArenaSlot<std::uint64_t>);
+TEST_CASE("Concept SlabArenaSlotable accepts trivially-destructible nodes", AUTO_TAG) {
+    STATIC_REQUIRE(Traits::SlabArenaSlotable<LinkNode>);
+    STATIC_REQUIRE(Traits::SlabArenaSlotable<AlignedNode>);
+    STATIC_REQUIRE(Traits::SlabArenaSlotable<std::uint64_t>);
 }
 
-TEST_CASE("Concept SlabArenaSlot rejects throwing destructors", AUTO_TAG) {
-    STATIC_REQUIRE_FALSE(Traits::SlabArenaSlot<ThrowingDtor>);
+TEST_CASE("Concept SlabArenaSlotable rejects throwing destructors", AUTO_TAG) {
+    STATIC_REQUIRE_FALSE(Traits::SlabArenaSlotable<ThrowingDtor>);
 }
 
 TEST_CASE("Default NodesPerSlab is a cache-line-friendly power of two", AUTO_TAG) {

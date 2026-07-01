@@ -1,40 +1,12 @@
 /**
- * @brief Annotations for the Platform thread.
+ * @file ThreadContract.h
+ * @brief Compile-time scheduling annotations for Platform managers.
  *
- * ```
- * ┌───────────────────────────────────────────────────────────────────────┐
- * │                        Platform Thread                                │
- * │                                                                       │
- * │  ┌──────────────┐        ┌────────────────────────┐    SPSC           │
- * │  │ Win32 Pump   │───────▶│ Unified Event Writer   │───────────▶ Client A
- * │  │ (PeekMessage)│        │ (sole producer for all │    SPSC           │
- * │  └──────────────┘        │  EventChannels)        │───────────▶ Client B
- * │        ▲                 └────────────────────────┘                   │
- * │        │ wake event             ▲                                     │
- * │        │                        │ drain                               │
- * │  ┌──────────────┐        ┌──────────────┐                             │
- * │  │ MPSC Event   │◀───────│ Dedicated    │                             │
- * │  │ Inbox        │ submit │ thread mgrs  │                             │
- * │  └──────────────┘        │ (Gamepad,    │                             │
- * │        │                 │  FileWatch)  │                             │
- * │        ▼                 └──────────────┘                             │
- * │  ┌────────────────────────────────────────────┐                       │
- * │  │ Managers (state owners on platform thread) │                       │
- * │  │  Window, Input, Ime, Clipboard, Cursor,    │◀── OwnerTask<T> ──────┤
- * │  │  DragDrop, Dialog, Surface, Appearance,    │   (cross-thread,      │
- * │  │  Accessibility                             │    co_await)          │
- * │  └────────────────────────────────────────────┘                       │
- * │        ▲                                                              │
- * │  ┌──────────────┐                                                     │
- * │  │ MPSC         │◀────── coroutine handles from any worker thread     │
- * │  │ OwnerExecutor│                                                     │
- * │  └──────────────┘                                                     │
- * └───────────────────────────────────────────────────────────────────────┘
+ * Manager apartment placement is declared on the manager type with @c [[=ScheduleMode]] and read by
+ * @ref Mashiro::Traits::GetScheduleMode during EventPump instantiation. The annotation is the scheduling fact;
+ * event bookkeeping still uses structural @c On(const P&) @c noexcept overloads from SystemEvent.h.
  *
- * Free-threaded managers (any thread): Display, Power, AudioDevice
- * Free functions (not a Manager): `Mashiro::Platform::Time::*` for QPC, timer resolution, waitable
- * timers.
- * ```
+ * @ingroup Platform
  */
 
 #pragma once
@@ -82,8 +54,8 @@ namespace Mashiro {
         consteval auto GetScheduleMode() {
             constexpr auto annots =
                 std::define_static_array(std::meta::annotations_of(^^T, ^^Platform::ScheduleMode));
-            static_assert(annots.size() <= 1,
-                          "Manager must have at most one ScheduleMode annotation");
+            static_assert(annots.size() == 1,
+                          "Manager must have exactly one ScheduleMode annotation");
             return std::meta::extract<Platform::ScheduleMode>(annots[0]).mode;
         }
 

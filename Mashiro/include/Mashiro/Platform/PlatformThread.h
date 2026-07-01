@@ -1,49 +1,56 @@
 /**
  * @file PlatformThread.h
- * @brief The Platform thread: spawns the OS-input apartment, drives the EventPump,
- *        and exposes a stable EventChannel to the rest of the application.
+ * @brief Owner-thread facade for platform input, cancellation, and application-event readiness.
  *
- * The Platform thread is the *only* thread that may talk to the OS input
- * surface (Win32 message queue, Wayland fd, ...). Other threads communicate
- * with platform state via two routes:
- *
- *   - Subscribing to the broadcast: @ref AppChannel returns the application's
- *     EventChannel (allocated at startup), which the Platform thread fills via
- *     @c EventPump::DispatchEvent.
- *   - Cross-thread coroutine: a worker @c co_await's an @c OwnerTask<T> awaiter
- *     that posts its handle to the OwnerExecutor mailbox, the Platform thread
- *     resumes it on its own stack, and the awaiter completes back on the
- *     worker thread when the result is ready.
+ * PlatformThread is the public boundary above Platform::EventPump. The thread that enters @ref Run becomes the
+ * platform owner thread. Native readiness, OS message translation, and event fan-out stay below EventPump and
+ * PlatformBackend; this facade exposes only lifecycle, shutdown, and the application subscriber channel.
  *
  * @ingroup Platform
  */
 #pragma once
 
 #include "Mashiro/Platform/EventChannel.h"
-#include "Mashiro/Platform/PlatformBackend.h"
-#include "Mashiro/Platform/ThreadNaming.h"
+
+#include <stdexec/execution.hpp>
 
 #include <atomic>
+#include <cstdint>
+#include <optional>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 namespace Mashiro {
 
     namespace Detail {
+
         template<class Receiver>
-        struct WhenReadyOpState;
-    } // namespace Detail
+        concept PlatformReadyReceiver = requires(Receiver receiver, Platform::EventChannel* channel) {
+            typename stdexec::env_of_t<Receiver>;
+            typename stdexec::stop_token_of_t<stdexec::env_of_t<Receiver>>;
+            stdexec::set_value(std::move(receiver), channel);
+            stdexec::set_stopped(std::move(receiver));
+        };
+
+        template<class Receiver>
+        struct PlatformReadinessOpState;
+
+        struct PlatformReadinessSender;
+
+    } /* namespace Detail */
 
     /**
-     * @brief Owns the OS-input thread and the application's view onto it.
+     * @brief Owns the platform-thread execution lifetime and the application event channel.
      *
-     * Lifetime: construct → @ref Run on a dedicated @c std::thread → mainline
-     * waits on @ref Ready then uses @ref AppChannel → mainline calls
-     * @ref RequestStop → joins the thread.
+     * @details The object does not spawn an inner OS-input thread. @ref Run takes over the calling thread and drives
+     * the Platform::EventPump until cancellation. Other threads observe startup through @ref WhenReady and request
+     * shutdown through @ref RequestStop.
      */
     class PlatformThread final {
-    public:
-        enum class State { Idle, Running, Stopped };
+        enum class LifecycleState : std::uint8_t { Idle, Running, Stopped };
 
+    public:
         PlatformThread();
         ~PlatformThread();
 
@@ -52,142 +59,152 @@ namespace Mashiro {
         PlatformThread(PlatformThread&&) = delete;
         PlatformThread& operator=(PlatformThread&&) = delete;
 
-        /// @brief Run the platform-input loop until @ref RequestStop. Blocks the caller.
+        /**
+         * @brief Drive the platform loop on the calling thread until stop is requested.
+         *
+         * @note A second call after @ref Run has started is ignored. The object is a single-lifetime owner, not a
+         * restartable service.
+         */
         void Run();
 
-        /// @brief Cooperative shutdown signal. Safe from any thread.
+        /** @brief Request cooperative shutdown. Safe and idempotent from any thread, including before @ref Run. */
         void RequestStop() noexcept;
 
-        /// @brief The application's subscriber endpoint. Non-null only after @ref Ready returns true.
-        [[nodiscard]] Platform::EventChannel* AppChannel() const noexcept { return appChannel_; }
-
-        /// @brief True once the Platform thread has finished startup and the
-        ///        application channel is ready for consumption.
-        [[nodiscard]] bool Ready() const noexcept { return ready_.load(std::memory_order_acquire); }
-
-        /// @brief Sender form of @ref Ready — completes with the application
-        ///        channel pointer when it is published, or @c set_stopped when
-        ///        the receiver's stop_token fires first. Pointer (rather than
-        ///        reference) because @c EventChannel is non-copyable and the
-        ///        coroutine suspension boundary requires a decay-copyable value.
-        ///
-        /// Lost-wake-free by construction: @c Run sequences @c appChannel_ store →
-        /// @c ready_.store(release) → @c notify_all. The waiter checks the flag
-        /// under the release/acquire link and re-checks after each futex wake.
-        /// Stop integration is by @c stop_callback into @c notify_all on the
-        /// same atomic — no extra mutex, no condvar, no heap allocation.
-        [[nodiscard]] auto WhenReady() noexcept;
-
-    private:
-        // Sender op-state internals access the wait surface via helper methods
-        // below — keeps @c ready_ private and the wait API a single point of
-        // truth. The op-state is defined in PlatformThread.inl.
-        template<class R>
-        friend struct Detail::WhenReadyOpState;
-
-        void WaitReady() const noexcept { ready_.wait(false, std::memory_order_acquire); }
-        void NotifyReadyWaitersForStop() noexcept {
-            // Wake every parked waiter without changing the observed value
-            // (a true-store would impersonate a real readiness publish).
-            ready_.notify_all();
+        /** @brief Published application channel, or @c nullptr before startup and after shutdown. */
+        [[nodiscard]] Platform::EventChannel* AppChannel() const noexcept {
+            return appChannel_.load(std::memory_order_acquire);
         }
 
-        // "Run() is in flight" (state_) and "channel is published" (ready_)
-        // are distinct: state_ flips at Run() entry, ready_ flips after the
-        // channel is allocated. WhenReady waits on ready_; double-Run
-        // rejection uses state_.
-        std::atomic<State> state_{State::Idle};
-        std::atomic<bool> ready_{false};
-        std::thread::id ownerThread_{};
-        Platform::EventChannel* appChannel_{nullptr};
+        /** @brief Whether the application channel is currently published. */
+        [[nodiscard]] bool Ready() const noexcept { return AppChannel() != nullptr; }
 
-        // Pump and stop_source live in Run()'s stack frame so they share the
-        // Platform thread's lifetime exactly. RequestStop posts to a heap-stable
-        // bridge object set up in Run(); see PlatformThread.cpp.
+        /**
+         * @brief Sender that completes when the application channel is published.
+         *
+         * @return A sender completing with @c set_value(EventChannel*) or @c set_stopped(). The pointer is stable until
+         * @ref Run begins shutdown; clients that consume events should compose their own stop token with the awaiter.
+         *
+         * @details Readiness uses an atomic pointer for publication and a monotonic epoch for waits. The epoch changes
+         * on publish, shutdown, and receiver-stop callbacks, so waiters cannot miss a wake when the observed readiness
+         * value itself remains unchanged.
+         */
+        [[nodiscard]] auto WhenReady() noexcept -> Detail::PlatformReadinessSender;
+
+    private:
+        template<class R>
+        friend struct Detail::PlatformReadinessOpState;
+
+        [[nodiscard]] bool Stopped() const noexcept {
+            return state_.load(std::memory_order_acquire) == LifecycleState::Stopped;
+        }
+
+        [[nodiscard]] std::uint64_t LoadReadinessEpoch() const noexcept {
+            return readinessEpoch_.load(std::memory_order_acquire);
+        }
+
+        void WaitReadinessEpoch(std::uint64_t snapshot) const noexcept {
+            readinessEpoch_.wait(snapshot, std::memory_order_acquire);
+        }
+
+        void NotifyReadinessWaiters() noexcept {
+            readinessEpoch_.fetch_add(1, std::memory_order_release);
+            readinessEpoch_.notify_all();
+        }
+
+        std::atomic<LifecycleState> state_{LifecycleState::Idle};
+        std::atomic<Platform::EventChannel*> appChannel_{nullptr};
+        std::atomic<std::uint64_t> readinessEpoch_{0};
+        std::thread::id ownerThread_{};
+
         struct StopBridge;
+        std::atomic<bool> stopRequested_{false};
         std::atomic<StopBridge*> stopBridge_{nullptr};
     };
 
     namespace Detail {
 
-        /// @brief Operation state for @ref Mashiro::PlatformThread::WhenReady.
-        ///
-        /// Parameterised on @c Receiver so the stop_callback type derived from
-        /// the receiver's environment can be installed without type erasure. All
-        /// state is inline — connect+start performs no heap allocation.
+        /**
+         * @brief Operation state for @ref PlatformThread::WhenReady.
+         *
+         * @tparam Receiver Receiver type selected by the surrounding stdexec graph.
+         */
         template<class Receiver>
-        struct WhenReadyOpState {
+        struct PlatformReadinessOpState {
             PlatformThread* owner;
             Receiver receiver;
 
+            /** @brief Stop callback that wakes waiters through the readiness epoch. */
             struct OnStop {
                 PlatformThread* owner;
-                void operator()() const noexcept {
-                    // Wake every parked waiter; each will re-check Ready() and
-                    // its own stop_token. The publication and stop paths share
-                    // ready_ as the single wait surface — see file header.
-                    owner->NotifyReadyWaitersForStop();
-                }
+                void operator()() const noexcept { owner->NotifyReadinessWaiters(); }
             };
 
             using StopToken = stdexec::stop_token_of_t<stdexec::env_of_t<Receiver>>;
             using StopCallback = typename StopToken::template callback_type<OnStop>;
-            std::optional<StopCallback> stopCb;
+
+            std::optional<StopCallback> stopCallback;
 
             void start() noexcept {
-                // Fast path: already ready — no wait, no callback.
-                if (owner->Ready()) {
-                    stdexec::set_value(std::move(receiver), owner->AppChannel());
+                if (auto* channel = owner->AppChannel()) {
+                    stdexec::set_value(std::move(receiver), channel);
+                    return;
+                }
+                if (owner->Stopped()) {
+                    stdexec::set_stopped(std::move(receiver));
                     return;
                 }
 
                 auto token = stdexec::get_stop_token(stdexec::get_env(receiver));
-                stopCb.emplace(token, OnStop{owner});
+                if (token.stop_requested()) {
+                    stdexec::set_stopped(std::move(receiver));
+                    return;
+                }
 
-                // If the callback fired inline (stop already requested), Ready()
-                // is still false but notify_all has run; we observe stop_requested
-                // on the first iteration and complete via set_stopped.
+                stopCallback.emplace(token, OnStop{owner});
+                auto snapshot = owner->LoadReadinessEpoch();
+
                 for (;;) {
-                    if (owner->Ready()) {
-                        stopCb.reset();
-                        stdexec::set_value(std::move(receiver), owner->AppChannel());
+                    if (auto* channel = owner->AppChannel()) {
+                        stopCallback.reset();
+                        stdexec::set_value(std::move(receiver), channel);
                         return;
                     }
-                    if (token.stop_requested()) {
-                        stopCb.reset();
+                    if (owner->Stopped() || token.stop_requested()) {
+                        stopCallback.reset();
                         stdexec::set_stopped(std::move(receiver));
                         return;
                     }
-                    owner->WaitReady();
+
+                    owner->WaitReadinessEpoch(snapshot);
+                    snapshot = owner->LoadReadinessEpoch();
                 }
             }
         };
 
-        struct WhenReadySender {
+        /** @brief Sender returned by @ref PlatformThread::WhenReady. */
+        struct PlatformReadinessSender {
             PlatformThread* owner;
 
             using sender_concept = stdexec::sender_t;
-            // EventChannel is non-copyable / non-movable, so the value type must
-            // be the channel pointer rather than a reference. The pointer is
-            // decay-copyable, which @c exec::task / @c continues_on require to
-            // carry the value across the suspension boundary. Callers dereference
-            // at the use site (the channel is guaranteed non-null when Ready()).
             using completion_signatures =
                 stdexec::completion_signatures<stdexec::set_value_t(Platform::EventChannel*), stdexec::set_stopped_t()>;
 
             template<class Receiver>
-            auto connect(Receiver&& r) const noexcept -> WhenReadyOpState<std::remove_cvref_t<Receiver>> {
-                return WhenReadyOpState<std::remove_cvref_t<Receiver>>{
+                requires PlatformReadyReceiver<std::remove_cvref_t<Receiver>>
+            auto connect(Receiver&& receiver) const
+                noexcept(std::is_nothrow_constructible_v<std::remove_cvref_t<Receiver>, Receiver>)
+                    -> PlatformReadinessOpState<std::remove_cvref_t<Receiver>> {
+                return PlatformReadinessOpState<std::remove_cvref_t<Receiver>>{
                     .owner = owner,
-                    .receiver = std::forward<Receiver>(r),
+                    .receiver = std::forward<Receiver>(receiver),
                 };
             }
         };
 
-    } // namespace Detail
+    } /* namespace Detail */
 
-    inline auto PlatformThread::WhenReady() noexcept {
-        return Detail::WhenReadySender{this};
+    inline auto PlatformThread::WhenReady() noexcept -> Detail::PlatformReadinessSender {
+        return Detail::PlatformReadinessSender{this};
     }
 
-} // namespace Mashiro
+} /* namespace Mashiro */
