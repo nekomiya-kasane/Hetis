@@ -1,53 +1,111 @@
-/**
+﻿/**
  * @file ABI.cpp
- * @brief Runtime name demangling — DbgHelp on Windows, libc++abi on POSIX.
+ * @brief Runtime name demangling through lazily loaded ABI demangler backends.
+ * @ingroup Core
  *
- * Implements @ref Sora::Meta::ABI::Runtime. The compile-time `Mangle` direction is
- * header-only `consteval`; this translation unit holds the one runtime piece.
+ * @details Implements @ref Sora::Meta::ABI::TryDemangle and @ref Sora::Meta::ABI::Demangle. Compile-time mangling is
+ * header-only @c consteval code; this translation unit contains the runtime inverse for symbol strings that may come
+ * from a different ABI than the host compiler.
  *
- * Backend selection is a compile-time `#if` — exactly one path compiles, with
- * no runtime branch and no dead backend linked:
- * - **Windows / MSVC ABI** → `UnDecorateSymbolName` (DbgHelp). DbgHelp is not
- *   thread-safe, so calls are serialised behind a private mutex. The header and
- *   import library are present in this sysroot (the project already links
- *   `dbghelp`; see Sora/CMakeLists.txt and StackTrace.cpp), so we include
- *   `<dbghelp.h>` directly rather than hand-binding the entry point.
- * - **POSIX / Itanium ABI** → `abi::__cxa_demangle`; the returned malloc buffer
- *   is freed before returning.
+ * Runtime loading is delegated to @ref Sora::PAL::LoadModule. This keeps platform loader mechanics in PAL, while this
+ * file only owns ABI recognition and backend symbol use.
  */
 
 #include "Sora/Core/ABI.h"
 
-#include <string>
+#include "Sora/PAL/Module.h"
 
-#ifdef _WIN32
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <windows.h>
-#    include <dbghelp.h>
-#    include <mutex>
-#else
-#    include <cstdlib>
-#    include <cxxabi.h>
-#endif
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <string_view>
+// #include <cxxabi.h> // todo
 
 namespace Sora::Meta::ABI {
 
-#ifdef _WIN32
-
     namespace {
 
-        /// @brief DbgHelp is not thread-safe; serialise every call.
-        std::mutex g_undecorateMutex;
+        /** @brief Signature of the Itanium ABI demangler exported by libc++abi/libstdc++ runtimes. */
+        using CxaDemangleFn = char*(const char*, char*, std::size_t*, int*);
 
-        /// @brief Core demangle: returns nullopt on failure. Accepts both the
-        ///        linker-symbol form (`?foo@@YAHXZ`) and the typeid `raw_name()`
-        ///        form (`.?AVFoo@@` / `.H`). `UnDecorateSymbolName` wants a
-        ///        decorated *name*, so a leading `.` (typeid marker) is dropped;
-        ///        a bare builtin tag like `.H` has no textual demangling and is
-        ///        reported as failure (there is no human form to recover).
-        std::optional<std::string> Undecorate(std::string_view mangled) noexcept {
+#ifdef _WIN32
+        /** @brief Signature of DbgHelp's @c UnDecorateSymbolName entry point. */
+        using UnDecorateSymbolNameFn = unsigned long __stdcall(const char*, char*, unsigned long, unsigned long);
+#endif
+
+        /** @brief A loaded module kept alive with a resolved function pointer. */
+        template<typename Fn>
+        struct LoadedFunction {
+            PAL::ModulePtr module;
+            Fn* function = nullptr;
+        };
+
+        /** @brief Load the first module containing @p symbol. */
+        template<typename Fn>
+        [[nodiscard]] LoadedFunction<Fn> LoadFunction(std::initializer_list<std::string_view> modules,
+                                                      std::string_view symbol) noexcept {
+            for (std::string_view moduleName : modules) {
+                auto module = PAL::LoadModule({moduleName}, true);
+                if (!module) {
+                    continue;
+                }
+                if (auto* function = (*module)->template TryFindFunction<Fn>(symbol)) {
+                    return {.module = std::move(*module), .function = function};
+                }
+            }
+            return {};
+        }
+
+#ifdef _WIN32
+        /** @brief Lazily resolve DbgHelp's demangling entry point without creating a link-time dependency. */
+        [[nodiscard]] UnDecorateSymbolNameFn* LoadUnDecorateSymbolName() noexcept {
+            static LoadedFunction<UnDecorateSymbolNameFn> loaded =
+                LoadFunction<UnDecorateSymbolNameFn>({"dbghelp"}, "UnDecorateSymbolName");
+            return loaded.function;
+        }
+#endif
+
+        /** @brief Lazily resolve @c __cxa_demangle from C++ ABI runtimes. */
+        [[nodiscard]] CxaDemangleFn* LoadCxaDemangle() noexcept {
+            static LoadedFunction<CxaDemangleFn> loaded = LoadFunction<CxaDemangleFn>(
+                {"libc++abi.so.1", "libc++abi.so", "libstdc++.so.6", "libstdc++.so", "libc++abi.dll",
+                 "cxxabi.dll", "libc++.dll", "c++.dll", "c++abi", "stdc++", "c++"},
+                "__cxa_demangle");
+            return loaded.function;
+        }
+
+        /** @brief Try the lazily available Itanium ABI demangler. */
+        [[nodiscard]] std::optional<std::string> TryDemangleItanium(std::string_view mangled) noexcept {
             if (mangled.empty()) {
+                return std::nullopt;
+            }
+            CxaDemangleFn* demangle = LoadCxaDemangle();
+            if (demangle == nullptr) {
+                return std::nullopt;
+            }
+
+            std::string input{mangled.starts_with("__Z") ? mangled.substr(1) : mangled};
+            int status = 0;
+            char* demangled = demangle(input.c_str(), nullptr, nullptr, &status);
+            if (status != 0 || demangled == nullptr) {
+                if (demangled != nullptr) {
+                    std::free(demangled);
+                }
+                return std::nullopt;
+            }
+            std::string result{demangled};
+            std::free(demangled);
+            return result;
+        }
+
+#ifdef _WIN32
+        /** @brief Try the lazily available MSVC decorated-name demangler. */
+        [[nodiscard]] std::optional<std::string> TryUndecorateMsvc(std::string_view mangled) noexcept {
+            if (mangled.empty()) {
+                return std::nullopt;
+            }
+            UnDecorateSymbolNameFn* undecorate = LoadUnDecorateSymbolName();
+            if (undecorate == nullptr) {
                 return std::nullopt;
             }
 
@@ -59,45 +117,38 @@ namespace Sora::Meta::ABI {
                 return std::nullopt;
             }
 
-            // UnDecorateSymbolName needs a NUL-terminated input.
-            std::string buf{sym};
-
-            char out[1024];
-            std::lock_guard lock(g_undecorateMutex);
-            DWORD n = ::UnDecorateSymbolName(buf.c_str(), out, static_cast<DWORD>(sizeof(out)), UNDNAME_COMPLETE);
+            std::string input{sym};
+            char output[1024];
+            unsigned long n = undecorate(input.c_str(), output, static_cast<unsigned long>(sizeof(output)), 0);
             if (n == 0) {
                 return std::nullopt;
             }
-            return std::string(out, n);
+            return std::string(output, n);
         }
-
-    } // anonymous namespace
-
-#else // POSIX / Itanium
-
-    namespace {
-
-        std::optional<std::string> Undecorate(std::string_view mangled) noexcept {
-            if (mangled.empty()) {
-                return std::nullopt;
-            }
-            std::string buf{mangled};
-            int status = 0;
-            char* demangled = abi::__cxa_demangle(buf.c_str(), nullptr, nullptr, &status);
-            if (status != 0 || demangled == nullptr) {
-                if (demangled) {
-                    std::free(demangled);
-                }
-                return std::nullopt;
-            }
-            std::string result{demangled};
-            std::free(demangled);
-            return result;
+#else
+        /** @brief No MSVC decorated-name demangler is available on this target. */
+        [[nodiscard]] std::optional<std::string> TryUndecorateMsvc(std::string_view) noexcept {
+            return std::nullopt;
         }
-
-    } // anonymous namespace
-
 #endif
+
+        /** @brief Try demanglers in the order implied by the symbol spelling, then use fallback probing. */
+        [[nodiscard]] std::optional<std::string> Undecorate(std::string_view mangled) noexcept {
+            // MSVC decorated names 
+            if (mangled.starts_with("?") || mangled.starts_with(".?")) {
+                if (auto result = TryUndecorateMsvc(mangled)) {
+                    return result;
+                }
+                return TryDemangleItanium(mangled);
+            }
+            // Itanium external names 
+            if (auto result = TryDemangleItanium(mangled)) {
+                return result;
+            }
+            return TryUndecorateMsvc(mangled);
+        }
+
+    } // namespace
 
     std::optional<std::string> TryDemangle(std::string_view mangled) noexcept {
         return Undecorate(mangled);
@@ -110,4 +161,5 @@ namespace Sora::Meta::ABI {
         return std::string{mangled};
     }
 
-} // namespace Sora::Meta::ABI::Runtime
+} // namespace Sora::Meta::ABI
+

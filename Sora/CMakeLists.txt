@@ -18,7 +18,7 @@ target_include_directories(Sora PUBLIC
 target_link_libraries(Sora PRIVATE tapioca)
 target_link_libraries(Sora PUBLIC nlohmann_json::nlohmann_json stdexec)
 if(WIN32)
-    target_link_libraries(Sora PRIVATE advapi32 dbghelp dwmapi imm32 ole32 shell32 user32)
+    target_link_libraries(Sora PRIVATE advapi32 dwmapi imm32 ole32 shell32 user32)
 endif()
 set_target_properties(Sora PROPERTIES
     CXX_STANDARD 26

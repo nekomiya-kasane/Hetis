@@ -15,3 +15,6 @@ include(CTest)
 include(Catch)
 
 add_sora_demo(Core ABIDemo)
+add_sora_demo(Core PolymorphismDemo)
+
+add_sora_demo(PAL ModuleDemo)

@@ -291,7 +291,9 @@ namespace Sora {
         inline constexpr bool kIs64Bit = sizeof(void*) == 8;
         inline constexpr bool kIs32Bit = sizeof(void*) == 4;
 
-        inline constexpr char kPathSeparator = kIsWindows ? '\\' : '/';
+        inline constexpr char kPathSeparator_Windows = '\\';
+        inline constexpr char kPathSeparator_Unix = '/';
+        inline constexpr char kPathSeparator = kIsWindows ? kPathSeparator_Windows : kPathSeparator_Unix;
         inline constexpr std::string_view kSharedLibraryPrefix = kIsWindows ? "" : "lib";
         inline constexpr std::string_view kSharedLibrarySuffix = kIsWindows ? ".dll" : kIsMacOS ? ".dylib" : ".so";
         inline constexpr std::string_view kStaticLibraryPrefix = kIsWindows ? "" : "lib";
