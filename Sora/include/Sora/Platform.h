@@ -7,6 +7,7 @@
 #pragma once
 
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string_view>
@@ -301,5 +302,17 @@ namespace Sora {
         inline constexpr std::string_view kExecutableSuffix = kIsWindows ? ".exe" : "";
 
     } // namespace Platform
+
+    using std::size_t;
+    using ssize_t = std::make_signed_t<size_t>;
+
+    using std::int16_t;
+    using std::int32_t;
+    using std::int64_t;
+    using std::int8_t;
+    using std::uint16_t;
+    using std::uint32_t;
+    using std::uint64_t;
+    using std::uint8_t;
 
 } // namespace Sora
