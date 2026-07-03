@@ -22,3 +22,5 @@ add_sora_demo(Core HashDemo)
 add_sora_demo(Core ToStringDemo)
 
 add_sora_demo(PAL ModuleDemo)
+
+add_sora_demo(Kernel IIDDemo)

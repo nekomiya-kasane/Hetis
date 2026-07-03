@@ -267,17 +267,23 @@ namespace Sora {
 
         /** @brief Type that exposes the standard tuple protocol through @c std::tuple_size and @c std::get. */
         template<typename T>
-        concept TupleLikeClass = requires { typename std::tuple_size<std::remove_cvref_t<T>>::value_type; } &&
-                                 []<size_t... N>(std::index_sequence<N...>) {
-                                     return requires(T && t) { (std::get<N>(t), ...); };
-                                 }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
+        concept TupleLikeClass = requires {
+            typename std::tuple_size<std::remove_cvref_t<T>>::value_type;
+        } && []<size_t... N>(std::index_sequence<N...>) {
+            return requires(T && t) {
+                (std::get<N>(t), ...);
+            };
+        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
 
         /** @brief Type that exposes the standard variant protocol through @c std::variant_size and @c std::get. */
         template<typename T>
-        concept VariantLikeClass = requires { typename std::variant_size<std::remove_cvref_t<T>>::value_type; } &&
-                                   []<size_t... N>(std::index_sequence<N...>) {
-                                       return requires(T && t) { (std::get<N>(t), ...); };
-                                   }(std::make_index_sequence<std::variant_size_v<std::remove_cvref_t<T>>>{});
+        concept VariantLikeClass = requires {
+            typename std::variant_size<std::remove_cvref_t<T>>::value_type;
+        } && []<size_t... N>(std::index_sequence<N...>) {
+            return requires(T && t) {
+                (std::get<N>(t), ...);
+            };
+        }(std::make_index_sequence<std::variant_size_v<std::remove_cvref_t<T>>>{});
 
     } // namespace Concept
 
@@ -290,6 +296,311 @@ namespace Sora {
          */
         template<typename Ret, typename... Args>
         using FunctionPointer = Ret (*)(Args...);
+
+        /**
+         * @brief Type-level list and combinators
+         * @{
+         */
+
+        /** @brief A compile-time list of types — the type-level analogue of a tuple. */
+        template<typename... Ts>
+        struct TypeList {
+            static constexpr size_t size = sizeof...(Ts); /**< Number of elements. */
+        };
+
+        /** @brief Number of elements in @p L. */
+        template<template<typename...> class L, typename... Ts>
+        inline constexpr size_t Length = L<Ts...>::size;
+
+        /** @cond INTERNAL */
+        namespace Detail {
+
+            template<typename L, size_t I>
+            struct AtT;
+            template<typename... Ts, size_t I>
+            struct AtT<TypeList<Ts...>, I> {
+                using type = Ts...[I];
+            };
+
+            template<typename L>
+            struct TailT;
+            template<typename T, typename... Ts>
+            struct TailT<TypeList<T, Ts...>> {
+                using type = TypeList<Ts...>;
+            };
+
+            template<typename... Ls>
+            consteval std::meta::info ConcatImpl() {
+                std::vector<std::meta::info> types;
+                auto collect = [&](std::meta::info listType) {
+                    for (auto arg : std::meta::template_arguments_of(listType)) {
+                        types.push_back(arg);
+                    }
+                };
+                (collect(^^Ls), ...);
+                return std::meta::substitute(^^TypeList, types);
+            }
+
+            template<typename... Ls>
+            struct ConcatT {
+                using type = typename [:ConcatImpl<Ls...>():];
+            };
+            template<>
+            struct ConcatT<> {
+                using type = TypeList<>;
+            };
+
+            template<template<typename> typename F, typename L>
+            struct MapTT;
+            template<template<typename> typename F, typename... Ts>
+            struct MapTT<F, TypeList<Ts...>> {
+                using type = TypeList<F<Ts>...>;
+            };
+
+            template<template<typename> typename Pred, typename L>
+            struct FilterTT;
+            template<template<typename> typename Pred, typename... Ts>
+            struct FilterTT<Pred, TypeList<Ts...>> {
+                static consteval std::meta::info Compute() {
+                    std::vector<std::meta::info> result;
+                    const bool keep[] = {Pred<Ts>::value...};
+                    auto all = std::meta::template_arguments_of(^^TypeList<Ts...>);
+                    for (size_t i = 0; i < all.size(); ++i) {
+                        if (keep[i]) {
+                            result.push_back(all[i]);
+                        }
+                    }
+                    return std::meta::substitute(^^TypeList, result);
+                }
+                using type = typename [:Compute():];
+            };
+
+            template<template<typename...> typename F, typename L>
+            struct ApplyTT;
+            template<template<typename...> typename F, typename... Ts>
+            struct ApplyTT<F, TypeList<Ts...>> {
+                using type = F<Ts...>;
+            };
+
+            template<template<typename, typename> typename Op, typename Acc, typename L>
+            struct FoldTT;
+            template<template<typename, typename> typename Op, typename Acc>
+            struct FoldTT<Op, Acc, TypeList<>> {
+                using type = Acc;
+            };
+            template<template<typename, typename> typename Op, typename Acc, typename T, typename... Ts>
+            struct FoldTT<Op, Acc, TypeList<T, Ts...>> {
+                using type =
+                    typename FoldTT<Op, typename [:std::meta::substitute(^^Op, {^^Acc, ^^T}):], TypeList<Ts...>>::type;
+            };
+
+            template<typename T, typename... Ts>
+            consteval size_t IndexOfImpl() {
+                if constexpr (sizeof...(Ts) == 0) {
+                    return size_t(-1);
+                } else {
+                    const bool match[] = {std::is_same_v<T, Ts>...};
+                    for (size_t i = 0; i < sizeof...(Ts); ++i) {
+                        if (match[i]) {
+                            return i;
+                        }
+                    }
+                    return size_t(-1);
+                }
+            }
+            template<typename L, typename T>
+            struct IndexOfT;
+            template<typename T, typename... Ts>
+            struct IndexOfT<TypeList<Ts...>, T> {
+                static constexpr size_t value = IndexOfImpl<T, Ts...>();
+            };
+
+            template<typename T>
+            consteval std::meta::info TypeListReflOf() {
+                std::vector<std::meta::info> types;
+                for (auto m : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked())) {
+                    types.push_back(std::meta::type_of(m));
+                }
+                return std::meta::substitute(^^TypeList, types);
+            }
+
+            template<typename L>
+            struct LastT;
+            template<typename... Ts>
+            struct LastT<TypeList<Ts...>> {
+                static_assert(sizeof...(Ts) > 0, "Last of an empty TypeList");
+                using type = Ts...[sizeof...(Ts) - 1];
+            };
+
+            template<typename T, typename L>
+            struct PushFrontT;
+            template<typename T, typename... Ts>
+            struct PushFrontT<T, TypeList<Ts...>> {
+                using type = TypeList<T, Ts...>;
+            };
+
+            template<typename L, typename T>
+            struct PushBackT;
+            template<typename T, typename... Ts>
+            struct PushBackT<TypeList<Ts...>, T> {
+                using type = TypeList<Ts..., T>;
+            };
+
+            template<typename L>
+            consteval std::meta::info ReverseImpl() {
+                auto args = std::meta::template_arguments_of(^^L);
+                std::vector<std::meta::info> rev(args.rbegin(), args.rend());
+                return std::meta::substitute(^^TypeList, rev);
+            }
+            template<typename L>
+            struct ReverseT {
+                using type = typename [:ReverseImpl<L>():];
+            };
+
+            template<typename L>
+            consteval std::meta::info PopBackImpl() {
+                auto args = std::meta::template_arguments_of(^^L);
+                if (!args.empty()) {
+                    args.pop_back();
+                }
+                return std::meta::substitute(^^TypeList, args);
+            }
+            template<typename L>
+            struct PopBackT {
+                using type = typename [:PopBackImpl<L>():];
+            };
+
+            template<typename... Ts>
+            consteval std::meta::info UniqueImpl() {
+                std::vector<std::meta::info> result;
+                auto all = std::meta::template_arguments_of(^^TypeList<Ts...>);
+                for (auto arg : all) {
+                    bool seen = false;
+                    for (auto kept : result) {
+                        if (kept == arg) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (!seen) {
+                        result.push_back(arg);
+                    }
+                }
+                return std::meta::substitute(^^TypeList, result);
+            }
+            template<typename L>
+            struct UniqueT;
+            template<typename... Ts>
+            struct UniqueT<TypeList<Ts...>> {
+                using type = typename [:UniqueImpl<Ts...>():];
+            };
+
+            template<template<typename> typename Pred, typename L>
+            struct PredFoldT;
+            template<template<typename> typename Pred, typename... Ts>
+            struct PredFoldT<Pred, TypeList<Ts...>> {
+                static constexpr bool all = (Pred<Ts>::value && ...);
+                static constexpr bool any = (Pred<Ts>::value || ...);
+                static constexpr size_t count = (size_t{0} + ... + (Pred<Ts>::value ? size_t{1} : size_t{0}));
+            };
+
+            template<template<typename> typename Pred, typename L>
+            inline constexpr bool AllOfV = PredFoldT<Pred, L>::all;
+            template<template<typename> typename Pred, typename L>
+            inline constexpr bool AnyOfV = PredFoldT<Pred, L>::any;
+            template<template<typename> typename Pred, typename L>
+            inline constexpr size_t CountIfV = PredFoldT<Pred, L>::count;
+
+        } // namespace Detail
+        /** @endcond */
+
+        /** @brief The @p I-th element of @p L (C++26 pack indexing). */
+        template<typename L, size_t I>
+        using At = typename Detail::AtT<L, I>::type;
+
+        /** @brief First element of @p L. */
+        template<typename L>
+        using Head = At<L, 0>;
+
+        /** @brief All but the first element of @p L. */
+        template<typename L>
+        using Tail = typename Detail::TailT<L>::type;
+
+        /** @brief Concatenate any number of `TypeList`s. */
+        template<typename... Ls>
+        using Concat = typename Detail::ConcatT<Ls...>::type;
+
+        /** @brief Apply unary metafunction @p F to each element: `TypeList<F<Ts>...>`. */
+        template<template<typename> typename F, typename L>
+        using MapT = typename Detail::MapTT<F, L>::type;
+
+        /** @brief Keep elements for which `Pred<T>::value` holds. */
+        template<template<typename> typename Pred, typename L>
+        using FilterT = typename Detail::FilterTT<Pred, L>::type;
+
+        /** @brief Instantiate variadic template @p F with the list elements: `F<Ts...>`. */
+        template<template<typename...> typename F, typename L>
+        using ApplyT = typename Detail::ApplyTT<F, L>::type;
+
+        /** @brief Left fold with binary metafunction `Op<Acc, T>` and seed @p Init. */
+        template<template<typename, typename> typename Op, typename Init, typename L>
+        using FoldT = typename Detail::FoldTT<Op, Init, L>::type;
+
+        /** @brief Index of the first occurrence of @p T in @p L, or `size_t(-1)`. */
+        template<typename L, typename T>
+        inline constexpr size_t IndexOf = Detail::IndexOfT<L, T>::value;
+
+        /** @brief Whether @p L contains type @p T. */
+        template<typename L, typename T>
+        inline constexpr bool Contains = (IndexOf<L, T> != size_t(-1));
+
+        /** @brief Last element of @p L (requires a non-empty list). */
+        template<typename L>
+        using Last = typename Detail::LastT<L>::type;
+
+        /** @brief Prepend @p T to @p L: `TypeList<T, Ts...>`. */
+        template<typename T, typename L>
+        using PushFront = typename Detail::PushFrontT<T, L>::type;
+
+        /** @brief Append @p T to @p L: `TypeList<Ts..., T>`. */
+        template<typename L, typename T>
+        using PushBack = typename Detail::PushBackT<L, T>::type;
+
+        /** @brief Remove the last element of @p L (no-op on an empty list). */
+        template<typename L>
+        using PopBack = typename Detail::PopBackT<L>::type;
+
+        /** @brief Reverse the element order of @p L. */
+        template<typename L>
+        using Reverse = typename Detail::ReverseT<L>::type;
+
+        /** @brief Remove duplicate elements from @p L, keeping first occurrences. */
+        template<typename L>
+        using Unique = typename Detail::UniqueT<L>::type;
+
+        /** @brief `true` if `Pred<T>::value` holds for **every** element of @p L
+         *         (vacuously `true` for an empty list).
+         */
+        template<template<typename> typename Pred, typename L>
+        inline constexpr bool AllOf = Detail::AllOfV<Pred, L>;
+
+        /** @brief `true` if `Pred<T>::value` holds for **at least one** element. */
+        template<template<typename> typename Pred, typename L>
+        inline constexpr bool AnyOf = Detail::AnyOfV<Pred, L>;
+
+        /** @brief `true` if `Pred<T>::value` holds for **no** element. */
+        template<template<typename> typename Pred, typename L>
+        inline constexpr bool NoneOf = !AnyOf<Pred, L>;
+
+        /** @brief Number of elements of @p L for which `Pred<T>::value` holds. */
+        template<template<typename> typename Pred, typename L>
+        inline constexpr size_t CountIf = Detail::CountIfV<Pred, L>;
+
+        /** @brief Reflection bridge: a `TypeList` of @p T's data-member types. */
+        template<typename T>
+        using ToTypeList = [:Detail::TypeListReflOf<T>():];
+
+        /** @} */
 
     } // namespace Traits
 

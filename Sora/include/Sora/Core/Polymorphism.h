@@ -42,7 +42,7 @@
 #pragma once
 
 #include "Sora/Core/ABI.h"
-#include "Sora/Core/Int128.h"
+#include "Sora/Core/Hash.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Core/Traits/InheritanceTraits.h"
 
@@ -70,7 +70,7 @@ namespace Sora {
             using Force = Sora::$::ForceInPolymorphism;
 
         } // namespace $
-        
+
         /** @cond INTERNAL */
         namespace Detail {
 
@@ -106,7 +106,7 @@ namespace Sora {
             template<typename Iface>
             consteval std::vector<std::meta::info> SelectMethods() {
                 std::vector<std::meta::info> out;
-                WalkHierarchyMembers(^^Iface, [&](size_t /*depth*/, std::meta::info m) {
+                Sora::Meta::WalkHierarchyMembers(^^Iface, [&](size_t /*depth*/, std::meta::info m) {
                     if (!IsAdapterEntry(m)) {
                         return;
                     }
@@ -328,7 +328,7 @@ namespace Sora {
             // Materialise the per-method bytes into a constexpr-friendly std::array so we can feed
             // FNV-1a's @c std::span<const std::byte> API without reinterpret_cast (which is forbidden
             // in a constant expression). std::bit_cast<std::byte>(char) is well-defined and constexpr.
-            Hashing::Fnv1a128State h;
+            Sora::Hashing::Fnv1a128State h;
             template for (constexpr auto m : Detail::kSelectedMethods<Iface>) {
                 constexpr std::string_view mangled = ABI::Itanium::Mangle(m);
                 constexpr auto bytes = []() {
@@ -341,6 +341,57 @@ namespace Sora {
                 h.Feed(std::span<const std::byte>{bytes.data(), bytes.size()});
             }
             return h.Finalize();
+        }
+
+        /**
+         * @brief Aggregate vtable shape for the (Iface, Impl) pair — forward-declared.
+         *
+         * The shape is *completed* by @ref Define via `std::meta::define_aggregate` once per
+         * (Iface, Impl) pair, mirroring the @c Mashiro::SoA::Define pattern. Until completed, the type
+         * is incomplete; querying its members or instantiating @ref kVtable triggers a clear diagnostic
+         * directing the user to call @ref Define first.
+         *
+         * @tparam Iface Interface type (declares the methods to be dispatched).
+         * @tparam Impl  Implementation type (any class type whose methods structurally match @p Iface).
+         */
+        template<typename Iface, typename Impl>
+        struct Vtable;
+
+        /**
+         * @brief Complete the @ref Vtable<Iface, Impl> aggregate via `define_aggregate`.
+         *
+         * **Must be invoked from a `consteval { }` block at namespace scope, exactly once per
+         * (Iface, Impl) pair.** After the call, `Vtable<Iface, Impl>` is a complete aggregate carrying
+         * one function-pointer slot per selected Iface method, named after the source method.
+         *
+         * @par Overload limitation (current)
+         * Slot names are the bare method identifier, so the aggregate cannot host two selected methods
+         * sharing a name. `Define` rejects overload sets up front with a `static_assert` carrying the
+         * colliding identifier; either rename one of the overloads or mark the secondary one with
+         * `[[=Anno::Skip{}]]`.
+         *
+         * @TODO Lift this restriction by mangling overloaded slots with a deterministic signature
+         * suffix (e.g. `Draw__int_int`) and exposing a PMF-keyed `Adapter::invoke<Pmf>()` accessor that
+         * resolves the matching slot via reflection. Tracked as a future extension; the rejection is in
+         * place to keep the user-facing call surface (`vtable().Name`) clean while the broader vtable
+         * composition is still settling.
+         *
+         * @code
+         * consteval { Mashiro::Polymorphism::Define<IDrawable, Square>(); }
+         * @endcode
+         */
+        template<typename Iface, typename Impl>
+        consteval void Define() {
+            constexpr auto collision = Detail::FindOverloadCollision<Iface>();
+            if constexpr (!collision.empty()) {
+                throw std::define_static_string(
+                    "Polymorphism::Define: interface '" + std::string{std::meta::display_string_of(^^Iface)} +
+                    "' has overloaded selected method '" + std::string{collision} +
+                    "'. The current name-keyed vtable cannot disambiguate overload sets — rename one "
+                    "of the overloads or skip it with [[=Anno::Skip{}]]. (Tracked TODO: signature-"
+                    "mangled slots + PMF-keyed Adapter::invoke<Pmf>().)");
+            }
+            std::meta::define_aggregate(^^Vtable<Iface, Impl>, Detail::VtableSpecs<Iface, Impl>());
         }
 
         /**
@@ -390,7 +441,7 @@ namespace Sora {
             struct ThunkFromList;
 
             template<typename Self, auto Pmf, typename R, typename... As>
-            struct ThunkFromList<Self, Pmf, R, Mashiro::Traits::TypeList<As...>> {
+            struct ThunkFromList<Self, Pmf, R, Sora::Traits::TypeList<As...>> {
                 using Type = Thunk<Self, Pmf, R, As...>;
             };
 
@@ -404,7 +455,7 @@ namespace Sora {
              * @brief Build a @c TypeList<...> reflection from the parameter types of function @p f.
              */
             consteval std::meta::info ParamTypeListInfo(std::meta::info f) {
-                return std::meta::substitute(^^Mashiro::Traits::TypeList, ParamTypes(f));
+                return std::meta::substitute(^^Sora::Traits::TypeList, Meta::ParamTypesOf(f));
             }
 
             /**
@@ -544,24 +595,23 @@ namespace Sora {
         template<typename Iface, typename Impl>
         concept CanImplementInterface = Polymorphism::Implements<Impl, Iface>;
 
-    }
+    } // namespace Concept
 
     namespace Traits {
 
         /**
          * @brief Public alias to the polymorphism vtable instance variable template.
          */
-        inline constexpr auto kVTable = Polymorphism::kVtable;
+        template<typename Iface, typename Impl>
+        inline constexpr auto kVTable = Polymorphism::kVtable<Iface, Impl>;
 
         /**
          * @brief Compile-time ABI digest for an interface.
          * @tparam Iface Interface contract type.
          */
         template<typename Iface>
-        inline constexpr uint128_t AbiDigestOf = [] consteval {
-            return Polymorphism::AbiDigest<Iface>();
-        }();
+        inline constexpr uint128_t AbiDigestOf = [] consteval { return Polymorphism::AbiDigest<Iface>(); }();
 
-    }
+    } // namespace Traits
 
 } // namespace Sora

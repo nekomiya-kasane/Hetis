@@ -735,15 +735,24 @@ namespace Sora::Hashing {
          * 2. @c [[=$::Key{}]] enables whitelist mode; if any member has it, only those participate.
          * 3. @c [[=$::Order{.priority=N}]] defines stable sort by ascending priority.
          *
-         * Implemented in terms of @ref Sora::Traits::$::SelectMembers, the subsystem-agnostic selector; the three
-         * policy tags are passed in as template arguments.
+         * The selector starts from @ref Sora::Traits::DataMembers so only object fields can reach member splicing.
          */
-        template<typename T> 
+        template<typename T>
             requires (std::is_class_v<T> && !std::is_union_v<T>)
         consteval auto GetHashableMembers() {
             std::vector<std::meta::info> result;
-            for (auto m : Traits::Members<T>) {
+            bool hasKey = false;
+            for (auto m : Traits::DataMembers<T>) {
+                if (Sora::$::Has<$::Key>(m)) {
+                    hasKey = true;
+                    break;
+                }
+            }
+            for (auto m : Traits::DataMembers<T>) {
                 if (Sora::$::Has<$::Ignore>(m)) {
+                    continue;
+                }
+                if (hasKey && !Sora::$::Has<$::Key>(m)) {
                     continue;
                 }
                 result.push_back(m);
