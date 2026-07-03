@@ -27,9 +27,9 @@ namespace Sora {
          * @param[in] context Reflection access context used for base-specifier discovery.
          * @return Vector of type reflections for every direct base in declaration order.
          */
-        consteval std::vector<std::meta::info> DirectBaseTypesOf(
-            std::meta::info type,
-            std::meta::access_context context = std::meta::access_context::unchecked()) {
+        consteval std::vector<std::meta::info>
+        DirectBaseTypesOf(std::meta::info type,
+                          std::meta::access_context context = std::meta::access_context::unchecked()) {
             std::vector<std::meta::info> bases;
             for (auto base : std::meta::bases_of(type, context)) {
                 bases.push_back(std::meta::type_of(base));
@@ -43,9 +43,9 @@ namespace Sora {
          * @param[in] context Reflection access context used for base-specifier discovery.
          * @return Vector of type reflections in depth-first direct-base order.
          */
-        consteval std::vector<std::meta::info> RecursiveBaseTypesOf(
-            std::meta::info type,
-            std::meta::access_context context = std::meta::access_context::unchecked()) {
+        consteval std::vector<std::meta::info>
+        RecursiveBaseTypesOf(std::meta::info type,
+                             std::meta::access_context context = std::meta::access_context::unchecked()) {
             std::vector<std::meta::info> bases;
             auto directBaseTypes = DirectBaseTypesOf(type, context);
             for (auto base : directBaseTypes) {
@@ -54,6 +54,42 @@ namespace Sora {
                 bases.insert_range(bases.end(), recursiveBases);
             }
             return bases;
+        }
+
+        /**
+         * @brief Walk the class @p root's reflection hierarchy in derived-first order, invoking
+         *        @p visit for each (depth, member) pair across @p root and every base class.
+         *        Visits each unique base class exactly once (handles diamond inheritance and
+         *        virtual bases) — duplicates are filtered by reflection-info equality of the base
+         *        class type.
+         *
+         * @tparam Visit Callable as @c void(size_t depth, std::meta::info member). Depth is 0 for
+         *               members declared in @p root, 1 for direct bases, etc.
+         */
+        template<typename Visit>
+        consteval void WalkHierarchyMembers(std::meta::info root, Visit&& visit) {
+            std::vector<std::meta::info> stack{root};
+            std::vector<std::meta::info> seen{root};
+            for (size_t i = 0; i < stack.size(); ++i) {
+                const size_t depth = i;
+                for (auto m : std::meta::members_of(stack[i], std::meta::access_context::unchecked())) {
+                    visit(depth, m);
+                }
+                for (auto b : std::meta::bases_of(stack[i], std::meta::access_context::unchecked())) {
+                    const auto baseType = std::meta::type_of(b);
+                    bool already = false;
+                    for (auto s : seen) {
+                        if (s == baseType) {
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (!already) {
+                        stack.push_back(baseType);
+                        seen.push_back(baseType);
+                    }
+                }
+            }
         }
 
     } // namespace Meta

@@ -29,7 +29,11 @@ namespace Sora {
 
         /** @brief Scoped enumeration type that is not implicitly convertible to its underlying type. */
         template<typename T>
-        concept EnumClass = std::is_enum_v<T> && !std::is_convertible_v<T, std::underlying_type_t<T>>;
+        concept EnumClass = std::is_scoped_enum_v<T>;
+        
+        /** @brief An unscoped (C-style) enumeration. */
+        template<typename T>
+        concept UnscopedEnum = std::is_enum_v<T> && !std::is_scoped_enum_v<T>;
 
     } // namespace Concept
 
