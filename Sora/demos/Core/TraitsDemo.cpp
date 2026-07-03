@@ -4,34 +4,9 @@
 #include <iostream>
 #include <variant>
 
-enum class Color : uint8_t { Red, Green, Blue };
-
-namespace $ {
-
-    struct AnnoA {
-        int value;
-    };
-
-    struct AnnoB {
-        ::Sora::FixedString<32> name;
-    };
-
-    constexpr AnnoA a1{42};
-    constexpr AnnoA a2{100};
-
-    constexpr AnnoB b1{"b1::Hello"};
-    constexpr AnnoB b2{"b2::World"};
-
-} // namespace $
+#include "Common/Common.h"
 
 int main() {
-    // Example usage of the Traits library
-    struct MyStruct {
-        int aa;
-        double bb;
-        std::string cc;
-    };
-
     // Get the number of members in MyStruct
     constexpr size_t memberCount = Sora::Traits::MembersCount<MyStruct>;
     std::cout << "MyStruct has " << memberCount << " members." << std::endl;
@@ -67,30 +42,6 @@ int main() {
     std::visit(overload, v2);
     std::visit(overload, v3);
 
-    struct A {
-        int x;
-    };
-
-    struct B : A {
-        double y;
-    };
-
-    struct C : B {
-        std::string z;
-    };
-
-    struct D {
-        int w;
-    };
-
-    struct E : C, D {
-        struct F {
-            using G = int;
-        } f;
-
-        float v;
-    };
-
     std::cout << "Direct bases of E: " << Sora::Traits::DirectBasesCount<E> << std::endl;
     std::cout << "Recursive bases of E: " << Sora::Traits::RecursiveBasesCount<E> << std::endl;
 
@@ -117,17 +68,23 @@ int main() {
 
     } h;
 
-    struct [[= $::b1]] I {
+    struct[[= $::b1]] I {
+        int func() { return 42; }
 
+        int member;
     } i;
 
-    constexpr auto anno = Sora::$::GetFirst<$::AnnoA>(^^H);
+    constexpr auto anno1 = Sora::$::GetFirst<$::AnnoA>(^^H);
     constexpr auto anno2 = Sora::$::GetFirst<$::AnnoB>(^^H);
-    std::cout << "H has AnnoA: " << anno.value().value << std::endl;
+    constexpr auto anno3 = Sora::$::GetSingle<$::AnnoB>(^^H);
+    std::cout << "H has AnnoA: " << anno1.value().value << std::endl;
     std::cout << "H has AnnoB: " << anno2.value().name.c_str() << std::endl;
+    std::cout << "H has AnnoB: " << anno3.name.c_str() << std::endl;
 
-    constexpr auto anno3 = Sora::$::GetFirst<$::AnnoB>(^^I);
-    std::cout << "I has AnnoB: " << anno3.value().name.c_str() << std::endl;
+    constexpr auto anno4 = Sora::$::GetFirst<$::AnnoB>(^^I);
+    std::cout << "I has AnnoB: " << anno4.value().name.c_str() << std::endl;
+    std::cout << "Member count: " << Sora::Traits::MembersCount<decltype(i)> << std::endl;
+    std::cout << "Member name: " << Sora::Traits::MemberIdentifier<decltype(i), 0> << std::endl;
 
     return 0;
 }
