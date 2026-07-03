@@ -3,11 +3,13 @@
 #include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Kernel/Core/Traits.h"
 
+#include <type_traits>
+
 namespace Sora::Kernel {
 
     /** @name Object-model roles @{ */
 
-    /** @brief Historical Yuki object-model role of a class declaration. */
+    /** @brief Historical Sora object-model role of a class declaration. */
     enum class TypeOfClass : uint8_t {
         NothingType = 0x01,        /**< Untagged class; outside the object model. */
         BaseUnknown = 0x02,        /**< Root object anchor. */
@@ -70,7 +72,7 @@ namespace Sora::Kernel {
             if (!std::meta::is_class_type(^^T)) {
                 throw std::define_static_string(
                     "Meta::RoleOf: '" + std::string{Sora::Meta::DisplayStringOf(^^T)} +
-                    "' is not a class type reflection — only classes participate in Yuki object model.");
+                    "' is not a class type reflection — only classes participate in Sora object model.");
             }
             const std::meta::info canonical = std::meta::dealias(^^T);
             if (canonical == ^^Sora::Kernel::BaseUnknown) {
@@ -82,5 +84,30 @@ namespace Sora::Kernel {
         }();
 
     } // namespace Traits
+
+    namespace Concept {
+
+        template<typename T>
+        concept InterfaceClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::Interface;
+
+        template<typename T>
+        concept ImplementationClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::Implementation;
+
+        template<typename T>
+        concept DataExtensionClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::DataExtension;
+
+        template<typename T>
+        concept CodeExtensionClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::CodeExtension;
+
+        template<typename T>
+        concept ExtensionClass = ComClass<T> && IsExtension(Traits::RoleOf<T>);
+
+        template<typename T>
+        concept ComponentClass = ImplementationClass<T> || ExtensionClass<T> || std::is_same_v<T, BaseUnknown>;
+
+        template<typename T>
+        concept TIEClass = ComClass<T> && IsTie(Traits::RoleOf<T>);
+
+    } // namespace Concept
 
 } // namespace Sora::Kernel

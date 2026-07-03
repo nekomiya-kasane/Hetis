@@ -9,7 +9,7 @@ namespace Sora::Meta {
      *
      * P3385 annotations require structural values. `std::span` is not structural, so Core stores a public
      * pointer/length pair. The initializer-list constructor promotes inline reflection lists into static storage,
-     * making declarations such as `[[=Yuki::Anno::Implements{^^IPosition, ^^IName}]]` lifetime-safe.
+     * making declarations such as `[[=Sora::$::Implements{^^IPosition, ^^IName}]]` lifetime-safe.
      */
     struct InfoList {
         const std::meta::info* first{}; /**< First reflected type in static storage, or null for empty. */

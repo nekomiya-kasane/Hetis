@@ -30,7 +30,7 @@ namespace Sora {
         /** @brief Scoped enumeration type that is not implicitly convertible to its underlying type. */
         template<typename T>
         concept EnumClass = std::is_scoped_enum_v<T>;
-        
+
         /** @brief An unscoped (C-style) enumeration. */
         template<typename T>
         concept UnscopedEnum = std::is_enum_v<T> && !std::is_scoped_enum_v<T>;
@@ -55,6 +55,13 @@ namespace Sora {
         /** @brief Number of enumerators in @p T. */
         template<Concept::Enum T>
         inline constexpr size_t EnumeratorsCount = Meta::EnumeratorsOf(^^T).size();
+
+        template<Concept::Enum T>
+        inline constexpr std::array<T, Traits::EnumeratorsCount<T>> EnumeratorsArr = [] consteval {
+            return []<size_t... I>(std::index_sequence<I...>) {
+                return std::array<T, sizeof...(I)>{std::meta::extract<T>(Meta::EnumeratorsOf(^^T)[I])...};
+            }(std::make_index_sequence<Traits::EnumeratorsCount<T>>{});
+        }();
 
     } // namespace Traits
 

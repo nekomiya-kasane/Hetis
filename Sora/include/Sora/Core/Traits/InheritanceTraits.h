@@ -57,14 +57,13 @@ namespace Sora {
         }
 
         /**
-         * @brief Walk the class @p root's reflection hierarchy in derived-first order, invoking
-         *        @p visit for each (depth, member) pair across @p root and every base class.
-         *        Visits each unique base class exactly once (handles diamond inheritance and
-         *        virtual bases) — duplicates are filtered by reflection-info equality of the base
-         *        class type.
+         * @brief Walk the class @p root's reflection hierarchy in derived-first order, invoking @p visit for each
+         * (depth, member) pair across @p root and every base class. Visits each unique base class exactly once (handles
+         * diamond inheritance and virtual bases) — duplicates are filtered by reflection-info equality of the base
+         * class type.
          *
-         * @tparam Visit Callable as @c void(size_t depth, std::meta::info member). Depth is 0 for
-         *               members declared in @p root, 1 for direct bases, etc.
+         * @tparam Visit Callable as @c void(size_t depth, std::meta::info member). Depth is 0 for members declared in
+         * @p root, 1 for direct bases, etc.
          */
         template<typename Visit>
         consteval void WalkHierarchyMembers(std::meta::info root, Visit&& visit) {
