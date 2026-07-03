@@ -1,9 +1,28 @@
 #include "Sora/Core/Traits.h"
+#include "Sora/Core/FixedString.h"
 
 #include <iostream>
 #include <variant>
 
 enum class Color : uint8_t { Red, Green, Blue };
+
+namespace $ {
+
+    struct AnnoA {
+        int value;
+    };
+
+    struct AnnoB {
+        ::Sora::FixedString<32> name;
+    };
+
+    constexpr AnnoA a1{42};
+    constexpr AnnoA a2{100};
+
+    constexpr AnnoB b1{"b1::Hello"};
+    constexpr AnnoB b2{"b2::World"};
+
+} // namespace $
 
 int main() {
     // Example usage of the Traits library
@@ -89,7 +108,26 @@ int main() {
 
     std::cout << "Meta scope depth of G: " << Sora::Meta::ScopeDepthOf(^^E::F::G) << std::endl;
     std::cout << "Meta scope chain identifier of G: " << Sora::Meta::ScopeChainIdentifierOf(^^E::F::G) << std::endl;
-    std::cout << "Meta scope chain display string of G: " << Sora::Meta::ScopeChainDisplayStringOf(^^E::F::G) << std::endl;
+    std::cout << "Meta scope chain display string of G: " << Sora::Meta::ScopeChainDisplayStringOf(^^E::F::G)
+              << std::endl;
+
+    [[= 12]] int x = 10;
+
+    struct[[= $::AnnoA{42}]][[= $::AnnoB{"Hello"}]] H {
+
+    } h;
+
+    struct [[= $::b1]] I {
+
+    } i;
+
+    constexpr auto anno = Sora::$::GetFirst<$::AnnoA>(^^H);
+    constexpr auto anno2 = Sora::$::GetFirst<$::AnnoB>(^^H);
+    std::cout << "H has AnnoA: " << anno.value().value << std::endl;
+    std::cout << "H has AnnoB: " << anno2.value().name.c_str() << std::endl;
+
+    constexpr auto anno3 = Sora::$::GetFirst<$::AnnoB>(^^I);
+    std::cout << "I has AnnoB: " << anno3.value().name.c_str() << std::endl;
 
     return 0;
 }

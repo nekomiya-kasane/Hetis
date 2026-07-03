@@ -20,5 +20,6 @@
 #include "Sora/Core/Traits/EnumTraits.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Core/Traits/InheritanceTraits.h"
+#include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Core/Traits/ScopeTraits.h"
 #include "Sora/Core/Traits/VisitOverloader.h"
