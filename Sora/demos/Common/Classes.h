@@ -66,7 +66,7 @@ namespace Sora::Kernel {
     namespace Tie {
 
         template<Concept::ComponentClass Impl>
-        class [[= Sora::Kernel::$::TIE]] Tie_IPosition : public IPosition {
+        class [[= Sora::Kernel::$::TIE]] Tie$IPosition : public IPosition {
         public:
             S_OBJECT
 
@@ -81,7 +81,7 @@ namespace Sora::Kernel {
         };
 
         template<Concept::ComponentClass Impl>
-        class [[= Sora::Kernel::$::TIE]] Tie_I3DPosition : public I3DPosition {
+        class [[= Sora::Kernel::$::TIE]] Tie$I3DPosition : public I3DPosition {
         public:
             S_OBJECT
 

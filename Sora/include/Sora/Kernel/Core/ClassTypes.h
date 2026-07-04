@@ -274,7 +274,7 @@ namespace Sora::Kernel {
          */
         template<Concept::InterfaceClass Iface>
         inline constexpr std::string_view TieClassIdentifierOf = [] consteval {
-            return std::define_static_string("Tie_" + std::string{std::meta::identifier_of(^^Iface)});
+            return std::define_static_string("Tie$" + std::string{std::meta::identifier_of(^^Iface)});
         }();
 
     } // namespace Traits
