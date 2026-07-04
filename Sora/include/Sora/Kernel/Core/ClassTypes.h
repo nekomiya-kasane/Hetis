@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Sora/Core/Traits/AnnotationTraits.h"
+#include "Sora/Core/Traits/ScopeTraits.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Core/Traits/InheritanceTraits.h"
 #include "Sora/Core/Traits/TypeTraits.h"
@@ -205,13 +206,14 @@ namespace Sora::Kernel {
 
             constexpr auto chain = std::define_static_array(Sora::Meta::InheritanceChainOf(owner));
             template for (constexpr auto type : chain) {
-                if constexpr (type != owner) {
-                    constexpr auto members =
-                        std::define_static_array(std::meta::members_of(type, std::meta::access_context::unchecked()));
-                    template for (constexpr auto member : members) {
-                        if constexpr (Sora::Meta::IsSameSignatureMethod(member, CurrentFunction)) {
-                            return member;
-                        }
+                if constexpr (type == owner) {
+                    continue;
+                }
+
+                using CurrentBaseType = [:type:];
+                template for (constexpr auto member : Sora::Traits::Members<CurrentBaseType>) {
+                    if constexpr (Sora::Meta::IsSameSignatureMethod(member, CurrentFunction)) {
+                        return member;
                     }
                 }
             }
@@ -225,9 +227,8 @@ namespace Sora::Kernel {
         consteval std::meta::info TieTargetOfInterfaceMember() {
             constexpr auto chain = std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
             template for (constexpr auto type : chain) {
-                constexpr auto members =
-                    std::define_static_array(std::meta::members_of(type, std::meta::access_context::unchecked()));
-                template for (constexpr auto member : members) {
+                using CurrentBaseType = [:type:];
+                template for (constexpr auto member : Sora::Traits::Members<CurrentBaseType>) {
                     if constexpr (Sora::Meta::IsSameSignatureMethod(member, InterfaceMember)) {
                         return member;
                     }
@@ -257,7 +258,7 @@ namespace Sora::Kernel {
         template<std::meta::info CurrentFunction, Concept::ComponentClass Impl, typename... Args>
         decltype(auto) InvokeTieCurrent(const BaseUnknown* target, Args&&... args) {
             constexpr auto targetMember = TieTargetOfCurrent<CurrentFunction, Impl>();
-            using Owner = Sora::Meta::InfoType<std::meta::parent_of(targetMember)>;
+            using Owner = Sora::Meta::InfoType<Sora::Meta::ParentScopeOf(targetMember)>;
             constexpr auto method = &[:targetMember:];
             return (static_cast<const Owner*>(target)->*method)(std::forward<Args>(args)...);
         }

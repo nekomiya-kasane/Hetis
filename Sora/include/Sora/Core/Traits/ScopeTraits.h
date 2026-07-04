@@ -35,6 +35,15 @@ namespace Sora {
         };
 
         /**
+         * @brief Return the parent scope of @p info.
+         * @param[in] info Reflected declaration or type whose parent scope is requested.
+         * @return Parent scope of @p info.
+         */
+        consteval std::meta::info ParentScopeOf(std::meta::info info) {
+            return std::meta::parent_of(info);
+        }
+
+        /**
          * @brief Return the parent-scope chain for @p info.
          * @param[in] info Reflected declaration or type whose scope chain is requested.
          * @return Vector containing @p info followed by each parent scope up to, but not including, global scope.
@@ -42,10 +51,10 @@ namespace Sora {
         consteval std::vector<std::meta::info> ScopeChainOf(std::meta::info info) {
             std::vector<std::meta::info> chain;
             chain.push_back(info);
-            auto parent = std::meta::parent_of(info);
+            auto parent = ParentScopeOf(info);
             while (parent != ^^::) {
                 chain.push_back(parent);
-                parent = std::meta::parent_of(parent);
+                parent = ParentScopeOf(parent);
             }
             return chain;
         }
