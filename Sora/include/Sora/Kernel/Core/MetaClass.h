@@ -57,7 +57,13 @@ namespace Sora::Kernel {
 
             kMeta->type = type;
             kMeta->iid = Traits::IidOf<T>;
-            kMeta->name = Sora::Meta::IdentifierOf(^^T);
+            kMeta->name = [] consteval {
+                if constexpr (std::meta::has_identifier(^^T)) {
+                    return Sora::Meta::IdentifierOf(^^T);
+                } else {
+                    return Sora::Meta::DisplayStringOf(^^T);
+                }
+            }();
 
             if constexpr (std::same_as<T, BaseUnknown>) {
                 kMeta->base = nullptr;
@@ -85,7 +91,9 @@ namespace Sora::Kernel {
                         // TODO:
                     } else {
                         entry.kind = DispatchKind::BoundFacet;
-                        entry.factory = nullptr;
+                        entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* {
+                            return Sora::Kernel::Traits::TieClassOf<Interface, T>::MakeObjectModelBound(provider);
+                        };
                     }
                     entry.providerClass = kMeta;
                     entry.priority = 0; // TODO: Allow priority to be declared in the class annotation.

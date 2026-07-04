@@ -133,6 +133,18 @@ namespace Sora::Kernel {
         }
     }
 
+    void BaseUnknown::BindObjectModelBase(PointerType kind, BaseUnknown* base) noexcept {
+        assert(base != nullptr);
+        assert(kind == PointerType::ForExtension || kind == PointerType::ForTie || kind == PointerType::ForInlineFacet);
+        for (uint64_t current = data_.load(std::memory_order_acquire);;) {
+            assert(ComData::Kind(current) == PointerType::ForImplementation && ComData::Pointer(current) == nullptr);
+            const uint64_t next = ComData::WithPointer(current, kind, base);
+            if (data_.compare_exchange_weak(current, next, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                return;
+            }
+        }
+    }
+
     BaseUnknown::~BaseUnknown() noexcept {
         const uint64_t word = data_.load(std::memory_order_acquire);
         if (ComData::Kind(word) != ComData::PointerType::ForImplementation) {

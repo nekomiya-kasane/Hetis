@@ -214,13 +214,7 @@ namespace Sora::Kernel {
             for (auto m : std::meta::members_of(ns, std::meta::access_context::current())) {
                 if (std::meta::is_class_template(m) &&
                     std::meta::identifier_of(m) == Traits::TieClassIdentifierOf<Iface>) {
-                    auto params = std::meta::template_arguments_of(m);
-                    if (params.size() != 1) {
-                        msg += "Possible candidate: '" + std::string{Sora::Meta::DisplayStringOf(m)} + "'\n";
-                        continue;
-                    } else {
-                        return m;
-                    }
+                    return m;
                 }
             }
 

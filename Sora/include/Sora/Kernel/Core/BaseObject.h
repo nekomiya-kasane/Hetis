@@ -7,10 +7,11 @@
 #include <bit>
 #include <cassert>
 #include <memory>
+#include <new>
 
 namespace Sora::Kernel {
 
-    // ----------------------------------------------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------------------------------------
 
 #define S_OBJECT                                                                                                       \
 public:                                                                                                                \
@@ -34,9 +35,27 @@ public:                                                                         
         return GetRoleStatic();                                                                                        \
     }                                                                                                                  \
                                                                                                                        \
+    template<class T = Self>                                                                                           \
+    [[nodiscard]] static Sora::Kernel::BaseUnknown* MakeObjectModelBound(Sora::Kernel::BaseUnknown* base) noexcept     \
+        requires(Sora::Kernel::IsTie(Sora::Kernel::Traits::RoleOf<T>) ||                                               \
+                 Sora::Kernel::IsExtension(Sora::Kernel::Traits::RoleOf<T>))                                           \
+    {                                                                                                                  \
+        auto* object = new (std::nothrow) T;                                                                           \
+        if (object == nullptr) {                                                                                       \
+            return nullptr;                                                                                            \
+        }                                                                                                              \
+        constexpr auto role = Sora::Kernel::Traits::RoleOf<T>;                                                         \
+        if constexpr (Sora::Kernel::IsTie(role)) {                                                                     \
+            object->BindObjectModelBase(Sora::Kernel::BaseUnknown::PointerType::ForTie, base);                         \
+        } else {                                                                                                       \
+            object->BindObjectModelBase(Sora::Kernel::BaseUnknown::PointerType::ForExtension, base);                   \
+        }                                                                                                              \
+        return object;                                                                                                 \
+    }                                                                                                                  \
+                                                                                                                       \
 public:
 
-    // ----------------------------------------------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------------------------------------
 
     namespace Detail {
 
@@ -143,6 +162,9 @@ public:
             }
         };
 
+    protected:
+        using PointerType = ComData::PointerType;
+
     public:
         using Self = BaseUnknown;
 
@@ -184,6 +206,9 @@ public:
     protected:
         /** @brief Destroy this nucleus or closure-owned node. Use @ref Release instead of direct deletion. */
         virtual ~BaseUnknown() noexcept;
+
+        /** @brief Bind this non-nucleus object to its owner, extendee, or bound target. */
+        void BindObjectModelBase(PointerType kind, BaseUnknown* base) noexcept;
 
         friend class Sora::Kernel::Detail::BaseUnknownInternal;
 
