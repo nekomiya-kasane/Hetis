@@ -110,4 +110,52 @@ namespace Sora::Kernel {
 
     } // namespace Concept
 
+    namespace $ {
+
+        /** @brief Declares the interface facets directly provided by an object-model class. */
+        template<typename... Interfaces>
+        struct Implements {};
+
+        /** @brief Declares the object-model classes extended by an extension class. */
+        template<typename... Extendees>
+        struct Extends {};
+
+    } // namespace $
+
+    namespace Meta {
+
+        /** @brief Return the direct interface type reflections declared by @ref Anno::Implements on @p type. */
+        consteval std::vector<std::meta::info> ImplementedInterfaceTypesOf(std::meta::info type) {
+            std::vector<std::meta::info> implements;
+            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
+            for (const auto& annotation : allAnnotations) {
+                auto t = std::meta::type_of(annotation);
+                if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Implements>(t)) {
+                    auto params = std::meta::template_arguments_of(t);
+                    for (const auto& param : params) {
+                        implements.push_back(std::meta::type_of(std::meta::dealias(param)));
+                    }
+                }
+            }
+            return implements;
+        }
+
+        /** @brief Return the direct extendee type reflections declared by @ref Anno::Extends on @p type. */
+        consteval std::vector<std::meta::info> ExtendeeTypesOf(std::meta::info type) {
+            std::vector<std::meta::info> extendees;
+            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
+            for (const auto& annotation : allAnnotations) {
+                auto t = std::meta::type_of(annotation);
+                if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Extends>(t)) {
+                    auto params = std::meta::template_arguments_of(t);
+                    for (const auto& param : params) {
+                        extendees.push_back(std::meta::type_of(std::meta::dealias(param)));
+                    }
+                }
+            }
+            return extendees;
+        }
+
+    } // namespace Meta
+
 } // namespace Sora::Kernel

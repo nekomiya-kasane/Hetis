@@ -1,5 +1,6 @@
 #include "Sora/Kernel/Core/IID.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
+
 #include <print>
 
 using namespace Sora::Kernel::$;

@@ -17,7 +17,6 @@
 
 #include <Sora/Core/Hash.h>
 #include <Sora/Core/Polymorphism.h>
-#include <Sora/Core/Traits/MetaInfoList.h>
 
 namespace Sora::Kernel {
 
@@ -60,31 +59,6 @@ namespace Sora::Kernel {
         /** @brief Explicitly supplies the IID for a type instead of using the reflected name hash. */
         struct IidOverride {
             Iid value{}; /**< Replacement identifier. */
-        };
-
-        /** @brief Declares the interface facets directly provided by an object-model class. */
-        struct Implements {
-            Meta::InfoList interfaces{}; /**< Reflected interface types implemented by the annotated class. */
-
-            /** @brief Construct from an inline braced list of reflected interface types. */
-            consteval Implements(std::initializer_list<std::meta::info> items) : interfaces{items} {}
-
-            /** @brief Construct from an existing static array of reflected interface types. */
-            template<std::size_t N>
-            consteval Implements(const std::meta::info (&items)[N]) noexcept : interfaces{items} {}
-        };
-
-        /** @brief Declares the object-model classes extended by an extension class. */
-        struct Extends {
-            Meta::InfoList
-                classes{}; /**< Reflected implementation/component classes extended by the annotated class. */
-
-            /** @brief Construct from an inline braced list of reflected extendee classes. */
-            consteval Extends(std::initializer_list<std::meta::info> items) : classes{items} {}
-
-            /** @brief Construct from an existing static array of reflected extendee classes. */
-            template<std::size_t N>
-            consteval Extends(const std::meta::info (&items)[N]) noexcept : classes{items} {}
         };
 
     } // namespace $
