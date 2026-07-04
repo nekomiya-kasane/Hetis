@@ -66,14 +66,14 @@ namespace Sora::Kernel {
             }
 
             if constexpr (IsExtension(type)) {
-                template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypes<T>) {
+                template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypesOf<T>()) {
                     using Extendee = Sora::Meta::InfoType<ext>;
                     kMeta->protensions.emplace(Traits::IidOf<Extendee>, MetaClass::Query<Extendee>());
                 }
             }
 
             if constexpr (IsComponent(type)) {
-                template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypes<T>) {
+                template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<T>()) {
                     using Interface = Sora::Meta::InfoType<iface>;
                     ProviderEntry entry{};
                     entry.interfaceIid = Traits::IidOf<Interface>;

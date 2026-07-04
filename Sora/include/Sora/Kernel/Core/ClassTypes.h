@@ -145,10 +145,11 @@ namespace Sora::Kernel {
 
     namespace Meta {
 
-        /** @brief Return the direct interface type reflections declared by @ref $::Implements on @p type. */
-        consteval std::vector<std::meta::info> ImplementedInterfaceTypesOf(std::meta::info type) {
+        /** @brief Return static-storage direct interface type reflections declared by @ref $::Implements on @p T. */
+        template<Concept::ComClass T>
+        consteval auto ImplementedInterfaceTypesOf() {
             std::vector<std::meta::info> implements;
-            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
+            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(^^T));
             for (const auto& annotation : allAnnotations) {
                 auto t = std::meta::type_of(annotation);
                 if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Implements>(t)) {
@@ -158,17 +159,14 @@ namespace Sora::Kernel {
                     }
                 }
             }
-            return implements;
+            return std::define_static_array(implements);
         }
 
-        /** @brief Static-storage direct interface type reflections declared by @ref $::Implements on @p T. */
+        /** @brief Return static-storage direct extendee type reflections declared by @ref $::Extends on @p T. */
         template<Concept::ComClass T>
-        inline constexpr auto ImplementedInterfaceTypes = std::define_static_array(ImplementedInterfaceTypesOf(^^T));
-
-        /** @brief Return the direct extendee type reflections declared by @ref $::Extends on @p type. */
-        consteval std::vector<std::meta::info> ExtendeeTypesOf(std::meta::info type) {
+        consteval auto ExtendeeTypesOf() {
             std::vector<std::meta::info> extendees;
-            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
+            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(^^T));
             for (const auto& annotation : allAnnotations) {
                 auto t = std::meta::type_of(annotation);
                 if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Extends>(t)) {
@@ -178,12 +176,8 @@ namespace Sora::Kernel {
                     }
                 }
             }
-            return extendees;
+            return std::define_static_array(extendees);
         }
-
-        /** @brief Static-storage direct extendee type reflections declared by @ref $::Extends on @p T. */
-        template<Concept::ComClass T>
-        inline constexpr auto ExtendeeTypes = std::define_static_array(ExtendeeTypesOf(^^T));
 
     } // namespace Meta
 
