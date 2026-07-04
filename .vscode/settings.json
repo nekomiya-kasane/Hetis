@@ -4,25 +4,40 @@
   "terminal.integrated.profiles.windows": {
     "coca-p2996": {
       "source": "PowerShell",
-      "args": ["-NoExit", "-File", "${workspaceFolder}/scripts/coca-env.ps1"],
+      "args": [
+        "-NoExit",
+        "-File",
+        "${workspaceFolder}/scripts/coca-env.ps1"
+      ],
       "icon": "terminal-powershell",
       "overrideName": true
     }
   },
-
+  "C_Cpp.clang_format_path": "T:/toolchains/coca-toolchain-p2996/bin/clang-format.exe",
+  "clang-format.executable": "T:/toolchains/coca-toolchain-p2996/bin/clang-format.exe",
+  "clang-format.style": "file",
   // ─── CMake ───
   "cmake.generator": "Ninja",
   "cmake.cmakePath": "T:/toolchains/coca-toolchain-p2996/tools/cmake/bin/cmake.exe",
   "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}",
-
   // ─── IntelliSense (clangd) ───
   "clangd.path": "T:\\toolchains\\coca-toolchain-p2996\\bin\\clangd.exe",
   "clangd.arguments": [
     "--compile-commands-dir=${workspaceFolder}/build/x64-asan",
     "--background-index",
-    "--clang-tidy"
+    "--clang-tidy",
+    "--query-driver=T:/toolchains/coca-toolchain-p2996/bin/clang.exe,T:/toolchains/coca-toolchain-p2996/bin/clang++.exe,T:/toolchains/coca-toolchain-p2996/bin/clang-cl.exe"
   ],
-
+  // clangd --clang-tidy runs checks in-process; this path is for external VS Code C/C++ code analysis.
+  "C_Cpp.codeAnalysis.clangTidy.path": "T:/toolchains/coca-toolchain-p2996/bin/clang-tidy.exe",
+  "C_Cpp.codeAnalysis.clangTidy.enabled": false,
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "comment-formula.inline": "none",
+  "comment-formula.single": "none",
+  "comment-formula.multiple": "none",
+  "comment-formula.hidden": "none",
+  // ─── Explorer ───
+  "explorer.autoReveal": false,
   // ─── TestMate C++: test discovery + coverage ───
   // Use x64-coverage (no sanitizers) for stable coverage collection.
   // ASan+coverage combo is unstable on Windows debug CRT; use x64-asan separately.

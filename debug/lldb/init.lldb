@@ -1,0 +1,5 @@
+# LLDB startup for this repository.
+# Use from LLDB with: command source debug/lldb/init.lldb
+# VS Code launch configurations in .vscode/launch.json source this file automatically.
+
+command script import debug/lldb/vulkan_lldb.py

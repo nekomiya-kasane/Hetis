@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <!--
+    Fallback visualizers for COCA clang-p2996 debugging outside LLDB. Visual Studio already ships strong MSVC STL
+    visualizers; this file keeps the common COCA MSVC-STL and explicit libc++ layouts readable when those defaults are
+    unavailable. LLDB should prefer debug/lldb/init.lldb.
+  -->
+
+  <Type Name="std::vector&lt;*,*&gt;">
+    <DisplayString>{{ size={_Mypair._Myval2._Mylast - _Mypair._Myval2._Myfirst} }}</DisplayString>
+    <Expand>
+      <Item Name="size">_Mypair._Myval2._Mylast - _Mypair._Myval2._Myfirst</Item>
+      <Item Name="capacity">_Mypair._Myval2._Myend - _Mypair._Myval2._Myfirst</Item>
+      <ArrayItems>
+        <Size>_Mypair._Myval2._Mylast - _Mypair._Myval2._Myfirst</Size>
+        <ValuePointer>_Mypair._Myval2._Myfirst</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <Type Name="std::*::vector&lt;*,*&gt;">
+    <DisplayString>{{ size={__end_ - __begin_}, capacity={__cap_ - __begin_} }}</DisplayString>
+    <Expand>
+      <Item Name="size">__end_ - __begin_</Item>
+      <Item Name="capacity">__cap_ - __begin_</Item>
+      <ArrayItems>
+        <Size>__end_ - __begin_</Size>
+        <ValuePointer>__begin_</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <Type Name="std::unique_ptr&lt;*,*&gt;">
+    <DisplayString Condition="_Mypair._Myval2 == 0">empty</DisplayString>
+    <DisplayString>{{ ptr={_Mypair._Myval2} }}</DisplayString>
+    <Expand>
+      <Item Name="ptr">_Mypair._Myval2</Item>
+      <Item Name="value" Condition="_Mypair._Myval2 != 0">*_Mypair._Myval2</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="std::*::unique_ptr&lt;*,*&gt;">
+    <DisplayString Condition="__ptr_ == 0">empty</DisplayString>
+    <DisplayString>{{ ptr={__ptr_} }}</DisplayString>
+    <Expand>
+      <Item Name="ptr">__ptr_</Item>
+      <Item Name="value" Condition="__ptr_ != 0">*__ptr_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="std::shared_ptr&lt;*&gt;">
+    <DisplayString Condition="_Ptr == 0">empty</DisplayString>
+    <DisplayString>{{ ptr={_Ptr}, control={_Rep} }}</DisplayString>
+    <Expand>
+      <Item Name="ptr">_Ptr</Item>
+      <Item Name="control">_Rep</Item>
+      <Item Name="value" Condition="_Ptr != 0">*_Ptr</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="std::*::shared_ptr&lt;*&gt;">
+    <DisplayString Condition="__ptr_ == 0">empty</DisplayString>
+    <DisplayString>{{ ptr={__ptr_}, control={__cntrl_} }}</DisplayString>
+    <Expand>
+      <Item Name="ptr">__ptr_</Item>
+      <Item Name="control">__cntrl_</Item>
+      <Item Name="value" Condition="__ptr_ != 0">*__ptr_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="std::*::weak_ptr&lt;*&gt;">
+    <DisplayString>{{ ptr={__ptr_}, control={__cntrl_} }}</DisplayString>
+    <Expand>
+      <Item Name="ptr">__ptr_</Item>
+      <Item Name="control">__cntrl_</Item>
+    </Expand>
+  </Type>
+</AutoVisualizer>

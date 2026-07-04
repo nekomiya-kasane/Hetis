@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "COCA LLDB: CMake target",
+      "type": "lldb-dap",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "cwd": "${workspaceFolder}",
+      "args": [],
+      "env": {
+        "PATH": "T:/toolchains/coca-toolchain-p2996/bin;T:/toolchains/coca-toolchain-p2996/lib/clang/21/lib/windows;${env:PATH}"
+      },
+      "initCommands": [
+        "command source ${workspaceFolder}/debug/lldb/init.lldb"
+      ]
+    }
+  ]
+}

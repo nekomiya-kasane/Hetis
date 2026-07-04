@@ -76,6 +76,7 @@
   "extensions": {
     "recommendations": [
       "llvm-vs-code-extensions.vscode-clangd",
+      "llvm-vs-code-extensions.lldb-dap",
       "ms-vscode.cmake-tools",
       "twxs.cmake"
     ],

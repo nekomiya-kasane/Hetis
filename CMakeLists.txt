@@ -36,6 +36,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+set(HETIS_DEBUGGER_VISUALIZERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/debug/visualizers/libcxx.natvis"
+    "${CMAKE_CURRENT_SOURCE_DIR}/debug/lldb/init.lldb"
+    "${CMAKE_CURRENT_SOURCE_DIR}/debug/lldb/vulkan_lldb.py"
+)
+set_source_files_properties(${HETIS_DEBUGGER_VISUALIZERS} PROPERTIES HEADER_FILE_ONLY TRUE)
+add_custom_target(Hetis.DebuggerVisualizers SOURCES ${HETIS_DEBUGGER_VISUALIZERS})
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/debug" PREFIX "debug" FILES ${HETIS_DEBUGGER_VISUALIZERS})
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/thirdparty thirdparty)
 
 add_subdirectory(Sora)

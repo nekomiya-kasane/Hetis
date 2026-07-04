@@ -24,3 +24,4 @@ add_sora_demo(Core ToStringDemo)
 add_sora_demo(PAL ModuleDemo)
 
 add_sora_demo(Kernel IIDDemo)
+add_sora_demo(Kernel BaseObjectDemo)
