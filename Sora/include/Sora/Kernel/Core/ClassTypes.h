@@ -5,7 +5,9 @@
 #include "Sora/Kernel/Core/Traits.h"
 
 #include <meta>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 namespace Sora::Kernel {
 
@@ -37,6 +39,11 @@ namespace Sora::Kernel {
 
     [[nodiscard]] constexpr bool IsComponent(TypeOfClass type) noexcept {
         return IsImplementation(type) || IsExtension(type);
+    }
+
+    /** @brief Return whether @p type denotes a stateless code extension. */
+    [[nodiscard]] constexpr bool IsCodeExtension(TypeOfClass type) noexcept {
+        return type == TypeOfClass::CodeExtension;
     }
 
     [[nodiscard]] constexpr bool IsInterface(TypeOfClass type) noexcept {
@@ -138,49 +145,45 @@ namespace Sora::Kernel {
 
     namespace Meta {
 
-        /** @brief Return the direct interface type reflections declared by @ref Anno::Implements on @p type. */
+        /** @brief Return the direct interface type reflections declared by @ref $::Implements on @p type. */
         consteval std::vector<std::meta::info> ImplementedInterfaceTypesOf(std::meta::info type) {
             std::vector<std::meta::info> implements;
             auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
-            if (allAnnotations.empty()) {
-                throw std::define_static_string("Meta::ImplementedInterfaceTypesOf: '" +
-                                                std::string{Sora::Meta::DisplayStringOf(type)} +
-                                                "' has no annotations — only classes with [[=Sora::$::Implements]] "
-                                                "participate in vtable synthesis.");
-            }
             for (const auto& annotation : allAnnotations) {
                 auto t = std::meta::type_of(annotation);
                 if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Implements>(t)) {
                     auto params = std::meta::template_arguments_of(t);
                     for (const auto& param : params) {
-                        implements.push_back(std::meta::type_of(std::meta::dealias(param)));
+                        implements.push_back(std::meta::dealias(param));
                     }
                 }
             }
             return implements;
         }
 
-        /** @brief Return the direct extendee type reflections declared by @ref Anno::Extends on @p type. */
+        /** @brief Static-storage direct interface type reflections declared by @ref $::Implements on @p T. */
+        template<Concept::ComClass T>
+        inline constexpr auto ImplementedInterfaceTypes = std::define_static_array(ImplementedInterfaceTypesOf(^^T));
+
+        /** @brief Return the direct extendee type reflections declared by @ref $::Extends on @p type. */
         consteval std::vector<std::meta::info> ExtendeeTypesOf(std::meta::info type) {
             std::vector<std::meta::info> extendees;
             auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
-            if (allAnnotations.empty()) {
-                throw std::define_static_string("Meta::ExtendeeTypesOf: '" +
-                                                std::string{Sora::Meta::DisplayStringOf(type)} +
-                                                "' has no annotations — only classes with [[=Sora::$::Extends]] "
-                                                "participate in vtable synthesis.");
-            }
             for (const auto& annotation : allAnnotations) {
                 auto t = std::meta::type_of(annotation);
                 if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Extends>(t)) {
                     auto params = std::meta::template_arguments_of(t);
                     for (const auto& param : params) {
-                        extendees.push_back(std::meta::type_of(std::meta::dealias(param)));
+                        extendees.push_back(std::meta::dealias(param));
                     }
                 }
             }
             return extendees;
         }
+
+        /** @brief Static-storage direct extendee type reflections declared by @ref $::Extends on @p T. */
+        template<Concept::ComClass T>
+        inline constexpr auto ExtendeeTypes = std::define_static_array(ExtendeeTypesOf(^^T));
 
     } // namespace Meta
 
@@ -193,8 +196,9 @@ namespace Sora::Kernel {
          * @tparam Iface Interface type.
          */
         template<Concept::InterfaceClass Iface>
-        inline constexpr std::string_view TieClassIdentifierOf =
-            [] consteval { std::define_static_string("Tie_" + std::string{std::meta::identifier_of(^^Iface)}); }();
+        inline constexpr std::string_view TieClassIdentifierOf = [] consteval {
+            return std::define_static_string("Tie_" + std::string{std::meta::identifier_of(^^Iface)});
+        }();
 
     } // namespace Traits
 

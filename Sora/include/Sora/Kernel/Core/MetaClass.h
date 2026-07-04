@@ -66,14 +66,14 @@ namespace Sora::Kernel {
             }
 
             if constexpr (IsExtension(type)) {
-                template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypesOf(^^T)) {
+                template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypes<T>) {
                     using Extendee = Sora::Meta::InfoType<ext>;
                     kMeta->protensions.emplace(Traits::IidOf<Extendee>, MetaClass::Query<Extendee>());
                 }
             }
 
             if constexpr (IsComponent(type)) {
-                template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf(^^T)) {
+                template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypes<T>) {
                     using Interface = Sora::Meta::InfoType<iface>;
                     ProviderEntry entry{};
                     entry.interfaceIid = Traits::IidOf<Interface>;
@@ -85,9 +85,7 @@ namespace Sora::Kernel {
                         // TODO:
                     } else {
                         entry.kind = DispatchKind::BoundFacet;
-                        entry.factory = +[](BaseUnknown* provider) -> BaseUnknown* {
-                            
-                        };
+                        entry.factory = nullptr;
                     }
                     entry.providerClass = kMeta;
                     entry.priority = 0; // TODO: Allow priority to be declared in the class annotation.
