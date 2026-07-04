@@ -152,10 +152,12 @@ public:
         BaseUnknown(const BaseUnknown&) = delete;
         BaseUnknown& operator=(const BaseUnknown&) = delete;
 
+        /** @brief Return the meta-class associated with this object. */
         [[nodiscard]] virtual std::shared_ptr<const MetaClass> GetMeta() const noexcept {
             return MetaClass::Query<Self>();
         }
 
+        /** @brief Return the role associated with this object. */
         [[nodiscard]] virtual TypeOfClass GetRole() const noexcept { return TypeOfClass::BaseUnknown; }
 
         /** @brief Return the closure nucleus controlling lifetime for this object. */

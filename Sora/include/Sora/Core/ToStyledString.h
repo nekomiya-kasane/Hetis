@@ -19,6 +19,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <meta>
@@ -37,6 +38,16 @@
 #include <tapioca/terminal.h>
 
 namespace Sora {
+
+    /** @brief Rendering policy used by automatic formatting integration. */
+    enum class RenderMode : uint8_t {
+        Plain,       /**< Use @ref ToString. */
+        Styled,      /**< Use @ref ToStyledString. */
+        Placeholder, /**< Use a shallow placeholder in the form @c <TypeName @c at @c address>. */
+    };
+
+    /** @brief Default automatic formatting policy used by @c std::format and @c std::println. */
+    inline constexpr RenderMode kDefaultRenderMode = RenderMode::Styled;
 
     namespace $ {
 
@@ -117,7 +128,7 @@ namespace Sora {
 
         /** @brief Stateful builder for ANSI-rich strings generated through tapioca. */
         class StyledStringBuilder {
-          public:
+        public:
             /** @brief Construct a builder with explicit options. */
             explicit StyledStringBuilder(StyledStringOptions options = {})
                 : options_(options), emitter_(options.caps) {}
@@ -182,7 +193,7 @@ namespace Sora {
             /** @brief Access active styled string options. */
             [[nodiscard]] constexpr const StyledStringOptions& Options() const noexcept { return options_; }
 
-          private:
+        private:
             void AppendStyled(StyledRole role, std::string_view text) {
                 if (options_.color) {
                     emitter_.transition(options_.theme[role], out_);
@@ -283,6 +294,8 @@ namespace Sora {
                 ADL::FreeToStyledString::Invoke(builder, std::forward<T>(value));
             } else if constexpr (HasMemberToStyledString<U>) {
                 std::forward<T>(value).ToStyledString(builder);
+            } else if constexpr (HasHookToString<U> || ADL::FreeToString::Available<U> || HasMemberToString<U>) {
+                builder.Text($::StyledRole::Plain, ToString(std::forward<T>(value)));
             } else if constexpr (std::is_null_pointer_v<U>) {
                 builder.Text($::StyledRole::Null, "nullptr");
             } else if constexpr (std::same_as<U, bool>) {
@@ -377,7 +390,8 @@ namespace Sora {
                 builder.Text($::StyledRole::Number, std::format("{}", value));
             } else if constexpr (requires(T&& v) { std::to_string(std::forward<T>(v)); }) {
                 AppendStdToString(builder, std::forward<T>(value));
-            } else if constexpr (requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
+            } else if constexpr (!AutoDisplayable<U> &&
+                                 requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
                 std::stringstream ss;
                 ss << std::forward<T>(value);
                 builder.Text($::StyledRole::Plain, ss.str());
@@ -386,7 +400,7 @@ namespace Sora {
                 builder.Raw($::StyledRole::Punctuation, "{");
 
                 template for (bool first = true; constexpr auto m : Traits::DataMembers<U>) {
-                    if constexpr (!$::Has<$::Ignore>(m)) {
+                    if constexpr (!$::Has<$::IgnoreInSerialization>(m)) {
                         if (!first) {
                             builder.Raw($::StyledRole::Punctuation, ", ");
                         }
@@ -446,3 +460,71 @@ namespace Sora {
     inline constexpr Detail::ToStyledStringFn ToStyledString{};
 
 } // namespace Sora
+
+/**
+ * @brief Auto-specialise @c std::formatter for Sora-displayable types.
+ *
+ * @details Empty format specifiers use @ref Sora::kDefaultRenderMode. @c {:s} forces @ref Sora::ToStyledString,
+ * @c {:p} forces @ref Sora::ToString, and @c {:?} emits a shallow placeholder.
+ */
+template<typename T>
+    requires Sora::Detail::AutoDisplayable<T>
+struct std::formatter<T> {
+    Sora::RenderMode mode = Sora::kDefaultRenderMode;
+
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it == ctx.end() || *it == '}') {
+            return it;
+        }
+        switch (*it) {
+        case 's':
+            mode = Sora::RenderMode::Styled;
+            break;
+        case 'p':
+            mode = Sora::RenderMode::Plain;
+            break;
+        case '?':
+            mode = Sora::RenderMode::Placeholder;
+            break;
+        default:
+            throw std::format_error("invalid Sora display format specifier");
+        }
+        ++it;
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid Sora display format specifier");
+        }
+        return it;
+    }
+
+    auto format(const T& value, std::format_context& ctx) const {
+        switch (mode) {
+        case Sora::RenderMode::Plain:
+            return std::format_to(ctx.out(), "{}", Sora::ToString(value));
+        case Sora::RenderMode::Styled:
+            return std::format_to(ctx.out(), "{}", Sora::ToStyledString(value));
+        case Sora::RenderMode::Placeholder:
+            return std::format_to(ctx.out(), "<{} at {:p}>", Sora::Traits::TypeName<T>,
+                                  static_cast<const void*>(std::addressof(value)));
+        }
+        return std::format_to(ctx.out(), "<{} at {:p}>", Sora::Traits::TypeName<T>,
+                              static_cast<const void*>(std::addressof(value)));
+    }
+};
+
+/**
+ * @brief Insert Sora-displayable values into an output stream using @ref Sora::kDefaultRenderMode.
+ */
+template<typename T>
+    requires Sora::Detail::AutoDisplayable<T>
+std::ostream& operator<<(std::ostream& os, const T& value) {
+    switch (Sora::kDefaultRenderMode) {
+    case Sora::RenderMode::Plain:
+        return os << Sora::ToString(value);
+    case Sora::RenderMode::Styled:
+        return os << Sora::ToStyledString(value);
+    default:
+        return os << std::format("<{} at {:p}>", Sora::Traits::TypeName<T>,
+                                 static_cast<const void*>(std::addressof(value)));
+    }
+}

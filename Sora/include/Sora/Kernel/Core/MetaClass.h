@@ -61,7 +61,7 @@ namespace Sora::Kernel {
             if constexpr (std::same_as<T, BaseUnknown>) {
                 kMeta->base = nullptr;
             } else {
-                kMeta->base =  MetaClass::Query<Sora::Traits::DirectBaseType<T, 0>>();
+                kMeta->base = MetaClass::Query<Sora::Traits::DirectBaseType<T, 0>>();
             }
 
             if constexpr (IsExtension(type)) {

@@ -31,8 +31,8 @@ namespace Sora {
     namespace $ {
 
         /** @brief Exclude this member from generic object display and JSON emission. */
-        struct Ignore {
-            constexpr bool operator==(const Ignore&) const = default;
+        struct IgnoreInSerialization {
+            constexpr bool operator==(const IgnoreInSerialization&) const = default;
         };
 
         /**
@@ -202,6 +202,15 @@ namespace Sora {
             ADL::FreeToStringView::Available<std::remove_cvref_t<T>> || HasMemberToStringView<std::remove_cvref_t<T>> ||
             std::is_null_pointer_v<std::remove_cvref_t<T>> || std::same_as<std::remove_cvref_t<T>, bool> ||
             std::is_enum_v<std::remove_cvref_t<T>>;
+        /** @brief Type supported by Sora's automatic standard formatting and stream insertion bridges. */
+        template<typename T>
+        concept AutoDisplayable = !std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+                                  !std::convertible_to<std::remove_cvref_t<T>, std::string_view> &&
+                                  !std::convertible_to<std::remove_cvref_t<T>, std::string> &&
+                                  (std::is_enum_v<std::remove_cvref_t<T>> ||
+                                   (std::is_class_v<std::remove_cvref_t<T>> &&
+                                    !std::is_union_v<std::remove_cvref_t<T>> &&
+                                    requires { sizeof(std::remove_cvref_t<T>); }));
 
         /** @brief Return the display name used for reflected field @p M. */
         template<std::meta::info M>
@@ -343,7 +352,9 @@ namespace Sora {
                 return std::to_string(std::forward<T>(iValue));
             }
             // 13. ostream operator
-            else if constexpr (requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
+            else if constexpr (!AutoDisplayable<U> && requires(std::ostream& os, T&& v) {
+                os << std::forward<T>(v);
+            }) {
                 std::stringstream ss;
                 ss << std::forward<T>(iValue);
                 return ss.str();
@@ -354,7 +365,7 @@ namespace Sora {
                 ss << Traits::TypeName<U> << " {";
 
                 template for (bool first = true; constexpr auto m : Traits::DataMembers<U>) {
-                    if constexpr (!$::Has<$::Ignore>(m)) {
+                    if constexpr (!$::Has<$::IgnoreInSerialization>(m)) {
                         if (!first) {
                             ss << ", ";
                         }
@@ -534,22 +545,3 @@ namespace Sora {
     }
 
 } // namespace Sora
-
-/**
- * @brief Auto-specialise @c std::formatter for Sora-reflectable types.
- *
- * @details Enables @c std::format("{}", value) for scoped enums, complete classes with reflectable members, and
- * types with an ADL @c ToString() overload or @c .ToString() member. Arithmetic types, string-like types, and
- * standard library types that already have formatters are excluded.
- */
-template<typename T>
-    requires(!std::is_arithmetic_v<T> && !std::convertible_to<T, std::string_view> &&
-             !std::convertible_to<T, std::string> &&
-             (std::is_enum_v<T> || (std::is_class_v<T> && !std::is_union_v<T> && requires { sizeof(T); })))
-struct std::formatter<T> {
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-
-    auto format(const T& value, std::format_context& ctx) const {
-        return std::format_to(ctx.out(), "{}", Sora::ToString(value));
-    }
-};

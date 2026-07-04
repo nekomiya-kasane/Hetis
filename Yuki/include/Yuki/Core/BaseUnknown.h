@@ -110,7 +110,7 @@ namespace Yuki {
 
             /** @brief Decode the pointer arm stored in @p word. */
             [[nodiscard]] static void* Pointer(uint64_t word) noexcept {
-                return reinterpret_cast<void*>((word >> kPointerShift) << kPointerAlignmentShift);
+                return std::bit_cast<void*>((word >> kPointerShift) << kPointerAlignmentShift);
             }
 
             /** @brief Return @p word with the same refcount and a replacement pointer kind and pointer. */
@@ -163,8 +163,7 @@ namespace Yuki {
             static constexpr uint64_t kRefMask = kRefMaskValue << kRefShift;
             static constexpr uint64_t kPointerShift = 20;
             static constexpr uint64_t kPointerAlignmentShift = 4;
-            static constexpr std::uintptr_t kPointerAlignmentMask =
-                (std::uintptr_t{1} << kPointerAlignmentShift) - 1;
+            static constexpr std::uintptr_t kPointerAlignmentMask = (std::uintptr_t{1} << kPointerAlignmentShift) - 1;
 
             [[nodiscard]] static uint64_t EncodePointer(const void* pointer) noexcept {
                 const auto address = reinterpret_cast<std::uintptr_t>(pointer);
@@ -281,7 +280,6 @@ namespace Yuki {
 
     private:
         template<class T, class... Args>
-            requires Detail::BaseUnknownRawClass<T>
         friend ComPtr<T> MakeOwned(Args&&... args);
         friend void Retain(BaseUnknown* object) noexcept;
         friend void Release(BaseUnknown* object) noexcept;
@@ -324,8 +322,8 @@ namespace Yuki {
 
         /** @brief A type whose declaration is a Yuki interface contract. */
         template<class T>
-        concept InterfaceClass = BaseUnknownClass<T> && ClassTypeOf<T> == TypeOfClass::Interface &&
-                                 Mashiro::Traits::BasesCount<T> <= 1;
+        concept InterfaceClass =
+            BaseUnknownClass<T> && ClassTypeOf<T> == TypeOfClass::Interface && Mashiro::Traits::BasesCount<T> <= 1;
 
         /** @brief A BaseUnknown-derived class with a direct non-interface object-model role. */
         template<class T>
@@ -388,27 +386,25 @@ namespace Yuki {
     /** @brief Namespace-level facade for @ref Traits::ComponentClass. */
     template<class T>
     concept ComponentClass = Traits::ComponentClass<T>;
-    /**
-     * @brief Declare the Core metaclass hook for a BaseUnknown-derived object-model class.
-     *
-     * Place this macro inside every implementation, extension, and bound facet class. The macro obtains the enclosing
-     * class as Self through P2996 reflection and exposes the Core_Old-style GetMetaStatic/GetMeta pair.
-     */
-    #define Y_OBJECT \
-    public: \
-        using Self = typename[: ::std::meta::access_context::current().scope():]; \
-        static const ::Yuki::MetaClass& GetMetaStatic() noexcept { \
-            static_assert(::std::derived_from<Self, ::Yuki::BaseUnknown>, \
-                          "Y_OBJECT requires BaseUnknown inheritance"); \
-            static_assert(::Yuki::DirectCppBaseCountOf<Self> <= 1, \
-                          "Yuki object classes must use single inheritance"); \
-            static_assert(::std::has_virtual_destructor_v<Self>, \
-                          "Y_OBJECT requires a virtual destructor"); \
-            return ::Yuki::StaticMetaClass<Self>(); \
-        } \
-        [[nodiscard]] const ::Yuki::MetaClass& GetMeta() const noexcept override { \
-            return GetMetaStatic(); \
-        } \
-    public:
+/**
+ * @brief Declare the Core metaclass hook for a BaseUnknown-derived object-model class.
+ *
+ * Place this macro inside every implementation, extension, and bound facet class. The macro obtains the enclosing
+ * class as Self through P2996 reflection and exposes the Core_Old-style GetMetaStatic/GetMeta pair.
+ */
+#define Y_OBJECT                                                                                                       \
+public:                                                                                                                \
+    using Self = typename [:::std::meta::access_context::current().scope():];                                          \
+    static const ::Yuki::MetaClass& GetMetaStatic() noexcept {                                                         \
+        static_assert(::std::derived_from<Self, ::Yuki::BaseUnknown>, "Y_OBJECT requires BaseUnknown inheritance");    \
+        static_assert(::Yuki::DirectCppBaseCountOf<Self> <= 1, "Yuki object classes must use single inheritance");     \
+        static_assert(::std::has_virtual_destructor_v<Self>, "Y_OBJECT requires a virtual destructor");                \
+        return ::Yuki::StaticMetaClass<Self>();                                                                        \
+    }                                                                                                                  \
+    [[nodiscard]] const ::Yuki::MetaClass& GetMeta() const noexcept override {                                         \
+        return GetMetaStatic();                                                                                        \
+    }                                                                                                                  \
+                                                                                                                       \
+public:
 
 } // namespace Yuki
