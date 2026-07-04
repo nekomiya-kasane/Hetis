@@ -313,6 +313,7 @@ namespace Sora::PAL {
             if (stringOffset >= tableSize) {
                 return {};
             }
+            [[assume(stringOffset < tableSize)]];
             const uint64_t begin = tableOffset + stringOffset;
             const uint64_t end = tableOffset + tableSize;
             std::string name;
@@ -347,6 +348,11 @@ namespace Sora::PAL {
             }
 
             const bool is64 = elfClass == 2;
+            const uint64_t elfHeaderSize = is64 ? 64u : 52u;
+            if (!HasRange(bytes, 0, elfHeaderSize)) {
+                return std::unexpected{ErrorCode::ModuleLoadFailed};
+            }
+
             const uint64_t shoff =
                 is64 ? ReadEndian<uint64_t>(bytes, 40, littleEndian) : ReadEndian<uint32_t>(bytes, 32, littleEndian);
             const uint16_t shentsize =
@@ -355,9 +361,14 @@ namespace Sora::PAL {
                 is64 ? ReadEndian<uint16_t>(bytes, 60, littleEndian) : ReadEndian<uint16_t>(bytes, 48, littleEndian);
             const uint16_t shstrndx =
                 is64 ? ReadEndian<uint16_t>(bytes, 62, littleEndian) : ReadEndian<uint16_t>(bytes, 50, littleEndian);
-            if (shentsize == 0 || shstrndx >= shnum || !HasRange(bytes, shoff, uint64_t{shentsize} * shnum)) {
+            const uint16_t minSectionHeaderSize = is64 ? 64u : 40u;
+            const uint64_t sectionTableBytes = uint64_t{shentsize} * shnum;
+            if (shentsize < minSectionHeaderSize || shstrndx >= shnum ||
+                !HasRange(bytes, shoff, sectionTableBytes)) {
                 return std::unexpected{ErrorCode::ModuleLoadFailed};
             }
+            [[assume(shentsize >= minSectionHeaderSize)]];
+            [[assume(shstrndx < shnum)]];
 
             const uint64_t strBase = shoff + static_cast<uint64_t>(shstrndx) * shentsize;
             const uint64_t strOffset = is64 ? ReadEndian<uint64_t>(bytes, strBase + 24, littleEndian)
@@ -432,10 +443,18 @@ namespace Sora::PAL {
 
                 const uint32_t segmentCommand = is64 ? 0x19u : 0x1u;
                 if (cmd == segmentCommand) {
-                    const uint64_t sectionBase = command + (is64 ? 72u : 56u);
+                    const uint32_t segmentHeaderSize = is64 ? 72u : 56u;
+                    if (cmdsize < segmentHeaderSize || !HasRange(bytes, command, segmentHeaderSize)) {
+                        return std::unexpected{ErrorCode::ModuleLoadFailed};
+                    }
+                    [[assume(cmdsize >= segmentHeaderSize)]];
+
+                    const uint64_t sectionBase = command + segmentHeaderSize;
                     const uint32_t nsects = ReadLe<uint32_t>(bytes, command + (is64 ? 64u : 48u));
                     const uint32_t sectionSize = is64 ? 80u : 68u;
-                    if (!HasRange(bytes, sectionBase, static_cast<uint64_t>(nsects) * sectionSize)) {
+                    const uint64_t sectionBytes = static_cast<uint64_t>(nsects) * sectionSize;
+                    if (!HasRange(bytes, sectionBase, sectionBytes) ||
+                        sectionBytes > static_cast<uint64_t>(cmdsize - segmentHeaderSize)) {
                         return std::unexpected{ErrorCode::ModuleLoadFailed};
                     }
                     for (uint32_t section = 0; section < nsects; ++section) {
@@ -662,7 +681,7 @@ namespace Sora::PAL {
         ModuleImage image;
         Detail::ModuleImageBuilder::Path(image) = path;
         Detail::ModuleImageBuilder::Bytes(image) = std::move(*bytes);
-        if (auto error = ParseSections(image)) {
+        if (auto parsed = ParseSections(image); !parsed) {
             return std::unexpected{ErrorCode::ModuleLoadFailed};
         }
         return image;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Sora/Core/Traits/AnnotationTraits.h"
+#include "Sora/Core/Traits/InheritanceTraits.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Kernel/Core/Traits.h"
 
@@ -93,7 +94,7 @@ namespace Sora::Kernel {
             if (!std::meta::is_class_type(^^T)) {
                 throw std::define_static_string(
                     "Meta::RoleOf: '" + std::string{Sora::Meta::DisplayStringOf(^^T)} +
-                    "' is not a class type reflection — only classes participate in Sora object model.");
+                    "' is not a class type reflection -- only classes participate in Sora object model.");
             }
             const std::meta::info canonical = std::meta::dealias(^^T);
             if (canonical == ^^Sora::Kernel::BaseUnknown) {
@@ -179,6 +180,35 @@ namespace Sora::Kernel {
             return std::define_static_array(extendees);
         }
 
+        /** @brief Return whether @p T directly declares @p Iface in @ref $::Implements. */
+        template<Concept::InterfaceClass Iface, Concept::ComClass T>
+        consteval bool DirectlyImplements() {
+            for (auto iface : ImplementedInterfaceTypesOf<T>()) {
+                if (iface == std::meta::dealias(^^Iface)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * @brief Return the implementation-chain class that directly declares @p Iface as provided.
+         * @details The search is derived-first along the single-inheritance chain. When no explicit provider is found,
+         *          the final implementation type is returned so structurally implemented leaf classes still work.
+         */
+        template<Concept::InterfaceClass Iface, Concept::ComponentClass Impl>
+        consteval std::meta::info InterfaceProviderTypeOf() {
+            constexpr auto chain =
+                std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
+            template for (constexpr auto type : chain) {
+                using Candidate = Sora::Meta::InfoType<type>;
+                if constexpr (Concept::ComClass<Candidate> && DirectlyImplements<Iface, Candidate>()) {
+                    return type;
+                }
+            }
+            return std::meta::dealias(^^Impl);
+        }
+
     } // namespace Meta
 
     namespace Tie {} // namespace Tie
@@ -207,7 +237,8 @@ namespace Sora::Kernel {
             if (!Concept::InterfaceClass<Iface>) {
                 throw std::define_static_string(
                     "Meta::TieTemplateOf: '" + std::string{Sora::Meta::DisplayStringOf(^^Iface)} +
-                    "' is not an interface class type reflection — only interfaces participate in TIE synthesis.");
+                    "' is not an interface class type reflection -- only interfaces participate in TIE " +
+                    "synthesis.");
             }
 
             std::string msg;
@@ -236,6 +267,10 @@ namespace Sora::Kernel {
             auto tieTemplate = Meta::TieTemplateOf<Iface>(NS);
             return std::meta::substitute(tieTemplate, {^^Impl});
         }():];
+
+        /** @brief Class in @p Impl's inheritance chain that directly contributes @p Iface. */
+        template<Concept::InterfaceClass Iface, Concept::ComponentClass Impl>
+        using InterfaceProviderClassOf = typename [:Meta::InterfaceProviderTypeOf<Iface, Impl>():];
 
     } // namespace Traits
 

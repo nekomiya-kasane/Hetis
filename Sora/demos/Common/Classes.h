@@ -49,9 +49,6 @@ namespace Sora::Kernel {
     public:
         S_OBJECT
 
-        using Position2DImpl::GetPosition;
-        using Position2DImpl::SetPosition;
-
         void SetPosition(float x, float y, float z) {
             Position2DImpl::SetPosition(x, y);
             z_ = z;
@@ -73,9 +70,11 @@ namespace Sora::Kernel {
         public:
             S_OBJECT
 
-            void SetPosition(float x, float y) override { static_cast<Impl*>(BoundTarget())->SetPosition(x, y); }
+            using Provider = Traits::InterfaceProviderClassOf<IPosition, Impl>;
+
+            void SetPosition(float x, float y) override { static_cast<Provider*>(BoundTarget())->SetPosition(x, y); }
             void GetPosition(float& x, float& y) const override {
-                static_cast<const Impl*>(BoundTarget())->GetPosition(x, y);
+                static_cast<const Provider*>(BoundTarget())->GetPosition(x, y);
             }
         };
 
@@ -84,15 +83,20 @@ namespace Sora::Kernel {
         public:
             S_OBJECT
 
-            void SetPosition(float x, float y) override { static_cast<Impl*>(BoundTarget())->SetPosition(x, y); }
+            using BaseProvider = Traits::InterfaceProviderClassOf<IPosition, Impl>;
+            using Provider = Traits::InterfaceProviderClassOf<I3DPosition, Impl>;
+
+            void SetPosition(float x, float y) override {
+                static_cast<BaseProvider*>(BoundTarget())->SetPosition(x, y);
+            }
             void GetPosition(float& x, float& y) const override {
-                static_cast<const Impl*>(BoundTarget())->GetPosition(x, y);
+                static_cast<const BaseProvider*>(BoundTarget())->GetPosition(x, y);
             }
             void SetPosition(float x, float y, float z) override {
-                static_cast<Impl*>(BoundTarget())->SetPosition(x, y, z);
+                static_cast<Provider*>(BoundTarget())->SetPosition(x, y, z);
             }
             void GetPosition(float& x, float& y, float& z) const override {
-                static_cast<const Impl*>(BoundTarget())->GetPosition(x, y, z);
+                static_cast<const Provider*>(BoundTarget())->GetPosition(x, y, z);
             }
         };
 
