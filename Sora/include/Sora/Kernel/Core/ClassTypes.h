@@ -5,9 +5,12 @@
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Kernel/Core/Traits.h"
 
+#include <concepts>
+#include <cstddef>
 #include <meta>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace Sora::Kernel {
@@ -180,36 +183,140 @@ namespace Sora::Kernel {
             return std::define_static_array(extendees);
         }
 
-        /** @brief Return whether @p T directly declares @p Iface in @ref $::Implements. */
-        template<Concept::InterfaceClass Iface, Concept::ComClass T>
-        consteval bool DirectlyImplements() {
-            for (auto iface : ImplementedInterfaceTypesOf<T>()) {
-                if (iface == std::meta::dealias(^^Iface)) {
-                    return true;
+    } // namespace Meta
+
+    namespace Detail {
+
+        /** @brief Owning class of any pointer-to-member type, including cv/ref/noexcept member functions. */
+        template<typename T>
+        struct MemberPointerOwner;
+
+        template<typename M, typename C>
+        struct MemberPointerOwner<M C::*> {
+            using Type = C;
+        };
+
+        /** @brief Return whether @p selector is already a declaration reflection. */
+        template<auto selector>
+        inline constexpr bool IsReflectionSelector =
+            std::same_as<std::remove_cv_t<decltype(selector)>, std::meta::info>;
+
+        /** @brief Return whether @p candidate has the same name and full function signature as @p ifaceMember. */
+        consteval bool SameTieSignature(std::meta::info candidate, std::meta::info ifaceMember) {
+            if (!Sora::Meta::IsRegularMethod(candidate) || !std::meta::has_identifier(candidate)) {
+                return false;
+            }
+            if (Sora::Meta::IdentifierOf(candidate) != Sora::Meta::IdentifierOf(ifaceMember)) {
+                return false;
+            }
+            if (std::meta::return_type_of(candidate) != std::meta::return_type_of(ifaceMember)) {
+                return false;
+            }
+            if (std::meta::is_const(candidate) != std::meta::is_const(ifaceMember) ||
+                std::meta::is_volatile(candidate) != std::meta::is_volatile(ifaceMember)) {
+                return false;
+            }
+
+            const auto candidateParams = Sora::Meta::ParamTypesOf(candidate);
+            const auto ifaceParams = Sora::Meta::ParamTypesOf(ifaceMember);
+            if (candidateParams.size() != ifaceParams.size()) {
+                return false;
+            }
+            for (std::size_t i = 0; i < candidateParams.size(); ++i) {
+                if (candidateParams[i] != ifaceParams[i]) {
+                    return false;
                 }
             }
-            return false;
+            return true;
         }
 
-        /**
-         * @brief Return the implementation-chain class that directly declares @p Iface as provided.
-         * @details The search is derived-first along the single-inheritance chain. When no explicit provider is found,
-         *          the final implementation type is returned so structurally implemented leaf classes still work.
-         */
-        template<Concept::InterfaceClass Iface, Concept::ComponentClass Impl>
-        consteval std::meta::info InterfaceProviderTypeOf() {
+        /** @brief Resolve an interface declaration from a pointer-to-member selector type. */
+        template<auto InterfaceMethod>
+        consteval std::meta::info InterfaceMemberByPointerType() {
+            using Interface = typename MemberPointerOwner<decltype(InterfaceMethod)>::Type;
+            std::meta::info match{};
+            std::size_t matches = 0;
+            constexpr auto chain =
+                std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Interface)));
+            template for (constexpr auto type : chain) {
+                constexpr auto members =
+                    std::define_static_array(std::meta::members_of(type, std::meta::access_context::unchecked()));
+                template for (constexpr auto member : members) {
+                    if constexpr (Sora::Meta::IsRegularMethod(member)) {
+                        constexpr auto candidate = &[:member:];
+                        if constexpr (std::same_as<std::remove_cv_t<decltype(candidate)>,
+                                                   std::remove_cv_t<decltype(InterfaceMethod)>>) {
+                            match = member;
+                            ++matches;
+                        }
+                    }
+                }
+            }
+            if (matches == 1) {
+                return match;
+            }
+            if (matches == 0) {
+                throw std::define_static_string("Core::InterfaceMemberByPointerType: selector type does not match any "
+                                                "regular interface method.");
+            }
+            throw std::define_static_string("Core::InterfaceMemberByPointerType: selector type is ambiguous because "
+                                            "multiple interface methods have the same owner and signature.");
+        }
+
+        /** @brief Resolve the concrete interface member declaration selected by @p InterfaceSelector. */
+        template<auto InterfaceSelector>
+        consteval std::meta::info InterfaceMemberOf() {
+            if constexpr (IsReflectionSelector<InterfaceSelector>) {
+                if (!Sora::Meta::IsRegularMethod(InterfaceSelector)) {
+                    throw std::define_static_string("Core::InterfaceMemberOf: reflection selector is not a regular "
+                                                    "interface method declaration.");
+                }
+                return InterfaceSelector;
+            } else {
+                static_assert(std::is_member_function_pointer_v<decltype(InterfaceSelector)>,
+                              "Core::InterfaceMemberOf: selector must be a method reflection or member pointer.");
+                return InterfaceMemberByPointerType<InterfaceSelector>();
+            }
+        }
+
+        /** @brief Resolve the implementation method matching @p InterfaceSelector in @p Impl's inheritance chain. */
+        template<auto InterfaceSelector, Concept::ComponentClass Impl>
+        consteval std::meta::info TieTargetOf() {
+            constexpr auto ifaceMember = InterfaceMemberOf<InterfaceSelector>();
             constexpr auto chain =
                 std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
             template for (constexpr auto type : chain) {
-                using Candidate = Sora::Meta::InfoType<type>;
-                if constexpr (Concept::ComClass<Candidate> && DirectlyImplements<Iface, Candidate>()) {
-                    return type;
+                constexpr auto members =
+                    std::define_static_array(std::meta::members_of(type, std::meta::access_context::unchecked()));
+                template for (constexpr auto member : members) {
+                    if constexpr (SameTieSignature(member, ifaceMember)) {
+                        return member;
+                    }
                 }
             }
-            return std::meta::dealias(^^Impl);
+            throw std::define_static_string("Core::TieTargetOf: no implementation method matches the interface "
+                                            "member in the component inheritance chain.");
         }
 
-    } // namespace Meta
+        /** @brief Invoke the implementation method corresponding to @p InterfaceSelector on a mutable bound target. */
+        template<auto InterfaceSelector, Concept::ComponentClass Impl, typename... Args>
+        decltype(auto) InvokeTie(BaseUnknown* target, Args&&... args) {
+            constexpr auto targetMember = TieTargetOf<InterfaceSelector, Impl>();
+            using Owner = Sora::Meta::InfoType<std::meta::parent_of(targetMember)>;
+            constexpr auto method = &[:targetMember:];
+            return (static_cast<Owner*>(target)->*method)(std::forward<Args>(args)...);
+        }
+
+        /** @brief Invoke the implementation method corresponding to @p InterfaceSelector on a const bound target. */
+        template<auto InterfaceSelector, Concept::ComponentClass Impl, typename... Args>
+        decltype(auto) InvokeTie(const BaseUnknown* target, Args&&... args) {
+            constexpr auto targetMember = TieTargetOf<InterfaceSelector, Impl>();
+            using Owner = Sora::Meta::InfoType<std::meta::parent_of(targetMember)>;
+            constexpr auto method = &[:targetMember:];
+            return (static_cast<const Owner*>(target)->*method)(std::forward<Args>(args)...);
+        }
+
+    } // namespace Detail
 
     namespace Tie {} // namespace Tie
 
@@ -267,10 +374,6 @@ namespace Sora::Kernel {
             auto tieTemplate = Meta::TieTemplateOf<Iface>(NS);
             return std::meta::substitute(tieTemplate, {^^Impl});
         }():];
-
-        /** @brief Class in @p Impl's inheritance chain that directly contributes @p Iface. */
-        template<Concept::InterfaceClass Iface, Concept::ComponentClass Impl>
-        using InterfaceProviderClassOf = typename [:Meta::InterfaceProviderTypeOf<Iface, Impl>():];
 
     } // namespace Traits
 

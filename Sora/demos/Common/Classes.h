@@ -70,11 +70,11 @@ namespace Sora::Kernel {
         public:
             S_OBJECT
 
-            using Provider = Traits::InterfaceProviderClassOf<IPosition, Impl>;
-
-            void SetPosition(float x, float y) override { static_cast<Provider*>(BoundTarget())->SetPosition(x, y); }
+            void SetPosition(float x, float y) override {
+                Detail::InvokeTie<^^IPosition::SetPosition, Impl>(BoundTarget(), x, y);
+            }
             void GetPosition(float& x, float& y) const override {
-                static_cast<const Provider*>(BoundTarget())->GetPosition(x, y);
+                Detail::InvokeTie<^^IPosition::GetPosition, Impl>(BoundTarget(), x, y);
             }
         };
 
@@ -83,20 +83,17 @@ namespace Sora::Kernel {
         public:
             S_OBJECT
 
-            using BaseProvider = Traits::InterfaceProviderClassOf<IPosition, Impl>;
-            using Provider = Traits::InterfaceProviderClassOf<I3DPosition, Impl>;
-
             void SetPosition(float x, float y) override {
-                static_cast<BaseProvider*>(BoundTarget())->SetPosition(x, y);
+                Detail::InvokeTie<^^IPosition::SetPosition, Impl>(BoundTarget(), x, y);
             }
             void GetPosition(float& x, float& y) const override {
-                static_cast<const BaseProvider*>(BoundTarget())->GetPosition(x, y);
+                Detail::InvokeTie<^^IPosition::GetPosition, Impl>(BoundTarget(), x, y);
             }
             void SetPosition(float x, float y, float z) override {
-                static_cast<Provider*>(BoundTarget())->SetPosition(x, y, z);
+                Detail::InvokeTie<^^I3DPosition::SetPosition, Impl>(BoundTarget(), x, y, z);
             }
             void GetPosition(float& x, float& y, float& z) const override {
-                static_cast<const Provider*>(BoundTarget())->GetPosition(x, y, z);
+                Detail::InvokeTie<^^I3DPosition::GetPosition, Impl>(BoundTarget(), x, y, z);
             }
         };
 
