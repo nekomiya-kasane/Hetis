@@ -266,8 +266,7 @@ namespace Sora {
                 throw std::logic_error("No annotations of type found");
             }
 
-            using AnnotationType = Meta::InfoType<Annotation>;
-            return std::meta::extract<AnnotationType>(annots.front());
+            return std::meta::extract<Meta::InfoType<Annotation>>(annots.front());
         }
 
         /**

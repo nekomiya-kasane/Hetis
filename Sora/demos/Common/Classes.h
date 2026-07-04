@@ -63,6 +63,19 @@ namespace Sora::Kernel {
         float z_{0.0f};
     };
 
+    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<Position2DImpl>{}]] Position2DExtension
+        : public BaseUnknown {
+    public:
+        S_OBJECT
+
+        void SetName(std::string name) { name_ = std::move(name); }
+
+        void GetName(std::string& name) const { name = name_; }
+
+    private:
+        std::string name_;
+    };
+
     namespace Tie {
 
         template<Concept::ComponentClass Impl>

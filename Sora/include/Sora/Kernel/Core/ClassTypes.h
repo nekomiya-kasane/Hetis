@@ -210,8 +210,7 @@ namespace Sora::Kernel {
                     continue;
                 }
 
-                using CurrentBaseType = [:type:];
-                template for (constexpr auto member : Sora::Traits::Members<CurrentBaseType>) {
+                template for (constexpr auto member : Sora::Traits::Members<typename [:type:]>) {
                     if constexpr (Sora::Meta::IsSameSignatureMethod(member, CurrentFunction)) {
                         return member;
                     }
@@ -227,8 +226,7 @@ namespace Sora::Kernel {
         consteval std::meta::info TieTargetOfInterfaceMember() {
             constexpr auto chain = std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
             template for (constexpr auto type : chain) {
-                using CurrentBaseType = [:type:];
-                template for (constexpr auto member : Sora::Traits::Members<CurrentBaseType>) {
+                template for (constexpr auto member : Sora::Traits::Members<typename [:type:]>) {
                     if constexpr (Sora::Meta::IsSameSignatureMethod(member, InterfaceMember)) {
                         return member;
                     }
