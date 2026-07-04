@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Sora/Core/Traits/AnnotationTraits.h"
+#include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Kernel/Core/Traits.h"
 
+#include <meta>
 #include <type_traits>
 
 namespace Sora::Kernel {
@@ -23,10 +25,22 @@ namespace Sora::Kernel {
         TransientExtension = 0x80, /**< Transient provider object. */
     };
 
+    [[nodiscard]] constexpr bool IsImplementation(TypeOfClass type) noexcept {
+        return type == TypeOfClass::Implementation;
+    }
+
     /** @brief Return whether @p type denotes one of the extension roles. */
     [[nodiscard]] constexpr bool IsExtension(TypeOfClass type) noexcept {
         return type == TypeOfClass::DataExtension || type == TypeOfClass::CodeExtension ||
                type == TypeOfClass::CacheExtension || type == TypeOfClass::TransientExtension;
+    }
+
+    [[nodiscard]] constexpr bool IsComponent(TypeOfClass type) noexcept {
+        return IsImplementation(type) || IsExtension(type);
+    }
+
+    [[nodiscard]] constexpr bool IsInterface(TypeOfClass type) noexcept {
+        return type == TypeOfClass::Interface;
     }
 
     /** @brief Return whether @p type denotes a TIE role. */
@@ -128,6 +142,12 @@ namespace Sora::Kernel {
         consteval std::vector<std::meta::info> ImplementedInterfaceTypesOf(std::meta::info type) {
             std::vector<std::meta::info> implements;
             auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
+            if (allAnnotations.empty()) {
+                throw std::define_static_string("Meta::ImplementedInterfaceTypesOf: '" +
+                                                std::string{Sora::Meta::DisplayStringOf(type)} +
+                                                "' has no annotations — only classes with [[=Sora::$::Implements]] "
+                                                "participate in vtable synthesis.");
+            }
             for (const auto& annotation : allAnnotations) {
                 auto t = std::meta::type_of(annotation);
                 if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Implements>(t)) {
@@ -144,6 +164,12 @@ namespace Sora::Kernel {
         consteval std::vector<std::meta::info> ExtendeeTypesOf(std::meta::info type) {
             std::vector<std::meta::info> extendees;
             auto allAnnotations = std::meta::annotations_of(std::meta::dealias(type));
+            if (allAnnotations.empty()) {
+                throw std::define_static_string("Meta::ExtendeeTypesOf: '" +
+                                                std::string{Sora::Meta::DisplayStringOf(type)} +
+                                                "' has no annotations — only classes with [[=Sora::$::Extends]] "
+                                                "participate in vtable synthesis.");
+            }
             for (const auto& annotation : allAnnotations) {
                 auto t = std::meta::type_of(annotation);
                 if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Extends>(t)) {
@@ -157,5 +183,68 @@ namespace Sora::Kernel {
         }
 
     } // namespace Meta
+
+    namespace Tie {} // namespace Tie
+
+    namespace Traits {
+
+        /**
+         * @brief Return the corresponding TIE class for a given interface type.
+         * @tparam Iface Interface type.
+         */
+        template<Concept::InterfaceClass Iface>
+        inline constexpr std::string_view TieClassIdentifierOf =
+            [] consteval { std::define_static_string("Tie_" + std::string{std::meta::identifier_of(^^Iface)}); }();
+
+    } // namespace Traits
+
+    namespace Meta {
+
+        /**
+         * @brief Get the TIE template class type for a given interface type.
+         * @tparam Iface Interface type.
+         */
+        template<Concept::InterfaceClass Iface>
+        consteval std::meta::info TieTemplateOf(std::meta::info ns = ^^Sora::Kernel::Tie) {
+            if (!Concept::InterfaceClass<Iface>) {
+                throw std::define_static_string(
+                    "Meta::TieTemplateOf: '" + std::string{Sora::Meta::DisplayStringOf(^^Iface)} +
+                    "' is not an interface class type reflection — only interfaces participate in TIE synthesis.");
+            }
+
+            std::string msg;
+            for (auto m : std::meta::members_of(ns, std::meta::access_context::current())) {
+                if (std::meta::is_class_template(m) &&
+                    std::meta::identifier_of(m) == Traits::TieClassIdentifierOf<Iface>) {
+                    auto params = std::meta::template_arguments_of(m);
+                    if (params.size() != 1) {
+                        msg += "Possible candidate: '" + std::string{Sora::Meta::DisplayStringOf(m)} + "'\n";
+                        continue;
+                    } else {
+                        return m;
+                    }
+                }
+            }
+
+            throw std::define_static_string("Meta::TieTemplateOf: no TIE template class found for interface '" +
+                                            std::string{Sora::Meta::DisplayStringOf(^^Iface)} + "' in namespace '" +
+                                            std::string{Sora::Meta::DisplayStringOf(ns)} + "'\n" + msg);
+        }
+
+    } // namespace Meta
+
+    namespace Traits {
+
+        /**
+         * @brief Return the corresponding TIE class for a given interface type.
+         * @tparam Iface Interface type.
+         */
+        template<Concept::InterfaceClass Iface, Concept::ComponentClass Impl, std::meta::info NS = ^^Sora::Kernel::Tie>
+        using TieClassOf = typename [:[] consteval {
+            auto tieTemplate = Meta::TieTemplateOf<Iface>(NS);
+            return std::meta::substitute(tieTemplate, {^^Impl});
+        }():];
+
+    } // namespace Traits
 
 } // namespace Sora::Kernel

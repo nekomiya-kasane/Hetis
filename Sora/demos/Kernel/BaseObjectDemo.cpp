@@ -36,6 +36,7 @@ int main() {
 
     std::cout << "Base Name: " << meta->GetDirectBase()->GetClassName() << std::endl;
     std::cout << "Base Role: " << meta->GetDirectBase()->GetTypeOfClass() << std::endl;
+    std::cout << "Base IID: " << meta->GetDirectBase()->GetIid() << std::endl;
 
     return 0;
 }

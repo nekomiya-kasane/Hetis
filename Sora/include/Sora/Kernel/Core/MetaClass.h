@@ -6,12 +6,14 @@
 #pragma once
 
 #include "Sora/Core/Traits/InheritanceTraits.h"
+#include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Kernel/Core/Traits.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
 #include "Sora/Kernel/Core/IID.h"
 
 #include <concepts>
 #include <memory>
+#include <type_traits>
 #include <unordered_map>
 
 namespace Sora::Kernel {
@@ -23,7 +25,6 @@ namespace Sora::Kernel {
         BoundFacet = 2,             /**< Facet is a closure-owned bound object. */
         AttachedExtension = 3,      /**< Facet is provided by an attached extension object. */
         CodeExtensionSingleton = 4, /**< Facet is provided by a singleton code extension. */
-        TransientProvider = 5,      /**< Facet is produced by a transient provider. */
     };
 
     /** @brief One runtime provider edge from a component class to an interface. */
@@ -65,7 +66,33 @@ namespace Sora::Kernel {
             }
 
             if constexpr (IsExtension(type)) {
-                // todo:
+                template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypesOf(^^T)) {
+                    using Extendee = Sora::Meta::InfoType<ext>;
+                    kMeta->protensions.emplace(Traits::IidOf<Extendee>, MetaClass::Query<Extendee>());
+                }
+            }
+
+            if constexpr (IsComponent(type)) {
+                template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf(^^T)) {
+                    using Interface = Sora::Meta::InfoType<iface>;
+                    ProviderEntry entry{};
+                    entry.interfaceIid = Traits::IidOf<Interface>;
+                    if constexpr (std::is_base_of_v<Interface, T>) {
+                        entry.kind = DispatchKind::Direct;
+                        entry.factory = +[](BaseUnknown* provider) -> BaseUnknown* { return provider; };
+                    } else if constexpr (IsCodeExtension(type)) {
+                        entry.kind = DispatchKind::CodeExtensionSingleton;
+                        // TODO:
+                    } else {
+                        entry.kind = DispatchKind::BoundFacet;
+                        entry.factory = +[](BaseUnknown* provider) -> BaseUnknown* {
+                            
+                        };
+                    }
+                    entry.providerClass = kMeta;
+                    entry.priority = 0; // TODO: Allow priority to be declared in the class annotation.
+                    kMeta->provides.emplace(entry.interfaceIid, entry);
+                }
             }
 
             return kMeta;

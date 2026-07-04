@@ -3,54 +3,86 @@
 #include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
 
-class [[= Sora::Kernel::$::Implementation]] Position2DImpl : public Sora::Kernel::BaseUnknown {
-public:
-    S_OBJECT
+namespace Sora::Kernel {
 
-    void SetPosition(float x, float y) {
-        x_ = x;
-        y_ = y;
-    }
+    class [[= Sora::Kernel::$::Interface]] IPosition : public BaseUnknown {
+    public:
+        virtual ~IPosition() noexcept = default;
 
-    void GetPosition(float& x, float& y) const {
-        x = x_;
-        y = y_;
-    }
+        virtual void SetPosition(float x, float y) = 0;
+        virtual void GetPosition(float& x, float& y) const = 0;
+    };
 
-private:
-    float x_{0.0f}, y_{0.0f};
-};
+    class [[= Sora::Kernel::$::Interface]] I3DPosition : public IPosition {
+    public:
+        virtual ~I3DPosition() noexcept = default;
 
-class [[= Sora::Kernel::$::Implementation]] Position3DImpl : public Position2DImpl {
-public:
-    void SetPosition(float x, float y, float z) {
-        x_ = x;
-        y_ = y;
-        z_ = z;
-    }
+        virtual void SetPosition(float x, float y, float z) = 0;
+        virtual void GetPosition(float& x, float& y, float& z) const = 0;
+    };
 
-    void GetPosition(float& x, float& y, float& z) const {
-        x = x_;
-        y = y_;
-        z = z_;
-    }
+    class [[= Sora::Kernel::$::Implementation, = Sora::Kernel::$::Implements<IPosition>{}]] Position2DImpl
+        : public BaseUnknown {
+    public:
+        S_OBJECT
 
-private:
-    float x_{0.0f}, y_{0.0f}, z_{0.0f};
-};
+        void SetPosition(float x, float y) {
+            x_ = x;
+            y_ = y;
+        }
 
-class [[= Sora::Kernel::$::Interface]] IPosition : public Sora::Kernel::BaseUnknown {
-public:
-    virtual ~IPosition() noexcept = default;
+        void GetPosition(float& x, float& y) const {
+            x = x_;
+            y = y_;
+        }
 
-    virtual void SetPosition(float x, float y) = 0;
-    virtual void GetPosition(float& x, float& y) const = 0;
-};
+    private:
+        float x_{0.0f}, y_{0.0f};
+    };
 
-class [[= Sora::Kernel::$::Interface]] I3DPosition : public IPosition {
-public:
-    virtual ~I3DPosition() noexcept = default;
+    class [[= Sora::Kernel::$::Implementation, = Sora::Kernel::$::Implements<I3DPosition>{}]] Position3DImpl
+        : public Position2DImpl {
+    public:
+        void SetPosition(float x, float y, float z) {
+            x_ = x;
+            y_ = y;
+            z_ = z;
+        }
 
-    virtual void SetPosition(float x, float y, float z) = 0;
-    virtual void GetPosition(float& x, float& y, float& z) const = 0;
-};
+        void GetPosition(float& x, float& y, float& z) const {
+            x = x_;
+            y = y_;
+            z = z_;
+        }
+
+    private:
+        float x_{0.0f}, y_{0.0f}, z_{0.0f};
+    };
+
+    namespace Tie {
+
+        template<Concept::ComponentClass Impl>
+        class [[= Sora::Kernel::$::TIE]] Tie_IPosition : public IPosition {
+        public:
+            S_OBJECT
+
+            void SetPosition(float x, float y) override { static_cast<Impl*>(this)->SetPosition(x, y); }
+            void GetPosition(float& x, float& y) const override { static_cast<const Impl*>(this)->GetPosition(x, y); }
+        };
+
+        template<Concept::ComponentClass Impl>
+        class [[= Sora::Kernel::$::TIE]] Tie_I3DPosition : public I3DPosition {
+        public:
+            S_OBJECT
+
+            void SetPosition(float x, float y) override { static_cast<Impl*>(this)->SetPosition(x, y); }
+            void GetPosition(float& x, float& y) const override { static_cast<const Impl*>(this)->GetPosition(x, y); }
+            void SetPosition(float x, float y, float z) override { static_cast<Impl*>(this)->SetPosition(x, y, z); }
+            void GetPosition(float& x, float& y, float& z) const override {
+                static_cast<const Impl*>(this)->GetPosition(x, y, z);
+            }
+        };
+
+    } // namespace Tie
+
+} // namespace Sora::Kernel
