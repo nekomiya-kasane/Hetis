@@ -18,6 +18,8 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <ranges>
+#include <algorithm>
 
 #include "Sora/Platform.h"
 
@@ -95,6 +97,29 @@ namespace Sora {
         consteval bool IsRegularMethod(std::meta::info m) {
             return std::meta::is_function(m) && !std::meta::is_static_member(m) && !std::meta::is_constructor(m) &&
                    !std::meta::is_destructor(m);
+        }
+
+        /** @brief Return whether @p candidate has the same name and full function signature as @p model. */
+        consteval bool IsSameSignatureMethod(std::meta::info candidate, std::meta::info model) {
+            if (!Sora::Meta::IsRegularMethod(candidate) || !std::meta::has_identifier(candidate)) {
+                return false;
+            }
+            if (Sora::Meta::IdentifierOf(candidate) != Sora::Meta::IdentifierOf(model)) {
+                return false;
+            }
+            if (std::meta::return_type_of(candidate) != std::meta::return_type_of(model)) {
+                return false;
+            }
+            if (std::meta::is_const(candidate) != std::meta::is_const(model)) {
+                return false;
+            }
+            if (std::meta::is_volatile(candidate) != std::meta::is_volatile(model)) {
+                return false;
+            }
+
+            const auto candidateParams = Sora::Meta::ParamTypesOf(candidate);
+            const auto modelParams = Sora::Meta::ParamTypesOf(model);
+            return candidateParams.size() == modelParams.size() && std::ranges::equal(candidateParams, modelParams);
         }
 
     } // namespace Meta

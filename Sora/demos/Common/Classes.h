@@ -71,10 +71,12 @@ namespace Sora::Kernel {
             S_OBJECT
 
             void SetPosition(float x, float y) override {
-                Detail::InvokeTie<^^IPosition::SetPosition, Impl>(BoundTarget(), x, y);
+                constexpr auto current = std::meta::access_context::current().scope();
+                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
             }
             void GetPosition(float& x, float& y) const override {
-                Detail::InvokeTie<^^IPosition::GetPosition, Impl>(BoundTarget(), x, y);
+                constexpr auto current = std::meta::access_context::current().scope();
+                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
             }
         };
 
@@ -84,16 +86,20 @@ namespace Sora::Kernel {
             S_OBJECT
 
             void SetPosition(float x, float y) override {
-                Detail::InvokeTie<^^IPosition::SetPosition, Impl>(BoundTarget(), x, y);
+                constexpr auto current = std::meta::access_context::current().scope();
+                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
             }
             void GetPosition(float& x, float& y) const override {
-                Detail::InvokeTie<^^IPosition::GetPosition, Impl>(BoundTarget(), x, y);
+                constexpr auto current = std::meta::access_context::current().scope();
+                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
             }
             void SetPosition(float x, float y, float z) override {
-                Detail::InvokeTie<^^I3DPosition::SetPosition, Impl>(BoundTarget(), x, y, z);
+                constexpr auto current = std::meta::access_context::current().scope();
+                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y, z);
             }
             void GetPosition(float& x, float& y, float& z) const override {
-                Detail::InvokeTie<^^I3DPosition::GetPosition, Impl>(BoundTarget(), x, y, z);
+                constexpr auto current = std::meta::access_context::current().scope();
+                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y, z);
             }
         };
 
