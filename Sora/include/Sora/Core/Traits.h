@@ -22,4 +22,5 @@
 #include "Sora/Core/Traits/InheritanceTraits.h"
 #include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Core/Traits/ScopeTraits.h"
+#include "Sora/Core/Traits/ClassTraits.h"
 #include "Sora/Core/Traits/VisitOverloader.h"

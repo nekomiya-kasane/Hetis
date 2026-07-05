@@ -617,10 +617,16 @@ namespace Sora {
     /** @brief User-defined literals for @ref FixedString. */
     namespace Literals {
 
-        /** @brief Return the fixed string represented by the literal suffix @c _fs. */
-        template<FixedString S>
-        [[nodiscard]] consteval auto operator""_fs() {
-            return S;
+        /** @brief Return the fixed string represented by the literal suffix @c _FS. */
+        [[nodiscard]] consteval FixedString<256> operator""_FS(const char* str, size_t len) {
+            if (len > 256) {
+                throw std::define_static_string("Sora::FixedString literal _FS exceeds its 256-character capacity.");
+            }
+            FixedString<256> result;
+            for (size_t i = 0; i < len; ++i) {
+                result.push_back(str[i]);
+            }
+            return result;
         }
 
     } // namespace Literals

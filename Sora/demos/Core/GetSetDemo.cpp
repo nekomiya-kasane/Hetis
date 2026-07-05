@@ -14,11 +14,15 @@ public:
     [[= Sora::$::Exposed]] float z;
 
 private:
+    ALLOW_GET_SET
+
     [[= Sora::$::Exposed]] float w;
     float e;
 };
 
 int main() {
+    using namespace Sora::Literals;
+
     Point p{1.0f, 2.0f};
 
     // Get the value of x using Meta::Get
@@ -38,7 +42,9 @@ int main() {
     Sora::Meta::Set<^^PointExt::z>(pe, 6.0f);
     std::cout << "z: " << pe.z << std::endl;
 
-    Sora::Meta::Set<^^PointExt::w>(pe, 7.0f);
+    Sora::Meta::Set<PointExt, "w"_FS>(pe, 7.0f);
+    float wValue = Sora::Meta::Get<"w"_FS>(pe);
+    std::cout << "w: " << wValue << std::endl;
 
     return 0;
 }

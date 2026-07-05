@@ -2,6 +2,7 @@
 
 #include "Sora/Kernel/Core/MetaClass.h"
 #include "Sora/Kernel/Core/Traits.h"
+#include "Sora/Core/GetSet.h"
 
 #include <atomic>
 #include <bit>
@@ -52,6 +53,8 @@ public:                                                                         
         }                                                                                                              \
         return object;                                                                                                 \
     }                                                                                                                  \
+                                                                                                                       \
+    ALLOW_GET_SET                                                                                                      \
                                                                                                                        \
 public:
 
