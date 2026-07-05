@@ -1,0 +1,44 @@
+#include "Sora/Core/GetSet.h"
+
+#include <iostream>
+
+struct Point {
+    float x;
+    float y;
+};
+
+class PointExt : public Point {
+public:
+    PointExt(float x, float y, float z, float w, float e) : Point{x, y}, z(z), w(w), e(e) {}
+
+    [[= Sora::$::Exposed]] float z;
+
+private:
+    [[= Sora::$::Exposed]] float w;
+    float e;
+};
+
+int main() {
+    Point p{1.0f, 2.0f};
+
+    // Get the value of x using Meta::Get
+    float xValue = Sora::Meta::Get<^^Point::x>(p);
+    std::cout << "x: " << xValue << std::endl;
+
+    // Set the value of y using Meta::Set
+    Sora::Meta::Set<^^Point::y>(p, 3.0f);
+    std::cout << "y: " << p.y << std::endl;
+
+    // Get the value of z using Meta::Get
+    PointExt pe{1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+    float zValue = Sora::Meta::Get<^^PointExt::z>(pe);
+    std::cout << "z: " << zValue << std::endl;
+
+    // Set the value of z using Meta::Set
+    Sora::Meta::Set<^^PointExt::z>(pe, 6.0f);
+    std::cout << "z: " << pe.z << std::endl;
+
+    Sora::Meta::Set<^^PointExt::w>(pe, 7.0f);
+
+    return 0;
+}

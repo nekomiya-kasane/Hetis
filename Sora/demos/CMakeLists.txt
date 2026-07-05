@@ -20,6 +20,7 @@ add_sora_demo(Core TraitsDemo)
 add_sora_demo(Core PolymorphismDemo)
 add_sora_demo(Core HashDemo)
 add_sora_demo(Core ToStringDemo)
+add_sora_demo(Core GetSetDemo)
 
 add_sora_demo(PAL ModuleDemo)
 
