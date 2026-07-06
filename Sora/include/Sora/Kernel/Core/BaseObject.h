@@ -13,8 +13,10 @@
 #include <atomic>
 #include <bit>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <new>
+#include <vector>
 
 namespace Sora::Kernel {
 
@@ -233,6 +235,57 @@ public:
 
     static_assert(sizeof(BaseUnknown) == 2 * sizeof(void*));
     static_assert(alignof(BaseUnknown) >= 16);
+
+    namespace Detail {
+
+        /** @brief Internal closure-graph operations intentionally kept out of the public BaseUnknown API. */
+        class BaseUnknownInternal {
+        public:
+            /**
+             * @brief Bind @p object as an extension of @p extendee.
+             *        Extension --> Extendee
+             */
+            static void BindExtendee(BaseUnknown* object, BaseUnknown* extendee) noexcept;
+
+            /**
+             * @brief Bind @p object as a bound facet of @p target.
+             *        BoundFacet --> BoundTarget
+             */
+            static void BindBoundTarget(BaseUnknown* object, BaseUnknown* target) noexcept;
+
+            /** @brief Adopt @p extension as a closure-owned extension node under @p nucleus. */
+            [[nodiscard]] static bool AdoptExtensionNode(BaseUnknown* nucleus, BaseUnknown* extension);
+
+            /** @brief Adopt @p facet as a closure-owned bound facet node under @p component. */
+            [[nodiscard]] static bool AdoptBoundFacetNode(BaseUnknown* component, Iid interfaceIid, BaseUnknown* facet);
+
+            /** @brief Find an already materialized bound facet for @p interfaceIid. */
+            [[nodiscard]] static BaseUnknown* FindBoundFacetNode(BaseUnknown* component, Iid interfaceIid) noexcept;
+
+            /** @brief Return a stable snapshot of closure-owned extension nodes. */
+            [[nodiscard]] static std::vector<BaseUnknown*> SnapshotExtensionNodes(BaseUnknown* component);
+
+        private:
+            friend class Sora::Kernel::BaseUnknown;
+
+            /** @brief Bind @p object to @p base with an internal pointer-arm kind. */
+            static void BindObjectModelBase(BaseUnknown* object, BaseUnknown::ComData::PointerType kind,
+                                            BaseUnknown* base) noexcept;
+
+            /** @brief Reset @p object from an object-model pointer arm back to an unbound implementation payload. */
+            static void UnbindObjectModelBase(BaseUnknown* object) noexcept;
+
+            /** @brief Remove @p object from @p implementation's cold closure state and reset its object-model base. */
+            static void UnbindObjectModelBase(BaseUnknown* implementation, BaseUnknown* object) noexcept;
+
+            /** @brief Return the cold closure state, allocating it on the implementation nucleus when needed. */
+            [[nodiscard]] static ClosureState& EnsureClosureState(BaseUnknown* object);
+
+            /** @brief Return the cold closure state if it already exists. */
+            [[nodiscard]] static ClosureState* TryClosureState(BaseUnknown* object) noexcept;
+        };
+
+    } // namespace Detail
 
     /** @brief Add one strong reference to @p object's nucleus when it is non-null. */
     void Retain(BaseUnknown* object) noexcept;

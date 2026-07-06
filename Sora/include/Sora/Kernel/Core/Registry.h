@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
 #include "Sora/Kernel/Core/IID.h"
 #include "Sora/Kernel/Core/MetaClass.h"
@@ -42,7 +43,7 @@ namespace Sora::Kernel {
             if (!facet) {
                 return nullptr;
             }
-            BindBoundTarget(facet, provider);
+            Detail::BaseUnknownInternal::BindBoundTarget(facet, provider);
             return facet;
         }
 
@@ -70,7 +71,7 @@ namespace Sora::Kernel {
                 entry.providerClass = meta;
                 entry.priority = 0;
 
-                meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
+                meta->AddProvide(std::move(entry));
             }
         }
 

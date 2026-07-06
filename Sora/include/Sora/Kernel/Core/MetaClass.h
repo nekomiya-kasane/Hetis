@@ -1,5 +1,5 @@
 /**
- * @file Meta.h
+ * @file MetaClass.h
  * @brief Immutable metaclass facts and dictionary-materialized object-model links.
  * @ingroup Core
  */
@@ -15,16 +15,18 @@
 #include <memory>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 namespace Sora::Kernel {
 
+    namespace Tie {};
+
     /** @brief Runtime dispatch shape for a component-interface provider. */
     enum class DispatchKind : uint8_t {
-        Direct = 0,                 /**< Interface is the provider object itself. */
-        InlineFacet = 1,            /**< Facet is stored inline inside the provider frame. */
-        BoundFacet = 2,             /**< Facet is a closure-owned bound object. */
-        AttachedExtension = 3,      /**< Facet is provided by an attached extension object. */
-        CodeExtensionSingleton = 4, /**< Facet is provided by a singleton code extension. */
+        Direct = 0,            /**< Interface is the provider object itself. */
+        InlineFacet = 1,       /**< Facet is stored inline inside the provider frame. */
+        BoundFacet = 2,        /**< Facet is a closure-owned bound object. */
+        AttachedExtension = 3, /**< Facet is provided by an attached extension object. */
     };
 
     /** @brief One runtime provider edge from a component class to an interface. */
@@ -39,7 +41,7 @@ namespace Sora::Kernel {
     };
 
     /** @brief Immutable metaclass facade used by the Core runtime and dictionary. */
-    class MetaClass : std::enable_shared_from_this<MetaClass> {
+    class MetaClass {
     public:
         /** @brief Construct an empty metaclass sentinel. */
         constexpr MetaClass() noexcept = default;
@@ -48,7 +50,7 @@ namespace Sora::Kernel {
         inline static std::shared_ptr<MetaClass> Query() noexcept {
             static std::shared_ptr<MetaClass> kMeta = nullptr;
             if (kMeta) {
-                return kMeta->shared_from_this();
+                return kMeta;
             }
 
             kMeta = std::make_shared<MetaClass>();
@@ -78,29 +80,6 @@ namespace Sora::Kernel {
                 }
             }
 
-            if constexpr (IsComponent(type)) {
-                template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<T>()) {
-                    using Interface = Sora::Meta::InfoType<iface>;
-                    ProviderEntry entry{};
-                    entry.interfaceIid = Traits::IidOf<Interface>;
-                    if constexpr (std::is_base_of_v<Interface, T>) {
-                        entry.kind = DispatchKind::Direct;
-                        entry.factory = +[](BaseUnknown* provider) -> BaseUnknown* { return provider; };
-                    } else if constexpr (IsCodeExtension(type)) {
-                        entry.kind = DispatchKind::CodeExtensionSingleton;
-                        // TODO:
-                    } else {
-                        entry.kind = DispatchKind::BoundFacet;
-                        entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* {
-                            return Sora::Kernel::Traits::TieClassOf<Interface, T>::MakeObjectModelBound(provider);
-                        };
-                    }
-                    entry.providerClass = kMeta;
-                    entry.priority = 0; // TODO: Allow priority to be declared in the class annotation.
-                    kMeta->provides.emplace(entry.interfaceIid, entry);
-                }
-            }
-
             return kMeta;
         }
 
@@ -117,7 +96,7 @@ namespace Sora::Kernel {
         [[nodiscard]] constexpr bool HasDirectBase() const noexcept { return base != nullptr; }
 
         /** @brief Return the stable diagnostic class name. */
-        [[nodiscard]] constexpr const auto GetClassName() const noexcept { return name; }
+        [[nodiscard]] constexpr const auto& GetClassName() const noexcept { return name; }
 
         /** @brief Return components extended by this class. */
         [[nodiscard]] constexpr const auto& Protensions() const noexcept { return protensions; }
@@ -128,6 +107,9 @@ namespace Sora::Kernel {
         /** @brief Find the highest-priority direct provider for @p iid in this class. */
         [[nodiscard]] const ProviderEntry* FindProvide(Iid iid) const noexcept;
 
+        /** @brief Register or replace one direct provider contributed by this class. */
+        auto AddProvide(ProviderEntry entry) { return provides.insert_or_assign(entry.interfaceIid, std::move(entry)); }
+
     private:
         friend class Dictionary;
 
@@ -136,7 +118,7 @@ namespace Sora::Kernel {
         Iid iid{};                                  /**< Class identifier. */
 
         std::shared_ptr<MetaClass> base; /**< Direct object-model base metaclass, when materialized. */
-        std::unordered_map<Iid, std::shared_ptr<MetaClass>> protensions{}; /**< All extensi */
+        std::unordered_map<Iid, std::shared_ptr<MetaClass>> protensions{}; /**< Extension target classes. */
 
         std::unordered_map<Iid, ProviderEntry> provides{}; /**< Direct providers contributed by this class. */
     };

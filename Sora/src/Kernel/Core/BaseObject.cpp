@@ -1,13 +1,14 @@
 #include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
 #include "Sora/Kernel/Core/IID.h"
+#include "Sora/Kernel/Core/ComPtr.h"
 #include "Sora/Kernel/Core/MetaClass.h"
-
-#include "Kernel/Core/ObjectModelInternal.h"
+#include "Sora/Kernel/Core/Registry.h"
 
 #include <algorithm>
 #include <mutex>
 #include <flat_map>
+#include <ranges>
 
 namespace Sora::Kernel {
 
@@ -15,9 +16,9 @@ namespace Sora::Kernel {
 
         /** @brief Cold object chain allocated only when extensions, bound facets, or weak refs are used. */
         struct alignas(16) ClosureState {
-            mutable std::mutex mutex{};                     /**< Serializes chain mutation and snapshots. */
-            std::flat_map<Iid, BaseUnknown*> extensions{};  /**< Closure-owned extension nodes. */
-            std::flat_map<Iid, BaseUnknown*> boundFacets{}; /**< Closure-owned bound facet nodes. */
+            mutable std::mutex mutex{};                            /**< Serializes chain mutation and snapshots. */
+            std::flat_map<Iid, ComPtr<BaseUnknown>> extensions{};  /**< Closure-owned extension nodes. */
+            std::flat_map<Iid, ComPtr<BaseUnknown>> boundFacets{}; /**< Closure-owned bound facet nodes. */
             std::shared_ptr<WeakState> weak{std::make_shared<WeakState>()}; /**< Weak-reference state. */
 
             ~ClosureState() noexcept {
@@ -28,10 +29,10 @@ namespace Sora::Kernel {
                 {
                     std::scoped_lock lock(mutex);
                     for (const auto& extension : extensions | std::views::values) {
-                        Release(extension);
+                        Release(extension.Get());
                     }
                     for (const auto& facet : boundFacets | std::views::values) {
-                        Release(facet);
+                        Release(facet.Get());
                     }
                     extensions.clear();
                     boundFacets.clear();
@@ -40,13 +41,13 @@ namespace Sora::Kernel {
 
             void SetExtension(Iid iid, BaseUnknown* extension) {
                 std::scoped_lock lock(mutex);
-                assert(!extensions.contains(iid) || extensions[iid] == extension);
+                assert(!extensions.contains(iid) || extensions[iid].Get() == extension);
                 extensions[iid] = extension;
             }
 
             void SetBoundFacet(Iid iid, BaseUnknown* facet) {
                 std::scoped_lock lock(mutex);
-                assert(!boundFacets.contains(iid) || boundFacets[iid] == facet);
+                assert(!boundFacets.contains(iid) || boundFacets[iid].Get() == facet);
                 boundFacets[iid] = facet;
             }
 
@@ -56,198 +57,216 @@ namespace Sora::Kernel {
             }
         };
 
-        /** @brief Internal closure-graph operations intentionally kept out of the public BaseUnknown API. */
-        class BaseUnknownInternal {
-        public:
-            /**
-             * @brief Bind @p object as an extension of @p extendee.
-             *        Extension --> Extendee
-             */
-            static void BindExtendee(BaseUnknown* object, BaseUnknown* extendee) noexcept {
-                if (!object || !extendee) {
-                    return;
-                }
-                BindObjectModelBase(object, BaseUnknown::ComData::PointerType::ForExtension, extendee->Nucleus());
+        void BaseUnknownInternal::BindExtendee(BaseUnknown* object, BaseUnknown* extendee) noexcept {
+            if (!object || !extendee) {
+                return;
+            }
+            BindObjectModelBase(object, BaseUnknown::ComData::PointerType::ForExtension, extendee->Nucleus());
+        }
+
+        void BaseUnknownInternal::BindBoundTarget(BaseUnknown* object, BaseUnknown* target) noexcept {
+            if (!object || !target) {
+                return;
+            }
+            BindObjectModelBase(object, BaseUnknown::ComData::PointerType::ForTie, target);
+        }
+
+        bool BaseUnknownInternal::AdoptExtensionNode(BaseUnknown* nucleus, BaseUnknown* extension) {
+            if (!nucleus || !extension) {
+                return false;
+            }
+            assert(IsExtension(extension->GetRole()) && !extension->Extendee());
+
+            nucleus = nucleus->Nucleus();
+            Detail::ClosureState& state = EnsureClosureState(nucleus);
+
+            state.SetExtension(extension->GetIid(), extension);
+            BindObjectModelBase(extension, BaseUnknown::ComData::PointerType::ForExtension, nucleus);
+
+            return true;
+        }
+
+        bool BaseUnknownInternal::AdoptBoundFacetNode(BaseUnknown* component, Iid interfaceIid, BaseUnknown* facet) {
+            if (!component || !facet) {
+                return false;
+            }
+            assert(IsTie(facet->GetRole()));
+
+            BaseUnknown* target = facet->BoundTarget();
+            if (target && target != component) {
+                return false;
             }
 
-            /**
-             * @brief Bind @p object as a bound facet of @p target.
-             *        BoundFacet --> BoundTarget
-             */
-            static void BindBoundTarget(BaseUnknown* object, BaseUnknown* target) noexcept {
-                if (!object || !target) {
-                    return;
-                }
-                BindObjectModelBase(object, BaseUnknown::ComData::PointerType::ForTie, target);
-            }
-
-            /** @brief Adopt @p extension as a closure-owned extension node under @p nucleus. */
-            static bool AdoptExtensionNode(BaseUnknown* nucleus, BaseUnknown* extension) {
-                if (!nucleus || !extension) {
-                    return false;
-                }
-                assert(IsExtension(extension->GetRole()) && !extension->Extendee());
-
-                nucleus = nucleus->Nucleus();
-                Detail::ClosureState& state = EnsureClosureState(nucleus);
-
-                state.SetExtension(extension->GetIid(), extension);
-                BindObjectModelBase(extension, BaseUnknown::ComData::PointerType::ForExtension, nucleus);
-
-                return true;
-            }
-
-            /** @brief Adopt @p facet as a closure-owned bound facet node under @p component. */
-            [[nodiscard]] static bool AdoptBoundFacetNode(BaseUnknown* component, Iid interfaceIid,
-                                                          BaseUnknown* facet) {
-                if (!component || !facet) {
-                    return false;
-                }
-                assert(IsTie(facet->GetRole()) && !facet->BoundTarget());
-
-                Detail::ClosureState& state = EnsureClosureState(component->Nucleus());
+            Detail::ClosureState& state = EnsureClosureState(component->Nucleus());
+            {
                 std::scoped_lock lock(state.mutex);
-                if (auto existing = state.boundFacets.find(interfaceIid); existing != state.boundFacets.end()) {
+                if (state.boundFacets.contains(interfaceIid)) {
                     return false;
                 }
+                state.boundFacets[interfaceIid] = facet;
+            }
 
-                state.SetBoundFacet(interfaceIid, facet);
+            if (!target) {
                 BindObjectModelBase(facet, BaseUnknown::ComData::PointerType::ForTie, component);
-                return true;
+            }
+            return true;
+        }
+
+        BaseUnknown* BaseUnknownInternal::FindBoundFacetNode(BaseUnknown* component, Iid interfaceIid) noexcept {
+            if (!component) {
+                return nullptr;
+            }
+            Detail::ClosureState* state = TryClosureState(component->Nucleus());
+            if (!state) {
+                return nullptr;
             }
 
-        private:
-            friend class Sora::Kernel::BaseUnknown;
+            std::scoped_lock lock(state->mutex);
+            auto found = state->boundFacets.find(interfaceIid);
+            return found == state->boundFacets.end() ? nullptr : found->second.Get();
+        }
 
-            /** @brief Bind @p object to @p base with an internal pointer-arm kind. */
-            static void BindObjectModelBase(BaseUnknown* object, BaseUnknown::ComData::PointerType kind,
-                                            BaseUnknown* base) noexcept {
-                using PT = BaseUnknown::ComData::PointerType;
+        std::vector<BaseUnknown*> BaseUnknownInternal::SnapshotExtensionNodes(BaseUnknown* component) {
+            std::vector<BaseUnknown*> result;
+            if (!component) {
+                return result;
+            }
+            Detail::ClosureState* state = TryClosureState(component->Nucleus());
+            if (!state) {
+                return result;
+            }
 
-                assert(object != nullptr);
-                assert(base != nullptr);
+            std::scoped_lock lock(state->mutex);
+            result.reserve(state->extensions.size());
+            for (const auto& extension : state->extensions | std::views::values) {
+                result.push_back(extension.Get());
+            }
+            return result;
+        }
+
+        void BaseUnknownInternal::BindObjectModelBase(BaseUnknown* object, BaseUnknown::ComData::PointerType kind,
+                                                      BaseUnknown* base) noexcept {
+            using PT = BaseUnknown::ComData::PointerType;
+
+            assert(object != nullptr);
+            assert(base != nullptr);
+            assert(kind == PT::ForExtension || kind == PT::ForTie || kind == PT::ForInlineFacet);
+            for (uint64_t current = object->data_.load(std::memory_order_acquire);;) {
+                assert(BaseUnknown::ComData::Kind(current) == PT::ForImplementation &&
+                       BaseUnknown::ComData::Pointer(current) == nullptr);
+                const uint64_t next = BaseUnknown::ComData::WithPointer(current, kind, base);
+                if (object->data_.compare_exchange_weak(current, next, std::memory_order_acq_rel,
+                                                        std::memory_order_acquire)) {
+                    return;
+                }
+            }
+        }
+
+        void BaseUnknownInternal::UnbindObjectModelBase(BaseUnknown* object) noexcept {
+            using PT = BaseUnknown::ComData::PointerType;
+
+            if (!object) {
+                return;
+            }
+            for (uint64_t current = object->data_.load(std::memory_order_acquire);;) {
+                const PT kind = BaseUnknown::ComData::Kind(current);
+                if (kind == PT::ForImplementation) {
+                    return;
+                }
                 assert(kind == PT::ForExtension || kind == PT::ForTie || kind == PT::ForInlineFacet);
-                for (uint64_t current = object->data_.load(std::memory_order_acquire);;) {
-                    assert(BaseUnknown::ComData::Kind(current) == PT::ForImplementation &&
-                           BaseUnknown::ComData::Pointer(current) == nullptr);
-                    const uint64_t next = BaseUnknown::ComData::WithPointer(current, kind, base);
-                    if (object->data_.compare_exchange_weak(current, next, std::memory_order_acq_rel,
-                                                            std::memory_order_acquire)) {
-                        return;
-                    }
-                }
-            }
-
-            /** @brief Reset @p object from an object-model pointer arm back to an unbound implementation payload. */
-            static void UnbindObjectModelBase(BaseUnknown* object) noexcept {
-                using PT = BaseUnknown::ComData::PointerType;
-
-                if (!object) {
+                const uint64_t next = BaseUnknown::ComData::WithPointer(current, PT::ForImplementation, nullptr);
+                if (object->data_.compare_exchange_weak(current, next, std::memory_order_acq_rel,
+                                                        std::memory_order_acquire)) {
                     return;
                 }
-                for (uint64_t current = object->data_.load(std::memory_order_acquire);;) {
-                    const PT kind = BaseUnknown::ComData::Kind(current);
-                    if (kind == PT::ForImplementation) {
-                        return;
+            }
+        }
+
+        void BaseUnknownInternal::UnbindObjectModelBase(BaseUnknown* implementation, BaseUnknown* object) noexcept {
+            if (!implementation || !object) {
+                return;
+            }
+
+            implementation = implementation->Nucleus();
+            if (!implementation) {
+                return;
+            }
+            Detail::ClosureState* state = TryClosureState(implementation);
+            if (!state) {
+                return;
+            }
+
+            bool removed = false;
+            {
+                std::scoped_lock lock(state->mutex);
+                auto eraseObject = [object](std::flat_map<Iid, ComPtr<BaseUnknown>>& nodes) noexcept {
+                    const auto found = std::ranges::find_if(
+                        nodes, [object](const auto& entry) noexcept { return entry.second.Get() == object; });
+                    if (found == nodes.end()) {
+                        return false;
                     }
-                    assert(kind == PT::ForExtension || kind == PT::ForTie || kind == PT::ForInlineFacet);
-                    const uint64_t next = BaseUnknown::ComData::WithPointer(current, PT::ForImplementation, nullptr);
-                    if (object->data_.compare_exchange_weak(current, next, std::memory_order_acq_rel,
-                                                            std::memory_order_acquire)) {
-                        return;
-                    }
+                    nodes.erase(found);
+                    return true;
+                };
+
+                if (IsExtension(object->GetRole())) {
+                    removed = eraseObject(state->extensions);
+                } else if (IsTie(object->GetRole())) {
+                    removed = eraseObject(state->boundFacets);
                 }
             }
 
-            /** @brief Remove @p object from @p implementation's cold closure state and reset its object-model base. */
-            static void UnbindObjectModelBase(BaseUnknown* implementation, BaseUnknown* object) noexcept {
-                if (!implementation || !object) {
-                    return;
-                }
+            if (removed) {
+                UnbindObjectModelBase(object);
+            }
+        }
 
-                implementation = implementation->Nucleus();
-                if (!implementation) {
-                    return;
-                }
-                Detail::ClosureState* state = TryClosureState(implementation);
-                if (!state) {
-                    return;
-                }
+        ClosureState& BaseUnknownInternal::EnsureClosureState(BaseUnknown* object) {
+            using CD = BaseUnknown::ComData;
+            using PT = BaseUnknown::ComData::PointerType;
 
-                bool removed = false;
-                {
-                    std::scoped_lock lock(state->mutex);
-                    auto eraseObject = [object](std::flat_map<Iid, BaseUnknown*>& nodes) noexcept {
-                        const auto found = std::ranges::find_if(
-                            nodes, [object](const auto& entry) noexcept { return entry.second == object; });
-                        if (found == nodes.end()) {
-                            return false;
-                        }
-                        nodes.erase(found);
-                        return true;
-                    };
-
-                    if (IsExtension(object->GetRole())) {
-                        removed = eraseObject(state->extensions);
-                    } else if (IsTie(object->GetRole())) {
-                        removed = eraseObject(state->boundFacets);
-                    }
-                }
-
-                if (removed) {
-                    UnbindObjectModelBase(object);
-                }
+            const BaseUnknown* nucleus = object->Nucleus();
+            if (nucleus != object) {
+                return EnsureClosureState(const_cast<BaseUnknown*>(nucleus));
             }
 
-            /** @brief Return the cold closure state, allocating it on the implementation nucleus when needed. */
-            static ClosureState& EnsureClosureState(BaseUnknown* object) {
-                using CD = BaseUnknown::ComData;
-                using PT = BaseUnknown::ComData::PointerType;
+            Detail::ClosureState* candidate = nullptr;
 
-                const BaseUnknown* nucleus = object->Nucleus();
-                if (nucleus != object) {
-                    return EnsureClosureState(const_cast<BaseUnknown*>(nucleus));
+            for (uint64_t current = object->data_.load(std::memory_order_acquire);;) {
+                assert(CD::Kind(current) == PT::ForImplementation);
+                if (auto* existing = static_cast<Detail::ClosureState*>(CD::Pointer(current))) {
+                    delete candidate;
+                    return *existing;
                 }
 
-                Detail::ClosureState* candidate = nullptr;
+                if (!candidate) {
+                    candidate = new Detail::ClosureState;
+                    candidate->weak->nucleus.store(const_cast<BaseUnknown*>(object), std::memory_order_release);
+                }
 
-                for (uint64_t current = object->data_.load(std::memory_order_acquire);;) {
-                    assert(CD::Kind(current) == PT::ForImplementation);
-                    if (auto* existing = static_cast<Detail::ClosureState*>(CD::Pointer(current))) {
-                        delete candidate;
-                        return *existing;
-                    }
-
-                    if (!candidate) {
-                        candidate = new Detail::ClosureState;
-                        candidate->weak->nucleus.store(const_cast<BaseUnknown*>(object), std::memory_order_release);
-                    }
-
-                    const uint64_t next = CD::WithPointer(current, PT::ForImplementation, candidate);
-                    if (object->data_.compare_exchange_weak(current, next, std::memory_order_acq_rel,
-                                                            std::memory_order_acquire)) {
-                        return *candidate;
-                    }
+                const uint64_t next = CD::WithPointer(current, PT::ForImplementation, candidate);
+                if (object->data_.compare_exchange_weak(current, next, std::memory_order_acq_rel,
+                                                        std::memory_order_acquire)) {
+                    return *candidate;
                 }
             }
+        }
 
-            /** @brief Return the cold closure state if it already exists. */
-            [[nodiscard]] static ClosureState* TryClosureState(BaseUnknown* object) noexcept {
-                using CD = BaseUnknown::ComData;
-                using PT = BaseUnknown::ComData::PointerType;
+        ClosureState* BaseUnknownInternal::TryClosureState(BaseUnknown* object) noexcept {
+            using CD = BaseUnknown::ComData;
+            using PT = BaseUnknown::ComData::PointerType;
 
-                const BaseUnknown* nucleus = object->Nucleus();
-                if (nucleus != object) {
-                    return TryClosureState(const_cast<BaseUnknown*>(nucleus));
-                }
-
-                const uint64_t word = object->data_.load(std::memory_order_acquire);
-                if (CD::Kind(word) != PT::ForImplementation) {
-                    return nullptr;
-                }
-                return static_cast<Detail::ClosureState*>(CD::Pointer(word));
+            const BaseUnknown* nucleus = object->Nucleus();
+            if (nucleus != object) {
+                return TryClosureState(const_cast<BaseUnknown*>(nucleus));
             }
-        };
+
+            const uint64_t word = object->data_.load(std::memory_order_acquire);
+            if (CD::Kind(word) != PT::ForImplementation) {
+                return nullptr;
+            }
+            return static_cast<Detail::ClosureState*>(CD::Pointer(word));
+        }
 
     } // namespace Detail
 

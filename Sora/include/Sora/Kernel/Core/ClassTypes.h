@@ -223,26 +223,20 @@ namespace Sora::Kernel {
                                             "current TIE method in its base-class chain.");
         }
 
-        /** @brief Resolve the implementation method matching @p InterfaceMember in @p Impl's inheritance chain. */
-        template<std::meta::info InterfaceMember, Concept::ComponentClass Impl>
-        consteval std::meta::info TieTargetOfInterfaceMember() {
-            constexpr auto chain = std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
-            template for (constexpr auto type : chain) {
-                template for (constexpr auto member : Sora::Traits::Members<typename [:type:]>) {
-                    if constexpr (Sora::Meta::IsSameSignatureMethod(member, InterfaceMember)) {
-                        return member;
-                    }
-                }
-            }
-            throw std::define_static_string("Core::TieTargetOfInterfaceMember: no implementation method matches the "
-                                            "interface member in the component inheritance chain.");
-        }
-
         /** @brief Resolve the implementation method matching the current TIE method in @p Impl's inheritance chain. */
         template<std::meta::info CurrentFunction, Concept::ComponentClass Impl>
         consteval std::meta::info TieTargetOfCurrent() {
             constexpr auto interfaceMember = InterfaceMemberOverriddenBy<CurrentFunction>();
-            return TieTargetOfInterfaceMember<interfaceMember, Impl>();
+            constexpr auto chain = std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
+            template for (constexpr auto type : chain) {
+                template for (constexpr auto member : Sora::Traits::Members<typename [:type:]>) {
+                    if constexpr (Sora::Meta::IsSameSignatureMethod(member, interfaceMember)) {
+                        return member;
+                    }
+                }
+            }
+            throw std::define_static_string("Core::TieTargetOfCurrent: no implementation method matches the "
+                                            "interface member in the component inheritance chain.");
         }
 
         /** @brief Invoke the implementation method corresponding to @p CurrentFunction on a mutable bound target. */
