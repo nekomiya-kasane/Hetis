@@ -98,7 +98,7 @@ public:
     };
 
     /** @brief Intrusive lifetime root and type-erased object-model anchor. */
-    class alignas(16) BaseUnknown {
+    class alignas(16) [[= Sora::Kernel::$::Role{TypeOfClass::BaseUnknown}]] BaseUnknown {
         /** @brief Compressed BaseUnknown payload: pointer kind, refcount, and one 16-byte-aligned pointer. */
         class ComData {
         public:

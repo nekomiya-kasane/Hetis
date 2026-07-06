@@ -24,6 +24,19 @@
 
 namespace Sora {
 
+    namespace Meta {
+
+        /**
+         * @brief Return a static array of annotations for a given reflected entity.
+         * @param[in] ent Reflected entity whose annotations are requested.
+         * @return Static array of reflected annotations on @p ent.
+         */
+        consteval auto AnnotationsOf(std::meta::info ent) {
+            return std::define_static_array(std::meta::annotations_of(ent));
+        }
+
+    }
+
     namespace $ {
 
         /** @brief Marker annotation used to opt a regular class into @ref Concept::Annotation. */
@@ -160,11 +173,15 @@ namespace Sora {
          * @param[in] annotations Reflected annotation types to collect.
          * @return Static-storage array containing matching annotation reflections in query order.
          */
-        consteval auto GetAll(std::meta::info ent, std::initializer_list<std::meta::info> annotations) {
+        consteval auto GetAll(std::meta::info ent, std::initializer_list<std::meta::info> annotations = {}) {
             std::vector<std::meta::info> results;
-            for (auto a : annotations) {
-                auto annots = std::meta::annotations_of(ent, a);
-                results.insert_range(results.end(), annots);
+            if (annotations.size() == 0) {
+                results = std::meta::annotations_of(ent);
+            } else {
+                for (auto a : annotations) {
+                    auto annots = std::meta::annotations_of(ent, a);
+                    results.insert_range(results.end(), annots);
+                }
             }
             return std::define_static_array(results);
         }
@@ -305,7 +322,8 @@ namespace Sora {
          * @throws std::logic_error when more than one matching annotation exists.
          */
         template<std::meta::info... As>
-        consteval auto GetSingleOptional(std::meta::info ent) -> std::optional<MultiAnnoVariant<Meta::InfoType<As>...>> {
+        consteval auto GetSingleOptional(std::meta::info ent)
+            -> std::optional<MultiAnnoVariant<Meta::InfoType<As>...>> {
             std::optional<MultiAnnoVariant<Meta::InfoType<As>...>> result;
             std::size_t count = 0;
             auto collect = [&]<std::meta::info A> {
@@ -389,7 +407,7 @@ namespace Sora {
             return std::meta::template_of(type) == ^^Template;
         }
 
-    }
+    } // namespace Meta
 
 } // namespace Sora
 

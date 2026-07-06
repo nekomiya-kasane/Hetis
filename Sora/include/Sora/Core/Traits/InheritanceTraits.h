@@ -110,7 +110,10 @@ namespace Sora {
          */
         template<typename T, std::size_t I>
             requires std::is_class_v<T>
-        using DirectBaseType = typename [:Meta::DirectBaseTypesOf(^^T)[I]:];
+        using DirectBaseType = typename [:[] consteval {
+            auto bases = Meta::DirectBaseTypesOf(^^T);
+            return bases.size() ? bases[I] : ^^void;
+        }():];
 
     } // namespace Traits
 

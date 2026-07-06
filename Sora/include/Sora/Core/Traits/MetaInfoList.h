@@ -1,6 +1,7 @@
 #pragma once
 
 #include <meta>
+#include <ranges>
 
 namespace Sora::Meta {
 
@@ -38,6 +39,28 @@ namespace Sora::Meta {
 
         /** @brief Return whether the list is empty. */
         [[nodiscard]] consteval bool empty() const noexcept { return count == 0; }
+
+        /** @brief Return the reflected type at the specified index. */
+        [[nodiscard]] consteval const std::meta::info& operator[](std::size_t i) const noexcept { return first[i]; }
+
+        /** @brief Return the reflected type at the specified index, with bounds checking. */
+        [[nodiscard]] consteval const std::meta::info& at(std::size_t i) const {
+            if (i >= count) {
+                throw std::out_of_range("Sora::Meta::InfoList index out of range");
+            }
+            return first[i];
+        }
     };
+
+    consteval Sora::Meta::InfoList StaticInfoList(auto&& items)
+        requires std::ranges::range<decltype(items)> &&
+                 std::same_as<std::ranges::range_value_t<decltype(items)>, std::meta::info>
+    {
+        auto storage = std::define_static_array(items);
+        Sora::Meta::InfoList result;
+        result.first = storage.data();
+        result.count = items.size();
+        return result;
+    }
 
 } // namespace Sora::Meta

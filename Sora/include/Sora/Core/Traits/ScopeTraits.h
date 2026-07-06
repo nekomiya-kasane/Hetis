@@ -124,6 +124,17 @@ namespace Sora {
             return false;
         }
 
+        /**
+         * @brief Return a static reflection array of members for a given scope.
+         * @param[in] scope Reflected declaration or type whose members are requested.
+         * @param[in] context Reflection access context used for member discovery.
+         * @return Static reflection array of members for @p scope.
+         */
+        consteval auto MembersOf(std::meta::info scope,
+                                 std::meta::access_context context = std::meta::access_context::unchecked()) {
+            return std::define_static_array(std::meta::members_of(scope, context));
+        }
+
     } // namespace Meta
 
     namespace Traits {
@@ -140,6 +151,127 @@ namespace Sora {
         template<typename T>
         inline constexpr std::string_view ScopeChainDisplayString = Meta::ScopeChainDisplayStringOf(^^T);
 
+        /** @brief Static reflection array of @p T's members using unchecked access. */
+        template<typename T>
+        inline constexpr auto Members = Meta::MembersOf(^^T);
+
+        /** @brief Number of members in @p T. */
+        template<typename T>
+        inline constexpr size_t MembersCount = Members<T>.size();
+
+        /** @brief Source identifier of @p T's @p I-th member. */
+        template<typename T, size_t I>
+            requires std::is_class_v<T>
+        inline constexpr std::string_view MemberIdentifier = std::meta::identifier_of(Members<T>[I]);
+
+        template<typename T>
+            requires std::is_class_v<T>
+        inline constexpr auto MemberIdentierArr = [] consteval {
+            return []<size_t... I>(std::index_sequence<I...>) {
+                return std::array<std::string_view, sizeof...(I)>{std::meta::identifier_of(Members<T>[I])...};
+            }(std::make_index_sequence<MembersCount<T>>{});
+        };
+
+        /** @brief Static reflection array of @p T's non-static data members using unchecked access. */
+        template<typename T>
+        inline constexpr auto DataMembers =
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
+
+        /** @brief Number of non-static data members in @p T. */
+        template<typename T>
+        inline constexpr size_t DataMembersCount = DataMembers<T>.size();
+
+        /**
+         * @brief Source identifier of @p T's @p I-th non-static data member.
+         * @tparam T Reflectable class type.
+         * @tparam I Zero-based member index. Must be less than @ref DataMembersCount for @p T.
+         */
+        template<typename T, size_t I>
+            requires std::is_class_v<T>
+        inline constexpr std::string_view DataMemberIdentifier = std::meta::identifier_of(DataMembers<T>[I]);
+
+        /** @brief Static array containing source identifiers for every non-static data member of @p T. */
+        template<typename T>
+            requires std::is_class_v<T>
+        inline constexpr auto DataMemberIdentifiersArr = [] consteval {
+            return []<size_t... I>(std::index_sequence<I...>) {
+                return std::array<std::string_view, sizeof...(I)>{std::meta::identifier_of(DataMembers<T>[I])...};
+            }(std::make_index_sequence<DataMembersCount<T>>{});
+        }();
+
+        /** @brief Static reflection array of @p T's public non-static data members using unprivileged access. */
+        template<typename T>
+            requires std::is_class_v<T>
+        inline constexpr auto PublicDataMembers = std::define_static_array(
+            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unprivileged()));
+
+        /** @brief Number of public non-static data members in @p T. */
+        template<typename T>
+        inline constexpr size_t PublicDataMembersCount = PublicDataMembers<T>.size();
+
+        /** @brief Static array containing source identifiers for every public non-static data member of @p T. */
+        template<typename T>
+            requires std::is_class_v<T>
+        inline constexpr auto PublicDataMemberIdentifiersArr = [] consteval {
+            return []<size_t... I>(std::index_sequence<I...>) {
+                return std::array<std::string_view, sizeof...(I)>{std::meta::identifier_of(PublicDataMembers<T>[I])...};
+            }(std::make_index_sequence<PublicDataMembersCount<T>>{});
+        }();
+
+        /**
+         * @brief Source identifier of @p T's @p I-th public non-static data member.
+         * @tparam T Reflectable class type.
+         * @tparam I Zero-based member index. Must be less than @ref PublicMembersCount for @p T.
+         */
+        template<typename T, size_t I>
+            requires std::is_class_v<T>
+        inline constexpr std::string_view PublicDataMemberIdentifier =
+            std::meta::identifier_of(PublicDataMembers<T>[I]);
+
+        /**
+         * @brief Declared type of @p T's @p I-th non-static data member.
+         * @tparam T Reflectable class type.
+         * @tparam I Zero-based member index. Must be less than @ref DataMembersCount for @p T.
+         */
+        template<typename T, size_t I>
+            requires std::is_class_v<T>
+        using DataMemberType = typename [:std::meta::type_of(DataMembers<T>[I]):];
+
+        /** @brief Total padding bytes in @p T, computed from object size minus member object sizes. */
+        template<typename T>
+            requires std::is_class_v<T>
+        inline constexpr size_t PaddingBytes = sizeof(T) - [] consteval {
+            size_t total = 0;
+            for (auto m : DataMembers<T>) {
+                total += std::meta::size_of(std::meta::type_of(m));
+            }
+            return total;
+        }();
+
     } // namespace Traits
+
+    namespace Meta {
+
+        /** @brief Class type with at least one non-static data member and no detected padding bytes. */
+        template<typename T>
+        concept CompactClass = std::is_class_v<T> && Traits::DataMembersCount<T> > 0 && Traits::PaddingBytes<T> == 0;
+
+        /** @brief Class type with padding bytes detected by @ref Traits::PaddingBytes. */
+        template<typename T>
+        concept PaddedClass = std::is_class_v<T> && Traits::PaddingBytes<T> > 0;
+
+        /** @brief Class type whose non-static data members all have the same dealiased declared type. */
+        template<typename T>
+        concept HomogeneousClass = std::is_class_v<T> && Traits::DataMembersCount<T> > 0 && [] consteval {
+            auto first_type = std::meta::dealias(std::meta::type_of(Traits::DataMembers<T>[0]));
+            for (auto m : Traits::DataMembers<T>) {
+                if (std::meta::dealias(std::meta::type_of(m)) != first_type) {
+                    return false;
+                }
+            }
+            return true;
+        }();
+
+    } // namespace Meta
 
 } // namespace Sora

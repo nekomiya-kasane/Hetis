@@ -93,23 +93,29 @@ namespace Sora::Kernel {
 
     } // namespace $
 
-    namespace Traits {
+    namespace Meta {
 
-        template<typename T>
-        inline constexpr TypeOfClass RoleOf = [] consteval {
-            if (!std::meta::is_class_type(^^T)) {
+        consteval auto RoleOf(std::meta::info type) {
+            if (!std::meta::is_class_type(type)) {
                 throw std::define_static_string(
-                    "Meta::RoleOf: '" + std::string{Sora::Meta::DisplayStringOf(^^T)} +
+                    "Meta::RoleOf: '" + std::string{Sora::Meta::DisplayStringOf(type)} +
                     "' is not a class type reflection -- only classes participate in Sora object model.");
             }
-            const std::meta::info canonical = std::meta::dealias(^^T);
+            const std::meta::info canonical = std::meta::dealias(type);
             if (canonical == ^^Sora::Kernel::BaseUnknown) {
                 return TypeOfClass::BaseUnknown;
             }
 
             auto result = Sora::$::GetSingleOptional<$::Role>(canonical);
             return result ? result->type : TypeOfClass::NothingType;
-        }();
+        }
+
+    } // namespace Meta
+
+    namespace Traits {
+
+        template<typename T>
+        inline constexpr TypeOfClass RoleOf = Sora::Kernel::Meta::RoleOf(std::meta::dealias(^^T));
 
     } // namespace Traits
 
