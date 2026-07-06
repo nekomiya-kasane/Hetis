@@ -400,7 +400,7 @@ namespace Sora {
                 builder.Raw($::StyledRole::Punctuation, "{");
 
                 template for (bool first = true; constexpr auto m : Traits::DataMembers<U>) {
-                    if constexpr (!$::Has<$::IgnoreInSerialization>(m)) {
+                    if constexpr (!$::Has<$::Serialization::Ignore>(m)) {
                         if (!first) {
                             builder.Raw($::StyledRole::Punctuation, ", ");
                         }
@@ -412,7 +412,7 @@ namespace Sora {
                         if constexpr (std::meta::is_bit_field(m)) {
                             ToStyledStringImpl(builder, auto(value.[:m:]));
                         } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(m):]> &&
-                                             $::Has<$::DerefPrint>(m)) {
+                                             $::Has<$::Serialization::DerefPrint>(m)) {
                             auto* ptr = value.[:m:];
                             if (ptr == nullptr) {
                                 builder.Text($::StyledRole::Null, "nullptr");

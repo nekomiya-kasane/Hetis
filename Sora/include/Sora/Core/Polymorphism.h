@@ -60,14 +60,21 @@ namespace Sora {
             constexpr bool operator==(const ForceInPolymorphism&) const = default;
         };
 
+        namespace Polymorphism {
+
+            using Skip = Sora::$::SkipInPolymorphism;
+            using Force = Sora::$::ForceInPolymorphism;
+
+        } // namespace Polymorphism
+
     } // namespace $
 
     namespace Polymorphism {
 
         namespace $ {
 
-            using Skip = Sora::$::SkipInPolymorphism;
-            using Force = Sora::$::ForceInPolymorphism;
+            using Skip = Sora::$::Polymorphism::Skip;
+            using Force = Sora::$::Polymorphism::Force;
 
         } // namespace $
 

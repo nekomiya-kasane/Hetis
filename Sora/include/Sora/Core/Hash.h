@@ -59,10 +59,10 @@ namespace Sora::Hashing {
      * @brief Why an RFC-4122 string failed to parse.
      */
     enum class UuidParseErrc : uint8_t {
-        Ok = 0,        /**< Parsed successfully. */
-        Empty,         /**< Input (after stripping wrappers) was empty. */
-        BadLength,     /**< Body was not the canonical 36 characters. */
-        MissingHyphen, /**< Expected @c - at a group boundary (pos 8/13/18/23). */
+        Ok = 0,            /**< Parsed successfully. */
+        Empty,             /**< Input (after stripping wrappers) was empty. */
+        BadLength,         /**< Body was not the canonical 36 characters. */
+        MissingHyphen,     /**< Expected @c - at a group boundary (pos 8/13/18/23). */
         InvalidHexDigit,   /**< A non-hex character appeared in a hex group. */
         UnterminatedBrace, /**< A leading @c { had no matching trailing @c }. */
     };
@@ -72,12 +72,18 @@ namespace Sora::Hashing {
      */
     [[nodiscard]] constexpr std::string_view UuidParseErrcMessage(UuidParseErrc e) noexcept {
         switch (e) {
-            case UuidParseErrc::Ok:                 return "ok";
-            case UuidParseErrc::Empty:              return "empty UUID string";
-            case UuidParseErrc::BadLength:          return "UUID body must be 36 characters (8-4-4-4-12)";
-            case UuidParseErrc::MissingHyphen:      return "expected '-' at group boundary";
-            case UuidParseErrc::InvalidHexDigit:    return "invalid hexadecimal digit";
-            case UuidParseErrc::UnterminatedBrace:  return "missing closing '}'";
+        case UuidParseErrc::Ok:
+            return "ok";
+        case UuidParseErrc::Empty:
+            return "empty UUID string";
+        case UuidParseErrc::BadLength:
+            return "UUID body must be 36 characters (8-4-4-4-12)";
+        case UuidParseErrc::MissingHyphen:
+            return "expected '-' at group boundary";
+        case UuidParseErrc::InvalidHexDigit:
+            return "invalid hexadecimal digit";
+        case UuidParseErrc::UnterminatedBrace:
+            return "missing closing '}'";
         }
         return "unknown UUID parse error";
     }
@@ -93,7 +99,7 @@ namespace Sora::Hashing {
      * when you intend to derive a name-style identifier from a digest.
      */
     struct Uuid {
-        uint128_t value = 0;  /**< Big-endian 128-bit value (byte 0 = most significant). */
+        uint128_t value = 0; /**< Big-endian 128-bit value (byte 0 = most significant). */
 
         constexpr Uuid() noexcept = default;
         explicit constexpr Uuid(uint128_t v) noexcept : value(v) {}
@@ -107,20 +113,13 @@ namespace Sora::Hashing {
          * @brief Compose from RFC-4122 fields: 8-4-4 and trailing 8 bytes (clock_seq + node).
          */
         constexpr Uuid(uint32_t timeLow, uint16_t timeMid, uint16_t timeHiAndVersion,
-                   std::array<uint8_t, 8> tail) noexcept
-            : value((static_cast<uint128_t>(timeLow) << 96) |
-                (static_cast<uint128_t>(timeMid) << 80) |
-                (static_cast<uint128_t>(timeHiAndVersion) << 64) |
-                (static_cast<uint128_t>(tail[0]) << 56) |
-                (static_cast<uint128_t>(tail[1]) << 48) |
-                (static_cast<uint128_t>(tail[2]) << 40) |
-                (static_cast<uint128_t>(tail[3]) << 32) |
-                (static_cast<uint128_t>(tail[4]) << 24) |
-                (static_cast<uint128_t>(tail[5]) << 16) |
-                (static_cast<uint128_t>(tail[6]) << 8) |
-                static_cast<uint128_t>(tail[7])) {}
-
-        
+                       std::array<uint8_t, 8> tail) noexcept
+            : value((static_cast<uint128_t>(timeLow) << 96) | (static_cast<uint128_t>(timeMid) << 80) |
+                    (static_cast<uint128_t>(timeHiAndVersion) << 64) | (static_cast<uint128_t>(tail[0]) << 56) |
+                    (static_cast<uint128_t>(tail[1]) << 48) | (static_cast<uint128_t>(tail[2]) << 40) |
+                    (static_cast<uint128_t>(tail[3]) << 32) | (static_cast<uint128_t>(tail[4]) << 24) |
+                    (static_cast<uint128_t>(tail[5]) << 16) | (static_cast<uint128_t>(tail[6]) << 8) |
+                    static_cast<uint128_t>(tail[7])) {}
 
         constexpr bool operator==(const Uuid&) const = default;
         constexpr auto operator<=>(const Uuid&) const = default;
@@ -162,16 +161,12 @@ namespace Sora::Hashing {
         /**
          * @brief RFC-4122 version nibble (bits 12..15 of the time_hi field).
          */
-        [[nodiscard]] constexpr uint8_t Version() const noexcept {
-            return static_cast<uint8_t>((value >> 76) & 0xF);
-        }
+        [[nodiscard]] constexpr uint8_t Version() const noexcept { return static_cast<uint8_t>((value >> 76) & 0xF); }
 
         /**
          * @brief RFC-4122 variant bits (top bits of the clock_seq_hi byte).
          */
-        [[nodiscard]] constexpr uint8_t Variant() const noexcept {
-            return static_cast<uint8_t>((value >> 62) & 0x3);
-        }
+        [[nodiscard]] constexpr uint8_t Variant() const noexcept { return static_cast<uint8_t>((value >> 62) & 0x3); }
 
         /**
          * @brief Stamp the RFC-4122 version and variant fields onto this digest.
@@ -193,9 +188,15 @@ namespace Sora::Hashing {
          * @brief Hex digit -> 0..15, or -1 if @p c is not a hex digit.
          */
         [[nodiscard]] static constexpr int HexNibble(char c) noexcept {
-            if (c >= '0' && c <= '9') return c - '0';
-            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            if (c >= '0' && c <= '9') {
+                return c - '0';
+            }
+            if (c >= 'a' && c <= 'f') {
+                return c - 'a' + 10;
+            }
+            if (c >= 'A' && c <= 'F') {
+                return c - 'A' + 10;
+            }
             return -1;
         }
 
@@ -238,18 +239,25 @@ namespace Sora::Hashing {
          * The lowest-level parser: @p sv must be exactly the 36-character body. Returns the parsed value or the
          * specific @ref UuidParseErrc.
          */
-        [[nodiscard]] static constexpr std::expected<Uuid, UuidParseErrc>
-        ParseCanonical(std::string_view sv) noexcept {
-            if (sv.empty()) return std::unexpected(UuidParseErrc::Empty);
-            if (sv.size() != 36) return std::unexpected(UuidParseErrc::BadLength);
+        [[nodiscard]] static constexpr std::expected<Uuid, UuidParseErrc> ParseCanonical(std::string_view sv) noexcept {
+            if (sv.empty()) {
+                return std::unexpected(UuidParseErrc::Empty);
+            }
+            if (sv.size() != 36) {
+                return std::unexpected(UuidParseErrc::BadLength);
+            }
             uint128_t v = 0;
             for (size_t i = 0; i < sv.size(); ++i) {
                 if (i == 8 || i == 13 || i == 18 || i == 23) {
-                    if (sv[i] != '-') return std::unexpected(UuidParseErrc::MissingHyphen);
+                    if (sv[i] != '-') {
+                        return std::unexpected(UuidParseErrc::MissingHyphen);
+                    }
                     continue;
                 }
                 int n = HexNibble(sv[i]);
-                if (n < 0) return std::unexpected(UuidParseErrc::InvalidHexDigit);
+                if (n < 0) {
+                    return std::unexpected(UuidParseErrc::InvalidHexDigit);
+                }
                 v = (v << 4) | static_cast<uint128_t>(n);
             }
             return Uuid{v};
@@ -301,7 +309,9 @@ namespace Sora::Hashing {
          */
         [[nodiscard]] static constexpr Uuid ParseOrThrow(std::string_view sv) {
             auto r = Parse(sv);
-            if (!r) throw UuidParseError(std::string(UuidParseErrcMessage(r.error())));
+            if (!r) {
+                throw UuidParseError(std::string(UuidParseErrcMessage(r.error())));
+            }
             return *r;
         }
 
@@ -328,7 +338,7 @@ namespace Sora::Hashing {
     /**
      * @brief Stateless functor-style algorithm: empty callable, byte span -> unsigned.
      */
-    template <typename F>
+    template<typename F>
     concept StatelessAlgo = requires(const F& func, std::span<const std::byte> data) {
         { func(data) } noexcept -> std::unsigned_integral;
     } && std::is_empty_v<F> && std::is_trivially_copyable_v<F>;
@@ -336,7 +346,7 @@ namespace Sora::Hashing {
     /**
      * @brief Stateful incremental hasher with Feed/Finalize/Seed protocol.
      */
-    template <typename H>
+    template<typename H>
     concept StatefulAlgo = requires(H h, std::span<const std::byte> data) {
         typename H::ResultType;
         requires std::unsigned_integral<typename H::ResultType>;
@@ -348,31 +358,34 @@ namespace Sora::Hashing {
     /**
      * @brief Either stateless or stateful algorithm.
      */
-    template <typename T>
+    template<typename T>
     concept AnyAlgo = StatelessAlgo<T> || StatefulAlgo<T>;
 
     namespace Detail {
 
-        template <typename A, bool IsStateless> struct ResultOfImpl;
-        template <typename A> struct ResultOfImpl<A, true> {
+        template<typename A, bool IsStateless>
+        struct ResultOfImpl;
+        template<typename A>
+        struct ResultOfImpl<A, true> {
             using type = decltype(std::declval<const A&>()(std::span<const std::byte>{}));
         };
-        template <typename A> struct ResultOfImpl<A, false> {
+        template<typename A>
+        struct ResultOfImpl<A, false> {
             using type = typename A::ResultType;
         };
 
-    }
+    } // namespace Detail
 
     /**
      * @brief Result type of an algorithm.
      */
-    template <AnyAlgo A>
+    template<AnyAlgo A>
     using ResultOf = typename Detail::ResultOfImpl<A, StatelessAlgo<A>>::type;
 
     /**
      * @brief Result size in bits.
      */
-    template <AnyAlgo A>
+    template<AnyAlgo A>
     inline constexpr size_t kResultBits = sizeof(ResultOf<A>) * 8;
 
     /**
@@ -430,14 +443,14 @@ namespace Sora::Hashing {
          *
          * @tparam A Algorithm type, such as @ref Fnv1a32 or @ref Murmur64.
          */
-        template <AnyAlgo A>
+        template<AnyAlgo A>
         struct With {
             constexpr bool operator==(const With&) const = default;
         };
 
     } // namespace $
 
-}
+} // namespace Sora::Hashing
 
 namespace Sora::$ {
 
@@ -445,10 +458,10 @@ namespace Sora::$ {
     using HashingKey = Hashing::$::Key;
     using HashingOrder = Hashing::$::Order;
 
-    template <Hashing::AnyAlgo A>
+    template<Hashing::AnyAlgo A>
     using HashingWith = Hashing::$::With<A>;
 
-}
+} // namespace Sora::$
 
 namespace Sora::Hashing {
 
@@ -460,14 +473,14 @@ namespace Sora::Hashing {
      * @name Stateless algorithms
      * @{
      */
-    
+
     /**
      * @brief FNV-1a 32-bit (stateless, one-shot).
      */
     struct Fnv1a32 {
         using ResultType = uint32_t;
         static constexpr uint32_t kOffset = 2166136261U;
-        static constexpr uint32_t kPrime  = 16777619U;
+        static constexpr uint32_t kPrime = 16777619U;
 
         [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
             ResultType h = kOffset;
@@ -485,7 +498,7 @@ namespace Sora::Hashing {
     struct Fnv1a64 {
         using ResultType = uint64_t;
         static constexpr ResultType kOffset = 14695981039346656037ULL;
-        static constexpr ResultType kPrime  = 1099511628211ULL;
+        static constexpr ResultType kPrime = 1099511628211ULL;
 
         [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
             ResultType h = kOffset;
@@ -505,8 +518,10 @@ namespace Sora::Hashing {
 
         [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte> data) const noexcept {
             ResultType h = Fnv1a64{}(data);
-            h ^= h >> 33; h *= 0xff51afd7ed558ccdULL;
-            h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ULL;
+            h ^= h >> 33;
+            h *= 0xff51afd7ed558ccdULL;
+            h ^= h >> 33;
+            h *= 0xc4ceb9fe1a85ec53ULL;
             h ^= h >> 33;
             return h;
         }
@@ -604,14 +619,14 @@ namespace Sora::Hashing {
 
         [[nodiscard]] static constexpr Murmur64State Seed() noexcept { return {}; }
 
-        constexpr void Feed(std::span<const std::byte> chunk) noexcept {
-            inner.Feed(chunk);
-        }
+        constexpr void Feed(std::span<const std::byte> chunk) noexcept { inner.Feed(chunk); }
 
         [[nodiscard]] constexpr ResultType Finalize() const noexcept {
             uint64_t h = inner.Finalize();
-            h ^= h >> 33; h *= 0xff51afd7ed558ccdULL;
-            h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ULL;
+            h ^= h >> 33;
+            h *= 0xff51afd7ed558ccdULL;
+            h ^= h >> 33;
+            h *= 0xc4ceb9fe1a85ec53ULL;
             h ^= h >> 33;
             return h;
         }
@@ -647,7 +662,7 @@ namespace Sora::Hashing {
     /**
      * @brief Golden-ratio hash combine, auto-selects constants by bit width.
      */
-    template <std::unsigned_integral U>
+    template<std::unsigned_integral U>
     [[nodiscard]] constexpr U Combine(U seed, U value) noexcept {
         if constexpr (sizeof(U) >= 8) {
             constexpr U k = 0x9e3779b97f4a7c15ULL;
@@ -669,9 +684,9 @@ namespace Sora::Hashing {
     namespace Detail {
 
         /**
-     * @brief Invoke a stateless or stateful algo on a byte span.
-     */
-        template <AnyAlgo A>
+         * @brief Invoke a stateless or stateful algo on a byte span.
+         */
+        template<AnyAlgo A>
         [[nodiscard]] constexpr ResultOf<A> InvokeAlgo(const A& algo, std::span<const std::byte> data) noexcept {
             if constexpr (StatelessAlgo<A>) {
                 return algo(data);
@@ -690,7 +705,7 @@ namespace Sora::Hashing {
          * reinterpret_cast is unavailable, so the chars are first materialised into a byte buffer, the only
          * constexpr-legal way to obtain the span.
          */
-        template <StatelessAlgo A>
+        template<StatelessAlgo A>
         [[nodiscard]] constexpr ResultOf<A> HashString(const A& algo, std::string_view sv) noexcept {
             if consteval {
                 std::vector<std::byte> bytes(sv.size());
@@ -699,15 +714,14 @@ namespace Sora::Hashing {
                 }
                 return algo(std::span<const std::byte>{bytes.data(), bytes.size()});
             } else {
-                return algo(std::span<const std::byte>{
-                    reinterpret_cast<const std::byte*>(sv.data()), sv.size()});
+                return algo(std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()});
             }
         }
 
         /**
          * @brief Stateful string feed (constexpr-safe, char-by-char).
          */
-        template <StatefulAlgo S>
+        template<StatefulAlgo S>
         constexpr void FeedString(S& state, std::string_view sv) noexcept {
             for (char c : sv) {
                 std::byte b = static_cast<std::byte>(static_cast<unsigned char>(c));
@@ -721,8 +735,9 @@ namespace Sora::Hashing {
         consteval std::meta::info GetAlgoFor(std::meta::info entity, std::meta::info defaultAlgo) {
             for (auto a : std::meta::annotations_of(entity)) {
                 auto t = type_of(a);
-                if (std::meta::has_template_arguments(t) && std::meta::template_of(t) == ^^$::With)
+                if (std::meta::has_template_arguments(t) && std::meta::template_of(t) == ^^$::With) {
                     return std::meta::template_arguments_of(t)[0];
+                }
             }
             return defaultAlgo;
         }
@@ -738,7 +753,7 @@ namespace Sora::Hashing {
          * The selector starts from @ref Sora::Traits::DataMembers so only object fields can reach member splicing.
          */
         template<typename T>
-            requires (std::is_class_v<T> && !std::is_union_v<T>)
+            requires(std::is_class_v<T> && !std::is_union_v<T>)
         consteval auto GetHashableMembers() {
             std::vector<std::meta::info> result;
             bool hasKey = false;
@@ -764,7 +779,7 @@ namespace Sora::Hashing {
             };
             for (size_t i = 1; i < result.size(); ++i) {
                 auto key = result[i];
-                int  pk  = priorityOf(key);
+                int pk = priorityOf(key);
                 size_t j = i;
                 while (j > 0 && priorityOf(result[j - 1]) > pk) {
                     result[j] = result[j - 1];
@@ -785,17 +800,14 @@ namespace Sora::Hashing {
     /**
      * @brief A type that can be hashed by algorithm A.
      */
-    template <typename T, typename A = DefaultAlgo>
-    concept Hashable = AnyAlgo<A> && (
-        requires(const A& algo, const T& v) {
+    template<typename T, typename A = DefaultAlgo>
+    concept Hashable =
+        AnyAlgo<A> &&
+        (requires(const A& algo, const T& v) {
             { HashValue(algo, v) } -> std::same_as<ResultOf<A>>;
-        } ||
-        std::convertible_to<T, std::string_view> ||
-        std::convertible_to<T, std::span<const std::byte>> ||
-        std::is_arithmetic_v<T> || std::is_enum_v<T> ||
-        (std::is_class_v<T> && !std::is_union_v<T> && requires { sizeof(T); }) ||
-        std::is_trivially_copyable_v<T>
-    );
+        } || std::convertible_to<T, std::string_view> || std::convertible_to<T, std::span<const std::byte>> ||
+         std::is_arithmetic_v<T> || std::is_enum_v<T> ||
+         (std::is_class_v<T> && !std::is_union_v<T> && requires { sizeof(T); }) || std::is_trivially_copyable_v<T>);
 
     // =========================================================================
     // CPO: Hashing::Hash
@@ -809,19 +821,21 @@ namespace Sora::Hashing {
         /**
          * @brief Hash a value using algorithm @p algo (default: Fnv1a64).
          */
-        template <AnyAlgo A = DefaultAlgo, typename T>
+        template<AnyAlgo A = DefaultAlgo, typename T>
             requires Hashable<T, A>
         [[nodiscard]] constexpr ResultOf<A> operator()(const T& value, const A& algo = {}) const noexcept {
             return Dispatch<A>(value, algo);
         }
 
     private:
-        template <AnyAlgo A, typename T>
+        template<AnyAlgo A, typename T>
         [[nodiscard]] constexpr ResultOf<A> Dispatch(const T& value, const A& algo) const noexcept {
             using R = ResultOf<A>;
 
             // 1. ADL hook
-            if constexpr (requires { { HashValue(algo, value) } -> std::same_as<R>; }) {
+            if constexpr (requires {
+                              { HashValue(algo, value) } -> std::same_as<R>;
+                          }) {
                 return HashValue(algo, value);
             }
             // 2. string-like
@@ -874,8 +888,7 @@ namespace Sora::Hashing {
             else if constexpr (std::is_trivially_copyable_v<T>) {
                 auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
                 return Detail::InvokeAlgo(algo, std::span<const std::byte>(bytes));
-            }
-            else {
+            } else {
                 static_assert(false, "Type is not Hashable");
             }
         }
@@ -895,7 +908,7 @@ namespace Sora::Hashing {
      * auto result = h.Finalize();
      * @endcode
      */
-    template <StatefulAlgo State = Fnv1a64State>
+    template<StatefulAlgo State = Fnv1a64State>
     struct Hasher {
         using ResultType = typename State::ResultType;
 
@@ -904,7 +917,7 @@ namespace Sora::Hashing {
         /**
          * @brief Feed a single Hashable value (recursively expanded).
          */
-        template <typename T>
+        template<typename T>
         constexpr Hasher& Feed(const T& value) noexcept {
             FeedImpl(value);
             return *this;
@@ -921,14 +934,12 @@ namespace Sora::Hashing {
         /**
          * @brief Finalize and return the hash value.
          */
-        [[nodiscard]] constexpr ResultType Finalize() const noexcept {
-            return state.Finalize();
-        }
+        [[nodiscard]] constexpr ResultType Finalize() const noexcept { return state.Finalize(); }
 
         /**
          * @brief Convenience: feed all values and finalize in one call.
          */
-        template <typename... Ts>
+        template<typename... Ts>
         [[nodiscard]] static constexpr ResultType Of(const Ts&... values) noexcept {
             Hasher h;
             (h.FeedImpl(values), ...);
@@ -936,22 +947,19 @@ namespace Sora::Hashing {
         }
 
     private:
-        template <typename T>
+        template<typename T>
         constexpr void FeedImpl(const T& value) noexcept {
             if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
                 auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
                 state.Feed(bytes);
-            }
-            else if constexpr (std::convertible_to<T, std::string_view>) {
+            } else if constexpr (std::convertible_to<T, std::string_view>) {
                 auto sv = std::string_view(value);
                 Detail::FeedString(state, sv);
-            }
-            else if constexpr (std::is_class_v<T> && !std::is_union_v<T>) {
+            } else if constexpr (std::is_class_v<T> && !std::is_union_v<T>) {
                 template for (constexpr auto m : Detail::GetHashableMembers<T>()) {
                     FeedImpl(value.[:m:]);
                 }
-            }
-            else if constexpr (std::is_trivially_copyable_v<T>) {
+            } else if constexpr (std::is_trivially_copyable_v<T>) {
                 auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
                 state.Feed(bytes);
             }
@@ -1007,22 +1015,26 @@ namespace Sora {
 
     namespace $ {
 
-        using Ignore = Hashing::$::Ignore;
-        using Key = Hashing::$::Key;
-        using Order = Hashing::$::Order;
-        template <Hashing::AnyAlgo A>
-        using With = Hashing::$::With<A>;
+        namespace Hashing {
 
-    }
+            using Ignore = Sora::Hashing::$::Ignore;
+            using Key = Sora::Hashing::$::Key;
+            using Order = Sora::Hashing::$::Order;
+            template<Sora::Hashing::AnyAlgo A>
+            using With = Sora::Hashing::$::With<A>;
+
+        } // namespace Hashing
+
+    } // namespace $
 
     namespace Concept {
 
-        template <typename T, typename A = Hashing::DefaultAlgo>
+        template<typename T, typename A = Hashing::DefaultAlgo>
         concept HashableClass = Hashing::Hashable<T, A>;
 
     }
 
-}
+} // namespace Sora
 
 // =============================================================================
 // std::hash automatic injection
@@ -1031,8 +1043,8 @@ namespace Sora {
 /**
  * @brief Auto-specialise @c std::hash for any type satisfying @c Sora::Hashing::Hashable.
  */
-template <typename T>
-    requires (Sora::Hashing::Hashable<T> && !std::is_arithmetic_v<T> && !std::convertible_to<T, std::string_view>)
+template<typename T>
+    requires(Sora::Hashing::Hashable<T> && !std::is_arithmetic_v<T> && !std::convertible_to<T, std::string_view>)
 struct std::hash<T> {
     [[nodiscard]] constexpr size_t operator()(const T& value) const noexcept {
         if constexpr (sizeof(size_t) == 8) {
@@ -1051,7 +1063,7 @@ struct std::hash<T> {
  * @brief Format a @c Uuid in canonical RFC-4122 string form.
  * @todo support format_context arguments
  */
-template <>
+template<>
 struct std::formatter<Sora::Uuid> {
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
 

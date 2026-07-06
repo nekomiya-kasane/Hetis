@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Sora/Core/FixedString.h>
+#include <Sora/Core/Hash.h>
 
 #include <string>
 
@@ -29,7 +30,7 @@ struct MyStruct {
     int aa;
     double bb;
     std::string cc;
-    [[= Sora::$::Ignore{}]] double extra;
+    [[= Sora::$::Hashing::Ignore{}]] double extra;
     std::string dd;
 };
 
