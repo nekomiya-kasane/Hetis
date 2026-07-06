@@ -1,7 +1,6 @@
 #include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
 #include "Sora/Kernel/Core/IID.h"
-#include "Sora/Kernel/Core/ComPtr.h"
 #include "Sora/Kernel/Core/MetaClass.h"
 #include "Sora/Kernel/Core/Registry.h"
 
@@ -16,9 +15,9 @@ namespace Sora::Kernel {
 
         /** @brief Cold object chain allocated only when extensions, bound facets, or weak refs are used. */
         struct alignas(16) ClosureState {
-            mutable std::mutex mutex{};                            /**< Serializes chain mutation and snapshots. */
-            std::flat_map<Iid, ComPtr<BaseUnknown>> extensions{};  /**< Closure-owned extension nodes. */
-            std::flat_map<Iid, ComPtr<BaseUnknown>> boundFacets{}; /**< Closure-owned bound facet nodes. */
+            mutable std::mutex mutex{};                     /**< Serializes chain mutation and snapshots. */
+            std::flat_map<Iid, BaseUnknown*> extensions{};  /**< Closure-owned extension nodes. */
+            std::flat_map<Iid, BaseUnknown*> boundFacets{}; /**< Closure-owned bound facet nodes. */
             std::shared_ptr<WeakState> weak{std::make_shared<WeakState>()}; /**< Weak-reference state. */
 
             ~ClosureState() noexcept {
@@ -29,26 +28,14 @@ namespace Sora::Kernel {
                 {
                     std::scoped_lock lock(mutex);
                     for (const auto& extension : extensions | std::views::values) {
-                        Release(extension.Get());
+                        Release(extension);
                     }
                     for (const auto& facet : boundFacets | std::views::values) {
-                        Release(facet.Get());
+                        Release(facet);
                     }
                     extensions.clear();
                     boundFacets.clear();
                 }
-            }
-
-            void SetExtension(Iid iid, BaseUnknown* extension) {
-                std::scoped_lock lock(mutex);
-                assert(!extensions.contains(iid) || extensions[iid].Get() == extension);
-                extensions[iid] = extension;
-            }
-
-            void SetBoundFacet(Iid iid, BaseUnknown* facet) {
-                std::scoped_lock lock(mutex);
-                assert(!boundFacets.contains(iid) || boundFacets[iid].Get() == facet);
-                boundFacets[iid] = facet;
             }
 
             void InvalidateWeakRef() noexcept {
@@ -79,11 +66,32 @@ namespace Sora::Kernel {
 
             nucleus = nucleus->Nucleus();
             Detail::ClosureState& state = EnsureClosureState(nucleus);
+            const Iid iid = extension->GetIid();
 
-            state.SetExtension(extension->GetIid(), extension);
-            BindObjectModelBase(extension, BaseUnknown::ComData::PointerType::ForExtension, nucleus);
+            {
+                std::scoped_lock lock(state.mutex);
+                if (state.extensions.contains(iid)) {
+                    return false;
+                }
 
+                BindObjectModelBase(extension, BaseUnknown::ComData::PointerType::ForExtension, nucleus);
+                state.extensions[iid] = extension;
+            }
             return true;
+        }
+
+        BaseUnknown* BaseUnknownInternal::FindExtensionNode(BaseUnknown* component, Iid extensionIid) noexcept {
+            if (!component) {
+                return nullptr;
+            }
+            Detail::ClosureState* state = TryClosureState(component->Nucleus());
+            if (!state) {
+                return nullptr;
+            }
+
+            std::scoped_lock lock(state->mutex);
+            auto found = state->extensions.find(extensionIid);
+            return found == state->extensions.end() ? nullptr : found->second;
         }
 
         bool BaseUnknownInternal::AdoptBoundFacetNode(BaseUnknown* component, Iid interfaceIid, BaseUnknown* facet) {
@@ -123,7 +131,7 @@ namespace Sora::Kernel {
 
             std::scoped_lock lock(state->mutex);
             auto found = state->boundFacets.find(interfaceIid);
-            return found == state->boundFacets.end() ? nullptr : found->second.Get();
+            return found == state->boundFacets.end() ? nullptr : found->second;
         }
 
         std::vector<BaseUnknown*> BaseUnknownInternal::SnapshotExtensionNodes(BaseUnknown* component) {
@@ -139,7 +147,7 @@ namespace Sora::Kernel {
             std::scoped_lock lock(state->mutex);
             result.reserve(state->extensions.size());
             for (const auto& extension : state->extensions | std::views::values) {
-                result.push_back(extension.Get());
+                result.push_back(extension);
             }
             return result;
         }
@@ -199,9 +207,9 @@ namespace Sora::Kernel {
             bool removed = false;
             {
                 std::scoped_lock lock(state->mutex);
-                auto eraseObject = [object](std::flat_map<Iid, ComPtr<BaseUnknown>>& nodes) noexcept {
+                auto eraseObject = [object](std::flat_map<Iid, BaseUnknown*>& nodes) noexcept {
                     const auto found = std::ranges::find_if(
-                        nodes, [object](const auto& entry) noexcept { return entry.second.Get() == object; });
+                        nodes, [object](const auto& entry) noexcept { return entry.second == object; });
                     if (found == nodes.end()) {
                         return false;
                     }

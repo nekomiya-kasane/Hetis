@@ -1,6 +1,6 @@
 /**
  * @file Query.h
- * @brief Intrusive component handles, QueryInterface, closure attachment, and object-model introspection.
+ * @brief QueryInterface adapters for raw pointers, owning component handles, and borrowed component handles.
  * @ingroup Core
  */
 #pragma once

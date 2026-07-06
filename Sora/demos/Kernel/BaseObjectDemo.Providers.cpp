@@ -16,6 +16,7 @@ namespace {
         ProviderRegistration() {
             Sora::Kernel::Tie::RegisterObjectProviders<Sora::Kernel::Position2DImpl>();
             Sora::Kernel::Tie::RegisterObjectProviders<Sora::Kernel::Position3DImpl>();
+            Sora::Kernel::Tie::RegisterObjectProviders<Sora::Kernel::Position2DExtension>();
         }
     };
 

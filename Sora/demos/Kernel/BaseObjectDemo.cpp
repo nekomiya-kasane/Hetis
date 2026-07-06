@@ -47,6 +47,37 @@ int main() {
     borrowedPosition->GetPosition(x, y);
     std::cout << "QueryInterface(RefPtr): " << x << ", " << y << std::endl;
 
+    ITag* rawTag = QueryInterface<ITag>(rawPosition);
+    auto owningTag = QueryInterface<ITag>(point);
+    auto borrowedTag = QueryInterface<ITag>(Sora::Ref(pointImpl));
+
+    assert(rawTag != nullptr);
+    assert(owningTag);
+    assert(borrowedTag);
+
+    uint32_t tag{};
+    rawTag->SetTag(42);
+    rawTag->GetTag(tag);
+    std::cout << "Extension QueryInterface(IPosition*): " << tag << std::endl;
+
+    owningTag->SetTag(7);
+    borrowedTag->GetTag(tag);
+    std::cout << "Extension QueryInterface(RefPtr): " << tag << std::endl;
+
+    auto solid = MakeComPtr<Position3DImpl>();
+    Position3DImpl* solidImpl = solid.Get();
+    solidImpl->SetPosition(3.0f, 4.0f, 5.0f);
+
+    I3DPosition* raw3DPosition = QueryInterface<I3DPosition>(solidImpl);
+    ITag* inheritedTag = QueryInterface<ITag>(raw3DPosition);
+
+    assert(raw3DPosition != nullptr);
+    assert(inheritedTag != nullptr);
+
+    inheritedTag->SetTag(99);
+    inheritedTag->GetTag(tag);
+    std::cout << "Extension QueryInterface(base extendee): " << tag << std::endl;
+
     auto meta = pointImpl->GetMeta();
     std::println("Class Name: {}", meta->GetClassName());
     std::println("Class Role: {}", meta->GetTypeOfClass());

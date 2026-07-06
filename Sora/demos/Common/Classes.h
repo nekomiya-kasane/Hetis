@@ -3,6 +3,8 @@
 #include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
 
+#include <cstdint>
+
 namespace Sora::Kernel {
 
     class [[= Sora::Kernel::$::Interface]] IPosition : public BaseUnknown {
@@ -23,6 +25,16 @@ namespace Sora::Kernel {
 
         virtual void SetPosition(float x, float y, float z) = 0;
         virtual void GetPosition(float& x, float& y, float& z) const = 0;
+    };
+
+    class [[= Sora::Kernel::$::Interface]] ITag : public BaseUnknown {
+    public:
+        S_OBJECT
+
+        virtual ~ITag() noexcept = default;
+
+        virtual void SetTag(uint32_t tag) = 0;
+        virtual void GetTag(uint32_t& tag) const = 0;
     };
 
     class [[= Sora::Kernel::$::Implementation, = Sora::Kernel::$::Implements<IPosition>{}]] Position2DImpl
@@ -63,17 +75,17 @@ namespace Sora::Kernel {
         float z_{0.0f};
     };
 
-    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<Position2DImpl>{}]] Position2DExtension
-        : public BaseUnknown {
+    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<Position2DImpl>{},
+            = Sora::Kernel::$::Implements<ITag>{}]] Position2DExtension : public BaseUnknown {
     public:
         S_OBJECT
 
-        void SetName(std::string name) { name_ = std::move(name); }
+        void SetTag(uint32_t tag) { tag_ = tag; }
 
-        void GetName(std::string& name) const { name = name_; }
+        void GetTag(uint32_t& tag) const { tag = tag_; }
 
     private:
-        std::string name_;
+        uint32_t tag_{};
     };
 
 } // namespace Sora::Kernel

@@ -256,6 +256,9 @@ public:
             /** @brief Adopt @p extension as a closure-owned extension node under @p nucleus. */
             [[nodiscard]] static bool AdoptExtensionNode(BaseUnknown* nucleus, BaseUnknown* extension);
 
+            /** @brief Find an already materialized extension by extension class IID. */
+            [[nodiscard]] static BaseUnknown* FindExtensionNode(BaseUnknown* component, Iid extensionIid) noexcept;
+
             /** @brief Adopt @p facet as a closure-owned bound facet node under @p component. */
             [[nodiscard]] static bool AdoptBoundFacetNode(BaseUnknown* component, Iid interfaceIid, BaseUnknown* facet);
 

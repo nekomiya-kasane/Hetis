@@ -53,10 +53,11 @@ namespace Sora::Kernel {
          */
         template<Concept::ComponentClass Provider>
         void RegisterObjectProviders() {
+            auto meta = MetaClass::Query<Provider>();
+
             template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<Provider>()) {
                 using Iface = Sora::Meta::InfoType<iface>;
 
-                auto meta = MetaClass::Query<Provider>();
                 ProviderEntry entry{};
                 entry.interfaceIid = Traits::IidOf<Iface>;
                 if constexpr (std::is_base_of_v<Iface, Provider>) {
@@ -68,10 +69,21 @@ namespace Sora::Kernel {
                         return MakeBoundFacet<Iface, Provider>(provider);
                     };
                 }
-                entry.providerClass = meta;
-                entry.priority = 0;
 
-                meta->AddProvide(std::move(entry));
+                if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
+                    entry.extensionFactory = +[]() -> BaseUnknown* { return new (std::nothrow) Provider; };
+                }
+
+                entry.providerClass = meta;
+                meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
+            }
+
+            if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
+                template for (constexpr auto extendee : Sora::Kernel::Meta::ExtendeeTypesOf<Provider>()) {
+                    using Extendee = Sora::Meta::InfoType<extendee>;
+                    auto extendeeMeta = MetaClass::Query<Extendee>();
+                    extendeeMeta->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
+                }
             }
         }
 

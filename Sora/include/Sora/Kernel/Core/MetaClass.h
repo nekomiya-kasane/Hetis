@@ -19,14 +19,18 @@
 
 namespace Sora::Kernel {
 
-    namespace Tie {};
+    namespace Tie {
+
+        template<Concept::ComponentClass Provider>
+        void RegisterObjectProviders();
+
+    } // namespace Tie
 
     /** @brief Runtime dispatch shape for a component-interface provider. */
     enum class DispatchKind : uint8_t {
-        Direct = 0,            /**< Interface is the provider object itself. */
-        InlineFacet = 1,       /**< Facet is stored inline inside the provider frame. */
-        BoundFacet = 2,        /**< Facet is a closure-owned bound object. */
-        AttachedExtension = 3, /**< Facet is provided by an attached extension object. */
+        Direct = 0,      /**< Interface is the provider object itself. */
+        InlineFacet = 1, /**< Facet is stored inline inside the provider frame. */
+        BoundFacet = 2,  /**< Facet is a closure-owned bound object. */
     };
 
     /** @brief One runtime provider edge from a component class to an interface. */
@@ -35,9 +39,8 @@ namespace Sora::Kernel {
         DispatchKind kind{DispatchKind::InlineFacet}; /**< Runtime dispatch shape. */
 
         FacetFactory factory{};                   /**< Resolver used after the provider object is known. */
-        std::shared_ptr<MetaClass> providerClass; /**< Class that contributed the provider, if known. */
-
-        uint32_t priority{2}; /**< Lower value wins when providers are merged. */
+        DefaultFactory extensionFactory{};        /**< Allocates the extension provider object when it is absent. */
+        std::shared_ptr<MetaClass> providerClass; /**< Class that contributed this provider edge, if known. */
     };
 
     /** @brief Immutable metaclass facade used by the Core runtime and dictionary. */
@@ -104,14 +107,14 @@ namespace Sora::Kernel {
         /** @brief Return direct provider entries contributed by this class. */
         [[nodiscard]] constexpr const auto& Provides() const noexcept { return provides; }
 
-        /** @brief Find the highest-priority direct provider for @p iid in this class. */
+        /** @brief Find the most-derived direct provider for @p iid in this class inheritance chain. */
         [[nodiscard]] const ProviderEntry* FindProvide(Iid iid) const noexcept;
-
-        /** @brief Register or replace one direct provider contributed by this class. */
-        auto AddProvide(ProviderEntry entry) { return provides.insert_or_assign(entry.interfaceIid, std::move(entry)); }
 
     private:
         friend class Dictionary;
+
+        template<Concept::ComponentClass Provider>
+        friend void Tie::RegisterObjectProviders();
 
         TypeOfClass type{TypeOfClass::NothingType}; /**< Declared object-model role. */
         std::string_view name{};                    /**< Reflected or section-provided diagnostic name. */
