@@ -2,6 +2,9 @@ function(add_sora_demo CATEGORY DEMO_NAME)
     set(DEMO_TARGET Demo.Sora.${CATEGORY}.${DEMO_NAME})
 
     add_executable(${DEMO_TARGET} ${CATEGORY}/${DEMO_NAME}.cpp)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${CATEGORY}/${DEMO_NAME}.Providers.cpp")
+        target_sources(${DEMO_TARGET} PRIVATE "${CATEGORY}/${DEMO_NAME}.Providers.cpp")
+    endif()
     target_include_directories(${DEMO_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(${DEMO_TARGET} PRIVATE Sora Catch2::Catch2WithMain TBB::tbb)
     set_target_properties(${DEMO_TARGET} PROPERTIES

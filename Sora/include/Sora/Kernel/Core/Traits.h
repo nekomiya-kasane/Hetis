@@ -26,7 +26,7 @@ namespace Sora::Kernel {
 
     /** @brief Allocate @p T, bind its static metaclass, and return an adopted owning pointer. */
     template<Concept::ComClass T, class... Args>
-    [[nodiscard]] ComPtr<T> MakeOwned(Args&&... args);
+    [[nodiscard]] ComPtr<T> MakeComPtr(Args&&... args);
 
     /** @brief Runtime factory function after a module has been realized. */
     using DefaultFactory = BaseUnknown* (*)();

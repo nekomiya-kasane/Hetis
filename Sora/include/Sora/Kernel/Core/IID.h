@@ -6,6 +6,7 @@
 #pragma once
 
 #include "Sora/Core/Traits/AnnotationTraits.h"
+#include "Sora/Kernel/Core/ClassTypes.h"
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -68,8 +69,12 @@ namespace Sora::Kernel {
         template<typename T>
             requires(std::meta::is_class_type(^^T))
         inline constexpr Iid IidOf = [] consteval {
-            auto iid = Sora::$::GetSingleOptional<$::IidOverride>(^^T);
-            return iid.has_value() ? iid.value().value : Iid{Sora::Traits::AbiDigestOf<T>};
+            if constexpr (IsTie(Traits::RoleOf<T>)) {
+                return Sora::Kernel::Traits::IidOf<typename Sora::Traits::DirectBaseType<T, 0>>;
+            } else {
+                auto iid = Sora::$::GetSingleOptional<$::IidOverride>(^^T);
+                return iid.has_value() ? iid.value().value : Iid{Sora::Traits::AbiDigestOf<T>};
+            }
         }();
 
     } // namespace Traits

@@ -76,46 +76,4 @@ namespace Sora::Kernel {
         std::string name_;
     };
 
-    namespace Tie {
-
-        template<Concept::ComponentClass Impl>
-        class [[= Sora::Kernel::$::TIE]] Tie$IPosition : public IPosition {
-        public:
-            S_OBJECT
-
-            void SetPosition(float x, float y) override {
-                constexpr auto current = std::meta::access_context::current().scope();
-                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
-            }
-            void GetPosition(float& x, float& y) const override {
-                constexpr auto current = std::meta::access_context::current().scope();
-                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
-            }
-        };
-
-        template<Concept::ComponentClass Impl>
-        class [[= Sora::Kernel::$::TIE]] Tie$I3DPosition : public I3DPosition {
-        public:
-            S_OBJECT
-
-            void SetPosition(float x, float y) override {
-                constexpr auto current = std::meta::access_context::current().scope();
-                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
-            }
-            void GetPosition(float& x, float& y) const override {
-                constexpr auto current = std::meta::access_context::current().scope();
-                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y);
-            }
-            void SetPosition(float x, float y, float z) override {
-                constexpr auto current = std::meta::access_context::current().scope();
-                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y, z);
-            }
-            void GetPosition(float& x, float& y, float& z) const override {
-                constexpr auto current = std::meta::access_context::current().scope();
-                Detail::InvokeTieCurrent<current, Impl>(BoundTarget(), x, y, z);
-            }
-        };
-
-    } // namespace Tie
-
 } // namespace Sora::Kernel

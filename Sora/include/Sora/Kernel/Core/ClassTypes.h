@@ -116,25 +116,27 @@ namespace Sora::Kernel {
     namespace Concept {
 
         template<typename T>
-        concept InterfaceClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::Interface;
+        concept InterfaceClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::Interface && std::is_abstract_v<T>;
 
         template<typename T>
         concept ImplementationClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::Implementation;
 
         template<typename T>
-        concept DataExtensionClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::DataExtension;
+        concept DataExtensionClass =
+            ComClass<T> && Traits::RoleOf<T> == TypeOfClass::DataExtension && std::is_default_constructible_v<T>;
 
         template<typename T>
-        concept CodeExtensionClass = ComClass<T> && Traits::RoleOf<T> == TypeOfClass::CodeExtension;
+        concept CodeExtensionClass =
+            ComClass<T> && Traits::RoleOf<T> == TypeOfClass::CodeExtension && std::is_default_constructible_v<T>;
 
         template<typename T>
-        concept ExtensionClass = ComClass<T> && IsExtension(Traits::RoleOf<T>);
+        concept ExtensionClass = ComClass<T> && IsExtension(Traits::RoleOf<T>) && std::is_default_constructible_v<T>;
 
         template<typename T>
         concept ComponentClass = ImplementationClass<T> || ExtensionClass<T> || std::is_same_v<T, BaseUnknown>;
 
         template<typename T>
-        concept TIEClass = ComClass<T> && IsTie(Traits::RoleOf<T>);
+        concept TieClass = ComClass<T> && IsTie(Traits::RoleOf<T>) && std::is_default_constructible_v<T>;
 
     } // namespace Concept
 
@@ -262,64 +264,5 @@ namespace Sora::Kernel {
         }
 
     } // namespace Detail
-
-    namespace Tie {} // namespace Tie
-
-    namespace Traits {
-
-        /**
-         * @brief Return the corresponding TIE class for a given interface type.
-         * @tparam Iface Interface type.
-         */
-        template<Concept::InterfaceClass Iface>
-        inline constexpr std::string_view TieClassIdentifierOf = [] consteval {
-            return std::define_static_string("Tie$" + std::string{std::meta::identifier_of(^^Iface)});
-        }();
-
-    } // namespace Traits
-
-    namespace Meta {
-
-        /**
-         * @brief Get the TIE template class type for a given interface type.
-         * @tparam Iface Interface type.
-         */
-        template<Concept::InterfaceClass Iface>
-        consteval std::meta::info TieTemplateOf(std::meta::info ns = ^^Sora::Kernel::Tie) {
-            if (!Concept::InterfaceClass<Iface>) {
-                throw std::define_static_string(
-                    "Meta::TieTemplateOf: '" + std::string{Sora::Meta::DisplayStringOf(^^Iface)} +
-                    "' is not an interface class type reflection -- only interfaces participate in TIE " +
-                    "synthesis.");
-            }
-
-            std::string msg;
-            for (auto m : std::meta::members_of(ns, std::meta::access_context::current())) {
-                if (std::meta::is_class_template(m) &&
-                    std::meta::identifier_of(m) == Traits::TieClassIdentifierOf<Iface>) {
-                    return m;
-                }
-            }
-
-            throw std::define_static_string("Meta::TieTemplateOf: no TIE template class found for interface '" +
-                                            std::string{Sora::Meta::DisplayStringOf(^^Iface)} + "' in namespace '" +
-                                            std::string{Sora::Meta::DisplayStringOf(ns)} + "'\n" + msg);
-        }
-
-    } // namespace Meta
-
-    namespace Traits {
-
-        /**
-         * @brief Return the corresponding TIE class for a given interface type.
-         * @tparam Iface Interface type.
-         */
-        template<Concept::InterfaceClass Iface, Concept::ComponentClass Impl, std::meta::info NS = ^^Sora::Kernel::Tie>
-        using TieClassOf = typename [:[] consteval {
-            auto tieTemplate = Meta::TieTemplateOf<Iface>(NS);
-            return std::meta::substitute(tieTemplate, {^^Impl});
-        }():];
-
-    } // namespace Traits
 
 } // namespace Sora::Kernel

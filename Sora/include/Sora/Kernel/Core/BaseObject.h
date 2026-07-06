@@ -1,5 +1,11 @@
+/**
+ * @file BaseObject.h
+ * @brief BaseUnknown lifetime root, closure binding, weak references, and object-model declaration macro.
+ * @ingroup Core
+ */
 #pragma once
 
+#include "Sora/Kernel/Core/IID.h"
 #include "Sora/Kernel/Core/MetaClass.h"
 #include "Sora/Kernel/Core/Traits.h"
 #include "Sora/Core/GetSet.h"
@@ -20,6 +26,10 @@ public:                                                                         
     template<size_t I = 0>                                                                                             \
     using Base = Sora::Traits::DirectBaseType<Self, I>;                                                                \
                                                                                                                        \
+    [[nodiscard]] Iid GetIid() const noexcept override {                                                               \
+        return Sora::Kernel::Traits::IidOf<Self>;                                                                      \
+    }                                                                                                                  \
+                                                                                                                       \
     [[nodiscard]] static std::shared_ptr<const Sora::Kernel::MetaClass> GetMetaStatic() noexcept {                     \
         return Sora::Kernel::MetaClass::Query<Self>();                                                                 \
     }                                                                                                                  \
@@ -37,21 +47,10 @@ public:                                                                         
     }                                                                                                                  \
                                                                                                                        \
     template<class T = Self>                                                                                           \
-    [[nodiscard]] static Sora::Kernel::BaseUnknown* MakeObjectModelBound(Sora::Kernel::BaseUnknown* base) noexcept     \
-        requires(Sora::Kernel::IsTie(Sora::Kernel::Traits::RoleOf<T>) ||                                               \
-                 Sora::Kernel::IsExtension(Sora::Kernel::Traits::RoleOf<T>))                                           \
+    [[nodiscard]] static T* Create()                                                                                   \
+        requires(Sora::Kernel::IsExtension(Sora::Kernel::Traits::RoleOf<T>))                                           \
     {                                                                                                                  \
-        auto* object = new (std::nothrow) T;                                                                           \
-        if (object == nullptr) {                                                                                       \
-            return nullptr;                                                                                            \
-        }                                                                                                              \
-        constexpr auto role = Sora::Kernel::Traits::RoleOf<T>;                                                         \
-        if constexpr (Sora::Kernel::IsTie(role)) {                                                                     \
-            object->BindObjectModelBase(Sora::Kernel::BaseUnknown::PointerType::ForTie, base);                         \
-        } else {                                                                                                       \
-            object->BindObjectModelBase(Sora::Kernel::BaseUnknown::PointerType::ForExtension, base);                   \
-        }                                                                                                              \
-        return object;                                                                                                 \
+        return new T();                                                                                                \
     }                                                                                                                  \
                                                                                                                        \
     ALLOW_GET_SET                                                                                                      \
@@ -62,9 +61,13 @@ public:
 
     namespace Detail {
 
+        /** @brief Cold closure graph state stored outside the hot BaseUnknown payload. */
+        struct ClosureState;
+
+        /** @brief Opaque friend that owns BaseUnknown's storage-level object-model operations. */
         class BaseUnknownInternal;
 
-    }
+    } // namespace Detail
 
     /** @brief Shared state behind weak references to a closure nucleus. */
     struct WeakState {
@@ -165,9 +168,6 @@ public:
             }
         };
 
-    protected:
-        using PointerType = ComData::PointerType;
-
     public:
         using Self = BaseUnknown;
 
@@ -181,6 +181,9 @@ public:
         [[nodiscard]] virtual std::shared_ptr<const MetaClass> GetMeta() const noexcept {
             return MetaClass::Query<Self>();
         }
+
+        /** @brief Return the interface ID associated with this object. */
+        [[nodiscard]] virtual Iid GetIid() const noexcept { return Sora::Kernel::Traits::IidOf<Self>; }
 
         /** @brief Return the role associated with this object. */
         [[nodiscard]] virtual TypeOfClass GetRole() const noexcept { return TypeOfClass::BaseUnknown; }
@@ -210,9 +213,6 @@ public:
         /** @brief Destroy this nucleus or closure-owned node. Use @ref Release instead of direct deletion. */
         virtual ~BaseUnknown() noexcept;
 
-        /** @brief Bind this non-nucleus object to its owner, extendee, or bound target. */
-        void BindObjectModelBase(PointerType kind, BaseUnknown* base) noexcept;
-
         friend class Sora::Kernel::Detail::BaseUnknownInternal;
 
     private:
@@ -226,7 +226,7 @@ public:
         void Retain() noexcept;
 
         /** @brief Release one reference and return true on the last-reference transition. */
-        [[nodiscard]] bool Release() noexcept;
+        bool Release() noexcept;
 
         mutable std::atomic<uint64_t> data_{ComData::Initial()};
     };
