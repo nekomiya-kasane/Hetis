@@ -5,6 +5,7 @@
  */
 #include "Sora/Kernel/Core/Query.h"
 
+#include "Sora/Kernel/Core/ProviderSection.h"
 #include "Sora/Kernel/Core/Registry.h"
 
 #include <cassert>
@@ -157,32 +158,6 @@ namespace Sora::Kernel {
             return nullptr;
         }
 
-        [[nodiscard]] BaseUnknown* MaterializeLazyExtensionProvider(BaseUnknown* nucleus,
-                                                                    std::shared_ptr<const MetaClass> extensionMeta,
-                                                                    const ProviderEntry& entry, Iid interfaceIid) {
-            using Detail::BaseUnknownInternal;
-
-            if (!nucleus || !extensionMeta || !entry.extensionFactory) {
-                return nullptr;
-            }
-
-            const Iid extensionIid = extensionMeta->GetIid();
-            BaseUnknown* extension = BaseUnknownInternal::FindExtensionNode(nucleus, extensionIid);
-            if (!extension) {
-                extension = entry.extensionFactory();
-                if (!extension) {
-                    return nullptr;
-                }
-
-                if (!BaseUnknownInternal::AdoptExtensionNode(nucleus, extension)) {
-                    Release(extension);
-                    extension = BaseUnknownInternal::FindExtensionNode(nucleus, extensionIid);
-                }
-            }
-
-            return extension ? MaterializeProvider(extension, entry, interfaceIid) : nullptr;
-        }
-
         [[nodiscard]] BaseUnknown* QueryLazyExtensionProvider(BaseUnknown* nucleus, Iid interfaceIid) {
             if (!nucleus) {
                 return nullptr;
@@ -198,28 +173,33 @@ namespace Sora::Kernel {
                         continue;
                     }
 
-                    // MaterializeLazyExtensionProvider
-                    using Detail::BaseUnknownInternal;
+                    auto MaterializeLazyExtensionProvider =
+                        [](BaseUnknown* nucleus, const std::shared_ptr<const MetaClass>& extensionMeta,
+                           const ProviderEntry& entry, Iid interfaceIid) -> BaseUnknown* {
+                        using BUI = Detail::BaseUnknownInternal;
 
-                    if (!nucleus || !extensionMeta || !entry->extensionFactory) {
-                        return nullptr;
-                    }
-
-                    const Iid extensionIid = extensionMeta->GetIid();
-                    BaseUnknown* extension = BaseUnknownInternal::FindExtensionNode(nucleus, extensionIid);
-                    if (!extension) {
-                        extension = entry->extensionFactory();
-                        if (!extension) {
+                        if (!nucleus || !extensionMeta || !entry.extensionFactory) {
                             return nullptr;
                         }
 
-                        if (!BaseUnknownInternal::AdoptExtensionNode(nucleus, extension)) {
-                            Release(extension);
-                            extension = BaseUnknownInternal::FindExtensionNode(nucleus, extensionIid);
-                        }
-                    }
+                        const Iid extensionIid = extensionMeta->GetIid();
+                        BaseUnknown* extension = BUI::FindExtensionNode(nucleus, extensionIid);
+                        if (!extension) {
+                            extension = entry.extensionFactory();
+                            if (!extension) {
+                                return nullptr;
+                            }
 
-                    return extension ? MaterializeProvider(extension, *entry, interfaceIid) : nullptr;
+                            if (!BUI::AdoptExtensionNode(nucleus, extension)) {
+                                Release(extension);
+                                extension = BUI::FindExtensionNode(nucleus, extensionIid);
+                            }
+                        }
+
+                        return extension ? MaterializeProvider(extension, entry, interfaceIid) : nullptr;
+                    };
+
+                    return MaterializeLazyExtensionProvider(nucleus, extensionMeta, *entry, interfaceIid);
                 }
             }
             return nullptr;
@@ -240,6 +220,8 @@ namespace Sora::Kernel {
         if (!object || IsNil(interfaceIid)) {
             return nullptr;
         }
+
+        EnsureProviderSectionsRegistered();
 
         BaseUnknown* nucleus = object->Nucleus();
 #ifndef NDEBUG

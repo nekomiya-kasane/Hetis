@@ -47,46 +47,46 @@ namespace Sora::Kernel {
             return facet;
         }
 
-        /**
-         * @brief Register all direct @ref Sora::Kernel::$::Implements interfaces declared by @p Provider.
-         * @tparam Provider Implementation or extension class whose direct providers are being registered.
-         */
-        template<Concept::ComponentClass Provider>
-        void RegisterObjectProviders() {
-            auto meta = MetaClass::Query<Provider>();
+    } // namespace Tie
 
-            template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<Provider>()) {
-                using Iface = Sora::Meta::InfoType<iface>;
+    /**
+     * @brief Register all direct @ref Sora::Kernel::$::Implements interfaces declared by @p Provider.
+     * @tparam Provider Implementation or extension class whose direct providers are being registered.
+     */
+    template<Concept::ComponentClass Provider>
+    void RegisterObjectProviders() {
+        auto meta = MetaClass::Query<Provider>();
 
-                ProviderEntry entry{};
-                entry.interfaceIid = Traits::IidOf<Iface>;
-                if constexpr (std::is_base_of_v<Iface, Provider>) {
-                    entry.kind = DispatchKind::Direct;
-                    entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* { return provider; };
-                } else {
-                    entry.kind = DispatchKind::BoundFacet;
-                    entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* {
-                        return MakeBoundFacet<Iface, Provider>(provider);
-                    };
-                }
+        template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<Provider>()) {
+            using Iface = Sora::Meta::InfoType<iface>;
 
-                if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
-                    entry.extensionFactory = +[]() -> BaseUnknown* { return new (std::nothrow) Provider; };
-                }
-
-                entry.providerClass = meta;
-                meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
+            ProviderEntry entry{};
+            entry.interfaceIid = Traits::IidOf<Iface>;
+            if constexpr (std::is_base_of_v<Iface, Provider>) {
+                entry.kind = DispatchKind::Direct;
+                entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* { return provider; };
+            } else {
+                entry.kind = DispatchKind::BoundFacet;
+                entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* {
+                    return Tie::MakeBoundFacet<Iface, Provider>(provider);
+                };
             }
 
             if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
-                template for (constexpr auto extendee : Sora::Kernel::Meta::ExtendeeTypesOf<Provider>()) {
-                    using Extendee = Sora::Meta::InfoType<extendee>;
-                    auto extendeeMeta = MetaClass::Query<Extendee>();
-                    extendeeMeta->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
-                }
+                entry.extensionFactory = +[]() -> BaseUnknown* { return new (std::nothrow) Provider; };
             }
+
+            entry.providerClass = meta;
+            meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
         }
 
-    } // namespace Tie
+        if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
+            template for (constexpr auto extendee : Sora::Kernel::Meta::ExtendeeTypesOf<Provider>()) {
+                using Extendee = Sora::Meta::InfoType<extendee>;
+                auto extendeeMeta = MetaClass::Query<Extendee>();
+                extendeeMeta->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
+            }
+        }
+    }
 
 } // namespace Sora::Kernel

@@ -114,7 +114,7 @@ namespace Sora::Kernel {
         friend class Dictionary;
 
         template<Concept::ComponentClass Provider>
-        friend void Tie::RegisterObjectProviders();
+        friend void RegisterObjectProviders();
 
         TypeOfClass type{TypeOfClass::NothingType}; /**< Declared object-model role. */
         std::string_view name{};                    /**< Reflected or section-provided diagnostic name. */
