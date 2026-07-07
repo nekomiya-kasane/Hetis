@@ -100,14 +100,14 @@ namespace Sora::Kernel {
         /** @brief Return the stable diagnostic class name. */
         [[nodiscard]] constexpr const auto& GetClassName() const noexcept { return name; }
 
-        /** @brief Return components extended by this class. */
+        /** @brief Return role-dependent protension edges contributed to or by this class. */
         [[nodiscard]] constexpr const auto& Protensions() const noexcept { return protensions; }
 
         /** @brief Return direct provider entries contributed by this class. */
         [[nodiscard]] constexpr const auto& Provides() const noexcept { return provides; }
 
         /** @brief Return registered classes that directly implement this interface class. */
-        [[nodiscard]] constexpr const auto& Implementors() const noexcept { return implementors; }
+        [[nodiscard]] constexpr const auto& Implementors() const noexcept { return protensions; }
 
         /** @brief Find the most-derived direct provider for @p iid in this class inheritance chain. */
         [[nodiscard]] const ProviderEntry* FindProvide(Iid iid) const noexcept;
@@ -126,10 +126,9 @@ namespace Sora::Kernel {
         Iid iid{};                                  /**< Class identifier. */
 
         std::shared_ptr<MetaClass> base; /**< Direct object-model base metaclass, when materialized. */
-        std::unordered_map<Iid, std::shared_ptr<MetaClass>> protensions{}; /**< Extension target classes. */
+        std::unordered_map<Iid, std::shared_ptr<MetaClass>> protensions{}; /**< Role-dependent class relation edges. */
 
         std::unordered_map<Iid, ProviderEntry> provides{}; /**< Direct providers contributed by this class. */
-        std::unordered_map<Iid, std::shared_ptr<MetaClass>> implementors{}; /**< Direct implementors of an interface. */
     };
 
 } // namespace Sora::Kernel

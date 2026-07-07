@@ -80,7 +80,7 @@ namespace Sora::Kernel {
 
                 entry.providerClass = meta;
                 meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
-                MetaClass::Query<Iface>()->implementors.insert_or_assign(Traits::IidOf<Provider>, meta);
+                MetaClass::Query<Iface>()->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
             }
 
             if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
