@@ -4,9 +4,12 @@
 using namespace Sora;
 using namespace Sora::CLI;
 
+struct Commit {};
+struct Push {};
+
 struct MyProgram {
-    static consteval auto BuildSchema(SchemaBuilder<MyProgram>& builder) noexcept {
-        return builder.Name("greet").Policy(Policy::Utf8 | Policy::GnuStyle).Seal();
+    static consteval void BuildSchema(SchemaBuilder<MyProgram>& builder) noexcept {
+        builder.Name("greet").Policy(Policy::Utf8 | Policy::GnuStyle).Command<Commit>().Command<Push>();
     }
 };
 

@@ -16,6 +16,7 @@
 namespace Sora::CLI {
 
     using NameId = std::uint32_t;
+    using CommandId = std::uint32_t;
 
     inline constexpr NameId kInvalidNameId = 0;
 
@@ -90,7 +91,7 @@ namespace Sora::CLI {
     /** @brief Command descriptor stored in the sealed schema. */
     struct CommandDesc {
         NameId name = 0;
-        std::uint32_t commandId = 0;
+        CommandId commandId = 0;
         std::span<OptionDesc const> localOptions = {};
         std::span<OperandDesc const> operands = {};
         std::span<CommandEdge const> children = {};

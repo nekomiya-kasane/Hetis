@@ -79,11 +79,7 @@ namespace Sora {
                     "Meta::ParamTypesOf: '" + std::string{std::meta::display_string_of(f)} +
                     "' is not a function reflection — only methods participate in vtable synthesis.");
             }
-            std::vector<std::meta::info> out;
-            for (auto p : ParamsOf(f)) {
-                out.push_back(std::meta::type_of(p));
-            }
-            return out;
+            return ParamsOf(f) | std::views::transform(std::meta::type_of) | std::ranges::to<std::vector>();
         }
 
         /**

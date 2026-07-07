@@ -6,13 +6,15 @@
  * @ingroup Core
  */
 
-#include <span>
+#include <meta>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <utility>
 
-#include <Sora/Core/CLI/Descriptions.h>
+#include <Sora/Core/ADT/FixedCapacityVector.h>
 #include <Sora/Core/Hash.h>
+#include <Sora/Core/CLI/Descriptions.h>
 
 namespace Sora {
 
@@ -25,7 +27,8 @@ namespace Sora {
         struct NormalizedSchema {
             NameId programName = kInvalidNameId;
             Policy policy = Policy::None;
-            std::span<CommandDesc const> commands = {};
+
+            FixedCapacityVector<CommandDesc> commands = {};
             std::span<OptionDesc const> options = {};
             std::span<OperandDesc const> operands = {};
         };
@@ -39,9 +42,7 @@ namespace Sora {
 
             /** @brief Type that can be used as a command-line program root. */
             template<typename T>
-            concept ProgramRoot = requires(SchemaBuilder<T>& builder) {
-                T::BuildSchema(builder);
-            };
+            concept ProgramRoot = requires(SchemaBuilder<T>& builder) { T::BuildSchema(builder); };
 
         } // namespace Concept
 
@@ -50,18 +51,35 @@ namespace Sora {
             NormalizedSchema schema_ = {};
 
         public:
-            consteval auto Name(this auto&& self, std::string_view name) noexcept -> decltype(auto) {
-                self.schema_.programName = QueryNameTable(name);
-                return std::forward<decltype(self)>(self);
+            consteval auto Name(std::string_view name) noexcept -> SchemaBuilder& {
+                schema_.programName = QueryNameTable(name);
+                return *this;
             }
 
-            consteval auto Policy(this auto&& self, Policy value) noexcept -> decltype(auto) {
-                self.schema_.policy = value;
-                return std::forward<decltype(self)>(self);
+            consteval auto Policy(Policy value) noexcept -> SchemaBuilder& {
+                schema_.policy = value;
+                return *this;
             }
 
-            [[nodiscard]] consteval auto Seal(this auto const& self) noexcept -> NormalizedSchema {
-                return self.schema_;
+            template<typename Cmd>
+            consteval auto Command(std::string_view name = std::meta::identifier_of(^^Cmd)) -> SchemaBuilder& {
+                CommandDesc desc{
+                    .name = QueryNameTable(name),
+                    .commandId = static_cast<CommandId>(schema_.commands.size()),
+                };
+
+                for (const auto& cmd : schema_.commands) {
+                    if (cmd.name == desc.name) {
+                        throw "Duplicate command name.";
+                    }
+                }
+
+                schema_.commands.push_back(desc);
+                return *this;
+            }
+
+            [[nodiscard]] consteval auto Seal() const noexcept -> NormalizedSchema {
+                return schema_;
             }
         };
 
