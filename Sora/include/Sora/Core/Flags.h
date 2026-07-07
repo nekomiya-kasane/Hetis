@@ -24,62 +24,68 @@
 
 #include "Sora/Core/Traits/EnumTraits.h"
 
+// =========================================================================
+// Bitwise operators — return E, not a wrapper
+// =========================================================================
+
+/// @name Bitwise operators for Sora::Concept::BitfieldEnum
+/// @{
+
+/**
+ * @brief Bitwise OR for any reflected Sora bitfield enum.
+ * @details
+ * The operator intentionally lives in the global namespace. ADL for an enum declared in
+ * @c Sora::Nested associates @c Sora::Nested, not necessarily @c Sora, so a parent-namespace
+ * operator is not a stable zero-boilerplate solution for nested Sora modules.
+ */
+template<Sora::Concept::BitfieldEnum E>
+[[nodiscard]] constexpr E operator|(E a, E b) noexcept {
+    using U = std::make_unsigned_t<std::underlying_type_t<E>>;
+    return static_cast<E>(static_cast<U>(a) | static_cast<U>(b));
+}
+
+/** @brief Bitwise AND. */
+template<Sora::Concept::BitfieldEnum E>
+[[nodiscard]] constexpr E operator&(E a, E b) noexcept {
+    using U = std::make_unsigned_t<std::underlying_type_t<E>>;
+    return static_cast<E>(static_cast<U>(a) & static_cast<U>(b));
+}
+
+/** @brief Bitwise XOR. */
+template<Sora::Concept::BitfieldEnum E>
+[[nodiscard]] constexpr E operator^(E a, E b) noexcept {
+    using U = std::make_unsigned_t<std::underlying_type_t<E>>;
+    return static_cast<E>(static_cast<U>(a) ^ static_cast<U>(b));
+}
+
+/** @brief Masked complement that only flips bits within the valid flag space. */
+template<Sora::Concept::BitfieldEnum E>
+[[nodiscard]] constexpr E operator~(E a) noexcept {
+    using U = std::make_unsigned_t<std::underlying_type_t<E>>;
+    return static_cast<E>(~static_cast<U>(a) & Sora::Traits::kBitfieldMask<E>);
+}
+
+/** @brief Compound OR. */
+template<Sora::Concept::BitfieldEnum E>
+constexpr E& operator|=(E& a, E b) noexcept {
+    return a = a | b;
+}
+
+/** @brief Compound AND. */
+template<Sora::Concept::BitfieldEnum E>
+constexpr E& operator&=(E& a, E b) noexcept {
+    return a = a & b;
+}
+
+/** @brief Compound XOR. */
+template<Sora::Concept::BitfieldEnum E>
+constexpr E& operator^=(E& a, E b) noexcept {
+    return a = a ^ b;
+}
+
+/// @}
+
 namespace Sora {
-
-    // =========================================================================
-    // Bitwise operators — return E, not a wrapper
-    // =========================================================================
-
-    /// @name Bitwise operators for BitfieldEnum
-    /// @{
-
-    /// @brief Bitwise OR.
-    template<Concept::BitfieldEnum E>
-    [[nodiscard]] constexpr E operator|(E a, E b) noexcept {
-        using U = std::make_unsigned_t<std::underlying_type_t<E>>;
-        return static_cast<E>(static_cast<U>(a) | static_cast<U>(b));
-    }
-
-    /// @brief Bitwise AND.
-    template<Concept::BitfieldEnum E>
-    [[nodiscard]] constexpr E operator&(E a, E b) noexcept {
-        using U = std::make_unsigned_t<std::underlying_type_t<E>>;
-        return static_cast<E>(static_cast<U>(a) & static_cast<U>(b));
-    }
-
-    /// @brief Bitwise XOR.
-    template<Concept::BitfieldEnum E>
-    [[nodiscard]] constexpr E operator^(E a, E b) noexcept {
-        using U = std::make_unsigned_t<std::underlying_type_t<E>>;
-        return static_cast<E>(static_cast<U>(a) ^ static_cast<U>(b));
-    }
-
-    /// @brief Masked complement — only flips bits within the valid flag space.
-    template<Concept::BitfieldEnum E>
-    [[nodiscard]] constexpr E operator~(E a) noexcept {
-        using U = std::make_unsigned_t<std::underlying_type_t<E>>;
-        return static_cast<E>(~static_cast<U>(a) & Traits::kBitfieldMask<E>);
-    }
-
-    /// @brief Compound OR.
-    template<Concept::BitfieldEnum E>
-    constexpr E& operator|=(E& a, E b) noexcept {
-        return a = a | b;
-    }
-
-    /// @brief Compound AND.
-    template<Concept::BitfieldEnum E>
-    constexpr E& operator&=(E& a, E b) noexcept {
-        return a = a & b;
-    }
-
-    /// @brief Compound XOR.
-    template<Concept::BitfieldEnum E>
-    constexpr E& operator^=(E& a, E b) noexcept {
-        return a = a ^ b;
-    }
-
-    /// @}
 
     // =========================================================================
     // Query functions
