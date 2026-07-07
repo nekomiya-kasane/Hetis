@@ -49,6 +49,5 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/thirdparty thirdparty)
 add_subdirectory(Sora)
 add_subdirectory(Nova)
 add_subdirectory(Mashiro)
-add_subdirectory(Yuki)
 
 add_subdirectory(tests)
