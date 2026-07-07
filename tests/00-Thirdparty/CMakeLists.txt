@@ -56,7 +56,7 @@ target_link_libraries(probe PRIVATE
     TracyClient
     spdlog::spdlog
     nlohmann_json::nlohmann_json
-    entt
+    EnTT::EnTT
     tinyfiledialogs
     renderdoc_app
     cli11
@@ -108,6 +108,10 @@ endif()
 if(VK_TP_BUILD_JOLT)
     target_link_libraries(probe PRIVATE Jolt)
     target_compile_definitions(probe PRIVATE VK_TP_PROBE_JOLT)
+endif()
+if(VK_TP_ENABLE_PHYSX)
+    target_link_libraries(probe PRIVATE PhysX::Headers)
+    target_compile_definitions(probe PRIVATE VK_TP_PROBE_PHYSX)
 endif()
 if(VK_TP_BUILD_TBB)
     target_link_libraries(probe PRIVATE TBB::tbb)

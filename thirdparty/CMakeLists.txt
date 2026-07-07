@@ -74,6 +74,7 @@ option(VK_TP_BUILD_METIS   "Build METIS + GKlib graph partitioner (custom static
 option(VK_TP_BUILD_EFSW    "Build efsw filesystem watcher" ON)
 option(VK_TP_BUILD_CATCH2  "Build Catch2 test framework"   ON)
 option(VK_TP_BUILD_PERFETTO "Build Perfetto tracing SDK (amalgamated static library)" ON)
+option(VK_TP_ENABLE_PHYSX  "Expose NVIDIA PhysX SDK headers (native library build is isolated for now)" ON)
 
 # -----------------------------------------------------------------------------
 # 1. VulkanMemoryAllocator (header-only)
@@ -368,7 +369,9 @@ add_subdirectory(nlohmann_json)
 # 22. EnTT (header-only ECS)
 # -----------------------------------------------------------------------------
 add_library(entt INTERFACE)
-target_include_directories(entt INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/entt/src)
+target_include_directories(entt SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/entt/src)
+target_compile_features(entt INTERFACE cxx_std_17)
+add_library(EnTT::EnTT ALIAS entt)
 
 # -----------------------------------------------------------------------------
 # 23. tinyfiledialogs (single .c + .h)
@@ -553,6 +556,36 @@ if(VK_TP_BUILD_JOLT)
 endif()
 
 # -----------------------------------------------------------------------------
+# 34b. NVIDIA PhysX SDK 5.x.
+#      The upstream Windows CMake files still assume an MSVC/cl frontend and
+#      globally rewrite CMAKE_CXX_FLAGS with /std:c++14, /W4, /WX, /GR-, etc.
+#      This repository uses the COCA clang-p2996 GNU-like frontend, so directly
+#      adding PhysX's native build would pollute the whole thirdparty directory.
+#      For now we expose a stable, warning-free public-header target. A real
+#      runtime target should be added as a separate ExternalProject or imported
+#      prebuilt SDK once we decide on clang-cl vs upstream binaries.
+# -----------------------------------------------------------------------------
+if(VK_TP_ENABLE_PHYSX)
+    set(PHYSX_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/physx/physx)
+    if(NOT EXISTS "${PHYSX_SDK_ROOT}/include/PxPhysicsAPI.h")
+        message(FATAL_ERROR "[vulkan/thirdparty] PhysX SDK missing at ${PHYSX_SDK_ROOT}. "
+                            "Expected NVIDIA-Omniverse/PhysX checkout under thirdparty/physx.")
+    endif()
+
+    add_library(physx_headers INTERFACE)
+    target_include_directories(physx_headers SYSTEM INTERFACE ${PHYSX_SDK_ROOT}/include)
+    target_compile_features(physx_headers INTERFACE cxx_std_17)
+    target_compile_definitions(physx_headers INTERFACE
+        PX_PHYSX_STATIC_LIB
+        PX_SIMD_DISABLED
+        DISABLE_CUDA_PHYSX
+    )
+    add_library(PhysX::Headers ALIAS physx_headers)
+
+    message(STATUS "[vulkan/thirdparty] PhysX SDK:       ${PHYSX_SDK_ROOT} (headers only)")
+endif()
+
+# -----------------------------------------------------------------------------
 # 35. oneTBB — work-stealing task scheduler.
 #     oneTBB only supports a shared runtime, so it is built as tbb12.dll even
 #     though the rest of this tree is static (upstream emits an unconditional
@@ -672,11 +705,11 @@ message(STATUS "  Textures      : $<$<BOOL:${VK_TP_BUILD_KTX}>:ktx> stb tinyexr"
 message(STATUS "  Window/UI     : glfw glad imgui")
 message(STATUS "  Math          : glm")
 message(STATUS "  Assets        : $<$<BOOL:${VK_TP_BUILD_ASSIMP}>:assimp> tinyobjloader tinygltf cgltf fastgltf meshoptimizer mikktspace")
-message(STATUS "  Utility       : spdlog::spdlog nlohmann_json::nlohmann_json entt tinyfiledialogs cli11")
+message(STATUS "  Utility       : spdlog::spdlog nlohmann_json::nlohmann_json entt/EnTT::EnTT tinyfiledialogs cli11")
 message(STATUS "  Profiling     : TracyClient (active=${VK_TP_BUILD_TRACY})  renderdoc_app $<$<BOOL:${VK_TP_BUILD_PERFETTO}>:perfetto>")
 message(STATUS "  Concurrency   : $<$<BOOL:${VK_TP_BUILD_TBB}>:TBB::tbb (vk_tp_deploy_tbb())> taskflow stdexec")
 message(STATUS "  UI extras     : imguizmo implot")
-message(STATUS "  Physics       : $<$<BOOL:${VK_TP_BUILD_JOLT}>:Jolt>")
+message(STATUS "  Physics       : $<$<BOOL:${VK_TP_BUILD_JOLT}>:Jolt> $<$<BOOL:${VK_TP_ENABLE_PHYSX}>:PhysX::Headers>")
 message(STATUS "  Geometry      : $<$<BOOL:${VK_TP_BUILD_MSDFGEN}>:msdfgen::msdfgen-core> $<$<BOOL:${VK_TP_BUILD_METIS}>:metis (gklib)>")
 message(STATUS "  Audio/IO      : miniaudio $<$<BOOL:${VK_TP_BUILD_EFSW}>:efsw>")
 message(STATUS "  Testing       : $<$<BOOL:${VK_TP_BUILD_CATCH2}>:Catch2::Catch2WithMain>")

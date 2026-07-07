@@ -103,6 +103,9 @@ PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>
 #endif
+#if defined(VK_TP_PROBE_PHYSX)
+#include <PxPhysicsAPI.h>
+#endif
 #if defined(VK_TP_PROBE_TBB)
 #include <tbb/parallel_for.h>
 #include <tbb/blocked_range.h>
@@ -502,6 +505,18 @@ int main() {
         JPH::UnregisterTypes();
         delete JPH::Factory::sInstance;
         JPH::Factory::sInstance = nullptr;
+    }
+#endif
+
+#if defined(VK_TP_PROBE_PHYSX)
+    // 35b. PhysX — public headers only for now; native runtime is not linked.
+    {
+        physx::PxVec3 gravity{0.0f, -9.81f, 0.0f};
+        physx::PxTransform pose{physx::PxIdentity};
+        pose.p = gravity;
+        std::printf("physx       : v%u.%u.%u headers reachable (gravity.y=%g)\n",
+                    PX_PHYSICS_VERSION_MAJOR, PX_PHYSICS_VERSION_MINOR,
+                    PX_PHYSICS_VERSION_BUGFIX, static_cast<double>(pose.p.y));
     }
 #endif
 
