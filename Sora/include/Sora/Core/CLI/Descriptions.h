@@ -18,14 +18,15 @@ namespace Sora::CLI {
     using NameId = std::uint32_t;
     using CommandId = std::uint32_t;
 
-    inline constexpr NameId kInvalidNameId = 0;
+    inline constexpr NameId kInvalidNameId = std::numeric_limits<NameId>::max();
+    inline constexpr CommandId kInvalidCommandId = std::numeric_limits<CommandId>::max();
 
-    enum class OptionKind : std::uint8_t {
+    enum class OptionKind : uint8_t {
         Switch,
         Parameter,
     };
 
-    enum class ValueCardinality : std::uint8_t {
+    enum class ValueCardinality : uint8_t {
         None,
         One,
         OptionalOne,
@@ -33,7 +34,7 @@ namespace Sora::CLI {
         ZeroOrMore,
     };
 
-    enum class SourceKind : std::uint8_t {
+    enum class SourceKind : uint8_t {
         Argv,
         ResponseFile,
         Environment,
@@ -41,7 +42,7 @@ namespace Sora::CLI {
         DefaultValue,
     };
 
-    enum class Policy : std::uint64_t {
+    enum class Policy : uint64_t {
         None = 0,
         GnuStyle = 1ull << 0,
         PosixStrict = 1ull << 1,
@@ -59,11 +60,11 @@ namespace Sora::CLI {
 
     /** @brief Leaf option descriptor stored in the sealed schema. */
     struct OptionDesc {
-        NameId longName = 0;
+        NameId longName = kInvalidNameId;
         char shortName = '\0';
         OptionKind kind = OptionKind::Switch;
         ValueCardinality cardinality = ValueCardinality::None;
-        std::uint32_t ownerCommandId = 0;
+        CommandId ownerCommandId = kInvalidCommandId;
         std::uint32_t fieldId = 0;
         std::uint32_t groupId = 0;
         std::uint32_t presenceBit = 0;
@@ -73,9 +74,9 @@ namespace Sora::CLI {
 
     /** @brief Positional operand descriptor stored in the sealed schema. */
     struct OperandDesc {
-        NameId name = 0;
+        NameId name = kInvalidNameId;
         ValueCardinality cardinality = ValueCardinality::One;
-        std::uint32_t ownerCommandId = 0;
+        CommandId ownerCommandId = kInvalidCommandId;
         std::uint32_t fieldId = 0;
         std::uint32_t presenceBit = 0;
         BindFn bind = nullptr;
@@ -84,14 +85,14 @@ namespace Sora::CLI {
 
     /** @brief Static edge from one command trie node to a child node. */
     struct CommandEdge {
-        NameId name = 0;
-        std::uint32_t childCommandId = 0;
+        NameId name = kInvalidNameId;
+        CommandId childCommandId = kInvalidCommandId;
     };
 
     /** @brief Command descriptor stored in the sealed schema. */
     struct CommandDesc {
-        NameId name = 0;
-        CommandId commandId = 0;
+        NameId name = kInvalidNameId;
+        CommandId commandId = kInvalidCommandId;
         std::span<OptionDesc const> localOptions = {};
         std::span<OperandDesc const> operands = {};
         std::span<CommandEdge const> children = {};
@@ -101,11 +102,11 @@ namespace Sora::CLI {
     /** @brief Structured provenance for a parsed token or fallback value. */
     struct SourceRef {
         SourceKind kind = SourceKind::Argv;
-        std::uint32_t tokenIndex = 0;
-        std::uint32_t fileId = 0;
-        std::uint32_t line = 0;
-        std::uint32_t column = 0;
-        NameId key = 0;
+        uint32_t tokenIndex = 0;
+        uint32_t fileId = 0;
+        uint32_t line = 0;
+        uint32_t column = 0;
+        NameId key = kInvalidNameId;
     };
 
     static_assert(std::is_trivially_copyable_v<OptionDesc> && std::is_default_constructible_v<OptionDesc>);
