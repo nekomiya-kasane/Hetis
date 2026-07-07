@@ -6,26 +6,32 @@
 
 #include "Common/Private/ClassTies.h"
 
-#include "Sora/Kernel/Core/ProviderSection.h"
+#include "Sora/Kernel/Core/KernelSection.h"
 
 namespace {
 
-    inline constexpr auto BaseObjectDemoProviders = [] consteval {
-        return Sora::Kernel::ProviderManifest{
-            .types =
+    inline constexpr auto BaseObjectDemoKernelClasses = [] consteval {
+        return Sora::Kernel::KernelManifest{
+            .classes =
                 {
+                    ^^Sora::Kernel::IPosition,
+                    ^^Sora::Kernel::I3DPosition,
+                    ^^Sora::Kernel::ITag,
                     ^^Sora::Kernel::Position2DImpl,
                     ^^Sora::Kernel::Position3DImpl,
+                    ^^Sora::Kernel::PointWithoutInterfaceImpl,
+                    ^^Sora::Kernel::FutureExtensiblePointImpl,
                     ^^Sora::Kernel::Position2DExtension,
+                    ^^Sora::Kernel::PointTagExtension,
                 },
         };
     }();
 
     consteval {
-        Sora::Kernel::ValidateProviderManifest<BaseObjectDemoProviders>();
+        Sora::Kernel::ValidateKernelManifest<BaseObjectDemoKernelClasses>();
     }
 
-    [[maybe_unused]] constinit auto const& kBaseObjectDemoProviders =
-        Sora::Kernel::KernelSection<BaseObjectDemoProviders>::anchor;
+    [[maybe_unused]] constinit auto const& kBaseObjectDemoKernelClasses =
+        Sora::Kernel::KernelSection<BaseObjectDemoKernelClasses>::anchor;
 
 } // namespace

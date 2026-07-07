@@ -5,7 +5,7 @@
  */
 #include "Sora/Kernel/Core/Query.h"
 
-#include "Sora/Kernel/Core/ProviderSection.h"
+#include "Sora/Kernel/Core/KernelSection.h"
 #include "Sora/Kernel/Core/Registry.h"
 
 #include <cassert>
@@ -207,21 +207,12 @@ namespace Sora::Kernel {
 
     } // namespace
 
-    const ProviderEntry* MetaClass::FindProvide(Iid iid) const noexcept {
-        for (const MetaClass* current = this; current != nullptr; current = current->base.get()) {
-            if (auto found = current->provides.find(iid); found != current->provides.end()) {
-                return std::addressof(found->second);
-            }
-        }
-        return nullptr;
-    }
-
     BaseUnknown* QueryInterfaceRaw(BaseUnknown* object, Iid interfaceIid) {
         if (!object || IsNil(interfaceIid)) {
             return nullptr;
         }
 
-        EnsureProviderSectionsRegistered();
+        EnsureKernelSectionsRegistered();
 
         BaseUnknown* nucleus = object->Nucleus();
 #ifndef NDEBUG

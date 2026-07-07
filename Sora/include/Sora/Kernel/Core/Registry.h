@@ -50,41 +50,45 @@ namespace Sora::Kernel {
     } // namespace Tie
 
     /**
-     * @brief Register all direct @ref Sora::Kernel::$::Implements interfaces declared by @p Provider.
-     * @tparam Provider Implementation or extension class whose direct providers are being registered.
+     * @brief Register the object-model class node and all declaration edges contributed by @p Provider.
+     * @tparam Provider Interface, implementation, or extension class whose metadata is being registered.
      */
-    template<Concept::ComponentClass Provider>
-    void RegisterObjectProviders() {
+    template<Concept::ComClass Provider>
+        requires(IsInterface(Traits::RoleOf<Provider>) || IsComponent(Traits::RoleOf<Provider>))
+    void RegisterKernelClass() {
         auto meta = MetaClass::Query<Provider>();
 
-        template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<Provider>()) {
-            using Iface = Sora::Meta::InfoType<iface>;
+        if constexpr (IsComponent(Traits::RoleOf<Provider>)) {
+            template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<Provider>()) {
+                using Iface = Sora::Meta::InfoType<iface>;
 
-            ProviderEntry entry{};
-            entry.interfaceIid = Traits::IidOf<Iface>;
-            if constexpr (std::is_base_of_v<Iface, Provider>) {
-                entry.kind = DispatchKind::Direct;
-                entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* { return provider; };
-            } else {
-                entry.kind = DispatchKind::BoundFacet;
-                entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* {
-                    return Tie::MakeBoundFacet<Iface, Provider>(provider);
-                };
+                ProviderEntry entry{};
+                entry.interfaceIid = Traits::IidOf<Iface>;
+                if constexpr (std::is_base_of_v<Iface, Provider>) {
+                    entry.kind = DispatchKind::Direct;
+                    entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* { return provider; };
+                } else {
+                    entry.kind = DispatchKind::BoundFacet;
+                    entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* {
+                        return Tie::MakeBoundFacet<Iface, Provider>(provider);
+                    };
+                }
+
+                if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
+                    entry.extensionFactory = +[]() -> BaseUnknown* { return new (std::nothrow) Provider; };
+                }
+
+                entry.providerClass = meta;
+                meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
+                MetaClass::Query<Iface>()->implementors.insert_or_assign(Traits::IidOf<Provider>, meta);
             }
 
             if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
-                entry.extensionFactory = +[]() -> BaseUnknown* { return new (std::nothrow) Provider; };
-            }
-
-            entry.providerClass = meta;
-            meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
-        }
-
-        if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
-            template for (constexpr auto extendee : Sora::Kernel::Meta::ExtendeeTypesOf<Provider>()) {
-                using Extendee = Sora::Meta::InfoType<extendee>;
-                auto extendeeMeta = MetaClass::Query<Extendee>();
-                extendeeMeta->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
+                template for (constexpr auto extendee : Sora::Kernel::Meta::ExtendeeTypesOf<Provider>()) {
+                    using Extendee = Sora::Meta::InfoType<extendee>;
+                    auto extendeeMeta = MetaClass::Query<Extendee>();
+                    extendeeMeta->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
+                }
             }
         }
     }

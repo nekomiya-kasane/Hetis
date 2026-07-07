@@ -78,6 +78,22 @@ int main() {
     inheritedTag->GetTag(tag);
     std::cout << "Extension QueryInterface(base extendee): " << tag << std::endl;
 
+    auto plain = MakeComPtr<PointWithoutInterfaceImpl>();
+    ITag* plainTag = QueryInterface<ITag>(plain.Get());
+    assert(plainTag != nullptr);
+
+    plainTag->SetTag(123);
+    plainTag->GetTag(tag);
+    std::cout << "Extension QueryInterface(no direct interface): " << tag << std::endl;
+
+    auto futurePoint = MakeComPtr<FutureExtensiblePointImpl>();
+    assert(futurePoint->GetMeta()->GetIid() == Traits::IidOf<FutureExtensiblePointImpl>);
+
+    auto tagMeta = MetaClass::Query<ITag>();
+    assert(tagMeta->Implementors().contains(Traits::IidOf<Position2DExtension>));
+    assert(tagMeta->Implementors().contains(Traits::IidOf<PointTagExtension>));
+    std::cout << "Registered ITag implementors: " << tagMeta->Implementors().size() << std::endl;
+
     auto meta = pointImpl->GetMeta();
     std::println("Class Name: {}", meta->GetClassName());
     std::println("Class Role: {}", meta->GetTypeOfClass());

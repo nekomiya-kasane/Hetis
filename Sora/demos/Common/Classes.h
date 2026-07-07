@@ -75,8 +75,31 @@ namespace Sora::Kernel {
         float z_{0.0f};
     };
 
+    class [[= Sora::Kernel::$::Implementation]] PointWithoutInterfaceImpl : public BaseUnknown {
+    public:
+        S_OBJECT
+    };
+
+    class [[= Sora::Kernel::$::Implementation]] FutureExtensiblePointImpl : public BaseUnknown {
+    public:
+        S_OBJECT
+    };
+
     class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<Position2DImpl>{},
             = Sora::Kernel::$::Implements<ITag>{}]] Position2DExtension : public BaseUnknown {
+    public:
+        S_OBJECT
+
+        void SetTag(uint32_t tag) { tag_ = tag; }
+
+        void GetTag(uint32_t& tag) const { tag = tag_; }
+
+    private:
+        uint32_t tag_{};
+    };
+
+    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<PointWithoutInterfaceImpl>{},
+            = Sora::Kernel::$::Implements<ITag>{}]] PointTagExtension : public BaseUnknown {
     public:
         S_OBJECT
 

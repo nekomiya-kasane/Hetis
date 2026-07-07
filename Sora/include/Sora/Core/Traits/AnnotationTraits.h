@@ -35,7 +35,7 @@ namespace Sora {
             return std::define_static_array(std::meta::annotations_of(ent));
         }
 
-    }
+    } // namespace Meta
 
     namespace $ {
 

@@ -95,8 +95,21 @@ namespace Sora::Kernel {
 
     namespace Meta {
 
-        consteval auto RoleOf(std::meta::info type) {
+        consteval bool IsComClass(std::meta::info type) {
+            type = std::meta::dealias(type);
             if (!std::meta::is_class_type(type)) {
+                return false;
+            }
+            if (type == ^^Sora::Kernel::BaseUnknown) {
+                return true;
+            }
+
+            return Sora::Meta::DerivedFrom(type, ^^Sora::Kernel::BaseUnknown) &&
+                   Sora::$::GetSingleOptional<$::Role>(type).has_value();
+        }
+
+        consteval auto RoleOf(std::meta::info type) {
+            if (!IsComClass(type)) {
                 throw std::define_static_string(
                     "Meta::RoleOf: '" + std::string{Sora::Meta::DisplayStringOf(type)} +
                     "' is not a class type reflection -- only classes participate in Sora object model.");

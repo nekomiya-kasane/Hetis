@@ -22,6 +22,17 @@ namespace Sora {
     namespace Meta {
 
         /**
+         * @brief Return direct base types of a reflected class type as a static array.
+         * @param[in] type Reflection of a class type.
+         * @param[in] context Reflection access context used for base-specifier discovery.
+         * @return Static array of type reflections for every direct base in declaration order.
+         */
+        consteval auto BasesOf(std::meta::info type,
+                               std::meta::access_context context = std::meta::access_context::unchecked()) {
+            return std::define_static_array(std::meta::bases_of(type, context));
+        }
+
+        /**
          * @brief Return direct base types of a reflected class type.
          * @param[in] type Reflection of a class type.
          * @param[in] context Reflection access context used for base-specifier discovery.
@@ -31,7 +42,7 @@ namespace Sora {
         DirectBaseTypesOf(std::meta::info type,
                           std::meta::access_context context = std::meta::access_context::unchecked()) {
             std::vector<std::meta::info> bases;
-            for (auto base : std::meta::bases_of(type, context)) {
+            for (auto base : BasesOf(type, context)) {
                 bases.push_back(std::meta::type_of(base));
             }
             return bases;
@@ -74,7 +85,7 @@ namespace Sora {
                 for (auto m : std::meta::members_of(stack[i], std::meta::access_context::unchecked())) {
                     visit(depth, m);
                 }
-                for (auto b : std::meta::bases_of(stack[i], std::meta::access_context::unchecked())) {
+                for (auto b : BasesOf(stack[i], std::meta::access_context::unchecked())) {
                     const auto baseType = std::meta::type_of(b);
                     bool already = false;
                     for (auto s : seen) {
@@ -89,6 +100,29 @@ namespace Sora {
                     }
                 }
             }
+        }
+
+        /**
+         * @brief Return the inheritance chain of a reflected class type, including @p type itself and every direct base
+         * in chain order. Throws during constant evaluation if any type in the chain has multiple direct bases.
+         */
+        consteval bool DerivedFrom(std::meta::info type, std::meta::info base) {
+            if (!std::meta::is_class_type(type) || !std::meta::is_class_type(base)) {
+                throw std::define_static_string("Meta::DerivedFrom: both arguments must be class-type reflections");
+            }
+
+            type = std::meta::dealias(type);
+            base = std::meta::dealias(base);
+            if (type == base) {
+                return true;
+            }
+
+            for (std::meta::info baseSpecifier : BasesOf(type)) {
+                if (DerivedFrom(std::meta::type_of(baseSpecifier), base)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
     } // namespace Meta

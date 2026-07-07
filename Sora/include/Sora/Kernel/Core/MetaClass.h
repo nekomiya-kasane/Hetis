@@ -19,12 +19,9 @@
 
 namespace Sora::Kernel {
 
-    namespace Tie {
-
-        template<Concept::ComponentClass Provider>
-        void RegisterObjectProviders();
-
-    } // namespace Tie
+    template<Concept::ComClass Provider>
+        requires(IsInterface(Traits::RoleOf<Provider>) || IsComponent(Traits::RoleOf<Provider>))
+    void RegisterKernelClass();
 
     /** @brief Runtime dispatch shape for a component-interface provider. */
     enum class DispatchKind : uint8_t {
@@ -51,38 +48,40 @@ namespace Sora::Kernel {
 
         template<Concept::ComClass T>
         inline static std::shared_ptr<MetaClass> Query() noexcept {
-            static std::shared_ptr<MetaClass> kMeta = nullptr;
-            if (kMeta) {
-                return kMeta;
-            }
+            static std::shared_ptr<MetaClass> kMeta = [] {
+                auto meta = std::make_shared<MetaClass>();
 
-            kMeta = std::make_shared<MetaClass>();
+                constexpr auto type = Traits::RoleOf<T>;
 
-            constexpr auto type = Traits::RoleOf<T>;
+                meta->type = type;
+                meta->iid = Traits::IidOf<T>;
+                meta->name = [] consteval {
+                    if constexpr (std::meta::has_identifier(^^T)) {
+                        return Sora::Meta::IdentifierOf(^^T);
+                    } else {
+                        return Sora::Meta::DisplayStringOf(^^T);
+                    }
+                }();
 
-            kMeta->type = type;
-            kMeta->iid = Traits::IidOf<T>;
-            kMeta->name = [] consteval {
-                if constexpr (std::meta::has_identifier(^^T)) {
-                    return Sora::Meta::IdentifierOf(^^T);
+                if constexpr (std::same_as<T, BaseUnknown>) {
+                    meta->base = nullptr;
                 } else {
-                    return Sora::Meta::DisplayStringOf(^^T);
+                    meta->base = MetaClass::Query<Sora::Traits::DirectBaseType<T, 0>>();
+                }
+
+                if constexpr (IsExtension(type)) {
+                    template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypesOf<T>()) {
+                        using Extendee = Sora::Meta::InfoType<ext>;
+                        meta->protensions.emplace(Traits::IidOf<Extendee>, MetaClass::Query<Extendee>());
+                    }
+                }
+
+                if constexpr (IsComponent(type) || IsInterface(type) || std::same_as<T, BaseUnknown>) {
+                    return Intern(std::move(meta));
+                } else {
+                    return meta;
                 }
             }();
-
-            if constexpr (std::same_as<T, BaseUnknown>) {
-                kMeta->base = nullptr;
-            } else {
-                kMeta->base = MetaClass::Query<Sora::Traits::DirectBaseType<T, 0>>();
-            }
-
-            if constexpr (IsExtension(type)) {
-                template for (constexpr auto ext : Sora::Kernel::Meta::ExtendeeTypesOf<T>()) {
-                    using Extendee = Sora::Meta::InfoType<ext>;
-                    kMeta->protensions.emplace(Traits::IidOf<Extendee>, MetaClass::Query<Extendee>());
-                }
-            }
-
             return kMeta;
         }
 
@@ -107,14 +106,20 @@ namespace Sora::Kernel {
         /** @brief Return direct provider entries contributed by this class. */
         [[nodiscard]] constexpr const auto& Provides() const noexcept { return provides; }
 
+        /** @brief Return registered classes that directly implement this interface class. */
+        [[nodiscard]] constexpr const auto& Implementors() const noexcept { return implementors; }
+
         /** @brief Find the most-derived direct provider for @p iid in this class inheritance chain. */
         [[nodiscard]] const ProviderEntry* FindProvide(Iid iid) const noexcept;
 
     private:
         friend class Dictionary;
 
-        template<Concept::ComponentClass Provider>
-        friend void RegisterObjectProviders();
+        template<Concept::ComClass Provider>
+            requires(IsInterface(Traits::RoleOf<Provider>) || IsComponent(Traits::RoleOf<Provider>))
+        friend void RegisterKernelClass();
+
+        [[nodiscard]] static std::shared_ptr<MetaClass> Intern(std::shared_ptr<MetaClass> meta) noexcept;
 
         TypeOfClass type{TypeOfClass::NothingType}; /**< Declared object-model role. */
         std::string_view name{};                    /**< Reflected or section-provided diagnostic name. */
@@ -124,6 +129,7 @@ namespace Sora::Kernel {
         std::unordered_map<Iid, std::shared_ptr<MetaClass>> protensions{}; /**< Extension target classes. */
 
         std::unordered_map<Iid, ProviderEntry> provides{}; /**< Direct providers contributed by this class. */
+        std::unordered_map<Iid, std::shared_ptr<MetaClass>> implementors{}; /**< Direct implementors of an interface. */
     };
 
 } // namespace Sora::Kernel
