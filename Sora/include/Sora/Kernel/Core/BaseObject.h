@@ -44,7 +44,7 @@ public:                                                                         
         return GetMetaStatic()->GetClassName();                                                                        \
     }                                                                                                                  \
                                                                                                                        \
-    [[nodiscard]] std::string_view GetClassName() noexcept override {                                                  \
+    [[nodiscard]] std::string_view GetClassName() const noexcept override {                                            \
         return GetMeta()->GetClassName();                                                                              \
     }                                                                                                                  \
                                                                                                                        \

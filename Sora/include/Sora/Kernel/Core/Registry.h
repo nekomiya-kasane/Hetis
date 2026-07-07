@@ -59,11 +59,21 @@ namespace Sora::Kernel {
         auto meta = MetaClass::Query<Provider>();
 
         if constexpr (IsComponent(Traits::RoleOf<Provider>)) {
+            if constexpr (IsExtension(Traits::RoleOf<Provider>)) {
+                ProviderEntry selfEntry{};
+                selfEntry.targetIid = Traits::IidOf<Provider>;
+                selfEntry.kind = DispatchKind::Direct;
+                selfEntry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* { return provider; };
+                selfEntry.extensionFactory = +[]() -> BaseUnknown* { return new (std::nothrow) Provider; };
+                selfEntry.providerClass = meta;
+                meta->provides.insert_or_assign(selfEntry.targetIid, std::move(selfEntry));
+            }
+
             template for (constexpr auto iface : Sora::Kernel::Meta::ImplementedInterfaceTypesOf<Provider>()) {
                 using Iface = Sora::Meta::InfoType<iface>;
 
                 ProviderEntry entry{};
-                entry.interfaceIid = Traits::IidOf<Iface>;
+                entry.targetIid = Traits::IidOf<Iface>;
                 if constexpr (std::is_base_of_v<Iface, Provider>) {
                     entry.kind = DispatchKind::Direct;
                     entry.factory = +[](BaseUnknown* provider) noexcept -> BaseUnknown* { return provider; };
@@ -79,7 +89,7 @@ namespace Sora::Kernel {
                 }
 
                 entry.providerClass = meta;
-                meta->provides.insert_or_assign(entry.interfaceIid, std::move(entry));
+                meta->provides.insert_or_assign(entry.targetIid, std::move(entry));
                 MetaClass::Query<Iface>()->protensions.insert_or_assign(Traits::IidOf<Provider>, meta);
             }
 

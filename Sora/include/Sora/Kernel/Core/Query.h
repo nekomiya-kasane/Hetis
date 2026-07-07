@@ -14,40 +14,40 @@
 
 namespace Sora::Kernel {
 
-    /** @brief Type-erased QueryInterface kernel returning a borrowed BaseUnknown-backed facet. */
-    [[nodiscard]] BaseUnknown* QueryInterfaceRaw(BaseUnknown* object, Iid interfaceIid);
+    /** @brief Type-erased QueryInterface kernel returning a borrowed BaseUnknown-backed facet or extension node. */
+    [[nodiscard]] BaseUnknown* QueryInterfaceRaw(BaseUnknown* object, Iid targetIid);
 
-    /** @brief Query @p object for @p Iface and return a borrowed raw interface pointer. */
-    template<Concept::InterfaceClass Iface, Concept::ComClass T>
+    /** @brief Query @p object for @p Target and return a borrowed raw interface or extension pointer. */
+    template<Concept::QueryTargetClass Target, Concept::ComClass T>
         requires(!std::is_const_v<T>)
-    [[nodiscard]] Iface* QueryInterface(T* object) {
-        return static_cast<Iface*>(QueryInterfaceRaw(object, Traits::IidOf<Iface>));
+    [[nodiscard]] Target* QueryInterface(T* object) {
+        return static_cast<Target*>(QueryInterfaceRaw(object, Traits::IidOf<Target>));
     }
 
-    /** @brief Query @p object for @p Iface and return a borrowed raw interface pointer. */
-    template<Concept::InterfaceClass Iface, Concept::ComClass T>
+    /** @brief Query @p object for @p Target and return a borrowed raw interface or extension pointer. */
+    template<Concept::QueryTargetClass Target, Concept::ComClass T>
         requires(!std::is_const_v<T>)
-    [[nodiscard]] Iface* QueryInterface(T& object) {
-        return QueryInterface<Iface>(std::addressof(object));
+    [[nodiscard]] Target* QueryInterface(T& object) {
+        return QueryInterface<Target>(std::addressof(object));
     }
 
-    /** @brief Query an owning component handle and return an owning interface handle. */
-    template<Concept::InterfaceClass Iface, Concept::ComClass T>
-    [[nodiscard]] ComPtr<Iface> QueryInterface(const ComPtr<T>& object) {
+    /** @brief Query an owning component handle and return an owning interface or extension handle. */
+    template<Concept::QueryTargetClass Target, Concept::ComClass T>
+    [[nodiscard]] ComPtr<Target> QueryInterface(const ComPtr<T>& object) {
         if (!object) {
             return nullptr;
         }
-        Iface* iface = QueryInterface<Iface>(object.Get());
-        return iface ? ComPtr<Iface>{iface} : ComPtr<Iface>{nullptr};
+        Target* target = QueryInterface<Target>(object.Get());
+        return target ? ComPtr<Target>{target} : ComPtr<Target>{nullptr};
     }
 
-    /** @brief Query a borrowed component handle and return a borrowed interface handle. */
-    template<Concept::InterfaceClass Iface, Concept::ComClass T>
-    [[nodiscard]] Sora::RefPtr<Iface> QueryInterface(Sora::RefPtr<T> object) {
+    /** @brief Query a borrowed component handle and return a borrowed interface or extension handle. */
+    template<Concept::QueryTargetClass Target, Concept::ComClass T>
+    [[nodiscard]] Sora::RefPtr<Target> QueryInterface(Sora::RefPtr<T> object) {
         if (!object) {
             return nullptr;
         }
-        return Sora::RefPtr<Iface>{QueryInterface<Iface>(object.Get())};
+        return Sora::RefPtr<Target>{QueryInterface<Target>(object.Get())};
     }
 
 } // namespace Sora::Kernel

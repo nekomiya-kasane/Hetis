@@ -30,9 +30,9 @@ namespace Sora::Kernel {
         BoundFacet = 2,  /**< Facet is a closure-owned bound object. */
     };
 
-    /** @brief One runtime provider edge from a component class to an interface. */
+    /** @brief One runtime provider edge from a component class to an interface or extension class target. */
     struct ProviderEntry {
-        Iid interfaceIid{};                           /**< Interface provided by this entry. */
+        Iid targetIid{};                              /**< Interface or extension class target provided here. */
         DispatchKind kind{DispatchKind::InlineFacet}; /**< Runtime dispatch shape. */
 
         FacetFactory factory{};                   /**< Resolver used after the provider object is known. */
@@ -105,9 +105,6 @@ namespace Sora::Kernel {
 
         /** @brief Return direct provider entries contributed by this class. */
         [[nodiscard]] constexpr const auto& Provides() const noexcept { return provides; }
-
-        /** @brief Return registered classes that directly implement this interface class. */
-        [[nodiscard]] constexpr const auto& Implementors() const noexcept { return protensions; }
 
         /** @brief Find the most-derived direct provider for @p iid in this class inheritance chain. */
         [[nodiscard]] const ProviderEntry* FindProvide(Iid iid) const noexcept;

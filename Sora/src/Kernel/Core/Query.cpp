@@ -9,6 +9,7 @@
 #include "Sora/Kernel/Core/Registry.h"
 
 #include <cassert>
+#include <ranges>
 #include <utility>
 
 namespace Sora::Kernel {
@@ -58,21 +59,21 @@ namespace Sora::Kernel {
             assert(false && "ambiguous QueryInterface providers: providers must be on one inheritance chain");
         }
 
-        [[nodiscard]] DebugProviderCandidate DebugFindProviderCandidate(BaseUnknown* provider, Iid interfaceIid) {
-            if (!provider || IsNil(interfaceIid)) {
+        [[nodiscard]] DebugProviderCandidate DebugFindProviderCandidate(BaseUnknown* provider, Iid targetIid) {
+            if (!provider || IsNil(targetIid)) {
                 return {};
             }
 
             auto meta = provider->GetMeta();
-            if (ClassChainContainsIid(meta, interfaceIid)) {
+            if (ClassChainContainsIid(meta, targetIid)) {
                 return {.providerClass = meta};
             }
 
-            const ProviderEntry* entry = meta ? meta->FindProvide(interfaceIid) : nullptr;
+            const ProviderEntry* entry = meta ? meta->FindProvide(targetIid) : nullptr;
             return entry ? DebugProviderCandidate{.providerClass = entry->providerClass} : DebugProviderCandidate{};
         }
 
-        void DebugAddLazyExtensionCandidates(DebugProviderCandidate& selected, BaseUnknown* nucleus, Iid interfaceIid) {
+        void DebugAddLazyExtensionCandidates(DebugProviderCandidate& selected, BaseUnknown* nucleus, Iid targetIid) {
             if (!nucleus) {
                 return;
             }
@@ -81,7 +82,7 @@ namespace Sora::Kernel {
                     if (!extensionMeta) {
                         continue;
                     }
-                    const ProviderEntry* entry = extensionMeta->FindProvide(interfaceIid);
+                    const ProviderEntry* entry = extensionMeta->FindProvide(targetIid);
                     if (!entry) {
                         continue;
                     }
@@ -93,21 +94,21 @@ namespace Sora::Kernel {
             }
         }
 
-        void DebugAssertUniqueProviderPath(BaseUnknown* object, BaseUnknown* nucleus, Iid interfaceIid) {
+        void DebugAssertUniqueProviderPath(BaseUnknown* object, BaseUnknown* nucleus, Iid targetIid) {
             DebugProviderCandidate selected{};
-            DebugMergeProviderCandidate(selected, DebugFindProviderCandidate(object, interfaceIid));
+            DebugMergeProviderCandidate(selected, DebugFindProviderCandidate(object, targetIid));
             if (nucleus && nucleus != object) {
-                DebugMergeProviderCandidate(selected, DebugFindProviderCandidate(nucleus, interfaceIid));
+                DebugMergeProviderCandidate(selected, DebugFindProviderCandidate(nucleus, targetIid));
             }
             for (BaseUnknown* extension : Detail::BaseUnknownInternal::SnapshotExtensionNodes(nucleus)) {
-                DebugMergeProviderCandidate(selected, DebugFindProviderCandidate(extension, interfaceIid));
+                DebugMergeProviderCandidate(selected, DebugFindProviderCandidate(extension, targetIid));
             }
-            DebugAddLazyExtensionCandidates(selected, nucleus, interfaceIid);
+            DebugAddLazyExtensionCandidates(selected, nucleus, targetIid);
         }
 #endif
 
         [[nodiscard]] BaseUnknown* MaterializeProvider(BaseUnknown* provider, const ProviderEntry& entry,
-                                                       Iid interfaceIid) {
+                                                       Iid targetIid) {
             using Detail::BaseUnknownInternal;
 
             switch (entry.kind) {
@@ -116,7 +117,7 @@ namespace Sora::Kernel {
                 return entry.factory ? entry.factory(provider) : provider;
 
             case DispatchKind::BoundFacet:
-                if (BaseUnknown* cached = BaseUnknownInternal::FindBoundFacetNode(provider, interfaceIid)) {
+                if (BaseUnknown* cached = BaseUnknownInternal::FindBoundFacetNode(provider, targetIid)) {
                     return cached;
                 }
 
@@ -129,11 +130,11 @@ namespace Sora::Kernel {
                     return nullptr;
                 }
 
-                if (BaseUnknownInternal::AdoptBoundFacetNode(provider, interfaceIid, facet)) {
+                if (BaseUnknownInternal::AdoptBoundFacetNode(provider, targetIid, facet)) {
                     return facet;
                 }
 
-                BaseUnknown* existing = BaseUnknownInternal::FindBoundFacetNode(provider, interfaceIid);
+                BaseUnknown* existing = BaseUnknownInternal::FindBoundFacetNode(provider, targetIid);
                 Release(facet);
                 return existing;
             }
@@ -141,24 +142,24 @@ namespace Sora::Kernel {
             std::unreachable();
         }
 
-        [[nodiscard]] BaseUnknown* QueryProviderObject(BaseUnknown* provider, Iid interfaceIid) {
-            if (!provider || IsNil(interfaceIid)) {
+        [[nodiscard]] BaseUnknown* QueryProviderObject(BaseUnknown* provider, Iid targetIid) {
+            if (!provider || IsNil(targetIid)) {
                 return nullptr;
             }
 
             auto meta = provider->GetMeta();
-            if (ClassChainContainsIid(meta, interfaceIid)) {
+            if (ClassChainContainsIid(meta, targetIid)) {
                 return provider;
             }
 
-            if (const ProviderEntry* entry = meta ? meta->FindProvide(interfaceIid) : nullptr) {
-                return MaterializeProvider(provider, *entry, interfaceIid);
+            if (const ProviderEntry* entry = meta ? meta->FindProvide(targetIid) : nullptr) {
+                return MaterializeProvider(provider, *entry, targetIid);
             }
 
             return nullptr;
         }
 
-        [[nodiscard]] BaseUnknown* QueryLazyExtensionProvider(BaseUnknown* nucleus, Iid interfaceIid) {
+        [[nodiscard]] BaseUnknown* QueryLazyExtensionProvider(BaseUnknown* nucleus, Iid targetIid) {
             if (!nucleus) {
                 return nullptr;
             }
@@ -168,14 +169,14 @@ namespace Sora::Kernel {
                         continue;
                     }
 
-                    const ProviderEntry* entry = extensionMeta->FindProvide(interfaceIid);
+                    const ProviderEntry* entry = extensionMeta->FindProvide(targetIid);
                     if (!entry) {
                         continue;
                     }
 
                     auto MaterializeLazyExtensionProvider =
                         [](BaseUnknown* nucleus, const std::shared_ptr<const MetaClass>& extensionMeta,
-                           const ProviderEntry& entry, Iid interfaceIid) -> BaseUnknown* {
+                           const ProviderEntry& entry, Iid targetIid) -> BaseUnknown* {
                         using BUI = Detail::BaseUnknownInternal;
 
                         if (!nucleus || !extensionMeta || !entry.extensionFactory) {
@@ -196,10 +197,10 @@ namespace Sora::Kernel {
                             }
                         }
 
-                        return extension ? MaterializeProvider(extension, entry, interfaceIid) : nullptr;
+                        return extension ? MaterializeProvider(extension, entry, targetIid) : nullptr;
                     };
 
-                    return MaterializeLazyExtensionProvider(nucleus, extensionMeta, *entry, interfaceIid);
+                    return MaterializeLazyExtensionProvider(nucleus, extensionMeta, *entry, targetIid);
                 }
             }
             return nullptr;
@@ -207,8 +208,8 @@ namespace Sora::Kernel {
 
     } // namespace
 
-    BaseUnknown* QueryInterfaceRaw(BaseUnknown* object, Iid interfaceIid) {
-        if (!object || IsNil(interfaceIid)) {
+    BaseUnknown* QueryInterfaceRaw(BaseUnknown* object, Iid targetIid) {
+        if (!object || IsNil(targetIid)) {
             return nullptr;
         }
 
@@ -216,26 +217,26 @@ namespace Sora::Kernel {
 
         BaseUnknown* nucleus = object->Nucleus();
 #ifndef NDEBUG
-        DebugAssertUniqueProviderPath(object, nucleus, interfaceIid);
+        DebugAssertUniqueProviderPath(object, nucleus, targetIid);
 #endif
 
-        if (BaseUnknown* facet = QueryProviderObject(object, interfaceIid)) {
+        if (BaseUnknown* facet = QueryProviderObject(object, targetIid)) {
             return facet;
         }
 
         if (nucleus && nucleus != object) {
-            if (BaseUnknown* facet = QueryProviderObject(nucleus, interfaceIid)) {
+            if (BaseUnknown* facet = QueryProviderObject(nucleus, targetIid)) {
                 return facet;
             }
         }
 
         for (BaseUnknown* extension : Detail::BaseUnknownInternal::SnapshotExtensionNodes(nucleus)) {
-            if (BaseUnknown* facet = QueryProviderObject(extension, interfaceIid)) {
+            if (BaseUnknown* facet = QueryProviderObject(extension, targetIid)) {
                 return facet;
             }
         }
 
-        return QueryLazyExtensionProvider(nucleus, interfaceIid);
+        return QueryLazyExtensionProvider(nucleus, targetIid);
     }
 
 } // namespace Sora::Kernel
