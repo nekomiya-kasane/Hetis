@@ -1,44 +1,138 @@
 #pragma once
 
+/**
+ * @file Descriptions.h
+ * @brief Static descriptor atoms for sealed command-line schemas.
+ * @ingroup Core
+ */
+
 #include <cstdint>
+#include <span>
+#include <type_traits>
 
-namespace Sora {
+#include <Sora/Core/Flags.h>
+#include <Sora/Core/Traits/EnumTraits.h>
 
-    namespace CLI {
+namespace Sora::CLI {
 
-        enum class OptionKind : uint8_t {
-            Flag,
-            Switch = Flag, /**< Boolean flag option. */
-            Parameter,     /**< Option with a single value. */
-        };
+    using NameId = std::uint32_t;
 
-        enum class OptionCardinality : uint8_t {
-            None,
-            ExactlyOne,
-            AtMostOne,
-            Any,
-            AtLeastOne,
-        };
+    inline constexpr NameId kInvalidNameId = 0;
 
-        using FullNameId = uint32_t;
+    enum class OptionKind : std::uint8_t {
+        Switch,
+        Parameter,
+    };
 
-        /** @brief Leaf option description */
-        struct OptionDesc {
-            OptionKind kind;
-            OptionCardinality cardinality;
+    enum class ValueCardinality : std::uint8_t {
+        None,
+        One,
+        OptionalOne,
+        OneOrMore,
+        ZeroOrMore,
+    };
 
-            uint32_t ownerCommandId;
-            uint32_t fieldId;
-            uint32_t groupId;
-            uint32_t presenceBit;
+    enum class SourceKind : std::uint8_t {
+        Argv,
+        ResponseFile,
+        Environment,
+        Config,
+        DefaultValue,
+    };
 
-            char shortName;
-            FullNameId fullNameId;
+    enum class Policy : std::uint64_t {
+        None = 0,
+        GnuStyle = 1ull << 0,
+        PosixStrict = 1ull << 1,
+        AllowResponseFile = 1ull << 2,
+        AllowAbbreviation = 1ull << 3,
+        GlobalOptionsBeforeSubcommand = 1ull << 4,
+        GlobalOptionsAnywhere = 1ull << 5,
+        AllowInterspersedOperands = 1ull << 6,
+        Utf8 = 1ull << 7,
+    };
 
-            // TODO: BindFunc
-            // TODO: ParseValueFunc
-        };
+    [[nodiscard]] constexpr auto operator|(Policy lhs, Policy rhs) noexcept -> Policy {
+        return static_cast<Policy>(static_cast<std::uint64_t>(lhs) | static_cast<std::uint64_t>(rhs));
+    }
 
-    } // namespace CLI
+    [[nodiscard]] constexpr auto operator&(Policy lhs, Policy rhs) noexcept -> Policy {
+        return static_cast<Policy>(static_cast<std::uint64_t>(lhs) & static_cast<std::uint64_t>(rhs));
+    }
 
-} // namespace Sora
+    constexpr auto operator|=(Policy& lhs, Policy rhs) noexcept -> Policy& {
+        lhs = lhs | rhs;
+        return lhs;
+    }
+
+    constexpr auto operator&=(Policy& lhs, Policy rhs) noexcept -> Policy& {
+        lhs = lhs & rhs;
+        return lhs;
+    }
+
+    [[nodiscard]] constexpr auto HasPolicy(Policy set, Policy bit) noexcept -> bool {
+        return static_cast<std::uint64_t>(set & bit) == static_cast<std::uint64_t>(bit);
+    }
+
+    using BindFn = void (*)(void* object, void const* value) noexcept;
+    using ParseValueFn = bool (*)(void* output, char const* first, char const* last) noexcept;
+    using ActionAdapterFn = int (*)(void const* command, void* context) noexcept;
+
+    /** @brief Leaf option descriptor stored in the sealed schema. */
+    struct OptionDesc {
+        NameId longName = 0;
+        char shortName = '\0';
+        OptionKind kind = OptionKind::Switch;
+        ValueCardinality cardinality = ValueCardinality::None;
+        std::uint32_t ownerCommandId = 0;
+        std::uint32_t fieldId = 0;
+        std::uint32_t groupId = 0;
+        std::uint32_t presenceBit = 0;
+        BindFn bind = nullptr;
+        ParseValueFn parseValue = nullptr;
+    };
+
+    /** @brief Positional operand descriptor stored in the sealed schema. */
+    struct OperandDesc {
+        NameId name = 0;
+        ValueCardinality cardinality = ValueCardinality::One;
+        std::uint32_t ownerCommandId = 0;
+        std::uint32_t fieldId = 0;
+        std::uint32_t presenceBit = 0;
+        BindFn bind = nullptr;
+        ParseValueFn parseValue = nullptr;
+    };
+
+    /** @brief Static edge from one command trie node to a child node. */
+    struct CommandEdge {
+        NameId name = 0;
+        std::uint32_t childCommandId = 0;
+    };
+
+    /** @brief Command descriptor stored in the sealed schema. */
+    struct CommandDesc {
+        NameId name = 0;
+        std::uint32_t commandId = 0;
+        std::span<OptionDesc const> localOptions = {};
+        std::span<OperandDesc const> operands = {};
+        std::span<CommandEdge const> children = {};
+        ActionAdapterFn action = nullptr;
+    };
+
+    /** @brief Structured provenance for a parsed token or fallback value. */
+    struct SourceRef {
+        SourceKind kind = SourceKind::Argv;
+        std::uint32_t tokenIndex = 0;
+        std::uint32_t fileId = 0;
+        std::uint32_t line = 0;
+        std::uint32_t column = 0;
+        NameId key = 0;
+    };
+
+    static_assert(std::is_trivially_copyable_v<OptionDesc> && std::is_default_constructible_v<OptionDesc>);
+    static_assert(std::is_trivially_copyable_v<OperandDesc> && std::is_default_constructible_v<OperandDesc>);
+    static_assert(std::is_trivially_copyable_v<CommandEdge> && std::is_default_constructible_v<CommandEdge>);
+    static_assert(std::is_trivially_copyable_v<CommandDesc> && std::is_default_constructible_v<CommandDesc>);
+    static_assert(std::is_trivially_copyable_v<SourceRef> && std::is_default_constructible_v<SourceRef>);
+
+} // namespace Sora::CLI
