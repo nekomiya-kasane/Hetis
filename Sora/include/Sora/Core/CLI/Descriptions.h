@@ -52,28 +52,6 @@ namespace Sora::CLI {
         Utf8 = 1ull << 7,
     };
 
-    [[nodiscard]] constexpr auto operator|(Policy lhs, Policy rhs) noexcept -> Policy {
-        return static_cast<Policy>(static_cast<std::uint64_t>(lhs) | static_cast<std::uint64_t>(rhs));
-    }
-
-    [[nodiscard]] constexpr auto operator&(Policy lhs, Policy rhs) noexcept -> Policy {
-        return static_cast<Policy>(static_cast<std::uint64_t>(lhs) & static_cast<std::uint64_t>(rhs));
-    }
-
-    constexpr auto operator|=(Policy& lhs, Policy rhs) noexcept -> Policy& {
-        lhs = lhs | rhs;
-        return lhs;
-    }
-
-    constexpr auto operator&=(Policy& lhs, Policy rhs) noexcept -> Policy& {
-        lhs = lhs & rhs;
-        return lhs;
-    }
-
-    [[nodiscard]] constexpr auto HasPolicy(Policy set, Policy bit) noexcept -> bool {
-        return static_cast<std::uint64_t>(set & bit) == static_cast<std::uint64_t>(bit);
-    }
-
     using BindFn = void (*)(void* object, void const* value) noexcept;
     using ParseValueFn = bool (*)(void* output, char const* first, char const* last) noexcept;
     using ActionAdapterFn = int (*)(void const* command, void* context) noexcept;

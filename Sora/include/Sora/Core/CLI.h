@@ -1,18 +1,12 @@
 #pragma once
 
-namespace Mashiro {
+/**
+ * @file CLI.h
+ * @brief Umbrella header for Sora command-line parsing infrastructure.
+ * @ingroup Core
+ */
 
-    namespace CLI {
-
-        template<typename Root>
-        struct Program;
-
-        template<typename Root>
-        consteval auto Compile() -> Program<Root>;
-
-        template<typename Root, typename SchemaFactory>
-        consteval auto Compile(SchemaFactory) -> Program<Root>;
-
-    } // namespace CLI
-
-} // namespace Mashiro
+#include <Sora/Core/CLI/Descriptions.h>
+#include <Sora/Core/CLI/Parser.h>
+#include <Sora/Core/CLI/Program.h>
+#include <Sora/Core/CLI/Schema.h>
