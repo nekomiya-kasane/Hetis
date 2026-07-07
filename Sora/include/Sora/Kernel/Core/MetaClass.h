@@ -76,7 +76,7 @@ namespace Sora::Kernel {
                     }
                 }
 
-                if constexpr (IsComponent(type) || IsInterface(type) || std::same_as<T, BaseUnknown>) {
+                if constexpr (IsComponent(type) || IsInterface(type)) {
                     return Intern(std::move(meta));
                 } else {
                     return meta;

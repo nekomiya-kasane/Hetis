@@ -40,6 +40,14 @@ public:                                                                         
         return GetMetaStatic();                                                                                        \
     }                                                                                                                  \
                                                                                                                        \
+    [[nodiscard]] static std::string_view GetClassNameStatic() noexcept {                                              \
+        return GetMetaStatic()->GetClassName();                                                                        \
+    }                                                                                                                  \
+                                                                                                                       \
+    [[nodiscard]] std::string_view GetClassName() noexcept override {                                                  \
+        return GetMeta()->GetClassName();                                                                              \
+    }                                                                                                                  \
+                                                                                                                       \
     [[nodiscard]] static Sora::Kernel::TypeOfClass GetRoleStatic() noexcept {                                          \
         return Sora::Kernel::Traits::RoleOf<Self>;                                                                     \
     }                                                                                                                  \
@@ -98,7 +106,7 @@ public:
     };
 
     /** @brief Intrusive lifetime root and type-erased object-model anchor. */
-    class alignas(16) [[= Sora::Kernel::$::Role{TypeOfClass::BaseUnknown}]] BaseUnknown {
+    class alignas(16) [[= Sora::Kernel::$::Role{TypeOfClass::Implementation}]] BaseUnknown {
         /** @brief Compressed BaseUnknown payload: pointer kind, refcount, and one 16-byte-aligned pointer. */
         class ComData {
         public:
@@ -179,16 +187,33 @@ public:
         BaseUnknown(const BaseUnknown&) = delete;
         BaseUnknown& operator=(const BaseUnknown&) = delete;
 
+        /** @brief Return the meta-class associated with this object type. */
+        [[nodiscard]] static std::shared_ptr<const MetaClass> GetMetaStatic() noexcept {
+            return MetaClass::Query<Self>();
+        }
+
         /** @brief Return the meta-class associated with this object. */
         [[nodiscard]] virtual std::shared_ptr<const MetaClass> GetMeta() const noexcept {
             return MetaClass::Query<Self>();
         }
 
+        /** @brief Return the interface ID associated with this object type. */
+        [[nodiscard]] static Iid GetIidStatic() noexcept { return Sora::Kernel::Traits::IidOf<Self>; }
+
         /** @brief Return the interface ID associated with this object. */
         [[nodiscard]] virtual Iid GetIid() const noexcept { return Sora::Kernel::Traits::IidOf<Self>; }
 
+        /** @brief Return the role associated with this object type. */
+        [[nodiscard]] static TypeOfClass GetRoleStatic() noexcept { return TypeOfClass::Implementation; }
+
         /** @brief Return the role associated with this object. */
-        [[nodiscard]] virtual TypeOfClass GetRole() const noexcept { return TypeOfClass::BaseUnknown; }
+        [[nodiscard]] virtual TypeOfClass GetRole() const noexcept { return TypeOfClass::Implementation; }
+
+        /** @brief Return the class name associated with this object type. */
+        [[nodiscard]] static std::string_view GetClassNameStatic() noexcept { return GetMetaStatic()->GetClassName(); }
+
+        /** @brief Return the class name associated with this object. */
+        [[nodiscard]] virtual std::string_view GetClassName() const noexcept { return GetMeta()->GetClassName(); }
 
         /** @brief Return the closure nucleus controlling lifetime for this object. */
         [[nodiscard]] BaseUnknown* Nucleus() noexcept;

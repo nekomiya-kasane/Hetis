@@ -11,6 +11,7 @@
 #include <concepts>
 #include <cstddef>
 #include <meta>
+#include <ranges>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -23,7 +24,6 @@ namespace Sora::Kernel {
     /** @brief Historical Sora object-model role of a class declaration. */
     enum class TypeOfClass : uint8_t {
         NothingType = 0x01,        /**< Untagged class; outside the object model. */
-        BaseUnknown = 0x02,        /**< Root object anchor. */
         Interface = 0x03,          /**< Interface contract; not a lifetime-owning object. */
         TIE = 0x04,                /**< Bound facet object. */
         TIEchain = 0x05,           /**< Chained bound facet object. */
@@ -100,10 +100,6 @@ namespace Sora::Kernel {
             if (!std::meta::is_class_type(type)) {
                 return false;
             }
-            if (type == ^^Sora::Kernel::BaseUnknown) {
-                return true;
-            }
-
             return Sora::Meta::DerivedFrom(type, ^^Sora::Kernel::BaseUnknown) &&
                    Sora::$::GetSingleOptional<$::Role>(type).has_value();
         }
@@ -114,12 +110,7 @@ namespace Sora::Kernel {
                     "Meta::RoleOf: '" + std::string{Sora::Meta::DisplayStringOf(type)} +
                     "' is not a class type reflection -- only classes participate in Sora object model.");
             }
-            const std::meta::info canonical = std::meta::dealias(type);
-            if (canonical == ^^Sora::Kernel::BaseUnknown) {
-                return TypeOfClass::BaseUnknown;
-            }
-
-            auto result = Sora::$::GetSingleOptional<$::Role>(canonical);
+            auto result = Sora::$::GetSingleOptional<$::Role>(std::meta::dealias(type));
             return result ? result->type : TypeOfClass::NothingType;
         }
 
@@ -152,7 +143,7 @@ namespace Sora::Kernel {
         concept ExtensionClass = ComClass<T> && IsExtension(Traits::RoleOf<T>) && std::is_default_constructible_v<T>;
 
         template<typename T>
-        concept ComponentClass = ImplementationClass<T> || ExtensionClass<T> || std::is_same_v<T, BaseUnknown>;
+        concept ComponentClass = ImplementationClass<T> || ExtensionClass<T>;
 
         template<typename T>
         concept TieClass = ComClass<T> && IsTie(Traits::RoleOf<T>) && std::is_default_constructible_v<T>;
@@ -176,16 +167,15 @@ namespace Sora::Kernel {
         /** @brief Return static-storage direct interface type reflections declared by @ref $::Implements on @p T. */
         template<Concept::ComClass T>
         consteval auto ImplementedInterfaceTypesOf() {
-            std::vector<std::meta::info> implements;
-            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(^^T));
-            for (const auto& annotation : allAnnotations) {
-                auto t = std::meta::type_of(annotation);
-                if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Implements>(t)) {
-                    auto params = std::meta::template_arguments_of(t);
-                    for (const auto& param : params) {
-                        implements.push_back(std::meta::dealias(param));
-                    }
+            using namespace std::meta;
+            std::vector<info> implements;
+            for (const auto& annotation : annotations_of(dealias(^^T))) {
+                auto t = type_of(annotation);
+                if (!Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Implements>(t)) {
+                    continue;
                 }
+
+                implements.append_range(template_arguments_of(t) | std::views::transform(dealias));
             }
             return std::define_static_array(implements);
         }
@@ -193,16 +183,14 @@ namespace Sora::Kernel {
         /** @brief Return static-storage direct extendee type reflections declared by @ref $::Extends on @p T. */
         template<Concept::ComClass T>
         consteval auto ExtendeeTypesOf() {
-            std::vector<std::meta::info> extendees;
-            auto allAnnotations = std::meta::annotations_of(std::meta::dealias(^^T));
-            for (const auto& annotation : allAnnotations) {
-                auto t = std::meta::type_of(annotation);
-                if (Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Extends>(t)) {
-                    auto params = std::meta::template_arguments_of(t);
-                    for (const auto& param : params) {
-                        extendees.push_back(std::meta::dealias(param));
-                    }
+            using namespace std::meta;
+            std::vector<info> extendees;
+            for (const auto& annotation : annotations_of(dealias(^^T))) {
+                auto t = type_of(annotation);
+                if (!Sora::Meta::IsSpecializationOf<Sora::Kernel::$::Extends>(t)) {
+                    continue;
                 }
+                extendees.append_range(template_arguments_of(t) | std::views::transform(dealias));
             }
             return std::define_static_array(extendees);
         }
