@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <meta>
 #include <stdexcept>
@@ -16,6 +17,7 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include <ranges>
 
 namespace Sora {
 
@@ -41,11 +43,7 @@ namespace Sora {
         consteval std::vector<std::meta::info>
         DirectBaseTypesOf(std::meta::info type,
                           std::meta::access_context context = std::meta::access_context::unchecked()) {
-            std::vector<std::meta::info> bases;
-            for (auto base : BasesOf(type, context)) {
-                bases.push_back(std::meta::type_of(base));
-            }
-            return bases;
+            return BasesOf(type, context) | std::views::transform(std::meta::type_of) | std::ranges::to<std::vector>();
         }
 
         /**
@@ -58,11 +56,9 @@ namespace Sora {
         RecursiveBaseTypesOf(std::meta::info type,
                              std::meta::access_context context = std::meta::access_context::unchecked()) {
             std::vector<std::meta::info> bases;
-            auto directBaseTypes = DirectBaseTypesOf(type, context);
-            for (auto base : directBaseTypes) {
+            for (auto base : DirectBaseTypesOf(type, context)) {
                 bases.push_back(base);
-                auto recursiveBases = RecursiveBaseTypesOf(base, context);
-                bases.insert_range(bases.end(), recursiveBases);
+                bases.insert_range(bases.end(), RecursiveBaseTypesOf(base, context));
             }
             return bases;
         }
@@ -85,18 +81,12 @@ namespace Sora {
                 for (auto m : std::meta::members_of(stack[i], std::meta::access_context::unchecked())) {
                     visit(depth, m);
                 }
-                for (auto b : BasesOf(stack[i], std::meta::access_context::unchecked())) {
-                    const auto baseType = std::meta::type_of(b);
-                    bool already = false;
-                    for (auto s : seen) {
-                        if (s == baseType) {
-                            already = true;
-                            break;
-                        }
-                    }
-                    if (!already) {
-                        stack.push_back(baseType);
-                        seen.push_back(baseType);
+
+                for (auto b : BasesOf(stack[i]) | std::views::transform(std::meta::type_of)) {
+                    bool already = std::ranges::any_of(seen, [&](std::meta::info s) { return s == b; });
+                    if (std::ranges::all_of(seen, [&](std::meta::info s) { return s != b; })) {
+                        stack.push_back(b);
+                        seen.push_back(b);
                     }
                 }
             }
@@ -117,12 +107,8 @@ namespace Sora {
                 return true;
             }
 
-            for (std::meta::info baseSpecifier : BasesOf(type)) {
-                if (DerivedFrom(std::meta::type_of(baseSpecifier), base)) {
-                    return true;
-                }
-            }
-            return false;
+            return std::ranges::any_of(Meta::BasesOf(type),
+                                       [&base](auto b) { return DerivedFrom(std::meta::type_of(b), base); });
         }
 
     } // namespace Meta
@@ -179,7 +165,7 @@ namespace Sora {
             std::vector<std::meta::info> chain;
             while (true) {
                 chain.push_back(type);
-                auto bases = DirectBaseTypesOf(type, std::meta::access_context::unchecked());
+                auto bases = DirectBaseTypesOf(type);
                 if (bases.empty()) {
                     break;
                 }
