@@ -26,6 +26,8 @@
 #include <string_view>
 #include <vector>
 
+#include <Sora/Core/Traits/ScopeTraits.h>
+
 namespace Sora::Meta::ABI {
 
     /** @brief Which ABI's mangling scheme to apply. */
@@ -150,22 +152,6 @@ namespace Sora::Meta::ABI {
         }
 
         /**
-         * @brief Walk @c parent_of until the global namespace.
-         * @param[in] t Reflected entity.
-         * @return The scope chain in innermost-first order.
-         */
-        consteval std::vector<std::meta::info> ScopeChain(std::meta::info t) {
-            std::vector<std::meta::info> chain;
-            chain.push_back(t);
-            auto parent = std::meta::parent_of(t);
-            while (parent != ^^::&&std::meta::has_identifier(parent)) {
-                chain.push_back(parent);
-                parent = std::meta::parent_of(parent);
-            }
-            return chain;
-        }
-
-        /**
          * @brief Append the base-10 decimal representation of @p n to @p out.
          * @param[in,out] out Destination string.
          * @param[in] n Value to append.
@@ -261,10 +247,10 @@ namespace Sora::Meta::ABI {
 
 namespace Sora::ABI {
 
+    using Sora::Meta::ABI::Demangle;
     using Sora::Meta::ABI::Kind;
     using Sora::Meta::ABI::Mangle;
     using Sora::Meta::ABI::TryDemangle;
-    using Sora::Meta::ABI::Demangle;
 
     namespace Itanium = Sora::Meta::ABI::Itanium;
     namespace MSVC = Sora::Meta::ABI::MSVC;

@@ -177,6 +177,34 @@ namespace Sora {
             return chain;
         }
 
+        consteval std::string_view InheritanceChainIdentifierOf(std::meta::info info,
+                                                                std::string_view delimiter = ".") {
+            std::vector<std::meta::info> chain = Meta::InheritanceChainOf(info);
+            std::string desc;
+            for (auto& type : chain) {
+                if (!desc.empty()) {
+                    desc += delimiter;
+                }
+                desc += std::meta::identifier_of(type);
+            }
+            auto ret = std::define_static_array(desc);
+            return std::string_view{ret.data(), ret.size()};
+        }
+
+        consteval std::string_view InheritanceChainDisplayStringOf(std::meta::info info,
+                                                                   std::string_view delimiter = ".") {
+            std::vector<std::meta::info> chain = Meta::InheritanceChainOf(info);
+            std::string desc;
+            for (auto& type : chain) {
+                if (!desc.empty()) {
+                    desc += delimiter;
+                }
+                desc += std::meta::display_string_of(type);
+            }
+            auto ret = std::define_static_array(desc);
+            return std::string_view{ret.data(), ret.size()};
+        }
+
     } // namespace Meta
 
     namespace Concept {
@@ -195,33 +223,11 @@ namespace Sora {
 
         /** @brief Dot-separated reflection identifiers for @p T's single-inheritance chain. */
         template<Concept::SingleInheritanceChainClass T>
-        inline constexpr std::string_view InheritanceChainIdentifier = [] consteval {
-            std::vector<std::meta::info> chain = Meta::InheritanceChainOf(^^T);
-            std::string desc;
-            for (auto& type : chain) {
-                if (!desc.empty()) {
-                    desc += ".";
-                }
-                desc += std::meta::identifier_of(type);
-            }
-            auto ret = std::define_static_array(desc);
-            return std::string_view{ret.data(), ret.size()};
-        }();
+        inline constexpr std::string_view InheritanceChainIdentifier = Meta::InheritanceChainIdentifierOf(^^T);
 
         /** @brief Dot-separated reflection display strings for @p T's single-inheritance chain. */
         template<Concept::SingleInheritanceChainClass T>
-        inline constexpr std::string_view InheritanceChainDisplayString = [] consteval {
-            std::vector<std::meta::info> chain = Meta::InheritanceChainOf(^^T);
-            std::string desc;
-            for (auto& type : chain) {
-                if (!desc.empty()) {
-                    desc += ".";
-                }
-                desc += std::meta::display_string_of(type);
-            }
-            auto ret = std::define_static_array(desc);
-            return std::string_view{ret.data(), ret.size()};
-        }();
+        inline constexpr std::string_view InheritanceChainDisplayString = Meta::InheritanceChainDisplayStringOf(^^T);
 
     } // namespace Traits
 

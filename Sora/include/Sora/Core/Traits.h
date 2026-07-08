@@ -23,4 +23,6 @@
 #include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Core/Traits/ScopeTraits.h"
 #include "Sora/Core/Traits/ClassTraits.h"
+#include "Sora/Core/Traits/NamingTraits.h"
+
 #include "Sora/Core/Traits/VisitOverloader.h"

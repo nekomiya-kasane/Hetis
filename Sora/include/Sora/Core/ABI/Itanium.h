@@ -150,7 +150,7 @@ namespace Sora::Meta::ABI::Itanium {
                 return;
             }
 
-            auto chain = ABI::Detail::ScopeChain(t); // innermost-first: [t, ..., outer]
+            auto chain = Sora::Meta::ScopeChainOf(t); // innermost-first: [t, ..., outer]
             if (chain.size() == 1) {
                 // Unqualified (global-scope) name: bare source-name.
                 ABI::Detail::AppendSourceName(out, std::meta::identifier_of(t));

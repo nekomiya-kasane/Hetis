@@ -16,6 +16,8 @@
 #include <string_view>
 #include <vector>
 
+#include "Sora/Core/Traits/TypeTraits.h"
+
 namespace Sora {
 
     namespace Meta {
@@ -73,18 +75,14 @@ namespace Sora {
          * @param[in] info Reflected declaration or type whose scope path is requested.
          * @return Static-storage string view containing identifiers where available and display strings otherwise.
          */
-        consteval std::string_view ScopeChainIdentifierOf(std::meta::info info) {
+        consteval std::string_view ScopeChainIdentifierOf(std::meta::info info, std::string_view delimiter = ".") {
             std::vector<std::meta::info> chain = ScopeChainOf(info);
             std::string desc;
             for (size_t i = chain.size(); i-- > 0;) {
                 if (!desc.empty()) {
-                    desc += ".";
+                    desc += delimiter;
                 }
-                if (std::meta::has_identifier(chain[i])) {
-                    desc += std::meta::identifier_of(chain[i]);
-                } else {
-                    desc += std::meta::display_string_of(chain[i]);
-                }
+                desc += IdentifierOrDisplayStringOf(chain[i]);
             }
             auto ret = std::define_static_string(desc);
             return std::string_view{ret, desc.size()};
@@ -95,12 +93,12 @@ namespace Sora {
          * @param[in] info Reflected declaration or type whose scope path is requested.
          * @return Static-storage string view containing reflection display strings.
          */
-        consteval std::string_view ScopeChainDisplayStringOf(std::meta::info info) {
+        consteval std::string_view ScopeChainDisplayStringOf(std::meta::info info, std::string_view delimiter = ".") {
             std::vector<std::meta::info> chain = ScopeChainOf(info);
             std::string desc;
             for (size_t i = chain.size(); i-- > 0;) {
                 if (!desc.empty()) {
-                    desc += ".";
+                    desc += delimiter;
                 }
                 desc += std::meta::display_string_of(chain[i]);
             }

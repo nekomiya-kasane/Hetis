@@ -45,8 +45,14 @@
 #include "Sora/Core/Hash.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Core/Traits/InheritanceTraits.h"
+#include "Sora/Core/Traits/NamingTraits.h"
 
+#include <bit>
+#include <cstddef>
 #include <meta>
+#include <span>
+#include <string_view>
+#include <vector>
 
 namespace Sora {
 
@@ -330,21 +336,19 @@ namespace Sora {
          *
          * @tparam Iface Interface type whose selected methods are reflected and mangled.
          */
-        template<typename Iface>
+        template<typename Iface, bool ConsiderName = false>
         consteval uint128_t AbiDigest() {
-            // Materialise the per-method bytes into a constexpr-friendly std::array so we can feed
-            // FNV-1a's @c std::span<const std::byte> API without reinterpret_cast (which is forbidden
-            // in a constant expression). std::bit_cast<std::byte>(char) is well-defined and constexpr.
+            // Materialise reflected spelling into constexpr-friendly byte buffers so we can feed FNV-1a's
+            // @c std::span<const std::byte> API without reinterpret_cast, which is forbidden in a constant expression.
             Sora::Hashing::Fnv1a128State h;
             template for (constexpr auto m : Detail::kSelectedMethods<Iface>) {
                 constexpr std::string_view mangled = ABI::Itanium::Mangle(m);
-                constexpr auto bytes = []() {
-                    std::array<std::byte, mangled.size()> out{};
-                    for (size_t i = 0; i < mangled.size(); ++i) {
-                        out[i] = std::bit_cast<std::byte>(static_cast<unsigned char>(mangled[i]));
-                    }
-                    return out;
-                }();
+                auto bytes = Sora::Meta::BytesOf(mangled);
+                h.Feed(std::span<const std::byte>{bytes.data(), bytes.size()});
+            }
+            if constexpr (ConsiderName) {
+                constexpr std::string_view name = Sora::Traits::UniqueName<Iface>;
+                auto bytes = Sora::Meta::BytesOf(name);
                 h.Feed(std::span<const std::byte>{bytes.data(), bytes.size()});
             }
             return h.Finalize();
@@ -616,8 +620,9 @@ namespace Sora {
          * @brief Compile-time ABI digest for an interface.
          * @tparam Iface Interface contract type.
          */
-        template<typename Iface>
-        inline constexpr uint128_t AbiDigestOf = [] consteval { return Polymorphism::AbiDigest<Iface>(); }();
+        template<typename Iface, bool ConsiderName = false>
+        inline constexpr uint128_t AbiDigestOf =
+            [] consteval { return Polymorphism::AbiDigest<Iface, ConsiderName>(); }();
 
     } // namespace Traits
 

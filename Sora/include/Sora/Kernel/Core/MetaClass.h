@@ -58,11 +58,8 @@ namespace Sora::Kernel {
                 meta->name = [] consteval {
                     if constexpr (requires { T::kVirtualClassName.view(); }) {
                         return T::kVirtualClassName.view();
-                    } else if constexpr (std::meta::has_identifier(^^T)) {
-                        return Sora::Meta::IdentifierOf(^^T);
-                    } else {
-                        return Sora::Meta::DisplayStringOf(^^T);
                     }
+                    return Sora::Meta::IdentifierOrDisplayStringOf(^^T);
                 }();
 
                 if constexpr (std::same_as<T, BaseUnknown>) {

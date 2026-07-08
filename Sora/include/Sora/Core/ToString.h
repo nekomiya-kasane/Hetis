@@ -26,6 +26,8 @@
 #include "Sora/Core/Traits.h"
 #include "Sora/Core/FixedString.h"
 
+#include "Sora/Core/Traits/TypeTraits.h"
+
 namespace Sora {
 
     namespace $::Serialization {
@@ -215,7 +217,7 @@ namespace Sora {
         /** @brief Return the display name used for reflected field @p M. */
         template<std::meta::info M>
         consteval std::string_view FieldNameOf() {
-            std::string_view name = std::meta::has_identifier(M) ? Meta::IdentifierOf(M) : Meta::DisplayStringOf(M);
+            std::string_view name = Sora::Meta::IdentifierOrDisplayStringOf(M);
             template for (constexpr auto a : std::define_static_array(std::meta::annotations_of(M))) {
                 using A = typename [:std::meta::type_of(a):];
                 if constexpr (requires { A::name; }) {

@@ -144,7 +144,7 @@ namespace Sora::Meta::ABI::MSVC {
          *        outermost-namespace fragment is closest to the trailing `@@`).
          */
         consteval void AppendQualifiedName(std::string& out, std::meta::info t, State& st) {
-            auto chain = ABI::Detail::ScopeChain(t);
+            auto chain = Sora::Meta::ScopeChainOf(t);
             // chain[0] is innermost (the entity itself); MSVC writes innermost first.
             for (auto info : chain) {
                 std::string_view id =
