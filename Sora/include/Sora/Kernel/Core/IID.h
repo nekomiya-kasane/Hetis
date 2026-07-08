@@ -5,8 +5,12 @@
  */
 #pragma once
 
-#include "Sora/Core/Traits/AnnotationTraits.h"
-#include "Sora/Kernel/Core/ClassTypes.h"
+#include <Sora/Core/Traits/AnnotationTraits.h>
+#include <Sora/Core/Hash.h>
+#include <Sora/Core/Polymorphism.h>
+
+#include <Sora/Kernel/Core/ClassTypes.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -15,9 +19,6 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
-
-#include <Sora/Core/Hash.h>
-#include <Sora/Core/Polymorphism.h>
 
 namespace Sora::Kernel {
 
@@ -69,6 +70,8 @@ namespace Sora::Kernel {
         template<typename T>
             requires(std::meta::is_class_type(^^T))
         inline constexpr Iid IidOf = [] consteval {
+            static_assert(!Concept::VirtualObjectClass<T>,
+                          "IidOf: T is a virtual object class, please include VirtualObject.h to get a stable IID.");
             if constexpr (IsTie(Traits::RoleOf<T>)) {
                 return Sora::Kernel::Traits::IidOf<typename Sora::Traits::DirectBaseType<T, 0>>;
             } else {

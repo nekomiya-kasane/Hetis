@@ -1,11 +1,12 @@
 #pragma once
 
-#include "Sora/Core/Traits/AnnotationTraits.h"
-#include "Sora/Core/Traits/ScopeTraits.h"
-#include "Sora/Core/Traits/TypeTraits.h"
-#include "Sora/Core/Traits/InheritanceTraits.h"
-#include "Sora/Core/Traits/TypeTraits.h"
-#include "Sora/Kernel/Core/Traits.h"
+#include <Sora/Core/Traits/AnnotationTraits.h>
+#include <Sora/Core/Traits/ScopeTraits.h>
+#include <Sora/Core/Traits/TypeTraits.h>
+#include <Sora/Core/Traits/InheritanceTraits.h>
+#include <Sora/Core/Traits/TypeTraits.h>
+
+#include <Sora/Kernel/Core/Traits.h>
 
 #include <algorithm>
 #include <concepts>
@@ -151,6 +152,10 @@ namespace Sora::Kernel {
         template<typename T>
         concept TieClass = ComClass<T> && IsTie(Traits::RoleOf<T>) && std::is_default_constructible_v<T>;
 
+        /** @brief Type that can be used as a string-named virtual implementation class. */
+        template<typename T>
+        concept VirtualObjectClass = std::is_base_of_v<BaseUnknown, T> && requires { T::kVirtualClassName.view(); };
+
     } // namespace Concept
 
     namespace $ {
@@ -237,8 +242,7 @@ namespace Sora::Kernel {
         template<std::meta::info CurrentFunction, Concept::ComponentClass Impl>
         consteval std::meta::info TieTargetOfCurrent() {
             constexpr auto interfaceMember = InterfaceMemberOverriddenBy<CurrentFunction>();
-            constexpr auto chain =
-                std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
+            constexpr auto chain = std::define_static_array(Sora::Meta::InheritanceChainOf(std::meta::dealias(^^Impl)));
             template for (constexpr auto type : chain) {
                 template for (constexpr auto member : Sora::Traits::Members<typename [:type:]>) {
                     if constexpr (Sora::Meta::IsSameSignatureMethod(member, interfaceMember)) {

@@ -5,10 +5,10 @@
  */
 #pragma once
 
-#include "Sora/Kernel/Core/IID.h"
-#include "Sora/Kernel/Core/MetaClass.h"
-#include "Sora/Kernel/Core/Traits.h"
-#include "Sora/Core/GetSet.h"
+#include <Sora/Kernel/Core/IID.h>
+#include <Sora/Kernel/Core/MetaClass.h>
+#include <Sora/Kernel/Core/Traits.h>
+#include <Sora/Core/GetSet.h>
 
 #include <atomic>
 #include <bit>

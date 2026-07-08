@@ -56,7 +56,9 @@ namespace Sora::Kernel {
                 meta->type = type;
                 meta->iid = Traits::IidOf<T>;
                 meta->name = [] consteval {
-                    if constexpr (std::meta::has_identifier(^^T)) {
+                    if constexpr (requires { T::kVirtualClassName.view(); }) {
+                        return T::kVirtualClassName.view();
+                    } else if constexpr (std::meta::has_identifier(^^T)) {
                         return Sora::Meta::IdentifierOf(^^T);
                     } else {
                         return Sora::Meta::DisplayStringOf(^^T);

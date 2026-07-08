@@ -2,6 +2,7 @@
 
 #include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
+#include "Sora/Kernel/Core/VirtualObject.h"
 
 #include <cstdint>
 
@@ -81,6 +82,20 @@ namespace Sora::Kernel {
     };
 
     class [[= Sora::Kernel::$::Implementation]] FutureExtensiblePointImpl : public BaseUnknown {
+    public:
+        S_OBJECT
+    };
+
+    using SceneNode = Virtual<"SceneNode">;
+
+    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<SceneNode>{}]]
+    SceneNodeExtension : public BaseUnknown {
+    public:
+        S_OBJECT
+    };
+
+    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<FutureExtensiblePointImpl>{}]]
+    FuturePointExtension : public BaseUnknown {
     public:
         S_OBJECT
     };

@@ -60,6 +60,12 @@ int main() {
     rawTag->GetTag(tag);
     std::cout << "Extension QueryInterface(IPosition*): " << tag << std::endl;
 
+    Position2DExtension* rawPositionExtension = QueryInterface<Position2DExtension>(rawPosition);
+    assert(rawPositionExtension != nullptr);
+    assert(rawPositionExtension == rawTag->BoundTarget());
+    rawPositionExtension->GetTag(tag);
+    std::cout << "Extension QueryInterface(extension provider): " << tag << std::endl;
+
     owningTag->SetTag(7);
     borrowedTag->GetTag(tag);
     std::cout << "Extension QueryInterface(RefPtr): " << tag << std::endl;
@@ -88,11 +94,28 @@ int main() {
 
     auto futurePoint = MakeComPtr<FutureExtensiblePointImpl>();
     assert(futurePoint->GetMeta()->GetIid() == Traits::IidOf<FutureExtensiblePointImpl>);
+    FuturePointExtension* rawFutureExtension = QueryInterface<FuturePointExtension>(futurePoint.Get());
+    auto owningFutureExtension = QueryInterface<FuturePointExtension>(futurePoint);
+    assert(rawFutureExtension != nullptr);
+    assert(owningFutureExtension);
+    assert(rawFutureExtension == owningFutureExtension.Get());
+    assert(rawFutureExtension->Extendee() == futurePoint.Get());
+    std::cout << "Extension QueryInterface(extension type): "
+              << rawFutureExtension->GetClassName() << std::endl;
+
+    auto sceneNode = MakeComPtr<SceneNode>();
+    auto sceneExtension = QueryInterface<SceneNodeExtension>(sceneNode);
+    assert(sceneNode->GetClassName() == std::string_view{"SceneNode"});
+    assert(sceneNode->GetMeta()->GetClassName() == std::string_view{"SceneNode"});
+    assert(sceneExtension);
+    assert(sceneExtension->Extendee() == sceneNode.Get());
+    std::cout << "VirtualObject QueryInterface(extension type): "
+              << sceneExtension->Extendee()->GetClassName() << std::endl;
 
     auto tagMeta = MetaClass::Query<ITag>();
-    assert(tagMeta->Implementors().contains(Traits::IidOf<Position2DExtension>));
-    assert(tagMeta->Implementors().contains(Traits::IidOf<PointTagExtension>));
-    std::cout << "Registered ITag implementors: " << tagMeta->Implementors().size() << std::endl;
+    assert(tagMeta->Protensions().contains(Traits::IidOf<Position2DExtension>));
+    assert(tagMeta->Protensions().contains(Traits::IidOf<PointTagExtension>));
+    std::cout << "Registered ITag protensions: " << tagMeta->Protensions().size() << std::endl;
 
     auto meta = pointImpl->GetMeta();
     std::println("Class Name: {}", meta->GetClassName());
