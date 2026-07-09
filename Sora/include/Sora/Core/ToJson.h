@@ -251,7 +251,7 @@ namespace Sora {
                 }
             }
             template for (constexpr auto m : Traits::DataMembers<T>) {
-                if constexpr (!$::Has<$::Ignore>(m)) {
+                if constexpr (!$::Has<$::Serialization::Ignore>(m)) {
                     if (!whitelist || $::Has<$::Serialization::Key>(m)) {
                         selected.push_back(m);
                     }
