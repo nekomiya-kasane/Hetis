@@ -28,7 +28,7 @@ public:                                                                         
     template<size_t I = 0>                                                                                             \
     using Base = Sora::Traits::DirectBaseType<Self, I>;                                                                \
                                                                                                                        \
-    [[nodiscard]] Iid GetIid() const noexcept override {                                                               \
+    [[nodiscard]] Sora::Kernel::Iid GetIid() const noexcept override {                                               \
         return Sora::Kernel::Traits::IidOf<Self>;                                                                      \
     }                                                                                                                  \
                                                                                                                        \
