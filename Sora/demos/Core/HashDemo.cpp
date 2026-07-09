@@ -9,7 +9,7 @@ struct MyStruct {
     int a;
     float b;
     char c;
-    [[=Sora::$::Ignore{}]] int ignoredField;
+    [[=Sora::$::Hashing::Ignore{}]] int ignoredField;
     struct MySubStruct {
         int x;
         int y;

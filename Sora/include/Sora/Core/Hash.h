@@ -581,10 +581,14 @@ namespace Sora::Hashing {
 
         [[nodiscard]] static constexpr Fnv1a32State Seed() noexcept { return {}; }
 
+        constexpr void FeedByte(std::byte byte) noexcept {
+            state ^= static_cast<ResultType>(byte);
+            state *= Fnv1a32::kPrime;
+        }
+
         constexpr void Feed(std::span<const std::byte> chunk) noexcept {
-            for (std::byte b : chunk) {
-                state ^= static_cast<ResultType>(b);
-                state *= Fnv1a32::kPrime;
+            for (std::byte byte : chunk) {
+                FeedByte(byte);
             }
         }
 
@@ -600,10 +604,14 @@ namespace Sora::Hashing {
 
         [[nodiscard]] static constexpr Fnv1a64State Seed() noexcept { return {}; }
 
+        constexpr void FeedByte(std::byte byte) noexcept {
+            state ^= static_cast<ResultType>(byte);
+            state *= Fnv1a64::kPrime;
+        }
+
         constexpr void Feed(std::span<const std::byte> chunk) noexcept {
-            for (std::byte b : chunk) {
-                state ^= static_cast<ResultType>(b);
-                state *= Fnv1a64::kPrime;
+            for (std::byte byte : chunk) {
+                FeedByte(byte);
             }
         }
 
@@ -618,6 +626,8 @@ namespace Sora::Hashing {
         Fnv1a64State inner{};
 
         [[nodiscard]] static constexpr Murmur64State Seed() noexcept { return {}; }
+
+        constexpr void FeedByte(std::byte byte) noexcept { inner.FeedByte(byte); }
 
         constexpr void Feed(std::span<const std::byte> chunk) noexcept { inner.Feed(chunk); }
 
@@ -641,10 +651,14 @@ namespace Sora::Hashing {
 
         [[nodiscard]] static constexpr Fnv1a128State Seed() noexcept { return {}; }
 
+        constexpr void FeedByte(std::byte byte) noexcept {
+            state ^= static_cast<ResultType>(static_cast<uint8_t>(byte));
+            state *= Fnv1a128::kPrime;
+        }
+
         constexpr void Feed(std::span<const std::byte> chunk) noexcept {
-            for (std::byte b : chunk) {
-                state ^= static_cast<ResultType>(static_cast<uint8_t>(b));
-                state *= Fnv1a128::kPrime;
+            for (std::byte byte : chunk) {
+                FeedByte(byte);
             }
         }
 
@@ -674,6 +688,60 @@ namespace Sora::Hashing {
             constexpr U k = 0x9e37;
             return seed ^ (value + k + (seed << 3) + (seed >> 1));
         }
+    }
+
+    /** @brief One-byte type that can be fed into byte-range hash helpers without reinterpret casts. */
+    template<typename T>
+    concept ByteLike = std::same_as<std::remove_cv_t<T>, std::byte> ||
+                       (std::integral<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1);
+
+    /** @brief Hash a byte-like range with @p State, preserving constexpr legality for non-@c std::byte storage. */
+    template<StatefulAlgo State = Fnv1a64State, ByteLike Byte>
+    [[nodiscard]] constexpr typename State::ResultType HashByteRange(std::span<const Byte> bytes) noexcept {
+        auto state = State::Seed();
+        if constexpr (std::same_as<std::remove_cv_t<Byte>, std::byte>) {
+            state.Feed(bytes);
+        } else {
+            for (Byte byte : bytes) {
+                const std::byte b{static_cast<unsigned char>(byte)};
+                if constexpr (requires { state.FeedByte(b); }) {
+                    state.FeedByte(b);
+                } else {
+                    state.Feed(std::span<const std::byte>{&b, 1});
+                }
+            }
+        }
+        return state.Finalize();
+    }
+
+    /** @brief Hash a byte-like range while treating @p zeroSize bytes from @p zeroOffset as zero. */
+    template<StatefulAlgo State = Fnv1a64State, ByteLike Byte>
+    [[nodiscard]] constexpr typename State::ResultType HashByteRangeWithZeroRange(std::span<const Byte> bytes,
+                                                                                  size_t zeroOffset,
+                                                                                  size_t zeroSize) noexcept {
+        auto state = State::Seed();
+        const size_t boundedOffset = std::min(zeroOffset, bytes.size());
+        const size_t boundedSize = std::min(zeroSize, bytes.size() - boundedOffset);
+        const size_t zeroEnd = boundedOffset + boundedSize;
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            const bool zero = i >= boundedOffset && i < zeroEnd;
+            const std::byte b = [&] {
+                if (zero) {
+                    return std::byte{0};
+                }
+                if constexpr (std::same_as<std::remove_cv_t<Byte>, std::byte>) {
+                    return bytes[i];
+                } else {
+                    return std::byte{static_cast<unsigned char>(bytes[i])};
+                }
+            }();
+            if constexpr (requires { state.FeedByte(b); }) {
+                state.FeedByte(b);
+            } else {
+                state.Feed(std::span<const std::byte>{&b, 1});
+            }
+        }
+        return state.Finalize();
     }
 
     // =========================================================================
