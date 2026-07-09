@@ -610,7 +610,7 @@ namespace Sora {
         }
 
         /** @brief Append unique dealiased element-type reflections from @p list to @p out. */
-        consteval void AppendTypeList(std::vector<std::meta::info>& out, std::meta::info list) {
+        consteval void AppendTypeListUnique(std::vector<std::meta::info>& out, std::meta::info list) {
             for (auto type : TypeListTypesOf(list)) {
                 if (!std::ranges::contains(out, type)) {
                     out.push_back(type);
@@ -620,8 +620,8 @@ namespace Sora {
 
         /** @brief Append unique dealiased element-type reflections from @p List to @p out. */
         template<typename List>
-        consteval void AppendTypeList(std::vector<std::meta::info>& out) {
-            AppendTypeList(out, std::meta::dealias(^^List));
+        consteval void AppendTypeListUnique(std::vector<std::meta::info>& out) {
+            AppendTypeListUnique(out, std::meta::dealias(^^List));
         }
 
     } // namespace Meta
