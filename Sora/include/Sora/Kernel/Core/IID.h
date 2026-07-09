@@ -8,6 +8,7 @@
 #include <Sora/Core/Traits/AnnotationTraits.h>
 #include <Sora/Core/Hash.h>
 #include <Sora/Core/Polymorphism.h>
+#include <Sora/Core/Traits/ScopeTraits.h>
 
 #include <Sora/Kernel/Core/ClassTypes.h>
 
@@ -16,6 +17,7 @@
 #include <initializer_list>
 #include <meta>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -68,15 +70,33 @@ namespace Sora::Kernel {
     namespace Traits {
 
         template<typename T>
+        consteval Iid ReflectedClassIidOf() {
+            Sora::Hashing::Fnv1a128State h;
+            constexpr std::string_view name = Sora::Meta::ScopeChainIdentifierOf(^^T, "::");
+            auto bytes = Sora::Meta::BytesOf(name);
+            h.Feed(std::span<const std::byte>{bytes.data(), bytes.size()});
+            return Iid{h.Finalize()};
+        }
+
+        template<typename T>
             requires(std::meta::is_class_type(^^T))
         inline constexpr Iid IidOf = [] consteval {
             static_assert(!Concept::VirtualObjectClass<T>,
                           "IidOf: T is a virtual object class, please include VirtualObject.h to get a stable IID.");
             if constexpr (IsTie(Traits::RoleOf<T>)) {
                 return Sora::Kernel::Traits::IidOf<typename Sora::Traits::DirectBaseType<T, 0>>;
+            } else if constexpr (IsInterface(Traits::RoleOf<T>)) {
+                auto iid = Sora::$::GetSingleOptional<$::IidOverride>(^^T);
+                if (iid.has_value()) {
+                    return iid.value().value;
+                }
+                return Iid{Sora::Traits::AbiDigestOf<T>};
             } else {
                 auto iid = Sora::$::GetSingleOptional<$::IidOverride>(^^T);
-                return iid.has_value() ? iid.value().value : Iid{Sora::Traits::AbiDigestOf<T>};
+                if (iid.has_value()) {
+                    return iid.value().value;
+                }
+                return ReflectedClassIidOf<T>();
             }
         }();
 

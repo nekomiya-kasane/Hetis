@@ -156,25 +156,44 @@ namespace Sora {
     namespace Meta {
 
         /**
-         * @brief Return the single-inheritance chain containing @p type.
+         * @brief Return the single-inheritance chain containing @p type until @p exclusiveBase is reached.
          * @param[in] type Reflection of a class type.
-         * @return Vector containing @p type followed by each direct base in chain order.
-         * @throws std::logic_error during constant evaluation when a type in the chain has multiple direct bases.
+         * @param[in] exclusiveBase Optional base type excluded from the returned chain and never introspected.
+         * @return Vector containing @p type followed by each direct base before @p exclusiveBase.
+         * @throws Compile-time diagnostic when @p type is not a class or a type in the chain has multiple direct bases.
          */
-        consteval std::vector<std::meta::info> InheritanceChainOf(std::meta::info type) {
+        consteval std::vector<std::meta::info> InheritanceChainUntil(std::meta::info type,
+                                                                     std::meta::info exclusiveBase = {}) {
+            type = std::meta::dealias(type);
+            exclusiveBase = exclusiveBase == std::meta::info{} ? exclusiveBase : std::meta::dealias(exclusiveBase);
+
             std::vector<std::meta::info> chain;
-            while (true) {
+            while (type != exclusiveBase) {
+                if (!std::meta::is_class_type(type)) {
+                    throw std::define_static_string("Meta::InheritanceChainUntil: '" +
+                                                    std::string{std::meta::display_string_of(type)} +
+                                                    "' is not a class-type reflection.");
+                }
+
                 chain.push_back(type);
-                auto bases = DirectBaseTypesOf(type);
+                auto bases = std::meta::bases_of(type, std::meta::access_context::unchecked()) |
+                             std::views::transform(std::meta::type_of) | std::views::transform(std::meta::dealias) |
+                             std::ranges::to<std::vector>();
                 if (bases.empty()) {
                     break;
                 }
                 if (bases.size() > 1) {
-                    throw std::logic_error("Type does not have a single inheritance chain");
+                    throw std::define_static_string("Meta::InheritanceChainUntil: '" +
+                                                    std::string{std::meta::display_string_of(type)} +
+                                                    "' has multiple direct bases.");
                 }
-                type = bases[0];
+                type = bases.front();
             }
             return chain;
+        }
+
+        consteval std::vector<std::meta::info> InheritanceChainOf(std::meta::info type) {
+            return InheritanceChainUntil(type);
         }
 
         consteval std::string_view InheritanceChainIdentifierOf(std::meta::info info,
@@ -203,6 +222,22 @@ namespace Sora {
             }
             auto ret = std::define_static_array(desc);
             return std::string_view{ret.data(), ret.size()};
+        }
+
+        consteval std::meta::info FindMemberInInheritanceChainOf(std::meta::info type, std::string_view name) {
+            auto members = Sora::Meta::InheritanceChainOf(type) | std::views::transform([](std::meta::info scope) {
+                               return std::meta::members_of(scope, std::meta::access_context::unchecked());
+                           }) |
+                           std::views::join;
+
+            auto found = std::ranges::find_if(members, [name](std::meta::info member) {
+                return (std::meta::has_identifier(member) && std::meta::identifier_of(member) == name) ||
+                       std::meta::display_string_of(member) == name;
+            });
+            if (found != std::ranges::end(members)) {
+                return std::meta::dealias(*found);
+            }
+            return {};
         }
 
     } // namespace Meta

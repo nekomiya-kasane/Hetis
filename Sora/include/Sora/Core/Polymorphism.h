@@ -47,8 +47,10 @@
 #include "Sora/Core/Traits/InheritanceTraits.h"
 #include "Sora/Core/Traits/NamingTraits.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
+#include <format>
 #include <meta>
 #include <span>
 #include <string_view>
@@ -126,9 +128,8 @@ namespace Sora {
                     // Override filter: skip a base-class method whose identifier matches one already
                     // selected from a more-derived class. The first occurrence wins because the walk
                     // is derived-first.
-                    const auto name = Meta::IdentifierOf(m);
-                    for (auto kept : out) {
-                        if (Meta::IdentifierOf(kept) == name) {
+                    for (const auto name = Sora::Meta::IdentifierOf(m); auto kept : out) {
+                        if (Sora::Meta::IdentifierOf(kept) == name) {
                             return;
                         }
                     }
@@ -151,9 +152,9 @@ namespace Sora {
             consteval std::meta::info ThisPointerType(std::meta::info impl, std::meta::info m) {
                 if (!std::meta::is_class_type(impl)) {
                     throw std::define_static_string(
-                        "Polymorphism::ThisPointerType: implementation type '" +
-                        std::string{std::meta::display_string_of(impl)} +
-                        "' is not a class type; only class types can host the synthesised vtable thunks.");
+                        std::format("Polymorphism::ThisPointerType: implementation type '{}' is not a class type; "
+                                    "only class types can host the synthesised vtable thunks.",
+                                    Sora::Meta::DisplayStringOf(impl)));
                 }
                 auto t = impl;
                 if (std::meta::is_const(m)) {
@@ -172,13 +173,12 @@ namespace Sora {
             consteval std::vector<std::meta::info> ParamTypes(std::meta::info f) {
                 if (!std::meta::is_function(f)) {
                     throw std::define_static_string(
-                        "Polymorphism::ParamTypes: '" + std::string{std::meta::display_string_of(f)} +
-                        "' is not a function reflection; only methods participate in vtable synthesis.");
+                        std::format("Polymorphism::ParamTypes: '{}' is not a function reflection; only methods "
+                                    "participate in vtable synthesis.",
+                                    Sora::Meta::DisplayStringOf(f)));
                 }
-                std::vector<std::meta::info> out;
-                for (auto p : Meta::ParamsOf(f)) {
-                    out.push_back(std::meta::type_of(p));
-                }
+                std::vector<std::meta::info> out = Sora::Meta::ParamsOf(f) | std::views::transform(std::meta::type_of) |
+                                                   std::ranges::to<std::vector>();
                 return out;
             }
 
@@ -193,9 +193,7 @@ namespace Sora {
                 args.reserve(pts.size() + 2);
                 args.push_back(std::meta::return_type_of(m));
                 args.push_back(ThisPointerType(impl, m));
-                for (auto p : pts) {
-                    args.push_back(p);
-                }
+                args.append_range(pts);
                 return std::meta::substitute(^^Sora::Traits::FunctionPointer, args);
             }
 
@@ -225,20 +223,19 @@ namespace Sora {
              */
             consteval std::meta::info FindCompatible(std::meta::info classType, std::meta::info ifaceMember) {
                 if (!std::meta::is_class_type(classType)) {
-                    throw std::define_static_string("Polymorphism::FindCompatible: implementation argument '" +
-                                                    std::string{std::meta::display_string_of(classType)} +
-                                                    "' is not a class type.");
+                    throw std::define_static_string(
+                        std::format("Polymorphism::FindCompatible: implementation argument '{}' is not a class type.",
+                                    Sora::Meta::DisplayStringOf(classType)));
                 }
                 if (!std::meta::is_function(ifaceMember)) {
-                    throw std::define_static_string("Polymorphism::FindCompatible: interface member '" +
-                                                    std::string{std::meta::display_string_of(ifaceMember)} +
-                                                    "' is not a callable reflection.");
+                    throw std::define_static_string(
+                        std::format("Polymorphism::FindCompatible: interface member '{}' is not a callable reflection.",
+                                    Sora::Meta::DisplayStringOf(ifaceMember)));
                 }
                 const auto name = Meta::IdentifierOf(ifaceMember);
                 const auto wantRet = std::meta::return_type_of(ifaceMember);
                 const auto wantParams = ParamTypes(ifaceMember);
-                const bool wantC = std::meta::is_const(ifaceMember);
-                const bool wantV = std::meta::is_volatile(ifaceMember);
+                const bool wantC = std::meta::is_const(ifaceMember), wantV = std::meta::is_volatile(ifaceMember);
                 // Walk the impl's full base-class hierarchy in derived-first order so that, when a
                 // derived class overrides an inherited base method, we lock onto the derived entity
                 // (the dispatch we install in the vtable) rather than silently picking the base.
@@ -259,14 +256,8 @@ namespace Sora {
                     if (std::meta::return_type_of(m) != wantRet) {
                         return;
                     }
-                    auto pts = ParamTypes(m);
-                    if (pts.size() != wantParams.size()) {
+                    if (!std::ranges::equal(ParamTypes(m), wantParams)) {
                         return;
-                    }
-                    for (size_t i = 0; i < pts.size(); ++i) {
-                        if (pts[i] != wantParams[i]) {
-                            return;
-                        }
                     }
                     match = m;
                 });
@@ -278,11 +269,8 @@ namespace Sora {
              */
             template<typename Iface, typename Impl>
             consteval bool AllMethodsMatch() {
-                for (auto m : SelectMethods<Iface>()) {
-                    if (FindCompatible(^^Impl, m) == std::meta::info{}) {
-                        return false;
-                    }
-                }
+                return std::ranges::all_of(SelectMethods<Iface>(),
+                                           [&](auto m) { return FindCompatible(^^Impl, m) != std::meta::info{}; });
                 return true;
             }
 
@@ -299,9 +287,9 @@ namespace Sora {
             template<typename Iface>
             consteval std::string_view FindOverloadCollision() {
                 const auto methods = SelectMethods<Iface>();
-                for (size_t i = 0; i < methods.size(); ++i) {
+                for (size_t i : std::views::iota(0, methods.size())) {
                     const auto name = Meta::IdentifierOf(methods[i]);
-                    for (size_t j = i + 1; j < methods.size(); ++j) {
+                    for (size_t j : std::views::iota(i + 1, methods.size())) {
                         if (Meta::IdentifierOf(methods[j]) == name) {
                             return name;
                         }
@@ -396,11 +384,11 @@ namespace Sora {
             constexpr auto collision = Detail::FindOverloadCollision<Iface>();
             if constexpr (!collision.empty()) {
                 throw std::define_static_string(
-                    "Polymorphism::Define: interface '" + std::string{std::meta::display_string_of(^^Iface)} +
-                    "' has overloaded selected method '" + std::string{collision} +
-                    "'. The current name-keyed vtable cannot disambiguate overload sets — rename one "
-                    "of the overloads or skip it with [[=Anno::Skip{}]]. (Tracked TODO: signature-"
-                    "mangled slots + PMF-keyed Adapter::invoke<Pmf>().)");
+                    std::format("Polymorphism::Define: interface '{}' has overloaded selected method '{}'. "
+                                "The current name-keyed vtable cannot disambiguate overload sets — rename one "
+                                "of the overloads or skip it with [[=Anno::Skip{}]]. (Tracked TODO: signature-"
+                                "mangled slots + PMF-keyed Adapter::invoke<Pmf>().)",
+                                Sora::Meta::DisplayStringOf(^^Iface), collision));
             }
             std::meta::define_aggregate(^^Vtable<Iface, Impl>, Detail::VtableSpecs<Iface, Impl>());
         }
@@ -493,7 +481,7 @@ namespace Sora {
                 }
                 throw std::define_static_string(
                     "Polymorphism: vtable slot '" + std::string{name} + "' on interface '" +
-                    std::string{std::meta::display_string_of(^^Iface)} +
+                    std::string{Sora::Meta::DisplayStringOf(^^Iface)} +
                     "' has no matching selected interface method (slot identifier and selected-methods "
                     "set are out of sync; likely a stale Define<Iface, Impl>() call from a previous "
                     "version of the interface).");
@@ -519,16 +507,14 @@ namespace Sora {
                     constexpr auto ifaceMember = FindIfaceMemberByName<Iface>(Meta::IdentifierOf(slot));
                     constexpr auto target = FindCompatible(^^Impl, ifaceMember);
                     if constexpr (target == std::meta::info{}) {
-                        throw std::define_static_string(
-                            "Polymorphism::BuildVtable: implementation '" +
-                            std::string{std::meta::display_string_of(^^Impl)} +
-                            "' has no method matching interface slot '" + std::string{Meta::IdentifierOf(ifaceMember)} +
-                            "' on '" + std::string{std::meta::display_string_of(^^Iface)} +
-                            "'; required signature is '" +
-                            std::string{std::meta::display_string_of(std::meta::type_of(ifaceMember))} +
-                            "'. Add a matching method (same identifier, parameter types, cv-qualifiers, "
-                            "and return type) to the implementation, or skip the interface method with "
-                            "[[=Skip{}]].");
+                        throw std::define_static_string(std::format(
+                            "Polymorphism::BuildVtable: implementation '{}' has no method matching "
+                            "interface slot '{}' on '{}'; required signature is '{}'. Add a matching method "
+                            "(same identifier, parameter types, cv-qualifiers, and return type) to the "
+                            "implementation, or skip the interface method with [[=Skip{{}}]].",
+                            Sora::Meta::DisplayStringOf(^^Impl), Meta::IdentifierOf(ifaceMember),
+                            Sora::Meta::DisplayStringOf(^^Iface),
+                            Sora::Meta::DisplayStringOf(std::meta::type_of(ifaceMember))));
                     }
                     using SelfRaw = typename [:std::meta::remove_pointer(ThisPointerType(^^Impl, ifaceMember)):];
                     using R = typename [:std::meta::return_type_of(ifaceMember):];

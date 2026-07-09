@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 #include <ranges>
 #include <algorithm>
 
@@ -47,6 +48,15 @@ namespace Sora {
          */
         consteval auto IdentifierOf(std::meta::info iMeta) {
             return std::meta::identifier_of(iMeta);
+        }
+
+        /**
+         * @brief Return the identifier if available, otherwise the display string for a reflected declaration.
+         * @param[in] iMeta Reflected declaration whose identifier or display string is requested.
+         * @return Identifier or display string reported by the active reflection implementation.
+         */
+        consteval auto IdentifierOrDisplayStringOf(std::meta::info iMeta) {
+            return std::meta::has_identifier(iMeta) ? IdentifierOf(iMeta) : DisplayStringOf(iMeta);
         }
 
         /**
@@ -97,6 +107,20 @@ namespace Sora {
         }
 
         /**
+         * @brief Check if a type is a specialization of a given template.
+         * @tparam Template The template to check against.
+         * @param[in] type The type to check.
+         * @return `true` if `type` is a specialization of `Template`, `false` otherwise.
+         */
+        template<template<typename...> class Template>
+        consteval bool IsSpecializationOf(std::meta::info type) {
+            if (!std::meta::is_class_type(type) || !std::meta::has_template_arguments(type)) {
+                return false;
+            }
+            return std::meta::template_of(type) == ^^Template;
+        }
+
+        /**
          * @brief @c true if @p m reflects a non-static, non-special member function. Filters out constructors,
          * destructors, static member functions, and data members.
          */
@@ -105,7 +129,9 @@ namespace Sora {
                    !std::meta::is_destructor(m);
         }
 
-        /** @brief Return whether @p candidate has the same name and full function signature as @p model. */
+        /**
+         * @brief Return whether @p candidate has the same name and full function signature as @p model.
+         */
         consteval bool IsSameSignatureMethod(std::meta::info candidate, std::meta::info model) {
             if (!Sora::Meta::IsRegularMethod(candidate) || !std::meta::has_identifier(candidate)) {
                 return false;
@@ -126,6 +152,14 @@ namespace Sora {
             const auto candidateParams = Sora::Meta::ParamTypesOf(candidate);
             const auto modelParams = Sora::Meta::ParamTypesOf(model);
             return candidateParams.size() == modelParams.size() && std::ranges::equal(candidateParams, modelParams);
+        }
+
+        /** @brief Materialise @p text as byte values consumable by constexpr hash states. */
+        consteval std::vector<std::byte> BytesOf(std::string_view text) {
+            return text | std::views::transform([](char c) {
+                       return std::bit_cast<std::byte>(static_cast<unsigned char>(c));
+                   }) |
+                   std::ranges::to<std::vector>();
         }
 
     } // namespace Meta
@@ -219,6 +253,14 @@ namespace Sora {
         template<typename... Ts>
         struct TypeList {
             static constexpr size_t size = sizeof...(Ts); /**< Number of elements. */
+
+            /** @brief Return a list with @p Us appended without duplicate filtering. */
+            template<typename... Us>
+            [[nodiscard]] consteval auto Append() const noexcept;
+
+            /** @brief Return a list with @p Us appended and first-occurrence uniqueness preserved. */
+            template<typename... Us>
+            [[nodiscard]] consteval auto AppendUnique() const noexcept;
         };
 
         /** @brief Number of elements in @p L. */
@@ -245,12 +287,7 @@ namespace Sora {
             template<typename... Ls>
             consteval std::meta::info ConcatImpl() {
                 std::vector<std::meta::info> types;
-                auto collect = [&](std::meta::info listType) {
-                    for (auto arg : std::meta::template_arguments_of(listType)) {
-                        types.push_back(arg);
-                    }
-                };
-                (collect(^^Ls), ...);
+                (types.append_range(std::meta::template_arguments_of(^^Ls)), ...);
                 return std::meta::substitute(^^TypeList, types);
             }
 
@@ -331,9 +368,8 @@ namespace Sora {
             template<typename T>
             consteval std::meta::info TypeListReflOf() {
                 std::vector<std::meta::info> types;
-                for (auto m : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked())) {
-                    types.push_back(std::meta::type_of(m));
-                }
+                types.append_range(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()) |
+                                   std::views::transform(std::meta::type_of));
                 return std::meta::substitute(^^TypeList, types);
             }
 
@@ -491,6 +527,20 @@ namespace Sora {
         template<typename L>
         using Unique = typename Detail::UniqueT<L>::type;
 
+        template<typename... Ts>
+        template<typename... Us>
+        consteval auto TypeList<Ts...>::Append() const noexcept {
+            return TypeList<Ts..., std::remove_cvref_t<Us>...>{};
+        }
+
+        template<typename... Ts>
+        template<typename... Us>
+        consteval auto TypeList<Ts...>::AppendUnique() const noexcept {
+            using Added = TypeList<std::remove_cvref_t<Us>...>;
+            using Next = Unique<Concat<TypeList<Ts...>, Added>>;
+            return Next{};
+        }
+
         /** @brief `true` if `Pred<T>::value` holds for **every** element of @p L
          *         (vacuously `true` for an empty list).
          */
@@ -516,5 +566,41 @@ namespace Sora {
         /** @} */
 
     } // namespace Traits
+
+    namespace Meta {
+
+        /** @brief Return whether @p info reflects a @ref Sora::Traits::TypeList specialization. */
+        consteval bool IsTypeList(std::meta::info info) {
+            return IsSpecializationOf<Sora::Traits::TypeList>(std::meta::dealias(info));
+        }
+
+        /** @brief Return the dealiased element-type reflections stored in a reflected @ref Sora::Traits::TypeList. */
+        consteval std::vector<std::meta::info> TypeListTypesOf(std::meta::info list) {
+            list = std::meta::dealias(list);
+            if (!IsTypeList(list)) {
+                throw std::define_static_string("Meta::TypeListTypesOf: '" +
+                                                std::string{std::meta::display_string_of(list)} +
+                                                "' is not a Sora::Traits::TypeList specialization.");
+            }
+            return std::meta::template_arguments_of(list) | std::views::transform(std::meta::dealias) |
+                   std::ranges::to<std::vector>();
+        }
+
+        /** @brief Append unique dealiased element-type reflections from @p list to @p out. */
+        consteval void AppendTypeList(std::vector<std::meta::info>& out, std::meta::info list) {
+            for (auto type : TypeListTypesOf(list)) {
+                if (!std::ranges::contains(out, type)) {
+                    out.push_back(type);
+                }
+            }
+        }
+
+        /** @brief Append unique dealiased element-type reflections from @p List to @p out. */
+        template<typename List>
+        consteval void AppendTypeList(std::vector<std::meta::info>& out) {
+            AppendTypeList(out, std::meta::dealias(^^List));
+        }
+
+    } // namespace Meta
 
 } // namespace Sora

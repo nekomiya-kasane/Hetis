@@ -133,6 +133,33 @@ namespace Sora {
             return std::define_static_array(std::meta::members_of(scope, context));
         }
 
+        /**
+         * @brief Return a filtered view of direct members for a given scope by name.
+         * @param[in] scope Reflected declaration or type whose members are requested.
+         * @param[in] name Name of the member to find.
+         * @return Filtered view of direct members matching the given name.
+         */
+        consteval auto FindDirectMembersOf(std::meta::info scope, std::string_view name) {
+            return Sora::Meta::MembersOf(scope) | std::views::filter([name](std::meta::info member) {
+                       return std::meta::has_identifier(member) && std::meta::identifier_of(member) == name;
+                   });
+        }
+
+        /**
+         * @brief Return the first direct member for a given scope by name.
+         * @param[in] scope Reflected declaration or type whose members are requested.
+         * @param[in] name Name of the member to find.
+         * @return First direct member matching the given name, or an empty reflection if not found.
+         */
+        consteval std::meta::info FindDirectTypeMemberOf(std::meta::info type, std::string_view name) {
+            auto members = Sora::Meta::MembersOf(type);
+            auto found = std::ranges::find_if(members, [name](std::meta::info member) {
+                return std::meta::has_identifier(member) && std::meta::identifier_of(member) == name &&
+                       std::meta::is_type(member);
+            });
+            return found == std::ranges::end(members) ? std::meta::info{} : std::meta::dealias(*found);
+        }
+
     } // namespace Meta
 
     namespace Traits {

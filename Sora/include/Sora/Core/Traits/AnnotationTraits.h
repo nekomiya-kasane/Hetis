@@ -397,18 +397,6 @@ namespace Sora {
 
     } // namespace Concept
 
-    namespace Meta {
-
-        template<template<typename...> class Template>
-        consteval bool IsSpecializationOf(std::meta::info type) {
-            if (!std::meta::is_class_type(type) || !std::meta::has_template_arguments(type)) {
-                return false;
-            }
-            return std::meta::template_of(type) == ^^Template;
-        }
-
-    } // namespace Meta
-
 } // namespace Sora
 
 namespace $ {
