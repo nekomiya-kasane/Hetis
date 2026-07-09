@@ -6,7 +6,8 @@
 namespace Sora::Kernel {
 
     EventHub::EventHub(BaseUnknown& owner) noexcept
-        : owner_(owner.Nucleus()), ownerWeak_(owner_->GetComponentWeakRef()),
+        : owner_(owner.Nucleus()),
+          ownerWeak_(owner_->GetComponentWeakRef()),
           subscriptions_(std::make_shared<Detail::SubscriptionSnapshot>()),
           traces_(std::make_shared<Detail::TraceSnapshot>()) {}
 
@@ -14,7 +15,7 @@ namespace Sora::Kernel {
         CancelAll();
     }
 
-    EventSubscription EventHub::AddSubscription(Detail::SubscriptionRecord record) {
+    EventLink EventHub::AddSubscription(Detail::SubscriptionRecord record) {
         record.id = nextSubscription_.fetch_add(1, std::memory_order_relaxed) + 1;
         record.order = record.id;
         auto state = record.state;
@@ -33,7 +34,7 @@ namespace Sora::Kernel {
             subscriptions_ = std::move(next);
         }
 
-        return EventSubscription{std::move(state)};
+        return EventLink{std::move(state)};
     }
 
     EventTraceHook EventHub::AddTrace(Detail::TraceRecord record) {
@@ -46,9 +47,8 @@ namespace Sora::Kernel {
             std::scoped_lock lock(mutex_);
             auto next = std::make_shared<Detail::TraceSnapshot>(*traces_);
             next->records.push_back(std::move(stored));
-            std::ranges::stable_sort(next->records, [](const auto& lhs, const auto& rhs) noexcept {
-                return lhs->order < rhs->order;
-            });
+            std::ranges::stable_sort(next->records,
+                                     [](const auto& lhs, const auto& rhs) noexcept { return lhs->order < rhs->order; });
             traces_ = std::move(next);
         }
 
@@ -63,6 +63,13 @@ namespace Sora::Kernel {
     std::shared_ptr<const Detail::TraceSnapshot> EventHub::Traces() const {
         std::scoped_lock lock(mutex_);
         return traces_;
+    }
+
+    void EventHub::AttachInbound(std::weak_ptr<Detail::SubscriptionState> state) {
+        std::scoped_lock lock(mutex_);
+        std::erase_if(inbound_,
+                      [](const std::weak_ptr<Detail::SubscriptionState>& relation) { return relation.expired(); });
+        inbound_.push_back(std::move(state));
     }
 
     void EventHub::Trace(const EventTrace& trace) const {
@@ -87,6 +94,14 @@ namespace Sora::Kernel {
                 subscription->state->active.store(false, std::memory_order_release);
             }
         }
+        std::erase_if(inbound_, [](const std::weak_ptr<Detail::SubscriptionState>& relation) {
+            auto state = relation.lock();
+            if (!state) {
+                return true;
+            }
+            state->active.store(false, std::memory_order_release);
+            return false;
+        });
         for (const auto& trace : traces_->records) {
             if (trace) {
                 trace->state->active.store(false, std::memory_order_release);
@@ -111,13 +126,11 @@ namespace Sora::Kernel {
         assert(owner != nullptr);
 
         std::scoped_lock lock(gEventHubRegistryMutex);
-        std::erase_if(gEventHubRegistry, [](const EventHubRegistryEntry& entry) {
-            return !entry.hub || !entry.hub->OwnerAlive();
-        });
+        std::erase_if(gEventHubRegistry,
+                      [](const EventHubRegistryEntry& entry) { return !entry.hub || !entry.hub->OwnerAlive(); });
 
-        const auto found = std::ranges::find_if(gEventHubRegistry, [owner](const EventHubRegistryEntry& entry) {
-            return entry.owner == owner;
-        });
+        const auto found = std::ranges::find_if(
+            gEventHubRegistry, [owner](const EventHubRegistryEntry& entry) { return entry.owner == owner; });
         if (found != gEventHubRegistry.end()) {
             return *found->hub;
         }

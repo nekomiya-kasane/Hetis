@@ -36,9 +36,10 @@ namespace Sora::Kernel {
 
         struct BaseEvent {};
 
-        struct AnyEvent : BaseEvent {};
-
     } // namespace Event
+
+    /** @brief Type-list sentinel declaring that a class emits or accepts every concrete event payload. */
+    struct AllEvents {};
 
     namespace $ {
 
@@ -63,6 +64,9 @@ namespace Sora::Kernel {
 
         consteval bool IsEventType(std::meta::info info) {
             info = std::meta::dealias(info);
+            if (info == ^^Sora::Kernel::AllEvents) {
+                return false;
+            }
             if (!std::meta::is_class_type(info)) {
                 throw std::define_static_string("Meta::IsEvent: '" + std::string{std::meta::display_string_of(info)} +
                                                 "' is not a class reflection — only classes can be events.");
@@ -88,31 +92,34 @@ namespace Sora::Kernel {
         template<typename T>
         concept EventClass = std::is_class_v<T> && Sora::Kernel::Meta::IsEventType(^^T);
 
-        /** @brief Event payload class accepted by the event hub. */
+        /** @brief Concrete event payload class accepted by the event hub. */
         template<typename T>
         concept EventPayload =
-            std::is_class_v<std::remove_cvref_t<T>> && std::copy_constructible<std::remove_cvref_t<T>>;
+            std::is_class_v<std::remove_cvref_t<T>> && std::copy_constructible<std::remove_cvref_t<T>> &&
+            !std::same_as<std::remove_cvref_t<T>, AllEvents> &&
+            Sora::Kernel::Meta::IsEventType(std::meta::remove_cvref(^^T));
 
         /** @brief Callback policy tag; tags are ordinary class types, not event payloads. */
         template<typename T>
         concept CallbackTagClass = std::is_class_v<std::remove_cvref_t<T>>;
 
-        static_assert(EventClass<Event::AnyEvent>, "Event::AnyEvent must satisfy EventClass concept.");
         static_assert(EventClass<Event::BaseEvent>, "Event::BaseEvent must satisfy EventClass concept.");
+        static_assert(!EventClass<AllEvents>, "AllEvents is a declaration pattern, not an event payload.");
 
     } // namespace Concept
 
     /** @brief Default callback policy tag used when no more specific tag is requested. */
     struct DefaultCallbackTag {};
 
-    namespace event {
+    /** @brief TypeList of event payloads, or the single @ref AllEvents declaration pattern. */
+    template<typename... Ts>
+    using EventList = Sora::Traits::TypeList<Ts...>;
 
-        /** @brief Begin a chainable event or callback TypeList declaration. */
-        [[nodiscard]] consteval auto types() noexcept {
-            return Sora::Traits::TypeList<>{};
-        }
+    /** @brief Event wildcard value used by Listen overloads that do not care about the concrete event type. */
+    struct AnyEventTag {};
 
-    } // namespace event
+    /** @brief Subscribe to every event explicitly emitted through the selected emitter relation. */
+    inline constexpr AnyEventTag AnyEvent{};
 
     namespace Meta {
 
@@ -133,13 +140,15 @@ namespace Sora::Kernel {
             }
 
             auto args = Sora::Meta::TypeListTypesOf(info);
-            if (!std::ranges::all_of(args, Meta::IsEventType)) {
+            if (!std::ranges::all_of(args, [](std::meta::info arg) {
+                    return arg == ^^Sora::Kernel::AllEvents || Meta::IsEventType(arg);
+                })) {
                 return false;
             }
 
-            if (args.size() != 1 && std::ranges::contains(args, ^^Sora::Kernel::Event::AnyEvent)) {
+            if (args.size() != 1 && std::ranges::contains(args, ^^Sora::Kernel::AllEvents)) {
                 throw std::define_static_string(
-                    "Meta::IsEventTypeList: Event::AnyEvent cannot be combined with other event types in a list.");
+                    "Meta::IsEventTypeList: AllEvents cannot be combined with concrete event payloads.");
             }
             return true;
         }
@@ -182,55 +191,62 @@ namespace Sora::Kernel {
 
         namespace Detail {
 
-            template<Concept::ComClass T>
-            consteval std::meta::info DeclaredTypeListInfoOf(std::string_view name, std::invocable auto predicate) {
-                auto info = std::meta::dealias(^^T);
+            consteval std::meta::info DeclaredTypeListInfoOf(
+                std::meta::info type, std::string_view name, auto checker = [](std::meta::info list) { return true; }) {
+                auto info = std::meta::dealias(std::meta::remove_cvref(type));
                 if (!Sora::Kernel::Meta::IsComClass(info)) {
-                    throw std::define_static_string(
-                        std::format("Traits::DeclaredTypeListOf: '{}' is not a COM class reflection.",
-                                    Sora::Meta::DisplayStringOf(info)));
+                    throw std::define_static_string("Traits::DeclaredTypeListOf: '" +
+                                                    std::string{Sora::Meta::DisplayStringOf(info)} +
+                                                    "' is not a COM class reflection.");
                 }
 
                 std::vector<std::meta::info> result;
                 auto chain = Sora::Meta::InheritanceChainUntil(info, ^^Sora::Kernel::BaseUnknown);
                 for (auto scope : chain | std::views::reverse) {
-                    auto list = Sora::Meta::FindDirectTypeMemberOf(scope, "Emits");
+                    auto list = Sora::Meta::FindDirectTypeMemberOf(scope, name);
                     if (list == std::meta::info{}) {
                         continue;
                     }
-                    if (!predicate(list)) {
-                        throw std::define_static_string(
-                            std::format("Traits::DeclaredTypeListOf: '{}' is not a valid event type list.",
-                                        Sora::Meta::DisplayStringOf(list)));
+                    if (!Sora::Meta::IsTypeList(list)) {
+                        throw std::define_static_string("Traits::DeclaredTypeListOf: '" +
+                                                        std::string{Sora::Meta::DisplayStringOf(list)} +
+                                                        "' is not a Sora::Traits::TypeList specialization.");
                     }
                     Sora::Meta::AppendTypeList(result, list);
                 }
-                return std::meta::substitute(^^Sora::Traits::TypeList, result);
+
+                auto&& ret = std::meta::substitute(^^Sora::Traits::TypeList, result);
+                if (!checker(ret)) {
+                    throw std::define_static_string("Traits::DeclaredTypeListOf: '" +
+                                                    std::string{Sora::Meta::DisplayStringOf(ret)} +
+                                                    "' is not a valid type-list for '" + std::string{name} + "'.");
+                }
+                return ret;
             }
 
         } // namespace Detail
 
         /** @brief Type-list of event payloads emitted by @p T after inherited declarations are merged. */
         template<Concept::ComClass T>
-        using EmittedEventsOf = typename [:Detail::DeclaredTypeListInfoOf<T>("Emits", Meta::IsEventTypeList):];
+        using EmittedEventsOf = typename [:Detail::DeclaredTypeListInfoOf(^^T, "Emits", Meta::IsEventTypeList):];
 
         /** @brief Type-list of event payloads accepted by @p T after inherited declarations are merged. */
         template<Concept::ComClass T>
-        using AcceptedEventsOf = typename [:Detail::DeclaredTypeListInfoOf<T>("Accepts", Meta::IsEventTypeList):];
+        using AcceptedEventsOf = typename [:Detail::DeclaredTypeListInfoOf(^^T, "Accepts", Meta::IsEventTypeList):];
 
         /** @brief Type-list of callback tags allowed by @p T after inherited declarations are merged. */
         template<Concept::ComClass T>
-        using CallbackTagsOf = typename [:Detail::DeclaredTypeListInfoOf<T>("Callbacks", Meta::IsCallbackTagList):];
+        using CallbackTagsOf = typename [:Detail::DeclaredTypeListInfoOf(^^T, "Callbacks", Meta::IsCallbackTagList):];
 
     } // namespace Traits
 
     namespace Traits {
 
-        /** @brief Return whether @p List permits event payload @p Event, honoring @ref Event::AnyEvent. */
+        /** @brief Return whether @p List permits event payload @p Event, honoring @ref AllEvents. */
         template<typename List, typename Event>
         consteval bool EventListContains() {
             return Sora::Traits::Contains<List, std::remove_cvref_t<Event>> ||
-                   Sora::Traits::Contains<List, Sora::Kernel::Event::AnyEvent>;
+                   Sora::Traits::Contains<List, Sora::Kernel::AllEvents>;
         }
 
         /**
@@ -242,8 +258,7 @@ namespace Sora::Kernel {
         inline constexpr bool CanEmitEvent = [] consteval {
             using Emits = Traits::EmittedEventsOf<std::remove_cvref_t<T>>;
             return Concept::ComClass<std::remove_cvref_t<T>> && Concept::EventPayload<std::remove_cvref_t<Event>> &&
-                   (Sora::Traits::Contains<Emits, std::remove_cvref_t<Event>> ||
-                    Sora::Traits::Contains<Emits, Sora::Kernel::Event::AnyEvent>);
+                   EventListContains<Emits, Event>();
         }();
 
         /**
@@ -255,8 +270,7 @@ namespace Sora::Kernel {
         inline constexpr bool CanAcceptEvent = [] consteval {
             using Accepts = Traits::AcceptedEventsOf<std::remove_cvref_t<T>>;
             return Concept::ComClass<std::remove_cvref_t<T>> && Concept::EventPayload<std::remove_cvref_t<Event>> &&
-                   (Sora::Traits::Contains<Accepts, std::remove_cvref_t<Event>> ||
-                    Sora::Traits::Contains<Accepts, Sora::Kernel::Event::AnyEvent>);
+                   EventListContains<Accepts, Event>();
         }();
 
         /**
@@ -299,7 +313,6 @@ namespace Sora::Kernel {
     /** @brief Trace phase for observing an object's event receive process. */
     enum class EventTracePhase : uint8_t {
         ReceiveBegin,
-        ConditionRejected,
         CallbackScheduled,
         CallbackBegin,
         CallbackEnd,
@@ -466,9 +479,21 @@ namespace Sora::Kernel {
         return std::make_shared<Detail::SchedulerModel<S>>(std::forward<Scheduler>(scheduler));
     }
 
-    /** @brief Subscription behavior knobs shared by all event payload types. */
-    struct EventSubscriptionOptions {
-        bool once{};                   /**< Disable the subscription after the first accepted event. */
+    /** @brief Dispatch budget attached to an event relation. */
+    struct WoreBudget {
+        static constexpr uint32_t kPersistent = 0xffffffffu; /**< Sentinel for a non-wearing relation. */
+        uint32_t value{kPersistent};                         /**< Remaining successful dispatches. */
+    };
+
+    /** @brief Relation budget that never wears down. */
+    inline constexpr WoreBudget Persistent{WoreBudget::kPersistent};
+
+    /** @brief Relation budget consumed by one successful dispatch. */
+    inline constexpr WoreBudget OneShot{1};
+
+    /** @brief Event relation behavior knobs shared by typed and wildcard listeners. */
+    struct EventOptions {
+        WoreBudget budget{Persistent}; /**< Successful dispatch budget for this relation. */
         int32_t priority{};            /**< Higher priority callbacks run first for immediate dispatch. */
         EventSchedulerPtr scheduler{}; /**< Null for immediate invocation; non-null for deferred invocation. */
         EventId callbackId{Traits::EventIdOf<DefaultCallbackTag>}; /**< Callback policy tag. */
@@ -477,7 +502,9 @@ namespace Sora::Kernel {
     namespace Detail {
 
         struct SubscriptionState {
-            std::atomic<bool> active{true};
+            std::atomic<bool> active{true};                           /**< False after Drop or owner teardown. */
+            std::atomic<bool> suspended{};                            /**< True while dispatch is paused. */
+            std::atomic<uint32_t> remaining{WoreBudget::kPersistent}; /**< Successful dispatch budget. */
         };
 
         struct TraceState {
@@ -516,29 +543,55 @@ namespace Sora::Kernel {
 
     } // namespace Detail
 
-    /** @brief RAII-capable handle for a callback subscription. */
-    class EventSubscription {
+    /** @brief Stable handle for an explicit event relation. */
+    class EventLink {
     public:
-        EventSubscription() noexcept = default;
-        explicit EventSubscription(std::weak_ptr<Detail::SubscriptionState> state) noexcept
-            : state_(std::move(state)) {}
+        EventLink() noexcept = default;
+        explicit EventLink(std::weak_ptr<Detail::SubscriptionState> state) noexcept : state_(std::move(state)) {}
 
-        /** @brief Cancel the subscription if its hub still exists. */
-        void Cancel() noexcept {
-            if (auto state = state_.lock()) {
-                state->active.store(false, std::memory_order_release);
-            }
-        }
-
-        /** @brief Return whether this handle still refers to an active subscription. */
+        /** @brief Return whether this handle still refers to an active relation. */
         [[nodiscard]] bool Active() const noexcept {
             auto state = state_.lock();
             return state && state->active.load(std::memory_order_acquire);
         }
 
     private:
+        friend void Drop(EventLink) noexcept;
+        friend void Suspend(EventLink) noexcept;
+        friend void Resume(EventLink) noexcept;
+        friend void SetBudget(EventLink, WoreBudget) noexcept;
+
         std::weak_ptr<Detail::SubscriptionState> state_{};
     };
+
+    /** @brief Remove @p link from future dispatch without mutating relation storage immediately. */
+    inline void Drop(EventLink link) noexcept {
+        if (auto state = link.state_.lock()) {
+            state->active.store(false, std::memory_order_release);
+        }
+    }
+
+    /** @brief Pause @p link without consuming its dispatch budget. */
+    inline void Suspend(EventLink link) noexcept {
+        if (auto state = link.state_.lock()) {
+            state->suspended.store(true, std::memory_order_release);
+        }
+    }
+
+    /** @brief Resume @p link after a previous @ref Suspend. */
+    inline void Resume(EventLink link) noexcept {
+        if (auto state = link.state_.lock()) {
+            state->suspended.store(false, std::memory_order_release);
+        }
+    }
+
+    /** @brief Replace @p link's successful-dispatch budget. */
+    inline void SetBudget(EventLink link, WoreBudget budget) noexcept {
+        if (auto state = link.state_.lock()) {
+            state->remaining.store(budget.value, std::memory_order_release);
+            state->active.store(budget.value != 0, std::memory_order_release);
+        }
+    }
 
     /** @brief RAII-capable handle for a trace hook. */
     class EventTraceHook {
@@ -564,22 +617,21 @@ namespace Sora::Kernel {
     };
 
     namespace Detail {
-
-        using ErasedPredicate = UniqueFunction<bool(const EventContextBase&, const void*)>;
         using ErasedCallback = UniqueFunction<EventFlow(EventContextBase&, const void*)>;
         using ErasedTrace = UniqueFunction<void(const EventTrace&)>;
 
         struct SubscriptionRecord {
             std::shared_ptr<SubscriptionState> state{};
-            ErasedPredicate condition{};
             ErasedCallback callback{};
             EventSchedulerPtr scheduler{};
+            BaseUnknown* receiver{};
+            WeakRef receiverWeak{};
             EventId eventId{};
             EventId callbackId{};
             uint64_t id{};
             uint64_t order{};
             int32_t priority{};
-            bool once{};
+            bool anyEvent{};
         };
 
         struct TraceRecord {
@@ -597,6 +649,28 @@ namespace Sora::Kernel {
             std::vector<std::shared_ptr<TraceRecord>> records{};
         };
 
+        [[nodiscard]] inline bool TryConsume(SubscriptionState& state) noexcept {
+            if (!state.active.load(std::memory_order_acquire) || state.suspended.load(std::memory_order_acquire)) {
+                return false;
+            }
+            for (uint32_t current = state.remaining.load(std::memory_order_acquire);;) {
+                if (current == 0) {
+                    state.active.store(false, std::memory_order_release);
+                    return false;
+                }
+                if (current == WoreBudget::kPersistent) {
+                    return true;
+                }
+                const uint32_t next = current - 1;
+                if (state.remaining.compare_exchange_weak(current, next, std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
+                    if (next == 0) {
+                        state.active.store(false, std::memory_order_release);
+                    }
+                    return true;
+                }
+            }
+        }
         template<typename Result>
         [[nodiscard]] constexpr EventFlow ToEventFlow(Result&& result) {
             using R = std::remove_cvref_t<Result>;
@@ -619,6 +693,13 @@ namespace Sora::Kernel {
                     return EventFlow::Continue;
                 } else {
                     return ToEventFlow(std::invoke(callback, context));
+                }
+            } else if constexpr (std::invocable<Callback&, const Event&, BaseUnknown&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Callback&, const Event&, BaseUnknown&>>) {
+                    std::invoke(callback, event, context.emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return ToEventFlow(std::invoke(callback, event, context.emitter));
                 }
             } else if constexpr (std::invocable<Callback&, const Event&, EventContext<Event>&>) {
                 if constexpr (std::same_as<void, std::invoke_result_t<Callback&, const Event&, EventContext<Event>&>>) {
@@ -648,27 +729,41 @@ namespace Sora::Kernel {
             }
         }
 
-        template<Concept::EventPayload Event, typename Condition>
-        [[nodiscard]] bool InvokeTypedCondition(Condition& condition, const EventContextBase& base,
-                                                const void* payload) {
-            const auto& context = static_cast<const EventContext<Event>&>(base);
-            const Event& event = *static_cast<const Event*>(payload);
-            if constexpr (std::predicate<Condition&, const Event&, const EventContext<Event>&>) {
-                return std::invoke(condition, event, context);
-            } else if constexpr (std::predicate<Condition&, const Event&>) {
-                return std::invoke(condition, event);
-            } else if constexpr (std::predicate<Condition&, const EventContext<Event>&>) {
-                return std::invoke(condition, context);
-            } else if constexpr (std::predicate<Condition&>) {
-                return std::invoke(condition);
+        template<typename Callback>
+        [[nodiscard]] EventFlow InvokeAnyCallback(Callback& callback, EventContextBase& context, const void*) {
+            if constexpr (std::invocable<Callback&, EventContextBase&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Callback&, EventContextBase&>>) {
+                    std::invoke(callback, context);
+                    return EventFlow::Continue;
+                } else {
+                    return ToEventFlow(std::invoke(callback, context));
+                }
+            } else if constexpr (std::invocable<Callback&, BaseUnknown&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Callback&, BaseUnknown&>>) {
+                    std::invoke(callback, context.emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return ToEventFlow(std::invoke(callback, context.emitter));
+                }
+            } else if constexpr (std::invocable<Callback&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Callback&>>) {
+                    std::invoke(callback);
+                    return EventFlow::Continue;
+                } else {
+                    return ToEventFlow(std::invoke(callback));
+                }
             } else {
-                static_assert(kAlwaysFalse<Condition>, "Event condition must be a bool predicate over "
-                                                       "(const Event&, const EventContext<Event>&), const Event&, "
-                                                       "const EventContext<Event>&, or no arguments.");
+                static_assert(kAlwaysFalse<Callback>,
+                              "AnyEvent callback must accept EventContextBase&, BaseUnknown&, or no arguments.");
             }
         }
 
     } // namespace Detail
+
+    class EventHub;
+
+    /** @brief Return the event hub associated with @p object. */
+    [[nodiscard]] EventHub& Events(BaseUnknown& object);
 
     /** @brief Cold callback manager attached to one closure nucleus. */
     class EventHub {
@@ -688,41 +783,66 @@ namespace Sora::Kernel {
         /** @brief Return whether the owning nucleus is still alive. */
         [[nodiscard]] bool OwnerAlive() const noexcept { return ownerWeak_.Get() == owner_; }
 
-        /** @brief Attach @p callback for payload type @p Event. */
+        /** @brief Attach a typed relation owned by this hub's emitter. */
         template<Concept::EventPayload Event, typename Callback>
-        [[nodiscard]] EventSubscription Subscribe(Callback&& callback, EventSubscriptionOptions options = {}) {
+        [[nodiscard]] EventLink ListenTyped(BaseUnknown* receiver, Callback&& callback, EventOptions options = {}) {
             assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
-            return SubscribeIf<Event>([] { return true; }, std::forward<Callback>(callback), std::move(options));
-        }
-
-        /** @brief Attach @p callback for payload type @p Event, guarded by @p condition. */
-        template<Concept::EventPayload Event, typename Condition, typename Callback>
-        [[nodiscard]] EventSubscription SubscribeIf(Condition&& condition, Callback&& callback,
-                                                    EventSubscriptionOptions options = {}) {
-            assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
-            using C = std::remove_cvref_t<Condition>;
             using F = std::remove_cvref_t<Callback>;
-            static_assert(std::move_constructible<C>);
             static_assert(std::move_constructible<F>);
 
-            auto typedCondition = C(std::forward<Condition>(condition));
+            BaseUnknown* actualReceiver = receiver ? receiver->Nucleus() : nullptr;
             auto typedCallback = F(std::forward<Callback>(callback));
+            auto state = std::make_shared<Detail::SubscriptionState>();
+            state->remaining.store(options.budget.value, std::memory_order_relaxed);
+            state->active.store(options.budget.value != 0, std::memory_order_relaxed);
+            if (actualReceiver) {
+                Events(*actualReceiver).AttachInbound(state);
+            }
             Detail::SubscriptionRecord record{
-                .state = std::make_shared<Detail::SubscriptionState>(),
-                .condition =
-                    [condition = std::move(typedCondition)](const EventContextBase& context,
-                                                            const void* payload) mutable {
-                        return Detail::InvokeTypedCondition<Event>(condition, context, payload);
-                    },
+                .state = std::move(state),
                 .callback =
                     [callback = std::move(typedCallback)](EventContextBase& context, const void* payload) mutable {
                         return Detail::InvokeTypedCallback<Event>(callback, context, payload);
                     },
                 .scheduler = std::move(options.scheduler),
+                .receiver = actualReceiver,
+                .receiverWeak = actualReceiver ? actualReceiver->GetComponentWeakRef() : WeakRef{},
                 .eventId = Traits::EventIdOf<Event>,
                 .callbackId = options.callbackId,
                 .priority = options.priority,
-                .once = options.once,
+                .anyEvent = false,
+            };
+            return AddSubscription(std::move(record));
+        }
+
+        /** @brief Attach an event-type-erased relation owned by this hub's emitter. */
+        template<typename Callback>
+        [[nodiscard]] EventLink ListenAny(BaseUnknown* receiver, Callback&& callback, EventOptions options = {}) {
+            assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
+            using F = std::remove_cvref_t<Callback>;
+            static_assert(std::move_constructible<F>);
+
+            BaseUnknown* actualReceiver = receiver ? receiver->Nucleus() : nullptr;
+            auto anyCallback = F(std::forward<Callback>(callback));
+            auto state = std::make_shared<Detail::SubscriptionState>();
+            state->remaining.store(options.budget.value, std::memory_order_relaxed);
+            state->active.store(options.budget.value != 0, std::memory_order_relaxed);
+            if (actualReceiver) {
+                Events(*actualReceiver).AttachInbound(state);
+            }
+            Detail::SubscriptionRecord record{
+                .state = std::move(state),
+                .callback =
+                    [callback = std::move(anyCallback)](EventContextBase& context, const void* payload) mutable {
+                        return Detail::InvokeAnyCallback(callback, context, payload);
+                    },
+                .scheduler = std::move(options.scheduler),
+                .receiver = actualReceiver,
+                .receiverWeak = actualReceiver ? actualReceiver->GetComponentWeakRef() : WeakRef{},
+                .eventId = {},
+                .callbackId = options.callbackId,
+                .priority = options.priority,
+                .anyEvent = true,
             };
             return AddSubscription(std::move(record));
         }
@@ -744,16 +864,21 @@ namespace Sora::Kernel {
                              .eventId = Traits::EventIdOf<Event>,
                              .sequence = sequence});
 
-            EventContext<Event> context{{.receiver = *owner_,
-                                         .emitter = *actualEmitter,
-                                         .eventId = Traits::EventIdOf<Event>,
-                                         .sequence = sequence},
-                                        event};
             std::shared_ptr<const Event> deferredPayload;
             for (const auto& record : subscriptions->records) {
-                if (!record || record->eventId != Traits::EventIdOf<Event>) {
+                if (!record || (!record->anyEvent && record->eventId != Traits::EventIdOf<Event>)) {
                     continue;
                 }
+                BaseUnknown* actualReceiver = record->receiver ? record->receiverWeak.Get() : actualEmitter;
+                if (!actualReceiver) {
+                    record->state->active.store(false, std::memory_order_release);
+                    continue;
+                }
+                EventContext<Event> context{{.receiver = *actualReceiver,
+                                             .emitter = *actualEmitter,
+                                             .eventId = Traits::EventIdOf<Event>,
+                                             .sequence = sequence},
+                                            event};
                 context.callbackId = record->callbackId;
                 context.subscription = record->id;
                 const EventFlow flow = DispatchRecord(record, context, event, deferredPayload);
@@ -794,10 +919,11 @@ namespace Sora::Kernel {
         void CancelAll() noexcept;
 
     private:
-        [[nodiscard]] EventSubscription AddSubscription(Detail::SubscriptionRecord record);
+        [[nodiscard]] EventLink AddSubscription(Detail::SubscriptionRecord record);
         [[nodiscard]] EventTraceHook AddTrace(Detail::TraceRecord record);
         [[nodiscard]] std::shared_ptr<const Detail::SubscriptionSnapshot> Subscriptions() const;
         [[nodiscard]] std::shared_ptr<const Detail::TraceSnapshot> Traces() const;
+        void AttachInbound(std::weak_ptr<Detail::SubscriptionState> state);
         void Trace(const EventTrace& trace) const;
         static void Trace(std::shared_ptr<const Detail::TraceSnapshot> traces, const EventTrace& trace);
         EventFlow DispatchRecord(const std::shared_ptr<Detail::SubscriptionRecord>& record, EventContextBase& context,
@@ -810,23 +936,14 @@ namespace Sora::Kernel {
             if (!record->state->active.load(std::memory_order_acquire)) {
                 return EventFlow::Continue;
             }
-            if (!record->condition(context, std::addressof(event))) {
-                Trace(EventTrace{.phase = EventTracePhase::ConditionRejected,
-                                 .receiver = owner_,
-                                 .emitter = std::addressof(context.emitter),
-                                 .eventId = context.eventId,
-                                 .callbackId = record->callbackId,
-                                 .subscription = record->id,
-                                 .sequence = context.sequence});
-                return EventFlow::Continue;
-            }
-            if (record->once && !record->state->active.exchange(false, std::memory_order_acq_rel)) {
+
+            if (!Detail::TryConsume(*record->state)) {
                 return EventFlow::Continue;
             }
 
             if (!record->scheduler) {
                 Trace(EventTrace{.phase = EventTracePhase::CallbackBegin,
-                                 .receiver = owner_,
+                                 .receiver = std::addressof(context.receiver),
                                  .emitter = std::addressof(context.emitter),
                                  .eventId = context.eventId,
                                  .callbackId = record->callbackId,
@@ -834,7 +951,7 @@ namespace Sora::Kernel {
                                  .sequence = context.sequence});
                 const EventFlow flow = record->callback(context, std::addressof(event));
                 Trace(EventTrace{.phase = EventTracePhase::CallbackEnd,
-                                 .receiver = owner_,
+                                 .receiver = std::addressof(context.receiver),
                                  .emitter = std::addressof(context.emitter),
                                  .eventId = context.eventId,
                                  .callbackId = record->callbackId,
@@ -849,7 +966,7 @@ namespace Sora::Kernel {
 
             auto state = record->state;
             auto scheduler = record->scheduler;
-            Detail::StrongObjectRef receiver{owner_};
+            Detail::StrongObjectRef receiver{std::addressof(context.receiver)};
             Detail::StrongObjectRef emitter{std::addressof(context.emitter)};
             auto payload = deferredPayload;
             EventId eventId = context.eventId;
@@ -859,7 +976,7 @@ namespace Sora::Kernel {
             auto traces = Traces();
 
             Trace(EventTrace{.phase = EventTracePhase::CallbackScheduled,
-                             .receiver = owner_,
+                             .receiver = std::addressof(context.receiver),
                              .emitter = std::addressof(context.emitter),
                              .eventId = eventId,
                              .callbackId = callbackId,
@@ -871,7 +988,8 @@ namespace Sora::Kernel {
                                  traces = std::move(traces)]() mutable {
                 BaseUnknown* receiverObject = receiver.Get();
                 BaseUnknown* emitterObject = emitter.Get();
-                if (!state->active.load(std::memory_order_acquire)) {
+                if (!receiverObject || !emitterObject || !state->active.load(std::memory_order_acquire) ||
+                    state->suspended.load(std::memory_order_acquire)) {
                     Trace(traces, EventTrace{.phase = EventTracePhase::CallbackCanceled,
                                              .receiver = receiverObject,
                                              .emitter = emitterObject,
@@ -912,52 +1030,401 @@ namespace Sora::Kernel {
         mutable std::mutex mutex_{};
         std::shared_ptr<const Detail::SubscriptionSnapshot> subscriptions_{};
         std::shared_ptr<const Detail::TraceSnapshot> traces_{};
+        std::vector<std::weak_ptr<Detail::SubscriptionState>> inbound_{};
         std::atomic<uint64_t> nextSubscription_{};
         std::atomic<uint64_t> nextTrace_{};
         std::atomic<uint64_t> nextSequence_{};
     };
 
-    /** @brief Return the event hub associated with @p object. */
-    [[nodiscard]] EventHub& Events(BaseUnknown& object);
+    /** @brief A group of links produced by wildcard-emitter materialization. */
+    struct EventLinks {
+        std::vector<EventLink> links{}; /**< Materialized links, one per explicit emitter relation. */
+    };
+
+    /** @brief Remove every relation in @p links from future dispatch. */
+    inline void Drop(const EventLinks& links) noexcept {
+        for (const auto& link : links.links) {
+            Drop(link);
+        }
+    }
+
+    /** @brief Pause every relation in @p links. */
+    inline void Suspend(const EventLinks& links) noexcept {
+        for (const auto& link : links.links) {
+            Suspend(link);
+        }
+    }
+
+    /** @brief Resume every relation in @p links. */
+    inline void Resume(const EventLinks& links) noexcept {
+        for (const auto& link : links.links) {
+            Resume(link);
+        }
+    }
+
+    /** @brief Replace every relation budget in @p links. */
+    inline void SetBudget(const EventLinks& links, WoreBudget budget) noexcept {
+        for (const auto& link : links.links) {
+            SetBudget(link, budget);
+        }
+    }
+
+    /** @brief Explicit scope of emitters used to materialize @ref AnyEmitter relations. */
+    class EventSpace {
+    public:
+        /** @brief Add @p emitter to this explicit event space. */
+        EventSpace& Add(BaseUnknown& emitter) {
+            std::scoped_lock lock(mutex_);
+            BaseUnknown* nucleus = emitter.Nucleus();
+            if (nucleus &&
+                std::ranges::none_of(emitters_, [nucleus](const WeakRef& ref) { return ref.Get() == nucleus; })) {
+                emitters_.push_back(nucleus->GetComponentWeakRef());
+            }
+            return *this;
+        }
+
+        /** @brief Return currently alive emitters explicitly present in this space. */
+        [[nodiscard]] std::vector<BaseUnknown*> Emitters() const {
+            std::scoped_lock lock(mutex_);
+            return emitters_ | std::views::transform([](const WeakRef& ref) { return ref.Get(); }) |
+                   std::views::filter([](BaseUnknown* object) { return object != nullptr; }) |
+                   std::ranges::to<std::vector>();
+        }
+
+    private:
+        mutable std::mutex mutex_{};
+        std::vector<WeakRef> emitters_{};
+    };
+
+    /** @brief Wildcard emitter source bound to an explicit @ref EventSpace. */
+    struct AnyEmitter {
+        EventSpace& space; /**< Explicit emitter scope. */
+    };
 
     /** @brief Return the event hub associated with @p object. */
     [[nodiscard]] EventHub& Events(BaseUnknown* object);
 
-    /** @brief Typed event subscription with compile-time receiver and callback-tag policy checks. */
-    template<Concept::EventPayload Event, typename CallbackTag = DefaultCallbackTag, Concept::ComClass Receiver,
-             typename Callback>
-    [[nodiscard]] EventSubscription SubscribeEvent(Receiver& receiver, Callback&& callback,
-                                                   EventSubscriptionOptions options = {}) {
-        static_assert(Meta::CanAcceptEvent<Receiver, Event>(), "Receiver class does not accept this event payload.");
-        static_assert(Meta::CanAttachCallback<Receiver, CallbackTag>(), "Receiver class does not allow this callback.");
-        options.callbackId = Traits::EventIdOf<CallbackTag>;
-        return Events(receiver).template Subscribe<Event>(std::forward<Callback>(callback), std::move(options));
+    namespace Detail {
+
+        template<typename R>
+        [[nodiscard]] EventFlow FlowOf(R&& result) {
+            if constexpr (std::same_as<std::remove_cvref_t<R>, EventFlow>) {
+                return result;
+            } else {
+                return EventFlow::Continue;
+            }
+        }
+
+        template<Concept::EventPayload Event, typename Receiver, typename Emitter>
+        [[nodiscard]] EventFlow InvokeDefaultOn(EventContext<Event>& context) {
+            auto& receiver = static_cast<std::remove_cvref_t<Receiver>&>(context.receiver);
+            auto& emitter = static_cast<std::remove_cvref_t<Emitter>&>(context.emitter);
+            if constexpr (requires { receiver.On(context.event, emitter); }) {
+                if constexpr (std::same_as<void, decltype(receiver.On(context.event, emitter))>) {
+                    receiver.On(context.event, emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(receiver.On(context.event, emitter));
+                }
+            } else if constexpr (requires { receiver.On(context.event, static_cast<BaseUnknown&>(emitter)); }) {
+                if constexpr (std::same_as<void,
+                                           decltype(receiver.On(context.event, static_cast<BaseUnknown&>(emitter)))>) {
+                    receiver.On(context.event, static_cast<BaseUnknown&>(emitter));
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(receiver.On(context.event, static_cast<BaseUnknown&>(emitter)));
+                }
+            } else if constexpr (requires { receiver.On(context.event); }) {
+                if constexpr (std::same_as<void, decltype(receiver.On(context.event))>) {
+                    receiver.On(context.event);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(receiver.On(context.event));
+                }
+            } else if constexpr (requires { receiver.On(context); }) {
+                if constexpr (std::same_as<void, decltype(receiver.On(context))>) {
+                    receiver.On(context);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(receiver.On(context));
+                }
+            } else {
+                static_assert(kAlwaysFalse<Receiver>,
+                              "Receiver must provide On(event, emitter), On(event), or On(context).");
+            }
+        }
+
+        template<Concept::EventPayload Event, typename Receiver, typename Emitter, typename Handler>
+        [[nodiscard]] EventFlow InvokeReceiverHandler(Handler& handler, EventContext<Event>& context) {
+            auto& receiver = static_cast<std::remove_cvref_t<Receiver>&>(context.receiver);
+            auto& emitter = static_cast<std::remove_cvref_t<Emitter>&>(context.emitter);
+            if constexpr (std::invocable<Handler&, Receiver&, const Event&, Emitter&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, Receiver&, const Event&, Emitter&>>) {
+                    std::invoke(handler, receiver, context.event, emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, context.event, emitter));
+                }
+            } else if constexpr (std::invocable<Handler&, Receiver&, const Event&, BaseUnknown&>) {
+                if constexpr (std::same_as<void,
+                                           std::invoke_result_t<Handler&, Receiver&, const Event&, BaseUnknown&>>) {
+                    std::invoke(handler, receiver, context.event, context.emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, context.event, context.emitter));
+                }
+            } else if constexpr (std::invocable<Handler&, Receiver&, const Event&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, Receiver&, const Event&>>) {
+                    std::invoke(handler, receiver, context.event);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, context.event));
+                }
+            } else if constexpr (std::invocable<Handler&, const Event&, EventContext<Event>&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, const Event&, EventContext<Event>&>>) {
+                    std::invoke(handler, context.event, context);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, context.event, context));
+                }
+            } else if constexpr (std::invocable<Handler&, const Event&, BaseUnknown&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, const Event&, BaseUnknown&>>) {
+                    std::invoke(handler, context.event, context.emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, context.event, context.emitter));
+                }
+            } else if constexpr (std::invocable<Handler&, const Event&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, const Event&>>) {
+                    std::invoke(handler, context.event);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, context.event));
+                }
+            } else if constexpr (std::invocable<Handler&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&>>) {
+                    std::invoke(handler);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler));
+                }
+            } else if constexpr (std::invocable<Handler&, EventContext<Event>&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, EventContext<Event>&>>) {
+                    std::invoke(handler, context);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, context));
+                }
+            } else {
+                static_assert(kAlwaysFalse<Handler>, "Handler is not compatible with this receiver/event relation.");
+            }
+        }
+
+        template<typename Receiver, typename Emitter, typename Handler>
+        [[nodiscard]] EventFlow InvokeAnyReceiverHandler(Handler& handler, EventContextBase& context) {
+            auto& receiver = static_cast<std::remove_cvref_t<Receiver>&>(context.receiver);
+            auto& emitter = static_cast<std::remove_cvref_t<Emitter>&>(context.emitter);
+            if constexpr (std::invocable<Handler&, Receiver&, Emitter&, EventContextBase&>) {
+                if constexpr (std::same_as<void,
+                                           std::invoke_result_t<Handler&, Receiver&, Emitter&, EventContextBase&>>) {
+                    std::invoke(handler, receiver, emitter, context);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, emitter, context));
+                }
+            } else if constexpr (std::invocable<Handler&, Receiver&, EventContextBase&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, Receiver&, EventContextBase&>>) {
+                    std::invoke(handler, receiver, context);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, context));
+                }
+            } else if constexpr (std::invocable<Handler&, Receiver&, Emitter&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, Receiver&, Emitter&>>) {
+                    std::invoke(handler, receiver, emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, emitter));
+                }
+            } else if constexpr (std::invocable<Handler&, Receiver&, BaseUnknown&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, Receiver&, BaseUnknown&>>) {
+                    std::invoke(handler, receiver, context.emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, receiver, context.emitter));
+                }
+            } else if constexpr (std::invocable<Handler&, EventContextBase&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, EventContextBase&>>) {
+                    std::invoke(handler, context);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, context));
+                }
+            } else if constexpr (std::invocable<Handler&, BaseUnknown&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&, BaseUnknown&>>) {
+                    std::invoke(handler, context.emitter);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler, context.emitter));
+                }
+            } else if constexpr (std::invocable<Handler&>) {
+                if constexpr (std::same_as<void, std::invoke_result_t<Handler&>>) {
+                    std::invoke(handler);
+                    return EventFlow::Continue;
+                } else {
+                    return FlowOf(std::invoke(handler));
+                }
+            } else {
+                static_assert(kAlwaysFalse<Handler>, "Handler is not compatible with this wildcard event relation.");
+            }
+        }
+
+    } // namespace Detail
+
+    /** @brief Listen to one concrete event emitted by one concrete emitter using the receiver's default On overload. */
+
+    template<Concept::ComClass Receiver, Concept::ComClass Emitter, Concept::EventPayload Event>
+    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, WoreBudget budget = Persistent) {
+        return Listen(receiver, emitter, Event{}, EventOptions{.budget = budget});
     }
 
-    /** @brief Typed conditional event subscription with compile-time receiver and callback-tag policy checks. */
-    template<Concept::EventPayload Event, typename CallbackTag = DefaultCallbackTag, Concept::ComClass Receiver,
-             typename Condition, typename Callback>
-    [[nodiscard]] EventSubscription SubscribeEventIf(Receiver& receiver, Condition&& condition, Callback&& callback,
-                                                     EventSubscriptionOptions options = {}) {
-        static_assert(Meta::CanAcceptEvent<Receiver, Event>(), "Receiver class does not accept this event payload.");
-        static_assert(Meta::CanAttachCallback<Receiver, CallbackTag>(), "Receiver class does not allow this callback.");
-        options.callbackId = Traits::EventIdOf<CallbackTag>;
-        return Events(receiver).template SubscribeIf<Event>(std::forward<Condition>(condition),
-                                                            std::forward<Callback>(callback), std::move(options));
+    /** @brief Listen to one concrete event emitted by one concrete emitter using the receiver's default On overload. */
+    template<Concept::ComClass Receiver, Concept::ComClass Emitter, Concept::EventPayload Event>
+    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
+        static_assert(Traits::CanAcceptEvent<Receiver, Event>, "Receiver class does not accept this event payload.");
+        return Events(emitter).template ListenTyped<Event>(
+            receiver.Nucleus(),
+            [](EventContext<Event>& context) { return Detail::InvokeDefaultOn<Event, Receiver, Emitter>(context); },
+            std::move(options));
+    }
+
+    /** @brief Listen to one concrete event emitted by one concrete emitter using @p handler. */
+    template<Concept::ComClass Receiver, Concept::ComClass Emitter, Concept::EventPayload Event, typename Handler>
+    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, WoreBudget budget,
+                                   Handler&& handler) {
+        return Listen(receiver, emitter, Event{}, EventOptions{.budget = budget}, std::forward<Handler>(handler));
+    }
+
+    /** @brief Listen to one concrete event emitted by one concrete emitter using @p handler. */
+    template<Concept::ComClass Receiver, Concept::ComClass Emitter, Concept::EventPayload Event, typename Handler>
+    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options,
+                                   Handler&& handler) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
+        static_assert(Traits::CanAcceptEvent<Receiver, Event>, "Receiver class does not accept this event payload.");
+        using F = std::remove_cvref_t<Handler>;
+        return Events(emitter).template ListenTyped<Event>(
+            receiver.Nucleus(),
+            [handler = F(std::forward<Handler>(handler))](EventContext<Event>& context) mutable {
+                return Detail::InvokeReceiverHandler<Event, Receiver, Emitter>(handler, context);
+            },
+            std::move(options));
+    }
+
+    /** @brief Listen to one concrete event with a lambda receiver owned by @p emitter. */
+    template<Concept::ComClass Emitter, Concept::EventPayload Event, typename Handler>
+    [[nodiscard]] EventLink Listen(Emitter& emitter, const Event&, WoreBudget budget, Handler&& handler) {
+        return Listen(emitter, Event{}, EventOptions{.budget = budget}, std::forward<Handler>(handler));
+    }
+
+    /** @brief Listen to one concrete event with a lambda receiver owned by @p emitter. */
+    template<Concept::ComClass Emitter, Concept::EventPayload Event, typename Handler>
+    [[nodiscard]] EventLink Listen(Emitter& emitter, const Event&, EventOptions options, Handler&& handler) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
+        return Events(emitter).template ListenTyped<Event>(nullptr, std::forward<Handler>(handler), std::move(options));
+    }
+
+    /** @brief Listen to every event emitted by one concrete emitter. */
+    template<Concept::ComClass Receiver, Concept::ComClass Emitter, typename Handler>
+    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, AnyEventTag, WoreBudget budget,
+                                   Handler&& handler) {
+        return Listen(receiver, emitter, AnyEvent, EventOptions{.budget = budget}, std::forward<Handler>(handler));
+    }
+
+    /** @brief Listen to every event emitted by one concrete emitter. */
+    template<Concept::ComClass Receiver, Concept::ComClass Emitter, typename Handler>
+    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, AnyEventTag, EventOptions options,
+                                   Handler&& handler) {
+        using F = std::remove_cvref_t<Handler>;
+        return Events(emitter).ListenAny(
+            receiver.Nucleus(),
+            [handler = F(std::forward<Handler>(handler))](EventContextBase& context) mutable {
+                return Detail::InvokeAnyReceiverHandler<Receiver, Emitter>(handler, context);
+            },
+            std::move(options));
+    }
+
+    /** @brief Listen to one concrete event from every emitter explicitly present in @p source. */
+    template<Concept::ComClass Receiver, Concept::EventPayload Event, typename Handler>
+    [[nodiscard]] EventLinks Listen(Receiver& receiver, AnyEmitter source, const Event&, WoreBudget budget,
+                                    Handler&& handler) {
+        return Listen(receiver, source, Event{}, EventOptions{.budget = budget}, std::forward<Handler>(handler));
+    }
+
+    /** @brief Listen to one concrete event from every emitter explicitly present in @p source. */
+    template<Concept::ComClass Receiver, Concept::EventPayload Event, typename Handler>
+    [[nodiscard]] EventLinks Listen(Receiver& receiver, AnyEmitter source, const Event&, EventOptions options,
+                                    Handler&& handler) {
+        static_assert(Traits::CanAcceptEvent<Receiver, Event>, "Receiver class does not accept this event payload.");
+        using F = std::remove_cvref_t<Handler>;
+        static_assert(std::copy_constructible<F>, "AnyEmitter materialization requires a copy-constructible handler.");
+        EventLinks result;
+        auto emitters = source.space.Emitters();
+        result.links.reserve(emitters.size());
+        F stored(std::forward<Handler>(handler));
+        for (BaseUnknown* emitter : emitters) {
+            F copy(stored);
+            result.links.push_back(Events(*emitter).template ListenTyped<Event>(
+                receiver.Nucleus(),
+                [handler = std::move(copy)](EventContext<Event>& context) mutable {
+                    return Detail::InvokeReceiverHandler<Event, Receiver, BaseUnknown>(handler, context);
+                },
+                options));
+        }
+        return result;
+    }
+
+    /** @brief Listen to every event from every emitter explicitly present in @p source. */
+    template<Concept::ComClass Receiver, typename Handler>
+    [[nodiscard]] EventLinks Listen(Receiver& receiver, AnyEmitter source, AnyEventTag, WoreBudget budget,
+                                    Handler&& handler) {
+        return Listen(receiver, source, AnyEvent, EventOptions{.budget = budget}, std::forward<Handler>(handler));
+    }
+
+    /** @brief Listen to every event from every emitter explicitly present in @p source. */
+    template<Concept::ComClass Receiver, typename Handler>
+    [[nodiscard]] EventLinks Listen(Receiver& receiver, AnyEmitter source, AnyEventTag, EventOptions options,
+                                    Handler&& handler) {
+        using F = std::remove_cvref_t<Handler>;
+        static_assert(std::copy_constructible<F>, "AnyEmitter materialization requires a copy-constructible handler.");
+        EventLinks result;
+        auto emitters = source.space.Emitters();
+        result.links.reserve(emitters.size());
+        F stored(std::forward<Handler>(handler));
+        for (BaseUnknown* emitter : emitters) {
+            F copy(stored);
+            result.links.push_back(Events(*emitter).ListenAny(
+                receiver.Nucleus(),
+                [handler = std::move(copy)](EventContextBase& context) mutable {
+                    return Detail::InvokeAnyReceiverHandler<Receiver, BaseUnknown>(handler, context);
+                },
+                options));
+        }
+        return result;
     }
 
     /** @brief Typed event emission with compile-time emitter policy check. */
-    template<Concept::EventPayload Event, Concept::ComClass Emitter>
-    void EmitEvent(Emitter& emitter, const Event& event) {
-        static_assert(Meta::CanEmitEvent<Emitter, Event>(), "Emitter class does not emit this event payload.");
+    template<Concept::ComClass Emitter, Concept::EventPayload Event>
+    void Emit(Emitter& emitter, const Event& event) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
         Events(emitter).Emit(event, std::addressof(emitter));
     }
 
     /** @brief Typed event emission with a default-constructed payload. */
     template<Concept::EventPayload Event, Concept::ComClass Emitter>
         requires std::default_initializable<Event>
-    void EmitEvent(Emitter& emitter) {
-        static_assert(Meta::CanEmitEvent<Emitter, Event>(), "Emitter class does not emit this event payload.");
+    void Emit(Emitter& emitter) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
         Events(emitter).template Emit<Event>(std::addressof(emitter));
     }
 
