@@ -15,11 +15,13 @@
 #include <Sora/Core/Hash.h>
 #include <Sora/Core/StringUtils.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <meta>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string_view>
 
@@ -92,6 +94,62 @@ namespace Sora {
     };
 
     namespace Detail::Uri {
+
+        /** @brief Cursor over an immutable URI string; parser primitives advance by slicing views. */
+        struct Cursor {
+            std::string_view text{}; /**< Complete source text. */
+            size_t offset = 0;       /**< Current parse offset. */
+
+            /** @brief Return true when the cursor has consumed the whole source. */
+            [[nodiscard]] constexpr bool Done() const noexcept { return offset >= text.size(); }
+
+            /** @brief Return the unconsumed suffix. */
+            [[nodiscard]] constexpr std::string_view Remaining() const noexcept { return text.substr(offset); }
+
+            /** @brief Return true when the unconsumed suffix starts with @p prefix. */
+            [[nodiscard]] constexpr bool StartsWith(std::string_view prefix) const noexcept {
+                return Remaining().starts_with(prefix);
+            }
+
+            /** @brief Consume @p token when it appears at the cursor. */
+            constexpr bool Consume(std::string_view token) noexcept {
+                if (!StartsWith(token)) {
+                    return false;
+                }
+                offset += token.size();
+                return true;
+            }
+
+            /** @brief Consume @p token when it appears at the cursor. */
+            constexpr bool Consume(char token) noexcept {
+                if (Done() || text[offset] != token) {
+                    return false;
+                }
+                ++offset;
+                return true;
+            }
+
+            /** @brief Return the source slice up to one of @p delimiters, leaving the delimiter unconsumed. */
+            [[nodiscard]] constexpr std::string_view TakeUntilAny(std::string_view delimiters) noexcept {
+                const size_t begin = offset;
+                const size_t end = text.find_first_of(delimiters, offset);
+                offset = end == std::string_view::npos ? text.size() : end;
+                return text.substr(begin, offset - begin);
+            }
+
+            /** @brief Return the remaining source slice and move the cursor to EOF. */
+            [[nodiscard]] constexpr std::string_view TakeRest() noexcept {
+                const size_t begin = offset;
+                offset = text.size();
+                return text.substr(begin);
+            }
+        };
+
+        /** @brief Optional URI component returned by parsers for authority, query, and fragment. */
+        struct OptionalComponent {
+            std::string_view text{}; /**< Component bytes without their syntax marker. */
+            bool present = false;    /**< Whether the syntax marker for this component was present. */
+        };
 
         [[nodiscard]] constexpr bool IsAsciiUriByte(char c) noexcept {
             const auto u = static_cast<unsigned char>(c);
@@ -192,6 +250,77 @@ namespace Sora {
             return ValidateAuthority(authority) == UriParseError::Ok;
         }
 
+        /** @brief Parse `scheme:` and leave the cursor immediately after the colon. */
+        [[nodiscard]] constexpr auto ParseScheme(Cursor& cursor) noexcept
+            -> std::expected<std::string_view, UriParseError> {
+            const std::string_view scheme = cursor.TakeUntilAny(":");
+            if (!cursor.Consume(':') || scheme.empty()) {
+                return std::unexpected(UriParseError::MissingScheme);
+            }
+            if (!Ascii::IsAlpha(scheme.front())) {
+                return std::unexpected(UriParseError::BadSchemeStart);
+            }
+            if (std::ranges::any_of(scheme | std::views::drop(1), std::not_fn(IsSchemeCharacter))) {
+                return std::unexpected(UriParseError::BadSchemeCharacter);
+            }
+            return scheme;
+        }
+
+        /** @brief Parse optional `//authority` and leave the cursor at path, query, fragment, or EOF. */
+        [[nodiscard]] constexpr auto ParseAuthority(Cursor& cursor) noexcept
+            -> std::expected<OptionalComponent, UriParseError> {
+            if (!cursor.Consume("//")) {
+                return OptionalComponent{};
+            }
+            const std::string_view authority = cursor.TakeUntilAny("/?#");
+            if (const auto error = ValidateAuthority(authority); error != UriParseError::Ok) {
+                return std::unexpected(error);
+            }
+            return OptionalComponent{.text = authority, .present = true};
+        }
+
+        /** @brief Parse the path component and enforce RFC 3986 generic hierarchy constraints. */
+        [[nodiscard]] constexpr auto ParsePath(Cursor& cursor, bool hasAuthority) noexcept
+            -> std::expected<std::string_view, UriParseError> {
+            const std::string_view path = cursor.TakeUntilAny("?#");
+            if (hasAuthority && !path.empty() && path.front() != '/') {
+                return std::unexpected(UriParseError::BadPath);
+            }
+            if (!hasAuthority && path.starts_with("//")) {
+                return std::unexpected(UriParseError::BadPath);
+            }
+            if (const auto error = ValidateEncodedRange<IsPathPlain>(path); error != UriParseError::Ok) {
+                return std::unexpected(error);
+            }
+            return path;
+        }
+
+        /** @brief Parse optional `?query` and leave the cursor at fragment or EOF. */
+        [[nodiscard]] constexpr auto ParseQuery(Cursor& cursor) noexcept
+            -> std::expected<OptionalComponent, UriParseError> {
+            if (!cursor.Consume('?')) {
+                return OptionalComponent{};
+            }
+            const std::string_view query = cursor.TakeUntilAny("#");
+            if (const auto error = ValidateEncodedRange<IsQueryPlain>(query); error != UriParseError::Ok) {
+                return std::unexpected(error);
+            }
+            return OptionalComponent{.text = query, .present = true};
+        }
+
+        /** @brief Parse optional `#fragment` and consume the remaining URI text. */
+        [[nodiscard]] constexpr auto ParseFragment(Cursor& cursor) noexcept
+            -> std::expected<OptionalComponent, UriParseError> {
+            if (!cursor.Consume('#')) {
+                return OptionalComponent{};
+            }
+            const std::string_view fragment = cursor.TakeRest();
+            if (const auto error = ValidateEncodedRange<IsFragmentPlain>(fragment); error != UriParseError::Ok) {
+                return std::unexpected(error);
+            }
+            return OptionalComponent{.text = fragment, .present = true};
+        }
+
     } // namespace Detail::Uri
 
     /** @brief Return true when @p c is an RFC 3986 unreserved character. */
@@ -219,74 +348,45 @@ namespace Sora {
         if (text.empty()) {
             return std::unexpected(UriParseError::Empty);
         }
-        const size_t colon = text.find(':');
-        if (colon == std::string_view::npos || colon == 0) {
-            return std::unexpected(UriParseError::MissingScheme);
-        }
-        if (!Ascii::IsAlpha(text.front())) {
-            return std::unexpected(UriParseError::BadSchemeStart);
-        }
-        for (size_t i = 1; i < colon; ++i) {
-            if (!Detail::Uri::IsSchemeCharacter(text[i])) {
-                return std::unexpected(UriParseError::BadSchemeCharacter);
-            }
-        }
 
-        UriParts parts{.scheme = text.substr(0, colon)};
-        size_t cursor = colon + 1;
-        const bool hasAuthority = cursor + 1 < text.size() && text[cursor] == '/' && text[cursor + 1] == '/';
-        if (hasAuthority) {
-            cursor += 2;
-            const size_t authorityEnd = text.find_first_of("/?#", cursor);
-            const size_t end = authorityEnd == std::string_view::npos ? text.size() : authorityEnd;
-            parts.authority = text.substr(cursor, end - cursor);
-            parts.hasAuthority = true;
-            if (const auto error = Detail::Uri::ValidateAuthority(parts.authority); error != UriParseError::Ok) {
-                return std::unexpected(error);
-            }
-            cursor = end;
-        }
+        Detail::Uri::Cursor cursor{.text = text};
+        UriParts parts{};
 
-        const size_t pathEnd = text.find_first_of("?#", cursor);
-        const size_t pathStop = pathEnd == std::string_view::npos ? text.size() : pathEnd;
-        parts.path = text.substr(cursor, pathStop - cursor);
-        if (parts.hasAuthority && !parts.path.empty() && parts.path.front() != '/') {
-            return std::unexpected(UriParseError::BadPath);
+        auto scheme = Detail::Uri::ParseScheme(cursor);
+        if (!scheme) {
+            return std::unexpected(scheme.error());
         }
-        if (!parts.hasAuthority && parts.path.starts_with("//")) {
-            return std::unexpected(UriParseError::BadPath);
-        }
-        if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsPathPlain>(parts.path);
-            error != UriParseError::Ok) {
-            return std::unexpected(error);
-        }
-        for (char c : parts.path) {
-            if (c == '?' || c == '#') {
-                return std::unexpected(UriParseError::BadPath);
-            }
-        }
+        parts.scheme = *scheme;
 
-        cursor = pathStop;
-        if (cursor < text.size() && text[cursor] == '?') {
-            const size_t queryStart = ++cursor;
-            const size_t fragmentStart = text.find('#', cursor);
-            const size_t queryEnd = fragmentStart == std::string_view::npos ? text.size() : fragmentStart;
-            parts.query = text.substr(queryStart, queryEnd - queryStart);
-            parts.hasQuery = true;
-            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsQueryPlain>(parts.query);
-                error != UriParseError::Ok) {
-                return std::unexpected(error);
-            }
-            cursor = queryEnd;
+        auto authority = Detail::Uri::ParseAuthority(cursor);
+        if (!authority) {
+            return std::unexpected(authority.error());
         }
-        if (cursor < text.size() && text[cursor] == '#') {
-            parts.fragment = text.substr(cursor + 1);
-            parts.hasFragment = true;
-            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsFragmentPlain>(parts.fragment);
-                error != UriParseError::Ok) {
-                return std::unexpected(error);
-            }
-            cursor = text.size();
+        parts.authority = authority->text;
+        parts.hasAuthority = authority->present;
+
+        auto path = Detail::Uri::ParsePath(cursor, parts.hasAuthority);
+        if (!path) {
+            return std::unexpected(path.error());
+        }
+        parts.path = *path;
+
+        auto query = Detail::Uri::ParseQuery(cursor);
+        if (!query) {
+            return std::unexpected(query.error());
+        }
+        parts.query = query->text;
+        parts.hasQuery = query->present;
+
+        auto fragment = Detail::Uri::ParseFragment(cursor);
+        if (!fragment) {
+            return std::unexpected(fragment.error());
+        }
+        parts.fragment = fragment->text;
+        parts.hasFragment = fragment->present;
+
+        if (!cursor.Done()) {
+            return std::unexpected(UriParseError::BadCharacter);
         }
         return parts;
     }
