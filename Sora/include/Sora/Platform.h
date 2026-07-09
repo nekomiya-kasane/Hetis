@@ -16,6 +16,48 @@
 #    include <TargetConditionals.h>
 #endif
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+#    ifndef PLATFORM_EXPORT
+#        define PLATFORM_EXPORT __declspec(dllexport)
+#    endif
+#    ifndef PLATFORM_IMPORT
+#        define PLATFORM_IMPORT __declspec(dllimport)
+#    endif
+#    ifndef PLATFORM_LOCAL
+#        define PLATFORM_LOCAL
+#    endif
+#elif defined(__GNUC__) || defined(__clang__)
+#    ifndef PLATFORM_EXPORT
+#        define PLATFORM_EXPORT __attribute__((visibility("default")))
+#    endif
+#    ifndef PLATFORM_IMPORT
+#        define PLATFORM_IMPORT __attribute__((visibility("default")))
+#    endif
+#    ifndef PLATFORM_LOCAL
+#        define PLATFORM_LOCAL __attribute__((visibility("hidden")))
+#    endif
+#else
+#    ifndef PLATFORM_EXPORT
+#        define PLATFORM_EXPORT
+#    endif
+#    ifndef PLATFORM_IMPORT
+#        define PLATFORM_IMPORT
+#    endif
+#    ifndef PLATFORM_LOCAL
+#        define PLATFORM_LOCAL
+#    endif
+#endif
+
+#ifndef PLATFORM_API
+#    if defined(PLATFORM_STATIC) || defined(PLATFORM_BUILD_STATIC)
+#        define PLATFORM_API
+#    elif defined(PLATFORM_BUILD_SHARED) || defined(PLATFORM_EXPORTS)
+#        define PLATFORM_API PLATFORM_EXPORT
+#    else
+#        define PLATFORM_API PLATFORM_IMPORT
+#    endif
+#endif
+
 namespace Sora {
 
     inline namespace Platform {
