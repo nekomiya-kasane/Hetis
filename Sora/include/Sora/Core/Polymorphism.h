@@ -287,7 +287,7 @@ namespace Sora {
             template<typename Iface>
             consteval std::string_view FindOverloadCollision() {
                 const auto methods = SelectMethods<Iface>();
-                for (size_t i : std::views::iota(0, methods.size())) {
+                for (size_t i : std::views::iota(size_t{0}, methods.size())) {
                     const auto name = Meta::IdentifierOf(methods[i]);
                     for (size_t j : std::views::iota(i + 1, methods.size())) {
                         if (Meta::IdentifierOf(methods[j]) == name) {
