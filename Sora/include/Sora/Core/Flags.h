@@ -2,19 +2,18 @@
  * @file Flags.h
  * @brief Zero-boilerplate bitfield support for scoped enumerations via C++26 reflection.
  *
- * Any `enum class` whose enumerators are all either 0 or exact powers of two automatically
- * satisfies the `BitfieldEnum` concept. For such enums this header provides:
+ * Any @c enum class whose enumerators are all either 0 or exact powers of two automatically satisfies the @ref
+ * Sora::Concept::BitfieldEnum concept. For such enums this header provides:
  *
- * - **Bitwise operators** (`|`, `&`, `^`, `~`, `|=`, `&=`, `^=`) that return the
- *   enum type itself — no wrapper class, no macros, no opt-in boilerplate.
- * - **Query functions**: `HasFlag`, `HasAny`, `HasAll`, `IsEmpty`, `PopCount`.
- * - **Mutation functions**: `SetFlag`, `ClearFlag`, `ToggleFlag`.
- * - **Iteration**: `EachFlag(flags)` returns a `std::generator<E>` that yields
- *   each set bit as its enumerator, lowest first.
- * - **Compile-time safety**: `BitfieldEnum` is validated at compile time via
- *   P2996 reflection — a non-power-of-2 enumerator is a hard error.
- * - **Masked complement**: `operator~` only flips bits within the valid flag
- *   space (OR of all enumerators), never sets high garbage bits.
+ * - Bitwise operators (@c |, @c &, @c ^, @c ~, @c |=, @c &=, @c ^=) that return the enum type itself; no wrapper
+ *   class, no macros, no opt-in boilerplate.
+ * - Query functions: @ref HasFlag, @ref HasAny, @ref HasAll, @ref IsEmpty, @ref PopCount.
+ * - Mutation functions: @ref SetFlag, @ref ClearFlag, @ref ToggleFlag.
+ * - Iteration: @ref EachFlag returns a @c std::generator<E> that yields each set bit as its enumerator, lowest first.
+ * - Compile-time safety: @ref Sora::Concept::BitfieldEnum is validated at compile time via P2996 reflection;
+ *   a non-power-of-2 enumerator is a hard error.
+ * - Masked complement: @c operator~ only flips bits within the valid flag space (OR of all enumerators), never
+ *   sets high garbage bits.
  *
  * @ingroup Core
  */
@@ -25,18 +24,20 @@
 #include "Sora/Core/Traits/EnumTraits.h"
 
 // =========================================================================
-// Bitwise operators — return E, not a wrapper
+// Bitwise operators: return E, not a wrapper
 // =========================================================================
 
-/// @name Bitwise operators for Sora::Concept::BitfieldEnum
-/// @{
+/**
+ * @name Bitwise operators for Sora::Concept::BitfieldEnum
+ * @{
+ */
 
 /**
  * @brief Bitwise OR for any reflected Sora bitfield enum.
- * @details
- * The operator intentionally lives in the global namespace. ADL for an enum declared in
- * @c Sora::Nested associates @c Sora::Nested, not necessarily @c Sora, so a parent-namespace
- * operator is not a stable zero-boilerplate solution for nested Sora modules.
+ *
+ * @details The operator intentionally lives in the global namespace. ADL for an enum declared in @c Sora::Nested
+ * associates @c Sora::Nested, not necessarily @c Sora, so a parent-namespace operator is not a stable
+ * zero-boilerplate solution for nested Sora modules.
  */
 template<Sora::Concept::BitfieldEnum E>
 [[nodiscard]] constexpr E operator|(E a, E b) noexcept {
@@ -83,7 +84,7 @@ constexpr E& operator^=(E& a, E b) noexcept {
     return a = a ^ b;
 }
 
-/// @}
+/** @} */
 
 namespace Sora {
 
@@ -91,10 +92,14 @@ namespace Sora {
     // Query functions
     // =========================================================================
 
-    /// @name Bitfield queries
-    /// @{
+    /**
+     * @name Bitfield queries
+     * @{
+     */
 
-    /// @brief Test whether all bits of @p flag are set in @p set.
+    /**
+     * @brief Test whether all bits of @p flag are set in @p set.
+     */
     template<Concept::BitfieldEnum E>
     [[nodiscard]] constexpr bool HasFlag(E set, E flag) noexcept {
         using U = std::make_unsigned_t<std::underlying_type_t<E>>;
@@ -102,66 +107,84 @@ namespace Sora {
         return f == 0 ? static_cast<U>(set) == 0 : (static_cast<U>(set) & f) == f;
     }
 
-    /// @brief Test whether *any* bit of @p test is set in @p set.
+    /**
+     * @brief Test whether *any* bit of @p test is set in @p set.
+     */
     template<Concept::BitfieldEnum E>
     [[nodiscard]] constexpr bool HasAny(E set, E test) noexcept {
         using U = std::make_unsigned_t<std::underlying_type_t<E>>;
         return (static_cast<U>(set) & static_cast<U>(test)) != 0;
     }
 
-    /// @brief Test whether *all* bits of @p test are set in @p set.
+    /**
+     * @brief Test whether *all* bits of @p test are set in @p set.
+     */
     template<Concept::BitfieldEnum E>
     [[nodiscard]] constexpr bool HasAll(E set, E test) noexcept {
         using U = std::make_unsigned_t<std::underlying_type_t<E>>;
         return (static_cast<U>(set) & static_cast<U>(test)) == static_cast<U>(test);
     }
 
-    /// @brief True if no bits are set.
+    /**
+     * @brief True if no bits are set.
+     */
     template<Concept::BitfieldEnum E>
     [[nodiscard]] constexpr bool IsEmpty(E e) noexcept {
         return static_cast<std::make_unsigned_t<std::underlying_type_t<E>>>(e) == 0;
     }
 
-    /// @brief Number of set bits.
+    /**
+     * @brief Number of set bits.
+     */
     template<Concept::BitfieldEnum E>
     [[nodiscard]] constexpr int PopCount(E e) noexcept {
         return std::popcount(static_cast<std::make_unsigned_t<std::underlying_type_t<E>>>(e));
     }
 
-    /// @}
+    /** @} */
 
     // =========================================================================
     // Mutation functions
     // =========================================================================
 
-    /// @name Bitfield mutation
-    /// @{
+    /**
+     * @name Bitfield mutation
+     * @{
+     */
 
-    /// @brief Set flag bit(s).
+    /**
+     * @brief Set flag bit(s).
+     */
     template<Concept::BitfieldEnum E>
     constexpr E& SetFlag(E& set, E flag) noexcept {
         return set |= flag;
     }
 
-    /// @brief Clear flag bit(s).
+    /**
+     * @brief Clear flag bit(s).
+     */
     template<Concept::BitfieldEnum E>
     constexpr E& ClearFlag(E& set, E flag) noexcept {
         return set = set & ~flag;
     }
 
-    /// @brief Toggle flag bit(s).
+    /**
+     * @brief Toggle flag bit(s).
+     */
     template<Concept::BitfieldEnum E>
     constexpr E& ToggleFlag(E& set, E flag) noexcept {
         return set ^= flag;
     }
 
-    /// @}
+    /** @} */
 
     // =========================================================================
-    // Iteration — yields each set bit as its enumerator (lowest first)
+    // Iteration: yields each set bit as its enumerator (lowest first)
     // =========================================================================
 
-    /// @brief Lightweight input range over the set bits of a bitfield enum.
+    /**
+     * @brief Lightweight input range over the set bits of a bitfield enum.
+     */
     template<Concept::BitfieldEnum E>
     class FlagRange {
         using U = std::make_unsigned_t<std::underlying_type_t<E>>;
@@ -194,7 +217,7 @@ namespace Sora {
     /**
      * @brief Lazily yields each set flag bit as its enumerator, lowest first.
      *
-     * @code
+     * @code{.cpp}
      * for (auto f : EachFlag(Access::Read | Access::Exec)) {  Read, Exec  }
      * @endcode
      */
