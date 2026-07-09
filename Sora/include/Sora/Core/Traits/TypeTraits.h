@@ -238,6 +238,23 @@ namespace Sora {
             };
         }(std::make_index_sequence<std::variant_size_v<std::remove_cvref_t<T>>>{});
 
+        template<typename T>
+        concept OptionalLike = requires(T value) {
+            typename std::remove_cvref_t<T>::value_type;
+            { value.has_value() } -> std::convertible_to<bool>;
+            *value;
+        };
+
+        template<typename T>
+        concept StringLike =
+            std::same_as<std::remove_cvref_t<T>, std::string> || std::convertible_to<T, std::string_view>;
+
+        template<typename T>
+        concept ByteRange = std::ranges::range<T> && requires { typename std::ranges::range_value_t<T>; } &&
+                            (std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, std::byte> ||
+                             std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, unsigned char> ||
+                             std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, std::uint8_t>);
+
     } // namespace Concept
 
     namespace Traits {

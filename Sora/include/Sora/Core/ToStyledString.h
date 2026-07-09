@@ -49,7 +49,7 @@ namespace Sora {
     /** @brief Default automatic formatting policy used by @c std::format and @c std::println. */
     inline constexpr RenderMode kDefaultRenderMode = RenderMode::Styled;
 
-    namespace $ {
+    namespace $::Serialization {
 
         /** @brief Escaping mode used when appending data-owned text to styled output. */
         enum class StyledEscapePolicy : uint8_t {
@@ -218,7 +218,7 @@ namespace Sora {
             std::string out_{};
         };
 
-    } // namespace $
+    } // namespace $::Serialization
 
     namespace Hook {
 
@@ -240,7 +240,7 @@ namespace Sora {
     namespace Detail {
 
         template<typename T>
-        void ToStyledStringImpl($::StyledStringBuilder& builder, T&& value);
+        void ToStyledStringImpl($::Serialization::StyledStringBuilder& builder, T&& value);
 
         /** @name ADL hook detection @{ */
         namespace ADL {
@@ -251,13 +251,13 @@ namespace Sora {
 
                 /** @brief True if @c ToStyledString(builder, value) is found via ADL. */
                 template<typename T>
-                concept Available = requires($::StyledStringBuilder& builder, T&& value) {
+                concept Available = requires($::Serialization::StyledStringBuilder& builder, T&& value) {
                     { ToStyledString(builder, std::forward<T>(value)) } -> std::same_as<void>;
                 };
 
                 template<typename T>
                     requires Available<T>
-                void Invoke($::StyledStringBuilder& builder, T&& value) {
+                void Invoke($::Serialization::StyledStringBuilder& builder, T&& value) {
                     ToStyledString(builder, std::forward<T>(value));
                 }
             } // namespace FreeToStyledString
@@ -267,26 +267,27 @@ namespace Sora {
 
         /** @brief Detects a member @c value.ToStyledString(builder). */
         template<typename T>
-        concept HasMemberToStyledString = requires(T&& value, $::StyledStringBuilder& builder) {
+        concept HasMemberToStyledString = requires(T&& value, $::Serialization::StyledStringBuilder& builder) {
             { std::forward<T>(value).ToStyledString(builder) } -> std::same_as<void>;
         };
 
         /** @brief Detects a usable @ref Sora::Hook::ToStyledStringHook specialisation for @p T. */
         template<typename T>
-        concept HasHookToStyledString = requires(const T& value, $::StyledStringBuilder& builder) {
+        concept HasHookToStyledString = requires(const T& value, $::Serialization::StyledStringBuilder& builder) {
             { Hook::ToStyledStringHook<T>::Render(builder, value) } -> std::same_as<void>;
         };
 
         /** @brief Append @p value through @c std::to_string under numeric styling. */
         template<typename T>
-        void AppendStdToString($::StyledStringBuilder& builder, T&& value) {
-            builder.Text($::StyledRole::Number, std::to_string(std::forward<T>(value)));
+        void AppendStdToString($::Serialization::StyledStringBuilder& builder, T&& value) {
+            builder.Text($::Serialization::StyledRole::Number, std::to_string(std::forward<T>(value)));
         }
 
         /** @brief Core dispatch from a value to styled terminal text. */
         template<typename T>
-        void ToStyledStringImpl($::StyledStringBuilder& builder, T&& value) {
+        void ToStyledStringImpl($::Serialization::StyledStringBuilder& builder, T&& value) {
             using U = std::remove_cvref_t<T>;
+            namespace $$ = $::Serialization;
 
             if constexpr (HasHookToStyledString<U>) {
                 Hook::ToStyledStringHook<U>::Render(builder, value);
@@ -295,11 +296,11 @@ namespace Sora {
             } else if constexpr (HasMemberToStyledString<U>) {
                 std::forward<T>(value).ToStyledString(builder);
             } else if constexpr (HasHookToString<U> || ADL::FreeToString::Available<U> || HasMemberToString<U>) {
-                builder.Text($::StyledRole::Plain, ToString(std::forward<T>(value)));
+                builder.Text($$::StyledRole::Plain, ToString(std::forward<T>(value)));
             } else if constexpr (std::is_null_pointer_v<U>) {
-                builder.Text($::StyledRole::Null, "nullptr");
+                builder.Text($$::StyledRole::Null, "nullptr");
             } else if constexpr (std::same_as<U, bool>) {
-                builder.Text($::StyledRole::Boolean, value ? "true" : "false");
+                builder.Text($$::StyledRole::Boolean, value ? "true" : "false");
             } else if constexpr (std::same_as<U, char>) {
                 char text[] = {value, '\0'};
                 builder.QuotedString(std::string_view{text, 1});
@@ -313,7 +314,7 @@ namespace Sora {
 
                 template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
                     if ([:e:] == value) {
-                        builder.Text($::StyledRole::EnumName, Meta::DisplayStringOf(e));
+                        builder.Text($$::StyledRole::EnumName, Meta::DisplayStringOf(e));
                         return;
                     }
                 }
@@ -325,48 +326,48 @@ namespace Sora {
                     if constexpr (flag != Underlying{0}) {
                         if ((remaining & flag) == flag) {
                             if (!first) {
-                                builder.Raw($::StyledRole::Punctuation, " | ");
+                                builder.Raw($$::StyledRole::Punctuation, " | ");
                             }
                             first = false;
-                            builder.Text($::StyledRole::EnumName, Meta::DisplayStringOf(e));
+                            builder.Text($$::StyledRole::EnumName, Meta::DisplayStringOf(e));
                             remaining &= static_cast<Underlying>(~flag);
                         }
                     }
                 }
                 if (first || remaining != Underlying{0}) {
-                    builder.Text($::StyledRole::TypeName, Traits::TypeName<U>);
-                    builder.Raw($::StyledRole::Punctuation, "(unknown:");
-                    builder.Text($::StyledRole::Number, std::format("{}", static_cast<Underlying>(value)));
-                    builder.Raw($::StyledRole::Punctuation, ")");
+                    builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
+                    builder.Raw($$::StyledRole::Punctuation, "(unknown:");
+                    builder.Text($$::StyledRole::Number, std::format("{}", static_cast<Underlying>(value)));
+                    builder.Raw($$::StyledRole::Punctuation, ")");
                 }
             } else if constexpr (std::ranges::range<U>) {
-                builder.Raw($::StyledRole::Punctuation, "[");
+                builder.Raw($$::StyledRole::Punctuation, "[");
                 bool first = true;
                 for (auto&& item : value) {
                     if (!first) {
-                        builder.Raw($::StyledRole::Punctuation, ", ");
+                        builder.Raw($$::StyledRole::Punctuation, ", ");
                     }
                     first = false;
                     ToStyledStringImpl(builder, item);
                 }
-                builder.Raw($::StyledRole::Punctuation, "]");
+                builder.Raw($$::StyledRole::Punctuation, "]");
             } else if constexpr (Concept::TupleLikeClass<U>) {
-                builder.Raw($::StyledRole::Punctuation, "(");
+                builder.Raw($$::StyledRole::Punctuation, "(");
                 bool first = true;
                 std::apply(
                     [&]<typename... Ts>(Ts&&... args) {
-                        ((first ? void(first = false) : builder.Raw($::StyledRole::Punctuation, ", "),
+                        ((first ? void(first = false) : builder.Raw($$::StyledRole::Punctuation, ", "),
                           ToStyledStringImpl(builder, std::forward<Ts>(args))),
                          ...);
                     },
                     std::forward<T>(value));
-                builder.Raw($::StyledRole::Punctuation, ")");
+                builder.Raw($$::StyledRole::Punctuation, ")");
             } else if constexpr (Concept::VariantLikeClass<U>) {
                 if (value.valueless_by_exception()) {
-                    builder.Text($::StyledRole::TypeName, Traits::TypeName<U>);
-                    builder.Raw($::StyledRole::Punctuation, "(");
-                    builder.Text($::StyledRole::Error, "valueless");
-                    builder.Raw($::StyledRole::Punctuation, ")");
+                    builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
+                    builder.Raw($$::StyledRole::Punctuation, "(");
+                    builder.Text($$::StyledRole::Error, "valueless");
+                    builder.Raw($$::StyledRole::Punctuation, ")");
                 } else {
                     std::visit(
                         [&builder](auto&& alternative) {
@@ -376,38 +377,38 @@ namespace Sora {
                 }
             } else if constexpr (std::is_pointer_v<U>) {
                 if (value == nullptr) {
-                    builder.Text($::StyledRole::TypeName, Traits::TypeName<std::remove_pointer_t<U>>);
-                    builder.Raw($::StyledRole::Punctuation, "*(");
-                    builder.Text($::StyledRole::Null, "nullptr");
-                    builder.Raw($::StyledRole::Punctuation, ")");
+                    builder.Text($$::StyledRole::TypeName, Traits::TypeName<std::remove_pointer_t<U>>);
+                    builder.Raw($$::StyledRole::Punctuation, "*(");
+                    builder.Text($$::StyledRole::Null, "nullptr");
+                    builder.Raw($$::StyledRole::Punctuation, ")");
                 } else {
-                    builder.Text($::StyledRole::TypeName, Traits::TypeName<std::remove_pointer_t<U>>);
-                    builder.Raw($::StyledRole::Punctuation, "*(");
-                    builder.Text($::StyledRole::Address, std::format("{:p}", static_cast<const void*>(value)));
-                    builder.Raw($::StyledRole::Punctuation, ")");
+                    builder.Text($$::StyledRole::TypeName, Traits::TypeName<std::remove_pointer_t<U>>);
+                    builder.Raw($$::StyledRole::Punctuation, "*(");
+                    builder.Text($$::StyledRole::Address, std::format("{:p}", static_cast<const void*>(value)));
+                    builder.Raw($$::StyledRole::Punctuation, ")");
                 }
             } else if constexpr (std::is_arithmetic_v<U>) {
-                builder.Text($::StyledRole::Number, std::format("{}", value));
+                builder.Text($$::StyledRole::Number, std::format("{}", value));
             } else if constexpr (requires(T&& v) { std::to_string(std::forward<T>(v)); }) {
                 AppendStdToString(builder, std::forward<T>(value));
             } else if constexpr (!AutoDisplayable<U> &&
                                  requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
                 std::stringstream ss;
                 ss << std::forward<T>(value);
-                builder.Text($::StyledRole::Plain, ss.str());
+                builder.Text($$::StyledRole::Plain, ss.str());
             } else if constexpr (std::is_class_v<U> && !std::is_union_v<U> && requires { sizeof(U); }) {
-                builder.Text($::StyledRole::TypeName, Traits::TypeName<U>);
-                builder.Raw($::StyledRole::Punctuation, "{");
+                builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
+                builder.Raw($$::StyledRole::Punctuation, "{");
 
                 template for (bool first = true; constexpr auto m : Traits::DataMembers<U>) {
                     if constexpr (!$::Has<$::Serialization::Ignore>(m)) {
                         if (!first) {
-                            builder.Raw($::StyledRole::Punctuation, ", ");
+                            builder.Raw($$::StyledRole::Punctuation, ", ");
                         }
                         first = false;
 
-                        builder.Text($::StyledRole::FieldName, FieldNameOf<m>());
-                        builder.Raw($::StyledRole::Punctuation, "=");
+                        builder.Text($$::StyledRole::FieldName, FieldNameOf<m>());
+                        builder.Raw($$::StyledRole::Punctuation, "=");
 
                         if constexpr (std::meta::is_bit_field(m)) {
                             ToStyledStringImpl(builder, auto(value.[:m:]));
@@ -415,7 +416,7 @@ namespace Sora {
                                              $::Has<$::Serialization::DerefPrint>(m)) {
                             auto* ptr = value.[:m:];
                             if (ptr == nullptr) {
-                                builder.Text($::StyledRole::Null, "nullptr");
+                                builder.Text($$::StyledRole::Null, "nullptr");
                             } else {
                                 ToStyledStringImpl(builder, *ptr);
                             }
@@ -425,14 +426,14 @@ namespace Sora {
                     }
                 }
 
-                builder.Raw($::StyledRole::Punctuation, "}");
+                builder.Raw($$::StyledRole::Punctuation, "}");
             } else {
-                builder.Raw($::StyledRole::Punctuation, "<");
-                builder.Text($::StyledRole::TypeName, Traits::TypeName<U>);
-                builder.Raw($::StyledRole::Plain, " at ");
-                builder.Text($::StyledRole::Address,
+                builder.Raw($$::StyledRole::Punctuation, "<");
+                builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
+                builder.Raw($$::StyledRole::Plain, " at ");
+                builder.Text($$::StyledRole::Address,
                              std::format("{:p}", static_cast<const void*>(std::addressof(value))));
-                builder.Raw($::StyledRole::Punctuation, ">");
+                builder.Raw($$::StyledRole::Punctuation, ">");
             }
         }
 
@@ -441,13 +442,13 @@ namespace Sora {
             /** @brief Convert @p value to a styled string with default options. */
             template<typename T>
             [[nodiscard]] std::string operator()(T&& value) const {
-                return (*this)(std::forward<T>(value), $::StyledStringOptions{});
+                return (*this)(std::forward<T>(value), $::Serialization::StyledStringOptions{});
             }
 
             /** @brief Convert @p value to a styled string with explicit options. */
             template<typename T>
-            [[nodiscard]] std::string operator()(T&& value, $::StyledStringOptions options) const {
-                $::StyledStringBuilder builder{options};
+            [[nodiscard]] std::string operator()(T&& value, $::Serialization::StyledStringOptions options) const {
+                $::Serialization::StyledStringBuilder builder{options};
                 ToStyledStringImpl(builder, std::forward<T>(value));
                 return std::move(builder).Finish();
             }

@@ -204,6 +204,7 @@ namespace Sora {
             ADL::FreeToStringView::Available<std::remove_cvref_t<T>> || HasMemberToStringView<std::remove_cvref_t<T>> ||
             std::is_null_pointer_v<std::remove_cvref_t<T>> || std::same_as<std::remove_cvref_t<T>, bool> ||
             std::is_enum_v<std::remove_cvref_t<T>>;
+
         /** @brief Type supported by Sora's automatic standard formatting and stream insertion bridges. */
         template<typename T>
         concept AutoDisplayable =
