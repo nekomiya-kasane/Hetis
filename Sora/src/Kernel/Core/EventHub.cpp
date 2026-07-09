@@ -5,10 +5,8 @@
 
 namespace Sora::Kernel {
 
-    EventHub::EventHub(BaseUnknown& owner) noexcept
-        : owner_(owner.Nucleus()),
-          ownerWeak_(owner_->GetComponentWeakRef()),
-          subscriptions_(std::make_shared<Detail::SubscriptionSnapshot>()),
+    EventHub::EventHub() noexcept
+        : subscriptions_(std::make_shared<Detail::SubscriptionSnapshot>()),
           traces_(std::make_shared<Detail::TraceSnapshot>()) {}
 
     EventHub::~EventHub() noexcept {
@@ -109,36 +107,27 @@ namespace Sora::Kernel {
         }
     }
 
-    namespace {
-
-        struct EventHubRegistryEntry {
-            BaseUnknown* owner{};
-            std::shared_ptr<EventHub> hub{};
-        };
-
-        std::mutex gEventHubRegistryMutex;
-        std::vector<EventHubRegistryEntry> gEventHubRegistry;
-
-    } // namespace
-
     EventHub& Events(BaseUnknown& object) {
+        using Detail::BaseUnknownInternal;
+
         BaseUnknown* owner = object.Nucleus();
         assert(owner != nullptr);
 
-        std::scoped_lock lock(gEventHubRegistryMutex);
-        std::erase_if(gEventHubRegistry,
-                      [](const EventHubRegistryEntry& entry) { return !entry.hub || !entry.hub->OwnerAlive(); });
-
-        const auto found = std::ranges::find_if(
-            gEventHubRegistry, [owner](const EventHubRegistryEntry& entry) { return entry.owner == owner; });
-        if (found != gEventHubRegistry.end()) {
-            return *found->hub;
+        const Iid hubIid = Traits::IidOf<EventHub>;
+        if (BaseUnknown* existing = BaseUnknownInternal::FindExtensionNode(owner, hubIid)) {
+            return *static_cast<EventHub*>(existing);
         }
 
-        auto hub = std::shared_ptr<EventHub>{new EventHub(*owner)};
-        EventHub& result = *hub;
-        gEventHubRegistry.push_back(EventHubRegistryEntry{.owner = owner, .hub = std::move(hub)});
-        return result;
+        EventHub* hub = new EventHub;
+        hub->ownerWeak_ = owner->GetComponentWeakRef();
+        if (BaseUnknownInternal::AdoptExtensionNode(owner, hub)) {
+            return *hub;
+        }
+
+        Release(hub);
+        BaseUnknown* existing = BaseUnknownInternal::FindExtensionNode(owner, hubIid);
+        assert(existing != nullptr);
+        return *static_cast<EventHub*>(existing);
     }
 
     EventHub& Events(BaseUnknown* object) {

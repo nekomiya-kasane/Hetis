@@ -34,12 +34,16 @@ namespace Sora::Kernel {
 
     namespace Event {
 
+        /** @brief Base class for all event payloads. */
         struct BaseEvent {};
 
-    } // namespace Event
+        /** @brief Type-list sentinel declaring that a class emits or accepts every concrete event payload. */
+        struct AllEvents : BaseEvent {};
 
-    /** @brief Type-list sentinel declaring that a class emits or accepts every concrete event payload. */
-    struct AllEvents {};
+        /** @brief Type-list sentinel declaring that a class emits or accepts an unspecified event payload. */
+        struct UnspecifiedEvent : BaseEvent {};
+
+    } // namespace Event
 
     namespace $ {
 
@@ -64,9 +68,6 @@ namespace Sora::Kernel {
 
         consteval bool IsEventType(std::meta::info info) {
             info = std::meta::dealias(info);
-            if (info == ^^Sora::Kernel::AllEvents) {
-                return false;
-            }
             if (!std::meta::is_class_type(info)) {
                 throw std::define_static_string("Meta::IsEvent: '" + std::string{std::meta::display_string_of(info)} +
                                                 "' is not a class reflection — only classes can be events.");
@@ -96,7 +97,8 @@ namespace Sora::Kernel {
         template<typename T>
         concept EventPayload =
             std::is_class_v<std::remove_cvref_t<T>> && std::copy_constructible<std::remove_cvref_t<T>> &&
-            !std::same_as<std::remove_cvref_t<T>, AllEvents> &&
+            !std::same_as<std::remove_cvref_t<T>, Event::AllEvents> &&
+            !std::same_as<std::remove_cvref_t<T>, Event::UnspecifiedEvent> &&
             Sora::Kernel::Meta::IsEventType(std::meta::remove_cvref(^^T));
 
         /** @brief Callback policy tag; tags are ordinary class types, not event payloads. */
@@ -104,9 +106,16 @@ namespace Sora::Kernel {
         concept CallbackTagClass = std::is_class_v<std::remove_cvref_t<T>>;
 
         static_assert(EventClass<Event::BaseEvent>, "Event::BaseEvent must satisfy EventClass concept.");
-        static_assert(!EventClass<AllEvents>, "AllEvents is a declaration pattern, not an event payload.");
+        static_assert(EventClass<Event::AllEvents>, "Event::AllEvents must satisfy EventClass concept.");
+        static_assert(EventClass<Event::UnspecifiedEvent>, "Event::UnspecifiedEvent must satisfy EventClass concept.");
 
     } // namespace Concept
+
+    /** @brief Declaration-side event-list sentinel accepting every concrete event payload. */
+    using AllEvents = Event::AllEvents;
+
+    /** @brief Declaration-side event-list sentinel used by unconstrained event concepts. */
+    using UnspecifiedEvent = Event::UnspecifiedEvent;
 
     /** @brief Default callback policy tag used when no more specific tag is requested. */
     struct DefaultCallbackTag {};
@@ -140,17 +149,53 @@ namespace Sora::Kernel {
             }
 
             auto args = Sora::Meta::TypeListTypesOf(info);
-            if (!std::ranges::all_of(args, [](std::meta::info arg) {
-                    return arg == ^^Sora::Kernel::AllEvents || Meta::IsEventType(arg);
-                })) {
+            if (!std::ranges::all_of(args, Meta::IsEventType)) {
                 return false;
             }
 
-            if (args.size() != 1 && std::ranges::contains(args, ^^Sora::Kernel::AllEvents)) {
-                throw std::define_static_string(
-                    "Meta::IsEventTypeList: AllEvents cannot be combined with concrete event payloads.");
-            }
             return true;
+        }
+
+        consteval std::meta::info CanonicalizeEventList(std::meta::info info) {
+            info = std::meta::dealias(info);
+            if (!IsEventTypeList(info)) {
+                throw std::define_static_string("Meta::CanonicalEventListOf: '" +
+                                                std::string{std::meta::display_string_of(info)} +
+                                                "' is not a Sora::Traits::TypeList specialization of event types.");
+            }
+
+            auto types = Sora::Meta::TypeListTypesOf(info) | std::views::filter([](std::meta::info type) {
+                             return type != ^^Sora::Kernel::Event::UnspecifiedEvent;
+                         }) |
+                         std::ranges::to<std::vector>();
+            if (std::ranges::contains(types, ^^Sora::Kernel::Event::AllEvents)) {
+                types = {^^Sora::Kernel::Event::AllEvents};
+            }
+            return std::meta::substitute(^^Sora::Kernel::EventList, types);
+        }
+
+        template<std::meta::info Validator>
+        consteval bool HasDeclaredTypeListInfo(std::meta::info type, std::string_view name) {
+            auto info = std::meta::dealias(std::meta::remove_cvref(type));
+            if (!Sora::Kernel::Meta::IsComClass(info)) {
+                return false;
+            }
+
+            auto chain = Sora::Meta::InheritanceChainUntil(info, ^^Sora::Kernel::BaseUnknown);
+            for (auto scope : chain) {
+                auto list = Sora::Meta::FindDirectTypeMemberOf(scope, name);
+                if (list == std::meta::info{}) {
+                    continue;
+                }
+
+                if (!Sora::Meta::IsTypeList(list) || !Sora::Meta::Invoke<Validator>(list)) {
+                    throw std::define_static_string(
+                        std::format("Meta::HasDeclaredTypeListInfo: '{}' is not a valid type-list for '{}'.",
+                                    Sora::Meta::DisplayStringOf(list), name));
+                }
+                return true;
+            }
+            return false;
         }
 
     } // namespace Meta
@@ -165,20 +210,17 @@ namespace Sora::Kernel {
         template<typename T>
         concept CallbackTagTypeList = Meta::IsCallbackTagList(^^T);
 
-        /** @brief Class that declares emitted events through a nested @c Emits alias. */
+        /** @brief Class that declares emitted events through a nested or inherited @c Emits alias. */
         template<typename T>
-        concept EmittableClass = requires { typename std::remove_cvref_t<T>::Emits; } &&
-                                 EventTypeList<typename std::remove_cvref_t<T>::Emits>;
+        concept EmittableClass = Meta::HasDeclaredTypeListInfo<^^Meta::IsEventTypeList>(^^T, "Emits");
 
-        /** @brief Class that declares accepted events through a nested @c Accepts alias. */
+        /** @brief Class that declares accepted events through a nested or inherited @c Accepts alias. */
         template<typename T>
-        concept AcceptableClass = requires { typename std::remove_cvref_t<T>::Accepts; } &&
-                                  EventTypeList<typename std::remove_cvref_t<T>::Accepts>;
+        concept AcceptableClass = Meta::HasDeclaredTypeListInfo<^^Meta::IsEventTypeList>(^^T, "Accepts");
 
-        /** @brief Class that declares callback tags through a nested @c Callbacks alias. */
+        /** @brief Class that declares callback tags through a nested or inherited @c Callbacks alias. */
         template<typename T>
-        concept CallbackAttachableClass = requires { typename std::remove_cvref_t<T>::Callbacks; } &&
-                                          CallbackTagTypeList<typename std::remove_cvref_t<T>::Callbacks>;
+        concept CallbackAttachableClass = Meta::HasDeclaredTypeListInfo<^^Meta::IsCallbackTagList>(^^T, "Callbacks");
 
     } // namespace Concept
 
@@ -191,15 +233,17 @@ namespace Sora::Kernel {
 
         namespace Detail {
 
-            consteval std::meta::info DeclaredTypeListInfoOf(
-                std::meta::info type, std::string_view name, auto checker = [](std::meta::info list) { return true; }) {
+            template<std::meta::info Validator>
+            consteval std::meta::info DeclaredTypeListInfoOf(std::meta::info type, std::string_view name) {
                 auto info = std::meta::dealias(std::meta::remove_cvref(type));
                 if (!Sora::Kernel::Meta::IsComClass(info)) {
-                    throw std::define_static_string("Traits::DeclaredTypeListOf: '" +
-                                                    std::string{Sora::Meta::DisplayStringOf(info)} +
-                                                    "' is not a COM class reflection.");
+                    throw std::define_static_string(
+                        std::format("Traits::DeclaredTypeListOf: '{}' is not a COM class reflection.",
+                                    Sora::Meta::DisplayStringOf(info)));
                 }
 
+                // 1. collect all direct TypeList members of the given name in the inheritance chain, starting from the
+                // most-derived type
                 std::vector<std::meta::info> result;
                 auto chain = Sora::Meta::InheritanceChainUntil(info, ^^Sora::Kernel::BaseUnknown);
                 for (auto scope : chain | std::views::reverse) {
@@ -207,100 +251,92 @@ namespace Sora::Kernel {
                     if (list == std::meta::info{}) {
                         continue;
                     }
-                    if (!Sora::Meta::IsTypeList(list)) {
-                        throw std::define_static_string("Traits::DeclaredTypeListOf: '" +
-                                                        std::string{Sora::Meta::DisplayStringOf(list)} +
-                                                        "' is not a Sora::Traits::TypeList specialization.");
+
+                    if (!Sora::Meta::IsTypeList(list) || !Sora::Meta::Invoke<Validator>(list)) {
+                        throw std::define_static_string(
+                            std::format("Traits::DeclaredTypeListOf: '{}' is not a valid type-list for '{}'.",
+                                        Sora::Meta::DisplayStringOf(list), name));
                     }
-                    Sora::Meta::AppendTypeList(result, list);
+                    Sora::Meta::AppendTypeListUnique(result, list);
                 }
 
-                auto&& ret = std::meta::substitute(^^Sora::Traits::TypeList, result);
-                if (!checker(ret)) {
-                    throw std::define_static_string("Traits::DeclaredTypeListOf: '" +
-                                                    std::string{Sora::Meta::DisplayStringOf(ret)} +
-                                                    "' is not a valid type-list for '" + std::string{name} + "'.");
-                }
-                return ret;
+                // 2. merge the collected type-lists into a single TypeList specialization
+                return Sora::Kernel::Meta::CanonicalizeEventList(
+                    std::meta::substitute(^^Sora::Kernel::EventList, result));
             }
 
         } // namespace Detail
 
         /** @brief Type-list of event payloads emitted by @p T after inherited declarations are merged. */
         template<Concept::ComClass T>
-        using EmittedEventsOf = typename [:Detail::DeclaredTypeListInfoOf(^^T, "Emits", Meta::IsEventTypeList):];
+        using EmittedEventsOf = typename [:Detail::DeclaredTypeListInfoOf<^^Meta::IsEventTypeList>(^^T, "Emits"):];
 
         /** @brief Type-list of event payloads accepted by @p T after inherited declarations are merged. */
         template<Concept::ComClass T>
-        using AcceptedEventsOf = typename [:Detail::DeclaredTypeListInfoOf(^^T, "Accepts", Meta::IsEventTypeList):];
+        using AcceptedEventsOf = typename [:Detail::DeclaredTypeListInfoOf<^^Meta::IsEventTypeList>(^^T, "Accepts"):];
 
         /** @brief Type-list of callback tags allowed by @p T after inherited declarations are merged. */
         template<Concept::ComClass T>
-        using CallbackTagsOf = typename [:Detail::DeclaredTypeListInfoOf(^^T, "Callbacks", Meta::IsCallbackTagList):];
+        using CallbackTagsOf = typename [:Detail::DeclaredTypeListInfoOf<^^Meta::IsCallbackTagList>(^^T, "Callbacks"):];
 
     } // namespace Traits
 
     namespace Traits {
 
         /** @brief Return whether @p List permits event payload @p Event, honoring @ref AllEvents. */
-        template<typename List, typename Event>
-        consteval bool EventListContains() {
-            return Sora::Traits::Contains<List, std::remove_cvref_t<Event>> ||
-                   Sora::Traits::Contains<List, Sora::Kernel::AllEvents>;
-        }
+        template<Concept::EventTypeList List, Concept::EventClass E = Event::UnspecifiedEvent>
+        inline constexpr bool EventListContains = (std::same_as<E, Event::UnspecifiedEvent> && List::size) ||
+                                                  Sora::Traits::Contains<List, std::remove_cvref_t<E>> ||
+                                                  Sora::Traits::Contains<List, Sora::Kernel::Event::AllEvents>;
 
         /**
          * @brief Return whether @p T can emit @p Event.
          * @details Classes emit only payload types declared by their own type-list alias or inherited from direct
          * bases.
          */
-        template<typename T, typename Event>
-        inline constexpr bool CanEmitEvent = [] consteval {
-            using Emits = Traits::EmittedEventsOf<std::remove_cvref_t<T>>;
-            return Concept::ComClass<std::remove_cvref_t<T>> && Concept::EventPayload<std::remove_cvref_t<Event>> &&
-                   EventListContains<Emits, Event>();
-        }();
+        template<Concept::ComClass T, Concept::EventClass E = Event::UnspecifiedEvent>
+        inline constexpr bool CanEmitEvent =
+            (std::same_as<std::remove_cvref_t<E>, Event::UnspecifiedEvent> ||
+             Concept::EventPayload<std::remove_cvref_t<E>>) &&
+            EventListContains<Traits::EmittedEventsOf<std::remove_cvref_t<T>>, E>;
 
         /**
          * @brief Return whether @p T can receive @p Event.
          * @details Classes accept only payload types declared by their own type-list alias or inherited from direct
          * bases.
          */
-        template<typename T, typename Event>
-        inline constexpr bool CanAcceptEvent = [] consteval {
-            using Accepts = Traits::AcceptedEventsOf<std::remove_cvref_t<T>>;
-            return Concept::ComClass<std::remove_cvref_t<T>> && Concept::EventPayload<std::remove_cvref_t<Event>> &&
-                   EventListContains<Accepts, Event>();
-        }();
+        template<Concept::ComClass T, Concept::EventClass E = Event::UnspecifiedEvent>
+        inline constexpr bool CanAcceptEvent =
+            (std::same_as<std::remove_cvref_t<E>, Event::UnspecifiedEvent> ||
+             Concept::EventPayload<std::remove_cvref_t<E>>) &&
+            EventListContains<Traits::AcceptedEventsOf<std::remove_cvref_t<T>>, E>;
 
         /**
          * @brief Return whether @p T can attach a callback tagged by @p CallbackTag.
          * @details Classes allow only callback tags declared by their own type-list alias or inherited from direct
          * bases.
          */
-        template<typename T, typename CallbackTag>
-        inline constexpr bool CanAttachCallback = [] consteval {
-            using Callbacks = Traits::CallbackTagsOf<std::remove_cvref_t<T>>;
-            return Concept::ComClass<std::remove_cvref_t<T>> &&
-                   Concept::CallbackTagClass<std::remove_cvref_t<CallbackTag>> &&
-                   Sora::Traits::Contains<Callbacks, std::remove_cvref_t<CallbackTag>>;
-        }();
+        template<Concept::ComClass T, Concept::CallbackTagClass CallbackTag>
+        inline constexpr bool CanAttachCallback =
+            Concept::CallbackTagClass<std::remove_cvref_t<CallbackTag>> &&
+            Sora::Traits::Contains<Traits::CallbackTagsOf<std::remove_cvref_t<T>>, std::remove_cvref_t<CallbackTag>>;
 
     } // namespace Traits
 
     namespace Concept {
 
         /** @brief Object-model class whose emitted-event list permits @p Event. */
-        template<typename T, typename Event>
-        concept EventEmitter = Traits::CanEmitEvent<T, Event>;
+        template<typename T, typename E = Event::UnspecifiedEvent>
+        concept EventEmitter = Concept::ComClass<T> && Concept::EventClass<E> && Traits::CanEmitEvent<T, E>;
 
         /** @brief Object-model class whose accepted-event list permits @p Event. */
-        template<typename T, typename Event>
-        concept EventReceiver = Traits::CanAcceptEvent<T, Event>;
+        template<typename T, typename E = Event::UnspecifiedEvent>
+        concept EventReceiver = Concept::ComClass<T> && Concept::EventClass<E> && Traits::CanAcceptEvent<T, E>;
 
         /** @brief Object-model class whose callback-tag list permits @p CallbackTag. */
         template<typename T, typename CallbackTag>
-        concept CallbackAttachable = Traits::CanAttachCallback<T, CallbackTag>;
+        concept CallbackAttachable =
+            Concept::ComClass<T> && Concept::CallbackTagClass<CallbackTag> && Traits::CanAttachCallback<T, CallbackTag>;
 
     } // namespace Concept
 
@@ -331,9 +367,9 @@ namespace Sora::Kernel {
     };
 
     /** @brief Strongly typed event receive context. */
-    template<Concept::EventPayload Event>
+    template<Concept::EventPayload E>
     struct EventContext : EventContextBase {
-        const Event& event; /**< Event payload being delivered. */
+        const E& event; /**< Event payload being delivered. */
     };
 
     /** @brief Trace hook payload produced by an event hub. */
@@ -347,83 +383,8 @@ namespace Sora::Kernel {
         uint64_t sequence{};     /**< Monotone receive sequence on the receiver hub. */
     };
 
-    namespace Detail {
-
-        template<typename>
-        class UniqueFunction;
-
-        /** @brief Minimal move-only callable erasure used until the active libc++ ships std::move_only_function. */
-        template<typename R, typename... Args>
-        class UniqueFunction<R(Args...)> {
-        public:
-            UniqueFunction() noexcept = default;
-            UniqueFunction(std::nullptr_t) noexcept {}
-
-            template<typename F>
-                requires(!std::same_as<std::remove_cvref_t<F>, UniqueFunction> &&
-                         std::invocable<std::remove_cvref_t<F>&, Args...>)
-            UniqueFunction(F&& fn) {
-                using Fn = std::remove_cvref_t<F>;
-                object_ = new Fn(std::forward<F>(fn));
-                invoke_ = [](void* object, Args... args) -> R {
-                    if constexpr (std::same_as<R, void>) {
-                        std::invoke(*static_cast<Fn*>(object), std::forward<Args>(args)...);
-                    } else {
-                        return std::invoke(*static_cast<Fn*>(object), std::forward<Args>(args)...);
-                    }
-                };
-                destroy_ = [](void* object) noexcept { delete static_cast<Fn*>(object); };
-            }
-
-            UniqueFunction(const UniqueFunction&) = delete;
-            UniqueFunction& operator=(const UniqueFunction&) = delete;
-
-            UniqueFunction(UniqueFunction&& other) noexcept
-                : object_(std::exchange(other.object_, nullptr)),
-                  invoke_(std::exchange(other.invoke_, nullptr)),
-                  destroy_(std::exchange(other.destroy_, nullptr)) {}
-
-            UniqueFunction& operator=(UniqueFunction&& other) noexcept {
-                if (this != std::addressof(other)) {
-                    Reset();
-                    object_ = std::exchange(other.object_, nullptr);
-                    invoke_ = std::exchange(other.invoke_, nullptr);
-                    destroy_ = std::exchange(other.destroy_, nullptr);
-                }
-                return *this;
-            }
-
-            ~UniqueFunction() noexcept { Reset(); }
-
-            explicit operator bool() const noexcept { return invoke_ != nullptr; }
-
-            R operator()(Args... args) {
-                if constexpr (std::same_as<R, void>) {
-                    invoke_(object_, std::forward<Args>(args)...);
-                } else {
-                    return invoke_(object_, std::forward<Args>(args)...);
-                }
-            }
-
-            void Reset() noexcept {
-                if (destroy_) {
-                    destroy_(object_);
-                }
-                object_ = nullptr;
-                invoke_ = nullptr;
-                destroy_ = nullptr;
-            }
-
-        private:
-            void* object_{};
-            R (*invoke_)(void*, Args...){};
-            void (*destroy_)(void*) noexcept {};
-        };
-
-    } // namespace Detail
-
     /** @brief Move-only scheduled work item used by event schedulers. */
-    using EventTask = Detail::UniqueFunction<void()>;
+    using EventTask = std::move_only_function<void()>;
 
     /** @brief Owning type-erased scheduler for deferred event callback invocation. */
     class EventScheduler {
@@ -617,8 +578,8 @@ namespace Sora::Kernel {
     };
 
     namespace Detail {
-        using ErasedCallback = UniqueFunction<EventFlow(EventContextBase&, const void*)>;
-        using ErasedTrace = UniqueFunction<void(const EventTrace&)>;
+        using ErasedCallback = std::move_only_function<EventFlow(EventContextBase&, const void*)>;
+        using ErasedTrace = std::move_only_function<void(const EventTrace&)>;
 
         struct SubscriptionRecord {
             std::shared_ptr<SubscriptionState> state{};
@@ -765,23 +726,27 @@ namespace Sora::Kernel {
     /** @brief Return the event hub associated with @p object. */
     [[nodiscard]] EventHub& Events(BaseUnknown& object);
 
-    /** @brief Cold callback manager attached to one closure nucleus. */
-    class EventHub {
+    /** @brief Cold callback manager stored as a closure-owned data extension on one closure nucleus. */
+    class [[= Sora::Kernel::$::Role{TypeOfClass::DataExtension}]] EventHub : public BaseUnknown {
+        S_OBJECT
+
     public:
-        /** @brief Construct for @p owner, which must be the closure nucleus. */
-        explicit EventHub(BaseUnknown& owner) noexcept;
+        /** @brief Construct an unbound hub extension; @ref Events binds it to the closure nucleus on demand. */
+        EventHub() noexcept;
         EventHub(const EventHub&) = delete;
         EventHub& operator=(const EventHub&) = delete;
         ~EventHub() noexcept;
 
         /** @brief Return the closure nucleus that owns this hub. */
-        [[nodiscard]] BaseUnknown& Owner() noexcept { return *owner_; }
+        [[nodiscard]] BaseUnknown& Owner() noexcept { return *Nucleus(); }
 
         /** @brief Return the closure nucleus that owns this hub. */
-        [[nodiscard]] const BaseUnknown& Owner() const noexcept { return *owner_; }
+        [[nodiscard]] const BaseUnknown& Owner() const noexcept { return *Nucleus(); }
 
         /** @brief Return whether the owning nucleus is still alive. */
-        [[nodiscard]] bool OwnerAlive() const noexcept { return ownerWeak_.Get() == owner_; }
+        [[nodiscard]] bool OwnerAlive() const noexcept {
+            return Extendee() != nullptr && ownerWeak_.Get() == Nucleus();
+        }
 
         /** @brief Attach a typed relation owned by this hub's emitter. */
         template<Concept::EventPayload Event, typename Callback>
@@ -851,15 +816,16 @@ namespace Sora::Kernel {
         template<Concept::EventPayload Event>
         void Emit(const Event& event, BaseUnknown* emitter = nullptr) {
             assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
-            BaseUnknown* actualEmitter = emitter ? emitter->Nucleus() : owner_;
+            BaseUnknown* owner = Nucleus();
+            BaseUnknown* actualEmitter = emitter ? emitter->Nucleus() : owner;
             if (!actualEmitter) {
-                actualEmitter = owner_;
+                actualEmitter = owner;
             }
 
             const uint64_t sequence = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
             auto subscriptions = Subscriptions();
             Trace(EventTrace{.phase = EventTracePhase::ReceiveBegin,
-                             .receiver = owner_,
+                             .receiver = owner,
                              .emitter = actualEmitter,
                              .eventId = Traits::EventIdOf<Event>,
                              .sequence = sequence});
@@ -888,7 +854,7 @@ namespace Sora::Kernel {
             }
 
             Trace(EventTrace{.phase = EventTracePhase::ReceiveEnd,
-                             .receiver = owner_,
+                             .receiver = owner,
                              .emitter = actualEmitter,
                              .eventId = Traits::EventIdOf<Event>,
                              .sequence = sequence});
@@ -919,6 +885,8 @@ namespace Sora::Kernel {
         void CancelAll() noexcept;
 
     private:
+        friend EventHub& Events(BaseUnknown& object);
+
         [[nodiscard]] EventLink AddSubscription(Detail::SubscriptionRecord record);
         [[nodiscard]] EventTraceHook AddTrace(Detail::TraceRecord record);
         [[nodiscard]] std::shared_ptr<const Detail::SubscriptionSnapshot> Subscriptions() const;
@@ -1025,7 +993,6 @@ namespace Sora::Kernel {
             return EventFlow::Continue;
         }
 
-        BaseUnknown* owner_{};
         WeakRef ownerWeak_{};
         mutable std::mutex mutex_{};
         std::shared_ptr<const Detail::SubscriptionSnapshot> subscriptions_{};
