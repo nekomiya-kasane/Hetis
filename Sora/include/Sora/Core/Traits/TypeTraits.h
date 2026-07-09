@@ -162,6 +162,12 @@ namespace Sora {
                    std::ranges::to<std::vector>();
         }
 
+        template<std::meta::info Invokable>
+        consteval bool Invoke(auto&&... args) {
+            static_assert(std::meta::is_function(Invokable), "Invokable must reflect a validation function.");
+            return [:Invokable:](std::forward<decltype(args)>(args)...);
+        }
+
     } // namespace Meta
 
     namespace Traits {

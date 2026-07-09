@@ -2,8 +2,8 @@
  * @file TypeTraits.h
  * @brief Reflection-based type traits, structural concepts, and utility types.
  *
- * Provides compile-time introspection helpers built on C++26 static reflection (`<meta>`, P2996) and standard 
- * concepts. Every facility is `consteval` / `inline constexpr`, so it folds to immediate values or pure type 
+ * Provides compile-time introspection helpers built on C++26 static reflection (`<meta>`, P2996) and standard
+ * concepts. Every facility is `consteval` / `inline constexpr`, so it folds to immediate values or pure type
  * computation with **zero** runtime cost. Key facilities, grouped by concern:
  *
  * @par Class member reflection
@@ -16,8 +16,8 @@
  * @par Base-class reflection
  * - `Bases<T>` / `BasesCount<T>` / `BaseType<T,I>` — direct base introspection.
  * - `RootClass<T>` / `SingleInheritedClass<T>`.
- * - `ChainedIdentifier<T>` / `ChainedDisplayString<T>` — dotted root-to-derived inheritance path; 
- *   `ScopedIdentifier<T>` / `ScopedDisplayString<T>` — dotted enclosing-scope path. `*Identifier` use `identifier_of`; 
+ * - `ChainedIdentifier<T>` / `ChainedDisplayString<T>` — dotted root-to-derived inheritance path;
+ *   `ScopedIdentifier<T>` / `ScopedDisplayString<T>` — dotted enclosing-scope path. `*Identifier` use `identifier_of`;
  *   `*DisplayString` use `display_string_of` (keeping template arguments).
  *
  * @par Enum reflection
@@ -28,20 +28,20 @@
  *
  * @par Structural & categorisation concepts
  * - `TupleLike<T>` / `VariantLike<T>` — structural duck-type detection.
- * - `Aggregate` / `StandardLayoutType` / `TriviallyCopyableType` / `EmptyType` / `PolymorphicType` / 
+ * - `Aggregate` / `StandardLayoutType` / `TriviallyCopyableType` / `EmptyType` / `PolymorphicType` /
  *   `UniquelyRepresented` / `Reflectable` / `ScopedEnum` …
- * - `SpecializationOf<T,Tmpl>` — generic class-template specialisation probe (reflection-based; @p Tmpl must be an 
+ * - `SpecializationOf<T,Tmpl>` — generic class-template specialisation probe (reflection-based; @p Tmpl must be an
  *   all-type-parameter template).
- * - Standard-library categorisation: `StdOptional`, `StdVariant`, `ChronoDuration`, `ChronoTimePoint`, 
+ * - Standard-library categorisation: `StdOptional`, `StdVariant`, `ChronoDuration`, `ChronoTimePoint`,
  *   `FilesystemPath`, `ByteRange`, `StringViewConvertible`, `StringKeyedAssociative`.
  *
  * @par Type-level algebra
- * - `TypeList` plus `At` / `Head` / `Tail` / `Last` / `Concat` / `MapT` / `FilterT` / `FoldT` / `Reverse` / 
- *   `Unique` / `PushFront` / `PushBack` / `PopBack` / `IndexOf` / `Contains` / `AllOf` / `AnyOf` / `NoneOf` / 
+ * - `TypeList` plus `At` / `Head` / `Tail` / `Last` / `Concat` / `MapT` / `FilterT` / `FoldT` / `Reverse` /
+ *   `Unique` / `PushFront` / `PushBack` / `PopBack` / `IndexOf` / `Contains` / `AllOf` / `AnyOf` / `NoneOf` /
  *   `CountIf`.
  *
  * @par Annotations (C++26 `[[=...]]`)
- * - `Anno::*` — annotation probing + member filtering/ordering driven by user-supplied `Ignore` / `Key` / `Order` 
+ * - `Anno::*` — annotation probing + member filtering/ordering driven by user-supplied `Ignore` / `Key` / `Order`
  *   annotation tag types.
  *
  * - `Overload` — lambda-overload-set builder for `std::visit`.
@@ -79,7 +79,7 @@ namespace Mashiro {
                 return std::meta::display_string_of(^^T);
             }
 
-        }
+        } // namespace Detail
 
         /// @brief string_view name of a type.
         template<typename T>
@@ -97,8 +97,8 @@ namespace Mashiro {
 
         /// @brief Static reflection array of @p T's non-static data members.
         template<typename T>
-        inline constexpr auto Members = std::define_static_array(
-            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
+        inline constexpr auto Members =
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
 
         /// @brief Number of non-static data members in @p T.
         template<typename T>
@@ -125,14 +125,16 @@ namespace Mashiro {
                 return total;
             }
 
-        }
+        } // namespace Detail
 
         /// @brief Total byte size of all data members (may differ from sizeof due to padding).
-        template<typename T> requires std::is_class_v<T>
+        template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t MemberBytesTotal = Detail::MemberBytesTotal<T>();
-    
+
         /// @brief Padding bytes = sizeof(T) - sum of member sizes.
-        template<typename T> requires std::is_class_v<T>
+        template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t PaddingBytes = sizeof(T) - MemberBytesTotal<T>;
 
         /// @brief Compact class: all members are homogeneous and there's no padding.
@@ -195,9 +197,9 @@ namespace Mashiro {
          * @tparam T Reflectable class type.
          * @tparam I Zero-based member index; must be `< MembersCount<T>`.
          */
-        template<typename T, size_t I> requires std::is_class_v<T>
-        inline constexpr std::string_view MemberName =
-            std::meta::identifier_of(Members<T>[I]);
+        template<typename T, size_t I>
+            requires std::is_class_v<T>
+        inline constexpr std::string_view MemberName = std::meta::identifier_of(Members<T>[I]);
 
         /** @cond INTERNAL */
         namespace Detail {
@@ -215,13 +217,14 @@ namespace Mashiro {
         /** @endcond */
 
         /// @brief `std::array<std::string_view, MembersCount<T>>` of member identifiers.
-        template<typename T> requires std::is_class_v<T>
+        template<typename T>
+            requires std::is_class_v<T>
         inline constexpr auto MemberNames = Detail::MemberNamesImpl<T>();
 
         /// @brief Byte offset of @p T's @p I-th non-static data member within @p T.
-        template<typename T, size_t I> requires std::is_class_v<T>
-        inline constexpr size_t MemberOffset =
-            static_cast<size_t>(std::meta::offset_of(Members<T>[I]).bytes);
+        template<typename T, size_t I>
+            requires std::is_class_v<T>
+        inline constexpr size_t MemberOffset = static_cast<size_t>(std::meta::offset_of(Members<T>[I]).bytes);
 
         /**
          * @brief Index of the first non-static data member of @p T named @p name.
@@ -230,11 +233,11 @@ namespace Mashiro {
          *
          * @return Zero-based index, or @ref kNotFound if no member matches.
          */
-        template<typename T> requires std::is_class_v<T>
+        template<typename T>
+            requires std::is_class_v<T>
         [[nodiscard]] consteval size_t MemberIndex(std::string_view name) {
             for (size_t i = 0; i < MembersCount<T>; ++i) {
-                if (std::meta::has_identifier(Members<T>[i]) &&
-                    std::meta::identifier_of(Members<T>[i]) == name) {
+                if (std::meta::has_identifier(Members<T>[i]) && std::meta::identifier_of(Members<T>[i]) == name) {
                     return i;
                 }
             }
@@ -242,7 +245,8 @@ namespace Mashiro {
         }
 
         /// @brief `true` if @p T declares a non-static data member named @p name.
-        template<typename T> requires std::is_class_v<T>
+        template<typename T>
+            requires std::is_class_v<T>
         [[nodiscard]] consteval bool HasMemberNamed(std::string_view name) {
             return MemberIndex<T>(name) != kNotFound;
         }
@@ -325,12 +329,13 @@ namespace Mashiro {
             using UnsignedUnderlying = std::make_unsigned_t<std::underlying_type_t<E>>;
 
             /// @brief Compile-time check: every enumerator is 0 or a power of 2.
-            template <typename E>
+            template<typename E>
             consteval bool AllPowerOfTwo() {
                 template for (constexpr auto e : Enumerators<E>) {
                     auto v = static_cast<UnsignedUnderlying<E>>([:e:]);
-                    if (v != 0 && !std::has_single_bit(v) && (std::meta::display_string_of(e) != "None"))
+                    if (v != 0 && !std::has_single_bit(v) && (std::meta::display_string_of(e) != "None")) {
                         return false;
+                    }
                 }
                 return true;
             }
@@ -344,8 +349,7 @@ namespace Mashiro {
                 }
                 using U = std::underlying_type_t<T>;
                 for (size_t i = 0; i < EnumeratorsCount<T>; ++i) {
-                    if (static_cast<U>(std::meta::extract<T>(Enumerators<T>[i])) !=
-                        static_cast<U>(i)) {
+                    if (static_cast<U>(std::meta::extract<T>(Enumerators<T>[i])) != static_cast<U>(i)) {
                         return false;
                     }
                 }
@@ -353,7 +357,7 @@ namespace Mashiro {
             }
 
             /// @brief Compile-time OR of all enumerators — the valid-bit mask.
-            template <typename E>
+            template<typename E>
             consteval UnsignedUnderlying<E> AllBitsMask() {
                 UnsignedUnderlying<E> mask{};
                 template for (constexpr auto e : Enumerators<E>) {
@@ -380,11 +384,11 @@ namespace Mashiro {
          * satisfying this concept automatically gets bitwise operators and query
          * functions — zero opt-in required.
          */
-        template <typename E>
+        template<typename E>
         concept BitfieldEnum = std::is_enum_v<E> && Detail::AllPowerOfTwo<E>();
-        
+
         /// @brief All-valid-bits mask for a BitfieldEnum (OR of all enumerators).
-        template <BitfieldEnum E>
+        template<BitfieldEnum E>
         inline constexpr auto kBitfieldMask = static_cast<E>(Detail::AllBitsMask<E>());
 
         /**
@@ -401,17 +405,20 @@ namespace Mashiro {
          * @return The matching enumerator identifier, or `""` if @p V is not a
          *         declared enumerator (e.g. a synthetic bitmask combination).
          */
-        template<typename E, E V> requires std::is_enum_v<E>
+        template<typename E, E V>
+            requires std::is_enum_v<E>
         consteval std::string_view EnumeratorName() {
             template for (constexpr auto en : Enumerators<E>) {
-                if (std::meta::extract<E>(en) == V)
+                if (std::meta::extract<E>(en) == V) {
                     return std::meta::identifier_of(en);
+                }
             }
             return {};
         }
 
         /// @brief The fixed underlying integer type of enum @p E.
-        template<typename E> requires std::is_enum_v<E>
+        template<typename E>
+            requires std::is_enum_v<E>
         using EnumUnderlying = std::underlying_type_t<E>;
 
         /** @cond INTERNAL */
@@ -421,8 +428,7 @@ namespace Mashiro {
             template<typename E>
             consteval auto EnumValuesImpl() {
                 return []<size_t... I>(std::index_sequence<I...>) {
-                    return std::array<E, sizeof...(I)>{
-                        std::meta::extract<E>(Mashiro::Traits::Enumerators<E>[I])...};
+                    return std::array<E, sizeof...(I)>{std::meta::extract<E>(Mashiro::Traits::Enumerators<E>[I])...};
                 }(std::make_index_sequence<EnumeratorsCount<E>>{});
             }
 
@@ -439,11 +445,13 @@ namespace Mashiro {
         /** @endcond */
 
         /// @brief `std::array<E, EnumeratorsCount<E>>` of every declared enumerator value.
-        template<typename E> requires std::is_enum_v<E>
+        template<typename E>
+            requires std::is_enum_v<E>
         inline constexpr auto EnumValues = Detail::EnumValuesImpl<E>();
 
         /// @brief `std::array<std::string_view, EnumeratorsCount<E>>` of enumerator identifiers.
-        template<typename E> requires std::is_enum_v<E>
+        template<typename E>
+            requires std::is_enum_v<E>
         inline constexpr auto EnumNames = Detail::EnumNamesImpl<E>();
 
         /**
@@ -457,11 +465,13 @@ namespace Mashiro {
          * @return The matching enumerator identifier, or `""` if @p value is not a
          *         declared enumerator (e.g. a synthetic bitmask combination).
          */
-        template<typename E> requires std::is_enum_v<E>
+        template<typename E>
+            requires std::is_enum_v<E>
         [[nodiscard]] constexpr std::string_view EnumName(E value) noexcept {
             template for (constexpr auto e : Enumerators<E>) {
-                if (std::meta::extract<E>(e) == value)
+                if (std::meta::extract<E>(e) == value) {
                     return std::meta::identifier_of(e);
+                }
             }
             return {};
         }
@@ -475,11 +485,13 @@ namespace Mashiro {
          * @return The enumerator whose identifier equals @p name, or
          *         `std::nullopt` when no enumerator matches.
          */
-        template<typename E> requires std::is_enum_v<E>
+        template<typename E>
+            requires std::is_enum_v<E>
         [[nodiscard]] constexpr std::optional<E> EnumCast(std::string_view name) noexcept {
             template for (constexpr auto e : Enumerators<E>) {
-                if (std::meta::identifier_of(e) == name)
+                if (std::meta::identifier_of(e) == name) {
                     return std::meta::extract<E>(e);
+                }
             }
             return std::nullopt;
         }
@@ -489,12 +501,14 @@ namespace Mashiro {
         // ==========================================================================
 
         /// @brief Static reflection array of @p T's direct base-class specifiers.
-        template<typename T> requires std::is_class_v<T>
-        inline constexpr auto Bases = std::define_static_array(
-            std::meta::bases_of(^^T, std::meta::access_context::unchecked()));
+        template<typename T>
+            requires std::is_class_v<T>
+        inline constexpr auto Bases =
+            std::define_static_array(std::meta::bases_of(^^T, std::meta::access_context::unchecked()));
 
         /// @brief Number of direct base classes of @p T.
-        template<typename T> requires std::is_class_v<T>
+        template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t BasesCount = Bases<T>.size();
 
         /**
@@ -512,8 +526,8 @@ namespace Mashiro {
          * is well-formed (and simply unsatisfied) for non-class types.
          */
         template<typename T>
-        concept RootClass = std::is_class_v<T> &&
-            std::meta::bases_of(^^T, std::meta::access_context::unchecked()).empty();
+        concept RootClass =
+            std::is_class_v<T> && std::meta::bases_of(^^T, std::meta::access_context::unchecked()).empty();
 
         /** @cond INTERNAL */
         namespace Detail {
@@ -552,7 +566,7 @@ namespace Mashiro {
                 std::vector<std::meta::info> chain; // innermost-first
                 chain.push_back(type);
                 auto parent = std::meta::parent_of(type);
-                while (parent != ^^:: && std::meta::has_identifier(parent)) {
+                while (parent != ^^::&&std::meta::has_identifier(parent)) {
                     chain.push_back(parent);
                     parent = std::meta::parent_of(parent);
                 }
@@ -567,8 +581,7 @@ namespace Mashiro {
             /// components without a plain identifier still render), otherwise with
             /// @c std::meta::identifier_of. The result is promoted to static storage
             /// via @c std::define_static_string.
-            consteval std::string_view JoinChain(const std::vector<std::meta::info>& chain,
-                                                 bool useDisplay) {
+            consteval std::string_view JoinChain(const std::vector<std::meta::info>& chain, bool useDisplay) {
                 std::string res;
                 for (size_t i = chain.size(); i-- > 0;) {
                     if (!res.empty()) {
@@ -647,7 +660,8 @@ namespace Mashiro {
          *
          * @tparam T A class or enumeration type.
          */
-        template<typename T> requires (std::is_class_v<T> || std::is_enum_v<T>)
+        template<typename T>
+            requires(std::is_class_v<T> || std::is_enum_v<T>)
         inline constexpr std::string_view ScopedIdentifier =
             Detail::JoinChain(Detail::ScopeChain(^^T), /*useDisplay=*/false);
 
@@ -661,7 +675,8 @@ namespace Mashiro {
          *
          * @tparam T A class or enumeration type.
          */
-        template<typename T> requires (std::is_class_v<T> || std::is_enum_v<T>)
+        template<typename T>
+            requires(std::is_class_v<T> || std::is_enum_v<T>)
         inline constexpr std::string_view ScopedDisplayString =
             Detail::JoinChain(Detail::ScopeChain(^^T), /*useDisplay=*/true);
 
@@ -715,8 +730,9 @@ namespace Mashiro {
             consteval std::meta::info ConcatImpl() {
                 std::vector<std::meta::info> types;
                 auto collect = [&](std::meta::info listType) {
-                    for (auto arg : std::meta::template_arguments_of(listType))
+                    for (auto arg : std::meta::template_arguments_of(listType)) {
                         types.push_back(arg);
+                    }
                 };
                 (collect(^^Ls), ...);
                 return std::meta::substitute(^^TypeList, types);
@@ -724,7 +740,7 @@ namespace Mashiro {
 
             template<typename... Ls>
             struct ConcatT {
-                using type = typename [:ConcatImpl<Ls...>():]; 
+                using type = typename [:ConcatImpl<Ls...>():];
             };
             template<>
             struct ConcatT<> {
@@ -747,12 +763,13 @@ namespace Mashiro {
                     const bool keep[] = {Pred<Ts>::value...};
                     auto all = std::meta::template_arguments_of(^^TypeList<Ts...>);
                     for (size_t i = 0; i < all.size(); ++i) {
-                        if (keep[i])
+                        if (keep[i]) {
                             result.push_back(all[i]);
+                        }
                     }
                     return std::meta::substitute(^^TypeList, result);
                 }
-                using type = typename [:Compute():]; 
+                using type = typename [:Compute():];
             };
 
             template<template<typename...> typename F, typename L>
@@ -770,7 +787,8 @@ namespace Mashiro {
             };
             template<template<typename, typename> typename Op, typename Acc, typename T, typename... Ts>
             struct FoldTT<Op, Acc, TypeList<T, Ts...>> {
-                using type = typename FoldTT<Op, typename [:std::meta::substitute(^^Op, {^^Acc, ^^T}):], TypeList<Ts...>>::type;
+                using type =
+                    typename FoldTT<Op, typename [:std::meta::substitute(^^Op, {^^Acc, ^^T}):], TypeList<Ts...>>::type;
             };
 
             template<typename T, typename... Ts>
@@ -797,8 +815,7 @@ namespace Mashiro {
             template<typename T>
             consteval std::meta::info TypeListReflOf() {
                 std::vector<std::meta::info> types;
-                for (auto m : std::meta::nonstatic_data_members_of(
-                         ^^T, std::meta::access_context::unchecked())) {
+                for (auto m : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked())) {
                     types.push_back(std::meta::type_of(m));
                 }
                 return std::meta::substitute(^^TypeList, types);
@@ -881,8 +898,7 @@ namespace Mashiro {
             struct PredFoldT<Pred, TypeList<Ts...>> {
                 static constexpr bool all = (Pred<Ts>::value && ...);
                 static constexpr bool any = (Pred<Ts>::value || ...);
-                static constexpr size_t count =
-                    (size_t{0} + ... + (Pred<Ts>::value ? size_t{1} : size_t{0}));
+                static constexpr size_t count = (size_t{0} + ... + (Pred<Ts>::value ? size_t{1} : size_t{0}));
             };
 
             template<template<typename> typename Pred, typename L>
@@ -1002,26 +1018,30 @@ namespace Mashiro {
         namespace Anno {
 
             /// @brief `true` if @p ent carries any annotation of type @p A.
-            template <typename A>
+            template<typename A>
             consteval bool Has(std::meta::info ent) {
                 return std::meta::annotations_of(ent, ^^A).size() > 0;
             }
 
             /// @brief Extract the first annotation of type @p A on @p ent, or `nullopt`.
-            template <typename A>
+            template<typename A>
             consteval std::optional<A> Get(std::meta::info ent) {
                 auto annots = std::meta::annotations_of(ent, ^^A);
-                if (annots.size() > 0) return std::meta::extract<A>(annots[0]);
+                if (annots.size() > 0) {
+                    return std::meta::extract<A>(annots[0]);
+                }
                 return std::nullopt;
             }
 
             /// @brief `true` if any non-static data member of @p T carries
             ///        annotation @p A (the "whitelist" / Key-mode trigger).
-            template <typename T, typename A>
+            template<typename T, typename A>
             consteval bool AnyMemberHas() {
-                for (auto m : std::meta::nonstatic_data_members_of(
-                                  ^^T, std::meta::access_context::unchecked()))
-                    if (Has<A>(m)) return true;
+                for (auto m : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked())) {
+                    if (Has<A>(m)) {
+                        return true;
+                    }
+                }
                 return false;
             }
 
@@ -1044,7 +1064,7 @@ namespace Mashiro {
              *         `std::define_static_array(...)` at the call site for use
              *         with `template for`.
              */
-            template <typename T, typename Ignore, typename Key, typename Order>
+            template<typename T, typename Ignore, typename Key, typename Order>
             consteval std::vector<std::meta::info> SelectMembers() {
                 const bool keyMode = AnyMemberHas<T, Key>();
                 std::vector<std::meta::info> result;
@@ -1064,7 +1084,7 @@ namespace Mashiro {
                 };
                 for (size_t i = 1; i < result.size(); ++i) {
                     auto key = result[i];
-                    int  pk  = priorityOf(key);
+                    int pk = priorityOf(key);
                     size_t j = i;
                     while (j > 0 && priorityOf(result[j - 1]) > pk) {
                         result[j] = result[j - 1];
@@ -1085,7 +1105,7 @@ namespace Mashiro {
              * example. This trait is provided here as a convenience anchor for
              * subsystems that all share the same NTTP-as-annotation pattern.
              */
-            template <typename T>
+            template<typename T>
             struct PayloadTrait {
                 static constexpr bool value = false;
             };
@@ -1109,8 +1129,7 @@ namespace Mashiro {
             /// specialisation cannot express.
             template<typename T, template<typename...> class Tmpl>
             consteval bool IsSpecializationOf() {
-                if (!std::meta::is_class_type(^^T) ||
-                    !std::meta::has_template_arguments(^^T)) {
+                if (!std::meta::is_class_type(^^T) || !std::meta::has_template_arguments(^^T)) {
                     return false;
                 }
                 return std::meta::template_of(^^T) == ^^Tmpl;
@@ -1137,8 +1156,7 @@ namespace Mashiro {
          * @endcode
          */
         template<typename T, template<typename...> class Tmpl>
-        concept SpecializationOf =
-            Detail::IsSpecializationOf<std::remove_cvref_t<T>, Tmpl>();
+        concept SpecializationOf = Detail::IsSpecializationOf<std::remove_cvref_t<T>, Tmpl>();
 
         /// @brief Any enumeration type (scoped or unscoped).
         template<typename T>
@@ -1201,53 +1219,69 @@ namespace Mashiro {
         concept StdVariant = SpecializationOf<T, std::variant>;
 
         /// @brief A `std::chrono::duration<Rep, Period>`.
-        template <typename T>
+        template<typename T>
         concept ChronoDuration = requires {
-            typename T::rep; typename T::period;
-            requires std::same_as<std::remove_cvref_t<T>,
-                std::chrono::duration<typename T::rep, typename T::period>>;
+            typename T::rep;
+            typename T::period;
+            requires std::same_as<std::remove_cvref_t<T>, std::chrono::duration<typename T::rep, typename T::period>>;
         };
 
         /// @brief A `std::chrono::time_point<Clock, Duration>`.
-        template <typename T>
+        template<typename T>
         concept ChronoTimePoint = requires {
-            typename T::clock; typename T::duration;
+            typename T::clock;
+            typename T::duration;
             requires std::same_as<std::remove_cvref_t<T>,
-                std::chrono::time_point<typename T::clock, typename T::duration>>;
+                                  std::chrono::time_point<typename T::clock, typename T::duration>>;
         };
 
         /// @brief A `std::filesystem::path`.
-        template <typename T>
-        concept FilesystemPath =
-            std::same_as<std::remove_cvref_t<T>, std::filesystem::path>;
+        template<typename T>
+        concept FilesystemPath = std::same_as<std::remove_cvref_t<T>, std::filesystem::path>;
 
         /// @brief A range whose element type is `std::byte` (binary blob).
-        template <typename T>
-        concept ByteRange = std::ranges::range<T> &&
-                            std::same_as<std::ranges::range_value_t<T>, std::byte>;
+        template<typename T>
+        concept ByteRange = std::ranges::range<T> && std::same_as<std::ranges::range_value_t<T>, std::byte>;
 
         /// @brief Convertible to `std::string_view` and not a path.
         ///
         /// `filesystem::path` is convertible-to-string-view on libstdc++ but
         /// has its own dedicated path; exclude it here so dispatchers can
         /// reach the path branch first.
-        template <typename T>
-        concept StringViewConvertible =
-            std::convertible_to<std::remove_cvref_t<T>, std::string_view> &&
-            !std::same_as<std::remove_cvref_t<T>, std::filesystem::path>;
+        template<typename T>
+        concept StringViewConvertible = std::convertible_to<std::remove_cvref_t<T>, std::string_view> &&
+                                        !std::same_as<std::remove_cvref_t<T>, std::filesystem::path>;
 
         /// @brief An associative range whose key type is convertible to
         ///        `std::string_view` (i.e. encodes naturally as a JSON object).
-        template <typename T>
-        concept StringKeyedAssociative = std::ranges::range<T> &&
-            requires { typename std::remove_cvref_t<T>::key_type; } &&
-            std::convertible_to<typename std::remove_cvref_t<T>::key_type,
-                                std::string_view>;
+        template<typename T>
+        concept StringKeyedAssociative = std::ranges::range<T> && requires {
+            typename std::remove_cvref_t<T>::key_type;
+        } && std::convertible_to<typename std::remove_cvref_t<T>::key_type, std::string_view>;
 
-    }
+        /** @brief Always returns true. */
+        bool AlwaysTrue(auto&&...) {
+            return true;
+        }
+
+        /** @brief Always returns false. */
+        bool AlwaysFalse(auto&&...) {
+            return false;
+        }
+
+    } // namespace Traits
+
+    namespace Meta {
+
+        consteval std::meta::info AggregateToTypeList(std::span<std::meta::info> members) {
+            auto types = members | std::views::transform(std::meta::type_of) | std::ranges::to<std::vector>();
+            return std::meta::substitute(^^Traits::TypeList, types);
+        }
+
+    } // namespace Meta
 
     namespace Anno {
-        
+
         using namespace Traits::Anno;
 
     }
