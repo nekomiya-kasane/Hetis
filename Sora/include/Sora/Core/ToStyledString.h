@@ -309,37 +309,7 @@ namespace Sora {
             } else if constexpr (std::is_convertible_v<U, std::string>) {
                 builder.QuotedString(std::string{std::forward<T>(value)});
             } else if constexpr (std::is_enum_v<U>) {
-                static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
-                using Underlying = std::underlying_type_t<U>;
-
-                template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
-                    if ([:e:] == value) {
-                        builder.Text($$::StyledRole::EnumName, Meta::DisplayStringOf(e));
-                        return;
-                    }
-                }
-
-                bool first = true;
-                auto remaining = static_cast<Underlying>(value);
-                template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
-                    constexpr auto flag = static_cast<Underlying>([:e:]);
-                    if constexpr (flag != Underlying{0}) {
-                        if ((remaining & flag) == flag) {
-                            if (!first) {
-                                builder.Raw($$::StyledRole::Punctuation, " | ");
-                            }
-                            first = false;
-                            builder.Text($$::StyledRole::EnumName, Meta::DisplayStringOf(e));
-                            remaining &= static_cast<Underlying>(~flag);
-                        }
-                    }
-                }
-                if (first || remaining != Underlying{0}) {
-                    builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
-                    builder.Raw($$::StyledRole::Punctuation, "(unknown:");
-                    builder.Text($$::StyledRole::Number, std::format("{}", static_cast<Underlying>(value)));
-                    builder.Raw($$::StyledRole::Punctuation, ")");
-                }
+                builder.Text($$::StyledRole::EnumName, Traits::EnumToString(value));
             } else if constexpr (std::ranges::range<U>) {
                 builder.Raw($$::StyledRole::Punctuation, "[");
                 bool first = true;

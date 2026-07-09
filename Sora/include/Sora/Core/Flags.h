@@ -63,7 +63,7 @@ template<Sora::Concept::BitfieldEnum E>
 template<Sora::Concept::BitfieldEnum E>
 [[nodiscard]] constexpr E operator~(E a) noexcept {
     using U = std::make_unsigned_t<std::underlying_type_t<E>>;
-    return static_cast<E>(~static_cast<U>(a) & Sora::Traits::kBitfieldMask<E>);
+    return static_cast<E>(~static_cast<U>(a) & Sora::Traits::BitfieldMask<E>);
 }
 
 /** @brief Compound OR. */

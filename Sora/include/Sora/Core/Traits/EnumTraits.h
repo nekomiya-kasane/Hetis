@@ -1,20 +1,26 @@
 /**
  * @file EnumTraits.h
- * @brief Reflection-based enum traits, enum concepts, and enum metadata tables.
+ * @brief Reflection-based enum traits, enum concepts, names, descriptions, and string conversion helpers.
  * @ingroup Core
  *
  * @details Provides compile-time enum introspection helpers built on C++26 static reflection. The facilities in this
- * file classify enums, expose enumerator names and values, and provide small conversion utilities without runtime
- * registration tables.
+ * file classify enums, expose enumerator names and values, handle annotation-backed descriptions, and centralise enum
+ * string conversion so higher layers such as ToString and JSON do not duplicate enum reflection logic.
  */
 #pragma once
 
+#include "Sora/Core/StringUtils.h"
+#include "Sora/Core/Traits/TypeTraits.h"
+
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
+#include <format>
 #include <meta>
 #include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -31,7 +37,7 @@ namespace Sora {
         template<typename T>
         concept EnumClass = std::is_scoped_enum_v<T>;
 
-        /** @brief An unscoped (C-style) enumeration. */
+        /** @brief An unscoped C-style enumeration. */
         template<typename T>
         concept UnscopedEnum = std::is_enum_v<T> && !std::is_scoped_enum_v<T>;
 
@@ -45,7 +51,7 @@ namespace Sora {
          * @return Static-storage array of enumerator reflections.
          */
         consteval auto EnumeratorsOf(std::meta::info iMeta) {
-            return std::define_static_array(std::meta::enumerators_of(iMeta));
+            return std::define_static_array(std::meta::enumerators_of(std::meta::dealias(iMeta)));
         }
 
     } // namespace Meta
@@ -56,6 +62,7 @@ namespace Sora {
         template<Concept::Enum T>
         inline constexpr size_t EnumeratorsCount = Meta::EnumeratorsOf(^^T).size();
 
+        /** @brief Static array containing every enumerator value of @p T in declaration order. */
         template<Concept::Enum T>
         inline constexpr std::array<T, Traits::EnumeratorsCount<T>> EnumeratorsArr = [] consteval {
             return []<size_t... I>(std::index_sequence<I...>) {
@@ -65,20 +72,48 @@ namespace Sora {
 
     } // namespace Traits
 
+    namespace $ {
+
+        /** @brief Human-readable description annotation for enum values and other reflected declarations. */
+        struct Description {
+            std::string_view text; /**< Description text. */
+        };
+
+    } // namespace $
+
+    namespace Meta {
+
+        /**
+         * @brief Return the @ref Sora::$::Description annotation for @p e, or an empty string when none is present.
+         * @param[in] e Reflection of an enumerator or declaration.
+         * @return Description text, or empty string when no description is present.
+         */
+        consteval std::string_view DescriptionOf(std::meta::info e) {
+            auto annotations = std::meta::annotations_of(e, ^^Sora::$::Description);
+            auto desc = std::ranges::find_if(
+                annotations, [](std::meta::info a) { return std::meta::type_of(a) == ^^Sora::$::Description; });
+            if (desc != annotations.end()) {
+                return std::define_static_string(std::meta::extract<Sora::$::Description>(*desc).text);
+            }
+            return std::string_view{};
+        }
+
+    } // namespace Meta
+
     namespace Concept {
 
-        /** @brief Enum whose non-special enumerators are all zero or single-bit values. */
+        /** @brief Enum whose ordinary enumerators are all zero or single-bit values. */
         template<typename T>
         concept BitfieldEnum = Enum<T> && Traits::EnumeratorsCount<T> > 0 && [] consteval {
             using U = std::make_unsigned_t<std::underlying_type_t<T>>;
             template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
-                if (std::meta::display_string_of(e) == "All" || std::meta::display_string_of(e) == "None") {
+                if (std::meta::identifier_of(e) == "All" || std::meta::identifier_of(e) == "None") {
                     continue;
                 }
-                if (std::meta::display_string_of(e).contains("Mask")) {
+                if (std::meta::identifier_of(e).contains("Mask")) {
                     continue;
                 }
-                auto v = static_cast<U>([:e:]);
+                const auto v = static_cast<U>([:e:]);
                 if (v != 0 && !std::has_single_bit(v)) {
                     return false;
                 }
@@ -86,16 +121,16 @@ namespace Sora {
             return true;
         }();
 
-        /** @brief Enum whose non-special enumerators have unique underlying values. */
+        /** @brief Enum whose ordinary enumerators have unique underlying values. */
         template<typename T>
         concept SequentialEnum = Enum<T> && Traits::EnumeratorsCount<T> > 0 && [] consteval {
             using U = std::underlying_type_t<T>;
             std::set<U> values;
             template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
-                if (std::meta::display_string_of(e) == "All" || std::meta::display_string_of(e) == "None") {
+                if (std::meta::identifier_of(e) == "All" || std::meta::identifier_of(e) == "None") {
                     continue;
                 }
-                if (std::meta::display_string_of(e).contains("Mask")) {
+                if (std::meta::identifier_of(e).contains("Mask")) {
                     continue;
                 }
                 if (values.contains(static_cast<U>([:e:]))) {
@@ -103,7 +138,6 @@ namespace Sora {
                 }
                 values.insert(static_cast<U>([:e:]));
             }
-
             return true;
         }();
 
@@ -113,7 +147,7 @@ namespace Sora {
 
         /** @brief All-valid-bits mask for a @ref Concept::BitfieldEnum, computed as the OR of all enumerators. */
         template<Concept::BitfieldEnum E>
-        inline constexpr auto kBitfieldMask = static_cast<E>([] consteval {
+        inline constexpr auto BitfieldMask = static_cast<E>([] consteval {
             using U = std::make_unsigned_t<std::underlying_type_t<E>>;
             U mask{};
             template for (constexpr auto e : Meta::EnumeratorsOf(^^E)) {
@@ -124,41 +158,165 @@ namespace Sora {
 
         /** @brief Static array containing every enumerator value of @p E in declaration order. */
         template<Concept::Enum E>
-        inline constexpr auto kEnumValues = [] consteval {
-            return []<size_t... I>(std::index_sequence<I...>) {
-                return std::array<E, sizeof...(I)>{std::meta::extract<E>(Meta::EnumeratorsOf(^^E)[I])...};
-            }(std::make_index_sequence<Traits::EnumeratorsCount<E>>{});
-        }();
+        inline constexpr auto EnumValues = EnumeratorsArr<E>;
 
         /** @brief Static array containing every enumerator source identifier of @p E in declaration order. */
         template<Concept::Enum E>
-        inline constexpr auto kEnumNames = [] consteval {
+        inline constexpr auto EnumNames = [] consteval {
             return []<size_t... I>(std::index_sequence<I...>) {
                 return std::array<std::string_view, sizeof...(I)>{
                     std::meta::identifier_of(Meta::EnumeratorsOf(^^E)[I])...};
             }(std::make_index_sequence<Traits::EnumeratorsCount<E>>{});
         }();
 
+        /** @brief Return the source identifier of @p value, or an empty view when no exact enumerator exists. */
+        template<Concept::Enum E>
+        [[nodiscard]] constexpr std::string_view EnumIdentifier(E value) noexcept {
+            template for (constexpr auto e : Meta::EnumeratorsOf(^^E)) {
+                if ([:e:] == value) {
+                    return Meta::IdentifierOf(e);
+                }
+            }
+            return {};
+        }
+
+        /** @brief Return the display name of @p value, or an empty view when no exact enumerator exists. */
+        template<Concept::Enum E>
+        [[nodiscard]] constexpr std::string_view EnumDisplayName(E value) noexcept {
+            template for (constexpr auto e : Meta::EnumeratorsOf(^^E)) {
+                if ([:e:] == value) {
+                    return Meta::DisplayStringOf(e);
+                }
+            }
+            return {};
+        }
+
+        /** @brief Return the description annotation of @p value, or an empty view when absent or not exact. */
+        template<Concept::Enum E>
+        [[nodiscard]] constexpr std::string_view EnumDescription(E value) noexcept {
+            template for (constexpr auto e : Meta::EnumeratorsOf(^^E)) {
+                if ([:e:] == value) {
+                    return Meta::DescriptionOf(e);
+                }
+            }
+            return {};
+        }
+
+        /** @brief Return a stable view for exact enum values, or the enum type name for unknown values. */
+        template<Concept::Enum E>
+        [[nodiscard]] constexpr std::string_view EnumToStringView(E value) noexcept {
+            if (const std::string_view exact = EnumDisplayName(value); !exact.empty()) {
+                return exact;
+            }
+            return Traits::TypeName<E>;
+        }
+
+        /** @brief Convert @p value to a display string, decomposing bitfield enums when possible. */
+        template<Concept::Enum E>
+        [[nodiscard]] std::string EnumToString(E value) {
+            using Raw = std::underlying_type_t<E>;
+            if (const std::string_view exact = EnumDisplayName(value); !exact.empty()) {
+                return std::string(exact);
+            }
+            if constexpr (Concept::BitfieldEnum<E>) {
+                using U = std::make_unsigned_t<Raw>;
+                U remaining = static_cast<U>(value);
+                std::string out;
+                template for (constexpr auto e : Meta::EnumeratorsOf(^^E)) {
+                    constexpr auto flag = static_cast<U>([:e:]);
+                    if constexpr (flag != U{0}) {
+                        if ((remaining & flag) == flag) {
+                            if (!out.empty()) {
+                                out += " | ";
+                            }
+                            out += Meta::DisplayStringOf(e);
+                            remaining &= static_cast<U>(~flag);
+                        }
+                    }
+                }
+                if (!out.empty() && remaining == U{0}) {
+                    return out;
+                }
+            }
+            return std::format("{}(unknown:{})", Traits::TypeName<E>, static_cast<Raw>(value));
+        }
+
     } // namespace Traits
 
     namespace Meta {
 
         /**
-         * @brief Convert an enumerator source identifier to an enum value.
+         * @brief Convert an enumerator token to an enum value.
+         * @details Matches source identifiers, display strings, and description annotations for exact enumerators.
          * @tparam E Enum type to inspect.
-         * @param[in] name Enumerator source identifier.
-         * @return Matching enum value, or @c std::nullopt when no enumerator has @p name.
+         * @param[in] token Enumerator token.
+         * @return Matching enum value, or @c std::nullopt when no enumerator has @p token.
          */
         template<Concept::Enum E>
-        [[nodiscard]] constexpr std::optional<E> EnumCast(std::string_view name) noexcept {
+        [[nodiscard]] constexpr std::optional<E> EnumCastToken(std::string_view token) noexcept {
+            token = Sora::Ascii::String::Trim(token);
             template for (constexpr auto e : Meta::EnumeratorsOf(^^E)) {
-                if (std::meta::identifier_of(e) == name) {
+                if (token == Meta::IdentifierOf(e) || token == Meta::DisplayStringOf(e) ||
+                    token == Meta::DescriptionOf(e)) {
                     return std::meta::extract<E>(e);
                 }
             }
             return std::nullopt;
         }
 
+        /**
+         * @brief Convert an enum display string to an enum value.
+         * @details For bitfield enums, accepts @c | separated tokens using identifiers, display strings, or
+         * descriptions. The token @c 0 is accepted as the empty flag set.
+         * @tparam E Enum type to inspect.
+         * @param[in] name Enumerator or bitfield display string.
+         * @return Matching enum value, or @c std::nullopt when parsing fails.
+         */
+        template<Concept::Enum E>
+        [[nodiscard]] constexpr std::optional<E> EnumCast(std::string_view name) noexcept {
+            if (auto exact = EnumCastToken<E>(name); exact.has_value()) {
+                return exact;
+            }
+            if constexpr (Concept::BitfieldEnum<E>) {
+                using U = std::make_unsigned_t<std::underlying_type_t<E>>;
+                U acc{};
+                bool sawToken = false;
+                size_t pos = 0;
+                while (pos <= name.size()) {
+                    size_t bar = name.find('|', pos);
+                    if (bar == std::string_view::npos) {
+                        bar = name.size();
+                    }
+                    const std::string_view token = Sora::Ascii::String::Trim(name.substr(pos, bar - pos));
+                    if (!token.empty() && token != "0") {
+                        auto value = EnumCastToken<E>(token);
+                        if (!value.has_value()) {
+                            return std::nullopt;
+                        }
+                        acc |= static_cast<U>(*value);
+                        sawToken = true;
+                    }
+                    if (bar == name.size()) {
+                        break;
+                    }
+                    pos = bar + 1;
+                }
+                if (sawToken || Sora::Ascii::String::Trim(name) == "0") {
+                    return static_cast<E>(acc);
+                }
+            }
+            return std::nullopt;
+        }
+
     } // namespace Meta
+
+    /** @brief Return an enum value description, falling back to the normal enum string representation. */
+    template<Concept::Enum E>
+    [[nodiscard]] std::string DescriptionOf(E value) {
+        if (const std::string_view desc = Traits::EnumDescription(value); !desc.empty()) {
+            return std::string(desc);
+        }
+        return Traits::EnumToString(value);
+    }
 
 } // namespace Sora

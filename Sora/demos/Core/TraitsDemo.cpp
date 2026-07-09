@@ -16,7 +16,7 @@ int main() {
     std::cout << "Member " << 1 << ": " << Sora::Traits::MemberIdentifier<MyStruct, 1> << std::endl;
     std::cout << "Member " << 2 << ": " << Sora::Traits::MemberIdentifier<MyStruct, 2> << std::endl;
 
-    constexpr auto colorEnumerators = Sora::Traits::kEnumNames<Color>;
+    constexpr auto colorEnumerators = Sora::Traits::EnumNames<Color>;
 
     for (auto& enumerator : colorEnumerators) {
         std::cout << "Color enumerator: " << enumerator << std::endl;

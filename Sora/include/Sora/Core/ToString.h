@@ -262,38 +262,7 @@ namespace Sora {
             }
             // 7. enum
             else if constexpr (std::is_enum_v<U>) {
-                static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
-                using Underlying = std::underlying_type_t<U>;
-
-                // a. exact match
-                template for (constexpr auto e : Sora::Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
-                    if ([:e:] == iValue) {
-                        return std::string(Sora::Meta::DisplayStringOf(e));
-                    }
-                }
-
-                // b. bitmask decomposition
-                std::stringstream ss;
-                bool first = true;
-                auto remaining = static_cast<Underlying>(iValue);
-
-                template for (constexpr auto e : Sora::Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
-                    constexpr auto flag = static_cast<Underlying>([:e:]);
-                    if constexpr (flag != Underlying{0}) {
-                        if ((remaining & flag) == flag) {
-                            ss << (first ? "" : " | ") << Sora::Meta::DisplayStringOf(e);
-                            first = false;
-                            remaining &= static_cast<Underlying>(~flag);
-                        }
-                    }
-                }
-
-                if (!first && remaining == Underlying{0}) {
-                    return ss.str();
-                }
-
-                // c. fallback
-                return std::format("{}(unknown:{})", Traits::TypeName<U>, static_cast<Underlying>(iValue));
+                return Traits::EnumToString(iValue);
             }
             // 8. range
             else if constexpr (std::ranges::range<U>) {
@@ -423,18 +392,7 @@ namespace Sora {
             }
             // 5. enum
             else if constexpr (std::is_enum_v<U>) {
-                static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
-                using Underlying = std::underlying_type_t<U>;
-
-                // a. exact match
-                template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
-                    if ([:e:] == iValue) {
-                        return std::string_view(Meta::DisplayStringOf(e));
-                    }
-                }
-
-                // b. fallback
-                return Traits::TypeName<U>;
+                return Traits::EnumToStringView(iValue);
             }
             // 6. fallback
             else {
@@ -520,16 +478,9 @@ namespace Sora {
         }
         // 6. enum
         else if constexpr (std::is_enum_v<U>) {
-            static_assert(std::meta::is_enumerable_type(std::meta::dealias(^^U)));
-
-            // a. exact match
-            template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^U))) {
-                if (iString == std::string_view(Meta::DisplayStringOf(e))) {
-                    return [:e:];
-                }
+            if (auto value = Meta::EnumCast<U>(iString); value.has_value()) {
+                return *value;
             }
-
-            // b. fallback
             return static_cast<T>(std::stoull(std::string(iString)));
         }
         // 7. fallback

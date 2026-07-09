@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "Sora/Core/Int128.h"
+#include "Sora/Core/StringUtils.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 #include "Sora/Core/Traits/AnnotationTraits.h"
 
@@ -185,29 +186,6 @@ namespace Sora::Hashing {
         }
 
         /**
-         * @brief Hex digit -> 0..15, or -1 if @p c is not a hex digit.
-         */
-        [[nodiscard]] static constexpr int HexNibble(char c) noexcept {
-            if (c >= '0' && c <= '9') {
-                return c - '0';
-            }
-            if (c >= 'a' && c <= 'f') {
-                return c - 'a' + 10;
-            }
-            if (c >= 'A' && c <= 'F') {
-                return c - 'A' + 10;
-            }
-            return -1;
-        }
-
-        /**
-         * @brief ASCII lowercase of @p c (only A..Z folded; other bytes pass through).
-         */
-        [[nodiscard]] static constexpr char ToLower(char c) noexcept {
-            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-        }
-
-        /**
          * @brief Canonical 8-4-4-4-12 lowercase hex string.
          */
         [[nodiscard]] constexpr std::array<char, 36> ToChars() const noexcept {
@@ -254,7 +232,7 @@ namespace Sora::Hashing {
                     }
                     continue;
                 }
-                int n = HexNibble(sv[i]);
+                int n = Sora::Ascii::HexValue(sv[i]);
                 if (n < 0) {
                     return std::unexpected(UuidParseErrc::InvalidHexDigit);
                 }
@@ -281,7 +259,7 @@ namespace Sora::Hashing {
             if (sv.size() >= kUrn.size()) {
                 bool match = true;
                 for (size_t i = 0; i < kUrn.size(); ++i) {
-                    if (ToLower(sv[i]) != kUrn[i]) {
+                    if (Sora::Ascii::ToLower(sv[i]) != kUrn[i]) {
                         match = false;
                         break;
                     }
@@ -365,10 +343,12 @@ namespace Sora::Hashing {
 
         template<typename A, bool IsStateless>
         struct ResultOfImpl;
+
         template<typename A>
         struct ResultOfImpl<A, true> {
             using type = decltype(std::declval<const A&>()(std::span<const std::byte>{}));
         };
+
         template<typename A>
         struct ResultOfImpl<A, false> {
             using type = typename A::ResultType;
@@ -452,16 +432,16 @@ namespace Sora::Hashing {
 
 } // namespace Sora::Hashing
 
-namespace Sora::$ {
+namespace Sora::$::Hashing {
 
-    using HashingIgnore = Hashing::$::Ignore;
-    using HashingKey = Hashing::$::Key;
-    using HashingOrder = Hashing::$::Order;
+    using Ignore = Sora::Hashing::$::Ignore;
+    using Key = Sora::Hashing::$::Key;
+    using Order = Sora::Hashing::$::Order;
 
-    template<Hashing::AnyAlgo A>
-    using HashingWith = Hashing::$::With<A>;
+    template<Sora::Hashing::AnyAlgo A>
+    using With = Sora::Hashing::$::With<A>;
 
-} // namespace Sora::$
+} // namespace Sora::$::Hashing
 
 namespace Sora::Hashing {
 
@@ -716,9 +696,8 @@ namespace Sora::Hashing {
 
     /** @brief Hash a byte-like range while treating @p zeroSize bytes from @p zeroOffset as zero. */
     template<StatefulAlgo State = Fnv1a64State, ByteLike Byte>
-    [[nodiscard]] constexpr typename State::ResultType HashByteRangeWithZeroRange(std::span<const Byte> bytes,
-                                                                                  size_t zeroOffset,
-                                                                                  size_t zeroSize) noexcept {
+    [[nodiscard]] constexpr typename State::ResultType
+    HashByteRangeWithZeroRange(std::span<const Byte> bytes, size_t zeroOffset, size_t zeroSize) noexcept {
         auto state = State::Seed();
         const size_t boundedOffset = std::min(zeroOffset, bytes.size());
         const size_t boundedSize = std::min(zeroSize, bytes.size() - boundedOffset);
@@ -776,10 +755,10 @@ namespace Sora::Hashing {
         template<StatelessAlgo A>
         [[nodiscard]] constexpr ResultOf<A> HashString(const A& algo, std::string_view sv) noexcept {
             if consteval {
-                std::vector<std::byte> bytes(sv.size());
-                for (size_t i = 0; i < sv.size(); ++i) {
-                    bytes[i] = static_cast<std::byte>(static_cast<unsigned char>(sv[i]));
-                }
+                auto bytes = sv | std::views::transform([](char c) {
+                                 return static_cast<std::byte>(static_cast<unsigned char>(c));
+                             }) |
+                             std::ranges::to<std::vector>();
                 return algo(std::span<const std::byte>{bytes.data(), bytes.size()});
             } else {
                 return algo(std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()});

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <meta>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -248,6 +249,19 @@ namespace Sora {
         template<typename T>
         concept StringLike =
             std::same_as<std::remove_cvref_t<T>, std::string> || std::convertible_to<T, std::string_view>;
+
+        /** @brief Type that exposes a stable @c view() convertible to @c std::string_view. */
+        template<typename T>
+        concept StringViewProvider = requires(const std::remove_cvref_t<T>& value) {
+            { value.view() } -> std::convertible_to<std::string_view>;
+        };
+
+        /** @brief Fixed-string-like structural string carrier with @c view(), @c data(), and @c size(). */
+        template<typename T>
+        concept FixedStringLike = StringViewProvider<T> && requires(const std::remove_cvref_t<T>& value) {
+            { value.data() } -> std::convertible_to<const char*>;
+            { value.size() } -> std::convertible_to<size_t>;
+        };
 
         template<typename T>
         concept ByteRange = std::ranges::range<T> && requires { typename std::ranges::range_value_t<T>; } &&
