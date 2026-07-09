@@ -237,9 +237,9 @@ namespace Sora {
     namespace Traits {
 
         /**
-         * @brief Pure-type-parameter substitution target for thunk-pointer construction.
-         *         Specialisations are exactly the flat free-function-pointer types `R(*)(Args...)`,
-         *         used as the reflection-domain handle for `std::meta::substitute`.
+         * @brief Pure-type-parameter substitution target for thunk-pointer construction. Specialisations are exactly
+         * the flat free-function-pointer types `R(*)(Args...)`, used as the reflection-domain handle for
+         * `std::meta::substitute`.
          */
         template<typename Ret, typename... Args>
         using FunctionPointer = Ret (*)(Args...);
@@ -602,5 +602,15 @@ namespace Sora {
         }
 
     } // namespace Meta
+
+    /** @brief Always returns true. */
+    bool AlwaysTrue(auto&&...) {
+        return true;
+    }
+
+    /** @brief Always returns false. */
+    bool AlwaysFalse(auto&&...) {
+        return false;
+    }
 
 } // namespace Sora
