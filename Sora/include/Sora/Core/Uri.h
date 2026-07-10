@@ -16,6 +16,7 @@
 #include <Sora/Core/StringUtils.h>
 
 #include <algorithm>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -27,46 +28,29 @@
 
 namespace Sora {
 
-    /** @brief URI parse and validation failure reason. */
-    enum class UriParseError : uint8_t {
-        Ok [[= Sora::$::Description{"URI parsed successfully."}]],
-        Empty [[= Sora::$::Description{"Input is empty."}]],
-        MissingScheme [[= Sora::$::Description{"Absolute URI requires a non-empty scheme and ':'."}]],
-        BadSchemeStart [[= Sora::$::Description{"Scheme does not start with an ASCII letter."}]],
-        BadSchemeCharacter
+    /** @brief URI parse, validation, construction, and decoding failure reason. */
+    enum class UriError : uint8_t {
+        Ok //
+        [[= Sora::$::Description{"URI operation completed successfully."}]],
+        Empty //
+        [[= Sora::$::Description{"Input is empty."}]],
+        MissingScheme //
+        [[= Sora::$::Description{"Absolute URI requires a non-empty scheme and ':'."}]],
+        BadSchemeStart //
+        [[= Sora::$::Description{"Scheme does not start with an ASCII letter."}]],
+        BadSchemeCharacter //
         [[= Sora::$::Description{"Scheme contains a character outside ALPHA / DIGIT / '+' / '-' / '.'."}]],
-        BadCharacter
+        BadCharacter //
         [[= Sora::$::Description{"URI contains a control, space, DEL, non-ASCII byte, or disallowed delimiter."}]],
-        BadPercentEncoding [[= Sora::$::Description{"A '%' is not followed by two hexadecimal digits."}]],
-        BadAuthority
+        BadPercentEncoding //
+        [[= Sora::$::Description{"A '%' is not followed by two hexadecimal digits."}]],
+        BadAuthority //
         [[= Sora::$::Description{"Authority is present but malformed for the generic parser's constraints."}]],
-        BadPath [[= Sora::$::Description{"Path violates RFC 3986 path grammar for the parsed hierarchy form."}]],
+        BadPath //
+        [[= Sora::$::Description{"Path violates RFC 3986 path grammar for the parsed hierarchy form."}]],
+        TooLong //
+        [[= Sora::$::Description{"URI construction exceeds the fixed-capacity URI carrier."}]],
     };
-
-    /** @brief Return a stable diagnostic string for @p error. */
-    [[nodiscard]] constexpr std::string_view UriParseErrorMessage(UriParseError error) noexcept {
-        switch (error) {
-        case UriParseError::Ok:
-            return "ok";
-        case UriParseError::Empty:
-            return "empty URI";
-        case UriParseError::MissingScheme:
-            return "absolute URI requires a scheme followed by ':'";
-        case UriParseError::BadSchemeStart:
-            return "URI scheme must start with an ASCII letter";
-        case UriParseError::BadSchemeCharacter:
-            return "URI scheme contains a character outside ALPHA / DIGIT / '+' / '-' / '.'";
-        case UriParseError::BadCharacter:
-            return "URI contains a byte outside RFC 3986 generic syntax";
-        case UriParseError::BadPercentEncoding:
-            return "URI percent encoding must be '%' followed by two hex digits";
-        case UriParseError::BadAuthority:
-            return "URI authority is malformed";
-        case UriParseError::BadPath:
-            return "URI path is not valid for its hierarchy form";
-        }
-        return "unknown URI parse error";
-    }
 
     /** @brief Parsed RFC 3986 URI components as views into the original URI text.
      *
@@ -151,6 +135,9 @@ namespace Sora {
             bool present = false;    /**< Whether the syntax marker for this component was present. */
         };
 
+        /** @brief Tag selecting construction from already-validated URI text. */
+        struct UncheckedTag {};
+
         [[nodiscard]] constexpr bool IsAsciiUriByte(char c) noexcept {
             const auto u = static_cast<unsigned char>(c);
             return u > 0x20u && u < 0x7Fu;
@@ -204,76 +191,103 @@ namespace Sora {
         }
 
         template<auto Plain>
-        [[nodiscard]] constexpr UriParseError ValidateEncodedRange(std::string_view text) noexcept {
+        [[nodiscard]] constexpr UriError ValidateEncodedRange(std::string_view text) noexcept {
             for (size_t i = 0; i < text.size(); ++i) {
                 const char c = text[i];
                 if (!IsAsciiUriByte(c)) {
-                    return UriParseError::BadCharacter;
+                    return UriError::BadCharacter;
                 }
                 if (c == '%') {
                     if (i + 2 >= text.size() || !Ascii::IsHexDigit(text[i + 1]) || !Ascii::IsHexDigit(text[i + 2])) {
-                        return UriParseError::BadPercentEncoding;
+                        return UriError::BadPercentEncoding;
                     }
                     i += 2;
                 } else if (!Plain(c)) {
-                    return UriParseError::BadCharacter;
+                    return UriError::BadCharacter;
                 }
             }
-            return UriParseError::Ok;
+            return UriError::Ok;
         }
 
         template<auto Plain>
         [[nodiscard]] constexpr bool IsValidEncodedRange(std::string_view text) noexcept {
-            return ValidateEncodedRange<Plain>(text) == UriParseError::Ok;
+            return ValidateEncodedRange<Plain>(text) == UriError::Ok;
         }
 
-        [[nodiscard]] constexpr UriParseError ValidateAuthority(std::string_view authority) noexcept {
+        [[nodiscard]] constexpr UriError ValidateAuthority(std::string_view authority) noexcept {
             for (size_t i = 0; i < authority.size(); ++i) {
                 const char c = authority[i];
                 if (!IsAsciiUriByte(c)) {
-                    return UriParseError::BadCharacter;
+                    return UriError::BadCharacter;
                 }
                 if (c == '%') {
                     if (i + 2 >= authority.size() || !Ascii::IsHexDigit(authority[i + 1]) ||
                         !Ascii::IsHexDigit(authority[i + 2])) {
-                        return UriParseError::BadPercentEncoding;
+                        return UriError::BadPercentEncoding;
                     }
                     i += 2;
                 } else if (!(IsRegNamePlain(c) || c == ':' || c == '@' || c == '[' || c == ']')) {
-                    return UriParseError::BadAuthority;
+                    return UriError::BadAuthority;
                 }
             }
-            return UriParseError::Ok;
+            return UriError::Ok;
         }
 
         [[nodiscard]] constexpr bool IsValidAuthority(std::string_view authority) noexcept {
-            return ValidateAuthority(authority) == UriParseError::Ok;
+            return ValidateAuthority(authority) == UriError::Ok;
+        }
+
+        template<size_t Capacity>
+        [[nodiscard]] constexpr bool Append(FixedString<Capacity>& out, std::string_view text) noexcept {
+            if (text.size() > out.capacity() - out.size()) {
+                return false;
+            }
+            out.append(text);
+            return true;
+        }
+
+        template<size_t Capacity>
+        [[nodiscard]] constexpr bool Append(FixedString<Capacity>& out, char c) noexcept {
+            if (out.size() == out.capacity()) {
+                return false;
+            }
+            out.push_back(c);
+            return true;
+        }
+
+        template<size_t Capacity>
+        [[nodiscard]] constexpr auto ToFixedString(std::string_view text) noexcept
+            -> std::expected<FixedString<Capacity>, UriError> {
+            if (text.size() > Capacity) {
+                return std::unexpected(UriError::TooLong);
+            }
+            return FixedString<Capacity>{text};
         }
 
         /** @brief Parse `scheme:` and leave the cursor immediately after the colon. */
         [[nodiscard]] constexpr auto ParseScheme(Cursor& cursor) noexcept
-            -> std::expected<std::string_view, UriParseError> {
+            -> std::expected<std::string_view, UriError> {
             const std::string_view scheme = cursor.TakeUntilAny(":");
             if (!cursor.Consume(':') || scheme.empty()) {
-                return std::unexpected(UriParseError::MissingScheme);
+                return std::unexpected(UriError::MissingScheme);
             }
             if (!Ascii::IsAlpha(scheme.front())) {
-                return std::unexpected(UriParseError::BadSchemeStart);
+                return std::unexpected(UriError::BadSchemeStart);
             }
             if (std::ranges::any_of(scheme | std::views::drop(1), std::not_fn(IsSchemeCharacter))) {
-                return std::unexpected(UriParseError::BadSchemeCharacter);
+                return std::unexpected(UriError::BadSchemeCharacter);
             }
             return scheme;
         }
 
         /** @brief Parse optional `//authority` and leave the cursor at path, query, fragment, or EOF. */
         [[nodiscard]] constexpr auto ParseAuthority(Cursor& cursor) noexcept
-            -> std::expected<OptionalComponent, UriParseError> {
+            -> std::expected<OptionalComponent, UriError> {
             if (!cursor.Consume("//")) {
                 return OptionalComponent{};
             }
             const std::string_view authority = cursor.TakeUntilAny("/?#");
-            if (const auto error = ValidateAuthority(authority); error != UriParseError::Ok) {
+            if (const auto error = ValidateAuthority(authority); error != UriError::Ok) {
                 return std::unexpected(error);
             }
             return OptionalComponent{.text = authority, .present = true};
@@ -281,15 +295,15 @@ namespace Sora {
 
         /** @brief Parse the path component and enforce RFC 3986 generic hierarchy constraints. */
         [[nodiscard]] constexpr auto ParsePath(Cursor& cursor, bool hasAuthority) noexcept
-            -> std::expected<std::string_view, UriParseError> {
+            -> std::expected<std::string_view, UriError> {
             const std::string_view path = cursor.TakeUntilAny("?#");
             if (hasAuthority && !path.empty() && path.front() != '/') {
-                return std::unexpected(UriParseError::BadPath);
+                return std::unexpected(UriError::BadPath);
             }
             if (!hasAuthority && path.starts_with("//")) {
-                return std::unexpected(UriParseError::BadPath);
+                return std::unexpected(UriError::BadPath);
             }
-            if (const auto error = ValidateEncodedRange<IsPathPlain>(path); error != UriParseError::Ok) {
+            if (const auto error = ValidateEncodedRange<IsPathPlain>(path); error != UriError::Ok) {
                 return std::unexpected(error);
             }
             return path;
@@ -297,12 +311,12 @@ namespace Sora {
 
         /** @brief Parse optional `?query` and leave the cursor at fragment or EOF. */
         [[nodiscard]] constexpr auto ParseQuery(Cursor& cursor) noexcept
-            -> std::expected<OptionalComponent, UriParseError> {
+            -> std::expected<OptionalComponent, UriError> {
             if (!cursor.Consume('?')) {
                 return OptionalComponent{};
             }
             const std::string_view query = cursor.TakeUntilAny("#");
-            if (const auto error = ValidateEncodedRange<IsQueryPlain>(query); error != UriParseError::Ok) {
+            if (const auto error = ValidateEncodedRange<IsQueryPlain>(query); error != UriError::Ok) {
                 return std::unexpected(error);
             }
             return OptionalComponent{.text = query, .present = true};
@@ -310,12 +324,12 @@ namespace Sora {
 
         /** @brief Parse optional `#fragment` and consume the remaining URI text. */
         [[nodiscard]] constexpr auto ParseFragment(Cursor& cursor) noexcept
-            -> std::expected<OptionalComponent, UriParseError> {
+            -> std::expected<OptionalComponent, UriError> {
             if (!cursor.Consume('#')) {
                 return OptionalComponent{};
             }
             const std::string_view fragment = cursor.TakeRest();
-            if (const auto error = ValidateEncodedRange<IsFragmentPlain>(fragment); error != UriParseError::Ok) {
+            if (const auto error = ValidateEncodedRange<IsFragmentPlain>(fragment); error != UriError::Ok) {
                 return std::unexpected(error);
             }
             return OptionalComponent{.text = fragment, .present = true};
@@ -344,9 +358,9 @@ namespace Sora {
     }
 
     /** @brief Parse an absolute RFC 3986 URI into component views. */
-    [[nodiscard]] constexpr auto ParseUri(std::string_view text) noexcept -> std::expected<UriParts, UriParseError> {
+    [[nodiscard]] constexpr auto ParseUri(std::string_view text) noexcept -> std::expected<UriParts, UriError> {
         if (text.empty()) {
-            return std::unexpected(UriParseError::Empty);
+            return std::unexpected(UriError::Empty);
         }
 
         Detail::Uri::Cursor cursor{.text = text};
@@ -386,7 +400,7 @@ namespace Sora {
         parts.hasFragment = fragment->present;
 
         if (!cursor.Done()) {
-            return std::unexpected(UriParseError::BadCharacter);
+            return std::unexpected(UriError::BadCharacter);
         }
         return parts;
     }
@@ -526,7 +540,237 @@ namespace Sora {
         std::string_view query_{};
     };
 
-    /** @brief Non-owning validated URI view with component and query helpers. */
+    /** @brief Materialized parse result for repeated zero-allocation access to one URI. */
+    struct ParsedUri {
+        std::string_view text{}; /**< Original URI text. */
+        UriParts parts{};        /**< Parsed component views into @ref text. */
+
+        /** @brief Return the original URI bytes. */
+        [[nodiscard]] constexpr std::string_view view() const noexcept { return text; }
+
+        /** @brief Return the parsed component record. */
+        [[nodiscard]] constexpr const UriParts& Parts() const noexcept { return parts; }
+
+        /** @brief Return the URI scheme. */
+        [[nodiscard]] constexpr std::string_view Scheme() const noexcept { return parts.scheme; }
+
+        /** @brief Return the URI authority, or an empty view when absent. */
+        [[nodiscard]] constexpr std::string_view Authority() const noexcept { return parts.authority; }
+
+        /** @brief Return the URI path. */
+        [[nodiscard]] constexpr std::string_view Path() const noexcept { return parts.path; }
+
+        /** @brief Return the URI query, or an empty view when absent. */
+        [[nodiscard]] constexpr std::string_view Query() const noexcept { return parts.query; }
+
+        /** @brief Return the URI fragment, or an empty view when absent. */
+        [[nodiscard]] constexpr std::string_view Fragment() const noexcept { return parts.fragment; }
+
+        /** @brief Return the URI anchor after @c #, or an empty view when absent. */
+        [[nodiscard]] constexpr std::string_view Anchor() const noexcept { return Fragment(); }
+
+        /** @brief Return whether an authority marker @c // is syntactically present. */
+        [[nodiscard]] constexpr bool HasAuthority() const noexcept { return parts.hasAuthority; }
+
+        /** @brief Return whether a query marker @c ? is syntactically present. */
+        [[nodiscard]] constexpr bool HasQuery() const noexcept { return parts.hasQuery; }
+
+        /** @brief Return whether an anchor marker @c # is syntactically present. */
+        [[nodiscard]] constexpr bool HasAnchor() const noexcept { return parts.hasFragment; }
+
+        /** @brief Return an iterable raw query parameter view. */
+        [[nodiscard]] constexpr UriQueryView QueryParams() const noexcept { return UriQueryView{parts.query}; }
+
+        /** @brief Return the stable exact-byte URI hash. */
+        [[nodiscard]] constexpr uint64_t Hash() const noexcept { return UriHash(text); }
+    };
+
+    /** @brief Parse an absolute URI and keep the parsed components for repeated access. */
+    [[nodiscard]] constexpr auto ParseUriView(std::string_view text) noexcept -> std::expected<ParsedUri,
+                                                                                              UriError> {
+        auto parts = ParseUri(text);
+        if (!parts) {
+            return std::unexpected(parts.error());
+        }
+        return ParsedUri{.text = text, .parts = *parts};
+    }
+
+    /** @brief Structured query argument used by URI construction helpers.
+     *
+     * @details The name must not contain raw @c & or @c = delimiters, and the value must not contain raw @c &. Encode
+     * these bytes explicitly when they are part of data rather than query syntax.
+     */
+    struct UriQueryArgument {
+        std::string_view name{};  /**< Raw query name without percent decoding. */
+        std::string_view value{}; /**< Raw query value without percent decoding. */
+        bool hasEquals = false;   /**< Whether the argument should be rendered as @c name=value. */
+
+        /** @brief Construct a raw @c name=value query argument. */
+        [[nodiscard]] static constexpr UriQueryArgument Pair(std::string_view name,
+                                                             std::string_view value) noexcept {
+            return UriQueryArgument{.name = name, .value = value, .hasEquals = true};
+        }
+
+        /** @brief Construct a raw flag query argument rendered as @c name. */
+        [[nodiscard]] static constexpr UriQueryArgument Flag(std::string_view name) noexcept {
+            return UriQueryArgument{.name = name, .value = {}, .hasEquals = false};
+        }
+    };
+
+    /** @brief Fragment/anchor argument used by URI construction helpers. */
+    struct UriAnchorArgument {
+        std::string_view text{}; /**< Raw anchor text without the leading @c #. */
+
+        /** @brief Construct a raw URI anchor argument without the leading @c # marker. */
+        [[nodiscard]] static constexpr UriAnchorArgument From(std::string_view text) noexcept {
+            return UriAnchorArgument{.text = text};
+        }
+    };
+
+    namespace Detail::Uri {
+
+        /** @brief Compose URI text from parsed component views. */
+        template<size_t Capacity>
+        [[nodiscard]] constexpr auto ComposeText(const UriParts& parts) noexcept
+            -> std::expected<FixedString<Capacity>, UriError> {
+            FixedString<Capacity> out;
+            if (!Append(out, parts.scheme) || !Append(out, ':')) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (parts.hasAuthority && (!Append(out, "//") || !Append(out, parts.authority))) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (!Append(out, parts.path)) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (parts.hasQuery && (!Append(out, '?') || !Append(out, parts.query))) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (parts.hasFragment && (!Append(out, '#') || !Append(out, parts.fragment))) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (auto parsed = ParseUri(out.view()); !parsed) {
+                return std::unexpected(parsed.error());
+            }
+            return out;
+        }
+
+        /** @brief Return URI text with @p segment appended to the path component. */
+        template<size_t Capacity>
+        [[nodiscard]] constexpr auto AppendPathText(std::string_view uri, std::string_view segment) noexcept
+            -> std::expected<FixedString<Capacity>, UriError> {
+            auto parsed = ParseUri(uri);
+            if (!parsed) {
+                return std::unexpected(parsed.error());
+            }
+            while (segment.starts_with('/')) {
+                segment.remove_prefix(1);
+            }
+            if (segment.empty()) {
+                return ToFixedString<Capacity>(uri);
+            }
+            if (segment.contains('/')) {
+                return std::unexpected(UriError::BadPath);
+            }
+            if (const auto error = ValidateEncodedRange<IsPathPlain>(segment); error != UriError::Ok) {
+                return std::unexpected(error);
+            }
+
+            FixedString<Capacity> path;
+            if (!Append(path, parsed->path)) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (path.empty()) {
+                if (parsed->hasAuthority && !Append(path, '/')) {
+                    return std::unexpected(UriError::TooLong);
+                }
+            } else if (!path.ends_with("/") && !Append(path, '/')) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (!Append(path, segment)) {
+                return std::unexpected(UriError::TooLong);
+            }
+
+            auto parts = *parsed;
+            parts.path = path.view();
+            return ComposeText<Capacity>(parts);
+        }
+
+        /** @brief Return URI text with its query component replaced by @p query without the leading @c ?. */
+        template<size_t Capacity>
+        [[nodiscard]] constexpr auto WithQueryText(std::string_view uri, std::string_view query) noexcept
+            -> std::expected<FixedString<Capacity>, UriError> {
+            auto parsed = ParseUri(uri);
+            if (!parsed) {
+                return std::unexpected(parsed.error());
+            }
+            if (const auto error = ValidateEncodedRange<IsQueryPlain>(query); error != UriError::Ok) {
+                return std::unexpected(error);
+            }
+            auto parts = *parsed;
+            parts.query = query;
+            parts.hasQuery = true;
+            return ComposeText<Capacity>(parts);
+        }
+
+        /** @brief Return URI text with @p argument appended to its query component. */
+        template<size_t Capacity>
+        [[nodiscard]] constexpr auto AppendQueryText(std::string_view uri, UriQueryArgument argument) noexcept
+            -> std::expected<FixedString<Capacity>, UriError> {
+            auto parsed = ParseUri(uri);
+            if (!parsed) {
+                return std::unexpected(parsed.error());
+            }
+            if (argument.name.contains('&') || argument.name.contains('=') || argument.value.contains('&')) {
+                return std::unexpected(UriError::BadCharacter);
+            }
+            if (const auto error = ValidateEncodedRange<IsQueryPlain>(argument.name); error != UriError::Ok) {
+                return std::unexpected(error);
+            }
+            if (const auto error = ValidateEncodedRange<IsQueryPlain>(argument.value); error != UriError::Ok) {
+                return std::unexpected(error);
+            }
+
+            FixedString<Capacity> query;
+            if (parsed->hasQuery && !Append(query, parsed->query)) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (!query.empty() && !Append(query, '&')) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (!Append(query, argument.name)) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (argument.hasEquals && (!Append(query, '=') || !Append(query, argument.value))) {
+                return std::unexpected(UriError::TooLong);
+            }
+
+            auto parts = *parsed;
+            parts.query = query.view();
+            parts.hasQuery = true;
+            return ComposeText<Capacity>(parts);
+        }
+
+        /** @brief Return URI text with its fragment/anchor component replaced by @p anchor. */
+        template<size_t Capacity>
+        [[nodiscard]] constexpr auto WithFragmentText(std::string_view uri, std::string_view fragment) noexcept
+            -> std::expected<FixedString<Capacity>, UriError> {
+            auto parsed = ParseUri(uri);
+            if (!parsed) {
+                return std::unexpected(parsed.error());
+            }
+            if (const auto error = ValidateEncodedRange<IsFragmentPlain>(fragment); error != UriError::Ok) {
+                return std::unexpected(error);
+            }
+            auto parts = *parsed;
+            parts.fragment = fragment;
+            parts.hasFragment = true;
+            return ComposeText<Capacity>(parts);
+        }
+
+    } // namespace Detail::Uri
+
+    /** @brief Non-owning raw URI text view with parsing convenience methods. */
     struct UriView {
         std::string_view text{}; /**< Original URI text. */
 
@@ -546,8 +790,13 @@ namespace Sora {
         [[nodiscard]] constexpr bool Valid() const noexcept { return IsUri(text); }
 
         /** @brief Parse this URI into component views. */
-        [[nodiscard]] constexpr auto Parts() const noexcept -> std::expected<UriParts, UriParseError> {
+        [[nodiscard]] constexpr auto Parts() const noexcept -> std::expected<UriParts, UriError> {
             return ParseUri(text);
+        }
+
+        /** @brief Parse this URI and keep the result in a materialized parsed view. */
+        [[nodiscard]] constexpr auto Parsed() const noexcept -> std::expected<ParsedUri, UriError> {
+            return ParseUriView(text);
         }
 
         /** @brief Return the URI scheme, or empty when invalid. */
@@ -598,7 +847,8 @@ namespace Sora {
 
     /** @brief Decode a percent-encoded component into a fixed-capacity string. */
     template<size_t Capacity = 1024>
-    [[nodiscard]] constexpr FixedString<Capacity> PercentDecode(std::string_view text, bool plusAsSpace = false) {
+    [[nodiscard]] constexpr auto PercentDecode(std::string_view text, bool plusAsSpace = false) noexcept
+        -> std::expected<FixedString<Capacity>, UriError> {
         FixedString<Capacity> out;
         for (size_t i = 0; i < text.size(); ++i) {
             char c = text[i];
@@ -606,13 +856,13 @@ namespace Sora {
                 c = ' ';
             } else if (c == '%') {
                 if (i + 2 >= text.size() || !Ascii::IsHexDigit(text[i + 1]) || !Ascii::IsHexDigit(text[i + 2])) {
-                    throw "Bad URI percent encoding.";
+                    return std::unexpected(UriError::BadPercentEncoding);
                 }
                 c = static_cast<char>((Ascii::HexValue(text[i + 1]) << 4) | Ascii::HexValue(text[i + 2]));
                 i += 2;
             }
             if (out.size() == out.capacity()) {
-                throw "PercentDecode output exceeds capacity.";
+                return std::unexpected(UriError::TooLong);
             }
             out.push_back(c);
         }
@@ -621,44 +871,60 @@ namespace Sora {
 
     /** @brief Decode an application/x-www-form-urlencoded component, where @c + denotes a space. */
     template<size_t Capacity = 1024>
-    [[nodiscard]] constexpr FixedString<Capacity> PercentDecodeFormComponent(std::string_view text) {
+    [[nodiscard]] constexpr auto PercentDecodeFormComponent(std::string_view text) noexcept
+        -> std::expected<FixedString<Capacity>, UriError> {
         return PercentDecode<Capacity>(text, true);
     }
 
     /** @brief Normalize syntax-preserving URI spelling by lowercasing the scheme and uppercasing percent hex digits. */
     template<size_t Capacity = 1024>
-    [[nodiscard]] constexpr FixedString<Capacity> NormalizeUriSyntax(std::string_view text) {
+    [[nodiscard]] constexpr auto NormalizeUriSyntax(std::string_view text) noexcept
+        -> std::expected<FixedString<Capacity>, UriError> {
         auto parsed = ParseUri(text);
         if (!parsed) {
-            throw "Cannot normalize an invalid URI.";
+            return std::unexpected(parsed.error());
         }
         FixedString<Capacity> out;
         const UriParts parts = *parsed;
         for (char c : parts.scheme) {
-            out.push_back(Ascii::ToLower(c));
+            if (!Detail::Uri::Append(out, Ascii::ToLower(c))) {
+                return std::unexpected(UriError::TooLong);
+            }
         }
-        out.push_back(':');
+        if (!Detail::Uri::Append(out, ':')) {
+            return std::unexpected(UriError::TooLong);
+        }
         const auto appendEncoded = [&](std::string_view component) constexpr {
             for (size_t i = 0; i < component.size(); ++i) {
-                out.push_back(component[i]);
+                if (!Detail::Uri::Append(out, component[i])) {
+                    return false;
+                }
                 if (component[i] == '%') {
-                    out.push_back(Ascii::ToUpperHex(component[++i]));
-                    out.push_back(Ascii::ToUpperHex(component[++i]));
+                    if (!Detail::Uri::Append(out, Ascii::ToUpperHex(component[++i])) ||
+                        !Detail::Uri::Append(out, Ascii::ToUpperHex(component[++i]))) {
+                        return false;
+                    }
                 }
             }
+            return true;
         };
         if (parts.hasAuthority) {
-            out.append("//");
-            appendEncoded(parts.authority);
+            if (!Detail::Uri::Append(out, "//") || !appendEncoded(parts.authority)) {
+                return std::unexpected(UriError::TooLong);
+            }
         }
-        appendEncoded(parts.path);
+        if (!appendEncoded(parts.path)) {
+            return std::unexpected(UriError::TooLong);
+        }
         if (parts.hasQuery) {
-            out.push_back('?');
-            appendEncoded(parts.query);
+            if (!Detail::Uri::Append(out, '?') || !appendEncoded(parts.query)) {
+                return std::unexpected(UriError::TooLong);
+            }
         }
         if (parts.hasFragment) {
-            out.push_back('#');
-            appendEncoded(parts.fragment);
+            if (!Detail::Uri::Append(out, '#') || !appendEncoded(parts.fragment)) {
+                return std::unexpected(UriError::TooLong);
+            }
         }
         return out;
     }
@@ -686,6 +952,20 @@ namespace Sora {
             }
         }
 
+        /** @brief Construct from already-validated URI bytes. */
+        constexpr Uri(FixedString<N> value, Detail::Uri::UncheckedTag) noexcept : text(value) {}
+
+        /** @brief Try to construct a URI carrier from runtime text without throwing. */
+        [[nodiscard]] static constexpr auto Try(std::string_view value) noexcept -> std::expected<Uri, UriError> {
+            if (value.size() > N) {
+                return std::unexpected(UriError::TooLong);
+            }
+            if (auto parsed = ParseUri(value); !parsed) {
+                return std::unexpected(parsed.error());
+            }
+            return Uri{FixedString<N>{value}, Detail::Uri::UncheckedTag{}};
+        }
+
         /** @brief Return the URI bytes. */
         [[nodiscard]] constexpr std::string_view view() const noexcept { return text.view(); }
 
@@ -699,8 +979,13 @@ namespace Sora {
         [[nodiscard]] constexpr UriView View() const noexcept { return UriView{view()}; }
 
         /** @brief Parse this URI into component views. */
-        [[nodiscard]] constexpr auto Parts() const noexcept -> std::expected<UriParts, UriParseError> {
+        [[nodiscard]] constexpr auto Parts() const noexcept -> std::expected<UriParts, UriError> {
             return ParseUri(view());
+        }
+
+        /** @brief Parse this URI and keep the result in a materialized parsed view. */
+        [[nodiscard]] constexpr auto Parsed() const noexcept -> std::expected<ParsedUri, UriError> {
+            return ParseUriView(view());
         }
 
         /** @brief Return the URI scheme. */
@@ -730,16 +1015,423 @@ namespace Sora {
         /** @brief Return the stable exact-byte URI hash. */
         [[nodiscard]] constexpr uint64_t Hash() const noexcept { return UriHash(view()); }
 
+        /** @brief Return a URI with @p segment appended to the path component. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto AppendPath(std::string_view segment) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            auto result = Detail::Uri::AppendPathText<N + Extra>(view(), segment);
+            if (!result) {
+                return std::unexpected(result.error());
+            }
+            return Uri<N + Extra>{*result, Detail::Uri::UncheckedTag{}};
+        }
+
+        /** @brief Return a URI with its query component replaced by @p query without the leading @c ?. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto WithQuery(std::string_view query) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            auto result = Detail::Uri::WithQueryText<N + Extra>(view(), query);
+            if (!result) {
+                return std::unexpected(result.error());
+            }
+            return Uri<N + Extra>{*result, Detail::Uri::UncheckedTag{}};
+        }
+
+        /** @brief Return a URI with @p argument appended to the query component. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto AppendQuery(UriQueryArgument argument) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            auto result = Detail::Uri::AppendQueryText<N + Extra>(view(), argument);
+            if (!result) {
+                return std::unexpected(result.error());
+            }
+            return Uri<N + Extra>{*result, Detail::Uri::UncheckedTag{}};
+        }
+
+        /** @brief Return a URI with @p name and @p value appended as @c name=value in the query component. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto AppendQuery(std::string_view name, std::string_view value) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            return AppendQuery<Extra>(UriQueryArgument::Pair(name, value));
+        }
+
+        /** @brief Return a URI with @p name appended as a flag query argument. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto AppendFlag(std::string_view name) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            return AppendQuery<Extra>(UriQueryArgument::Flag(name));
+        }
+
+        /** @brief Return a URI with its fragment/anchor component replaced by @p anchor. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto WithAnchor(UriAnchorArgument anchor) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            auto result = Detail::Uri::WithFragmentText<N + Extra>(view(), anchor.text);
+            if (!result) {
+                return std::unexpected(result.error());
+            }
+            return Uri<N + Extra>{*result, Detail::Uri::UncheckedTag{}};
+        }
+
+        /** @brief Return a URI with its fragment/anchor component replaced by @p anchor. */
+        template<size_t Extra = 256>
+        [[nodiscard]] constexpr auto WithAnchor(std::string_view anchor) const noexcept
+            -> std::expected<Uri<N + Extra>, UriError> {
+            return WithAnchor<Extra>(UriAnchorArgument::From(anchor));
+        }
+
         /** @brief Convert to @c std::string_view. */
         [[nodiscard]] constexpr operator std::string_view() const noexcept { return view(); }
 
-        /** @brief Compare URI spelling exactly. */
-        constexpr bool operator==(const Uri&) const noexcept = default;
+        /** @brief Compare exact URI spelling with another URI carrier. */
+        template<size_t M>
+        [[nodiscard]] constexpr bool operator==(const Uri<M>& other) const noexcept {
+            return view() == other.view();
+        }
+
+        /** @brief Compare exact URI spelling with a URI view. */
+        [[nodiscard]] constexpr bool operator==(UriView other) const noexcept { return view() == other.view(); }
+
+        /** @brief Compare exact URI spelling with raw text. */
+        [[nodiscard]] constexpr bool operator==(std::string_view other) const noexcept { return view() == other; }
+
+        /** @brief Order by exact URI spelling. */
+        template<size_t M>
+        [[nodiscard]] constexpr std::strong_ordering operator<=>(const Uri<M>& other) const noexcept {
+            return view() <=> other.view();
+        }
+
+        /** @brief Order by exact URI spelling against a URI view. */
+        [[nodiscard]] constexpr std::strong_ordering operator<=>(UriView other) const noexcept {
+            return view() <=> other.view();
+        }
+
+        /** @brief Order by exact URI spelling against raw text. */
+        [[nodiscard]] constexpr std::strong_ordering operator<=>(std::string_view other) const noexcept {
+            return view() <=> other;
+        }
     };
 
     /** @brief Deduction guide for string literals. */
     template<size_t M>
     Uri(const char (&)[M]) -> Uri<M - 1>;
+
+    /** @brief Try to construct a fixed-capacity URI carrier from runtime text. */
+    template<size_t Capacity = 256>
+    [[nodiscard]] constexpr auto MakeUri(std::string_view text) noexcept -> std::expected<Uri<Capacity>,
+                                                                                          UriError> {
+        return Uri<Capacity>::Try(text);
+    }
+
+    /** @brief Compose a fixed-capacity URI carrier from component views. */
+    template<size_t Capacity = 256>
+    [[nodiscard]] constexpr auto ComposeUri(const UriParts& parts) noexcept -> std::expected<Uri<Capacity>,
+                                                                                             UriError> {
+        auto text = Detail::Uri::ComposeText<Capacity>(parts);
+        if (!text) {
+            return std::unexpected(text.error());
+        }
+        return Uri<Capacity>{*text, Detail::Uri::UncheckedTag{}};
+    }
+
+    /** @brief Compare exact URI spelling between a URI view and a URI carrier. */
+    template<size_t N>
+    [[nodiscard]] constexpr bool operator==(UriView lhs, const Uri<N>& rhs) noexcept {
+        return lhs.view() == rhs.view();
+    }
+
+    /** @brief Order exact URI spelling between a URI view and a URI carrier. */
+    template<size_t N>
+    [[nodiscard]] constexpr std::strong_ordering operator<=>(UriView lhs, const Uri<N>& rhs) noexcept {
+        return lhs.view() <=> rhs.view();
+    }
+
+    /** @brief Compare exact URI spelling between two URI views. */
+    [[nodiscard]] constexpr bool operator==(UriView lhs, UriView rhs) noexcept {
+        return lhs.view() == rhs.view();
+    }
+
+    /** @brief Order exact URI spelling between two URI views. */
+    [[nodiscard]] constexpr std::strong_ordering operator<=>(UriView lhs, UriView rhs) noexcept {
+        return lhs.view() <=> rhs.view();
+    }
+
+    /** @brief Fixed-capacity structured URI builder over RFC 3986 components. */
+    template<size_t Capacity = 256>
+    class UriBuilder {
+        FixedString<Capacity> scheme_{};
+        FixedString<Capacity> authority_{};
+        FixedString<Capacity> path_{};
+        FixedString<Capacity> query_{};
+        FixedString<Capacity> fragment_{};
+        UriError error_ = UriError::Ok;
+        bool hasAuthority_ = false;
+        bool hasQuery_ = false;
+        bool hasFragment_ = false;
+
+        constexpr void SetError(UriError error) noexcept {
+            if (error_ == UriError::Ok) {
+                error_ = error;
+            }
+        }
+
+        constexpr bool Assign(FixedString<Capacity>& target, std::string_view value) noexcept {
+            target.clear();
+            if (!Detail::Uri::Append(target, value)) {
+                SetError(UriError::TooLong);
+                return false;
+            }
+            return true;
+        }
+
+        constexpr bool AppendPathSegment(std::string_view segment) noexcept {
+            while (segment.starts_with('/')) {
+                segment.remove_prefix(1);
+            }
+            if (segment.empty()) {
+                return true;
+            }
+            if (segment.contains('/')) {
+                SetError(UriError::BadPath);
+                return false;
+            }
+            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsPathPlain>(segment);
+                error != UriError::Ok) {
+                SetError(error);
+                return false;
+            }
+            if (path_.empty()) {
+                if (hasAuthority_ && !Detail::Uri::Append(path_, '/')) {
+                    SetError(UriError::TooLong);
+                    return false;
+                }
+            } else if (!path_.ends_with("/") && !Detail::Uri::Append(path_, '/')) {
+                SetError(UriError::TooLong);
+                return false;
+            }
+            if (!Detail::Uri::Append(path_, segment)) {
+                SetError(UriError::TooLong);
+                return false;
+            }
+            return true;
+        }
+
+    public:
+        /** @brief Construct an empty builder. */
+        constexpr UriBuilder() = default;
+
+        /** @brief Construct a builder initialized from an existing absolute URI. */
+        [[nodiscard]] static constexpr UriBuilder From(std::string_view uri) noexcept {
+            UriBuilder builder;
+            auto parsed = ParseUri(uri);
+            if (!parsed) {
+                builder.SetError(parsed.error());
+                return builder;
+            }
+            builder.Scheme(parsed->scheme);
+            if (parsed->hasAuthority) {
+                builder.Authority(parsed->authority);
+            }
+            builder.Path(parsed->path);
+            if (parsed->hasQuery) {
+                builder.RawQuery(parsed->query);
+            }
+            if (parsed->hasFragment) {
+                builder.Anchor(parsed->fragment);
+            }
+            return builder;
+        }
+
+        /** @brief Replace the URI scheme without the trailing @c :. */
+        constexpr UriBuilder& Scheme(std::string_view scheme) noexcept {
+            if (error_ == UriError::Ok) {
+                Assign(scheme_, scheme);
+            }
+            return *this;
+        }
+
+        /** @brief Replace the authority without the leading @c //. */
+        constexpr UriBuilder& Authority(std::string_view authority) noexcept {
+            if (error_ == UriError::Ok) {
+                hasAuthority_ = true;
+                Assign(authority_, authority);
+                if (!path_.empty() && !path_.starts_with("/")) {
+                    FixedString<Capacity> normalized;
+                    if (!Detail::Uri::Append(normalized, '/') || !Detail::Uri::Append(normalized, path_.view())) {
+                        SetError(UriError::TooLong);
+                    } else {
+                        path_ = normalized;
+                    }
+                }
+            }
+            return *this;
+        }
+
+        /** @brief Remove the authority component. */
+        constexpr UriBuilder& NoAuthority() noexcept {
+            if (error_ == UriError::Ok) {
+                hasAuthority_ = false;
+                authority_.clear();
+            }
+            return *this;
+        }
+
+        /** @brief Replace the full path component. A leading slash is inserted when an authority is present. */
+        constexpr UriBuilder& Path(std::string_view path) noexcept {
+            if (error_ != UriError::Ok) {
+                return *this;
+            }
+            if (path.empty()) {
+                path_.clear();
+                return *this;
+            }
+            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsPathPlain>(path);
+                error != UriError::Ok) {
+                SetError(error);
+                return *this;
+            }
+            path_.clear();
+            if (hasAuthority_ && !path.starts_with("/") && !Detail::Uri::Append(path_, '/')) {
+                SetError(UriError::TooLong);
+                return *this;
+            }
+            if (!Detail::Uri::Append(path_, path)) {
+                SetError(UriError::TooLong);
+            }
+            return *this;
+        }
+
+        /** @brief Append @p segment as one path segment. */
+        constexpr UriBuilder& Segment(std::string_view segment) noexcept {
+            if (error_ == UriError::Ok) {
+                AppendPathSegment(segment);
+            }
+            return *this;
+        }
+
+        /** @brief Replace the raw query component without the leading @c ?. */
+        constexpr UriBuilder& RawQuery(std::string_view query) noexcept {
+            if (error_ != UriError::Ok) {
+                return *this;
+            }
+            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsQueryPlain>(query);
+                error != UriError::Ok) {
+                SetError(error);
+                return *this;
+            }
+            hasQuery_ = true;
+            Assign(query_, query);
+            return *this;
+        }
+
+        /** @brief Append @p argument to the query component. */
+        constexpr UriBuilder& Query(UriQueryArgument argument) noexcept {
+            if (error_ != UriError::Ok) {
+                return *this;
+            }
+            if (argument.name.contains('&') || argument.name.contains('=') || argument.value.contains('&')) {
+                SetError(UriError::BadCharacter);
+                return *this;
+            }
+            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsQueryPlain>(argument.name);
+                error != UriError::Ok) {
+                SetError(error);
+                return *this;
+            }
+            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsQueryPlain>(argument.value);
+                error != UriError::Ok) {
+                SetError(error);
+                return *this;
+            }
+            if (hasQuery_ && !query_.empty() && !Detail::Uri::Append(query_, '&')) {
+                SetError(UriError::TooLong);
+                return *this;
+            }
+            hasQuery_ = true;
+            if (!Detail::Uri::Append(query_, argument.name)) {
+                SetError(UriError::TooLong);
+                return *this;
+            }
+            if (argument.hasEquals &&
+                (!Detail::Uri::Append(query_, '=') || !Detail::Uri::Append(query_, argument.value))) {
+                SetError(UriError::TooLong);
+            }
+            return *this;
+        }
+
+        /** @brief Append @p name and @p value as @c name=value to the query component. */
+        constexpr UriBuilder& Query(std::string_view name, std::string_view value) noexcept {
+            return Query(UriQueryArgument::Pair(name, value));
+        }
+
+        /** @brief Append @p name as a flag query argument. */
+        constexpr UriBuilder& Flag(std::string_view name) noexcept {
+            return Query(UriQueryArgument::Flag(name));
+        }
+
+        /** @brief Remove the query component. */
+        constexpr UriBuilder& NoQuery() noexcept {
+            if (error_ == UriError::Ok) {
+                hasQuery_ = false;
+                query_.clear();
+            }
+            return *this;
+        }
+
+        /** @brief Replace the fragment/anchor component without the leading @c #. */
+        constexpr UriBuilder& Anchor(std::string_view anchor) noexcept {
+            if (error_ != UriError::Ok) {
+                return *this;
+            }
+            if (const auto error = Detail::Uri::ValidateEncodedRange<Detail::Uri::IsFragmentPlain>(anchor);
+                error != UriError::Ok) {
+                SetError(error);
+                return *this;
+            }
+            hasFragment_ = true;
+            Assign(fragment_, anchor);
+            return *this;
+        }
+
+        /** @brief Remove the fragment/anchor component. */
+        constexpr UriBuilder& NoAnchor() noexcept {
+            if (error_ == UriError::Ok) {
+                hasFragment_ = false;
+                fragment_.clear();
+            }
+            return *this;
+        }
+
+        /** @brief Return the first accumulated construction error, if any. */
+        [[nodiscard]] constexpr UriError Error() const noexcept { return error_; }
+
+        /** @brief Compose the current components into fixed-capacity URI text. */
+        [[nodiscard]] constexpr auto BuildText() const noexcept -> std::expected<FixedString<Capacity>,
+                                                                                 UriError> {
+            if (error_ != UriError::Ok) {
+                return std::unexpected(error_);
+            }
+            return Detail::Uri::ComposeText<Capacity>(UriParts{
+                .scheme = scheme_.view(),
+                .authority = authority_.view(),
+                .path = path_.view(),
+                .query = query_.view(),
+                .fragment = fragment_.view(),
+                .hasAuthority = hasAuthority_,
+                .hasQuery = hasQuery_,
+                .hasFragment = hasFragment_,
+            });
+        }
+
+        /** @brief Compose the current components into a validated URI value. */
+        [[nodiscard]] constexpr auto Build() const noexcept -> std::expected<Uri<Capacity>, UriError> {
+            auto text = BuildText();
+            if (!text) {
+                return std::unexpected(text.error());
+            }
+            return Uri<Capacity>{*text, Detail::Uri::UncheckedTag{}};
+        }
+    };
 
     namespace Literals {
 
