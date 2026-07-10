@@ -362,25 +362,25 @@ namespace Sora {
         template<typename T>
         [[nodiscard]] json ClassToJson(const T& value) {
             json object = json::object();
-            template for (constexpr auto m : JsonMembers<T>()) {
+            template for (constexpr auto m : Detail::JsonMembers<T>()) {
                 using Member = typename [:std::meta::type_of(m):];
                 const auto& field = value.[:m:];
 
                 if constexpr ($::Has<$::Serialization::Flatten>(m)) {
-                    json sub = ToJsonImpl(field);
+                    json sub = Detail::ToJsonImpl(field);
                     if (sub.is_object()) {
                         for (auto it = sub.begin(); it != sub.end(); ++it) {
                             object[it.key()] = std::move(it.value());
                         }
                     } else {
-                        object[std::string(FieldNameOf<m>())] = std::move(sub);
+                        object[std::string(Detail::FieldNameOf<m>())] = std::move(sub);
                     }
                 } else {
                     constexpr bool memberEmitDefault = [] consteval {
                         if constexpr ($::Has<$::Serialization::EmitDefault>(m)) {
                             return $::GetSingle<$::Serialization::EmitDefault>(m).emit;
                         } else {
-                            return TypeEmitsDefaults<T>();
+                            return Detail::TypeEmitsDefaults<T>();
                         }
                     }();
                     if constexpr (!memberEmitDefault && std::equality_comparable<Member>) {
@@ -391,11 +391,12 @@ namespace Sora {
                     if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsInt>(m)) {
                         static_assert(!$::Has<$::Serialization::AsString>(m),
                                       "Enum member JSON policy cannot be both AsInt and AsString");
-                        object[std::string(FieldNameOf<m>())] = static_cast<std::underlying_type_t<Member>>(field);
+                        object[std::string(Detail::FieldNameOf<m>())] =
+                            static_cast<std::underlying_type_t<Member>>(field);
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsString>(m)) {
-                        object[std::string(FieldNameOf<m>())] = EnumToNameJson(field);
+                        object[std::string(Detail::FieldNameOf<m>())] = EnumToNameJson(field);
                     } else {
-                        object[std::string(FieldNameOf<m>())] = ToJsonImpl(field);
+                        object[std::string(Detail::FieldNameOf<m>())] = Detail::ToJsonImpl(field);
                     }
                 }
             }
@@ -408,14 +409,14 @@ namespace Sora {
             if (!input.is_object()) {
                 throw nlohmann::json::type_error::create(302, "expected JSON object", &input);
             }
-            template for (constexpr auto m : JsonMembers<T>()) {
+            template for (constexpr auto m : Detail::JsonMembers<T>()) {
                 using Member = typename [:std::meta::type_of(m):];
                 Member& field = output.[:m:];
 
                 if constexpr ($::Has<$::Serialization::Flatten>(m)) {
-                    FromJsonImpl(input, field);
+                    Detail::FromJsonImpl(input, field);
                 } else {
-                    auto key = std::string(FieldNameOf<m>());
+                    auto key = std::string(Detail::FieldNameOf<m>());
                     auto it = input.find(key);
                     if (it == input.end()) {
                         if constexpr ($::Has<$::Serialization::Required>(m)) {
@@ -429,7 +430,7 @@ namespace Sora {
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsString>(m)) {
                         EnumFromJson(*it, field);
                     } else {
-                        FromJsonImpl(*it, field);
+                        Detail::FromJsonImpl(*it, field);
                     }
                 }
             }

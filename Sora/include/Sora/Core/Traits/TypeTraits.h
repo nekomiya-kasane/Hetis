@@ -697,4 +697,12 @@ namespace Sora {
         return false;
     }
 
+    /** @brief Always returns false, but depends on a type parameter to allow SFINAE. */
+    template<typename>
+    inline constexpr bool kDependentFalse = false;
+
+    /** @brief Always returns true, but depends on a type parameter to allow SFINAE. */
+    template<typename>
+    inline constexpr bool kDependentTrue = true;
+
 } // namespace Sora
