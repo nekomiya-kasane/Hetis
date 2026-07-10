@@ -77,12 +77,12 @@ namespace Sora {
 
         /** @brief Type that is an instantiation of @ref Sora::Adaptor. */
         template<typename T>
-        concept Adapter = std::meta::has_template_arguments(^^std::remove_cvref_t<T>) &&
+        concept Adaptor = std::meta::has_template_arguments(^^std::remove_cvref_t<T>) &&
                           std::meta::template_of(^^std::remove_cvref_t<T>) == ^^Sora::Adaptor;
 
         /** @brief Type that is not an @ref Sora::Adaptor. */
         template<typename T>
-        concept NonAdaptor = !Adapter<T>;
+        concept NonAdaptor = !Adaptor<T>;
 
     } // namespace Concept
 
@@ -169,9 +169,8 @@ namespace Sora {
             if constexpr (Concept::LazyRange<X>) {
                 return std::views::transform(std::forward<decltype(xs)>(xs), f);
             } else if constexpr (Concept::TupleLikeClass<X>) {
-                return std::apply(
-                    [&](auto&&... es) { return std::tuple{f(std::forward<decltype(es)>(es))...}; },
-                    std::forward<decltype(xs)>(xs));
+                return std::apply([&](auto&&... es) { return std::tuple{f(std::forward<decltype(es)>(es))...}; },
+                                  std::forward<decltype(xs)>(xs));
             } else {
                 return Detail::MapRecord(f, std::forward<decltype(xs)>(xs));
             }
@@ -311,7 +310,6 @@ namespace Sora {
         return Adaptor{std::bind_front(std::forward<F>(f), std::forward<A>(a)...)};
     }
 
-
     /**
      * @brief Immutable runtime key-value rule.
      * @tparam K Key type.
@@ -331,14 +329,14 @@ namespace Sora {
     Rule(K, V) -> Rule<K, V>;
 
     /** @brief Forward declaration for compile-time keyed fields. */
-    template<FixedString K, typename V>
+    template<auto K, typename V>
     struct Field;
 
     /**
      * @brief Compile-time key tag produced by @c _k literals.
      * @tparam K Compile-time key string.
      */
-    template<FixedString K>
+    template<auto K>
     struct KeyTag {
         /** @brief Carried compile-time key string. */
         static constexpr auto key = K;
@@ -358,9 +356,10 @@ namespace Sora {
      * @brief Construct a compile-time key tag from a string literal.
      * @tparam S Literal key string.
      */
-    template<FixedString S>
-    [[nodiscard]] constexpr KeyTag<S> operator""_k() {
-        return {};
+    template<char... Cs>
+    [[nodiscard]] consteval auto operator""_k() {
+        constexpr char text[]{Cs..., '\0'};
+        return KeyTag<FixedString<sizeof...(Cs)>{text}>{};
     }
 
     /**
@@ -368,7 +367,7 @@ namespace Sora {
      * @tparam K Compile-time key string.
      * @tparam V Stored value type.
      */
-    template<FixedString K, typename V>
+    template<auto K, typename V>
     struct Field {
         /** @brief Compile-time key string. */
         static constexpr auto key = K;
@@ -393,7 +392,7 @@ namespace Sora {
          * @brief Return the index of key @p K within the field pack.
          * @return Matching index, or @c size_t(-1) when the key is absent.
          */
-        template<FixedString K>
+        template<auto K>
         static consteval size_t IndexOfKey() {
             if constexpr (sizeof...(Fs) == 0) {
                 return size_t(-1);
@@ -412,7 +411,7 @@ namespace Sora {
          * @brief Return field value for key @p K.
          * @tparam K Compile-time key string.
          */
-        template<FixedString K>
+        template<auto K>
         [[nodiscard]] constexpr decltype(auto) Get(this auto&& self) {
             constexpr size_t i = IndexOfKey<K>();
             static_assert(i != size_t(-1), "Assoc: key not found");
@@ -423,13 +422,13 @@ namespace Sora {
          * @brief Return field value for key tag @p KeyTag<K>.
          * @tparam K Compile-time key string.
          */
-        template<FixedString K>
+        template<auto K>
         [[nodiscard]] constexpr decltype(auto) operator[](this auto&& self, KeyTag<K>) {
             return std::forward<decltype(self)>(self).template Get<K>();
         }
 
         /** @brief Return whether key @p K exists in this association type. */
-        template<FixedString K>
+        template<auto K>
         static constexpr bool Contains() {
             return IndexOfKey<K>() != size_t(-1);
         }
@@ -593,5 +592,21 @@ namespace Sora {
         return Adaptor{
             [start](auto&& xs) { return std::views::zip(std::views::iota(start), std::forward<decltype(xs)>(xs)); }};
     }
+
+    namespace Traits {
+
+        template<typename T>
+        auto&& AdaptorAppliedTarget(T&&);
+
+        template<typename T>
+            requires requires {
+                { Traits::AdaptorAppliedTarget(std::declval<T>()) };
+            }
+        auto operator|(auto&& x, Concept::Adaptor auto&& adaptor) {
+            return Traits::AdaptorAppliedTarget(std::forward<decltype(x)>(x)) |
+                   std::forward<decltype(adaptor)>(adaptor);
+        }
+
+    } // namespace Traits
 
 } // namespace Sora
