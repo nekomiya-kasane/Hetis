@@ -42,6 +42,7 @@
 #include <memory>
 #include <meta>
 #include <new>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -80,8 +81,14 @@ namespace Sora {
             /** @brief Filtered list of non-skipped data members used for SoA generation. */
             template<typename T>
             consteval auto SoaMembers() {
-                auto result = Sora::Meta::MembersOf(^^T) | std::views::filter(std::not_fn(Sora::$::Has<$::Skip>));
-                return result | std::ranges::to<std::vector>();
+                std::vector<std::meta::info> result;
+                auto members = std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked());
+                for (auto member : members) {
+                    if (!Sora::$::Has<$::Skip>(member)) {
+                        result.push_back(member);
+                    }
+                }
+                return result;
             }
 
             /** @brief Number of SoA-eligible reflected fields in @p T. */
