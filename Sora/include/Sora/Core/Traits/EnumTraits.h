@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include "Sora/Core/FixedString.h"
 #include "Sora/Core/StringUtils.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 
@@ -76,7 +77,12 @@ namespace Sora {
 
         /** @brief Human-readable description annotation for enum values and other reflected declarations. */
         struct Description {
-            std::string_view text; /**< Description text. */
+            FixedString<256> text{}; /**< Description text. */
+
+            constexpr Description() = default;
+
+            template<size_t N>
+            consteval Description(const char (&value)[N]) : text(value) {}
         };
 
     } // namespace $
@@ -93,7 +99,7 @@ namespace Sora {
             auto desc = std::ranges::find_if(
                 annotations, [](std::meta::info a) { return std::meta::type_of(a) == ^^Sora::$::Description; });
             if (desc != annotations.end()) {
-                return std::define_static_string(std::meta::extract<Sora::$::Description>(*desc).text);
+                return std::define_static_string(std::meta::extract<Sora::$::Description>(*desc).text.view());
             }
             return std::string_view{};
         }
