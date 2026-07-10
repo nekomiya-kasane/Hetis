@@ -1,6 +1,6 @@
 /**
- * @file EventHub.h
- * @brief Per-nucleus event/callback hub, event type-list traits, subscriptions, schedulers, and trace hooks.
+ * @file EventPort.h
+ * @brief Per-nucleus event/callback hub, event type-list traits, subscriptions, delivery acts, and trace hooks.
  * @ingroup Core
  */
 #pragma once
@@ -9,6 +9,7 @@
 #include <Sora/Core/Traits/ScopeTraits.h>
 #include <Sora/Kernel/Core/Traits.h>
 #include <Sora/Kernel/Core/BaseObject.h>
+#include <Sora/Kernel/Core/ComPtr.h>
 #include <Sora/Kernel/Core/IID.h>
 
 #include <Sora/Core/Hash.h>
@@ -29,6 +30,9 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include <exec/start_detached.hpp>
+#include <stdexec/execution.hpp>
 
 namespace Sora::Kernel {
 
@@ -70,7 +74,7 @@ namespace Sora::Kernel {
             info = std::meta::dealias(info);
             if (!std::meta::is_class_type(info)) {
                 throw std::define_static_string("Meta::IsEvent: '" + std::string{std::meta::display_string_of(info)} +
-                                                "' is not a class reflection — only classes can be events.");
+                                                "' is not a class reflection -- only classes can be events.");
             }
 
             // Case 1: Event types are either explicitly marked with the @ref Eventive tag or derive from @ref
@@ -295,10 +299,9 @@ namespace Sora::Kernel {
          * bases.
          */
         template<Concept::ComClass T, Concept::EventClass E = Event::UnspecifiedEvent>
-        inline constexpr bool CanEmitEvent =
-            (std::same_as<std::remove_cvref_t<E>, Event::UnspecifiedEvent> ||
-             Concept::EventPayload<std::remove_cvref_t<E>>) &&
-            EventListContains<Traits::EmittedEventsOf<std::remove_cvref_t<T>>, E>;
+        inline constexpr bool CanEmitEvent = (std::same_as<std::remove_cvref_t<E>, Event::UnspecifiedEvent> ||
+                                              Concept::EventPayload<std::remove_cvref_t<E>>) &&
+                                             EventListContains<Traits::EmittedEventsOf<std::remove_cvref_t<T>>, E>;
 
         /**
          * @brief Return whether @p T can receive @p Event.
@@ -306,10 +309,9 @@ namespace Sora::Kernel {
          * bases.
          */
         template<Concept::ComClass T, Concept::EventClass E = Event::UnspecifiedEvent>
-        inline constexpr bool CanAcceptEvent =
-            (std::same_as<std::remove_cvref_t<E>, Event::UnspecifiedEvent> ||
-             Concept::EventPayload<std::remove_cvref_t<E>>) &&
-            EventListContains<Traits::AcceptedEventsOf<std::remove_cvref_t<T>>, E>;
+        inline constexpr bool CanAcceptEvent = (std::same_as<std::remove_cvref_t<E>, Event::UnspecifiedEvent> ||
+                                                Concept::EventPayload<std::remove_cvref_t<E>>) &&
+                                               EventListContains<Traits::AcceptedEventsOf<std::remove_cvref_t<T>>, E>;
 
         /**
          * @brief Return whether @p T can attach a callback tagged by @p CallbackTag.
@@ -383,63 +385,6 @@ namespace Sora::Kernel {
         uint64_t sequence{};     /**< Monotone receive sequence on the receiver hub. */
     };
 
-    /** @brief Move-only scheduled work item used by event schedulers. */
-    using EventTask = std::move_only_function<void()>;
-
-    /** @brief Owning type-erased scheduler for deferred event callback invocation. */
-    class EventScheduler {
-    public:
-        EventScheduler() noexcept = default;
-        EventScheduler(const EventScheduler&) = delete;
-        EventScheduler& operator=(const EventScheduler&) = delete;
-        virtual ~EventScheduler() noexcept = default;
-
-        /** @brief Enqueue @p task for eventual execution. */
-        virtual void Schedule(EventTask task) const = 0;
-    };
-
-    /** @brief Shared scheduler handle. Null means immediate in-thread invocation. */
-    using EventSchedulerPtr = std::shared_ptr<const EventScheduler>;
-
-    namespace Detail {
-
-        template<typename S>
-        concept SchedulerObject = requires(S& scheduler, EventTask task) {
-            { scheduler.Schedule(std::move(task)) };
-        } || requires(S& scheduler, EventTask task) {
-            { std::invoke(scheduler, std::move(task)) };
-        };
-
-        template<typename S>
-        class SchedulerModel final : public EventScheduler {
-        public:
-            explicit SchedulerModel(S scheduler) : scheduler_(std::move(scheduler)) {}
-
-            void Schedule(EventTask task) const override {
-                if constexpr (requires(S& scheduler, EventTask work) { scheduler.Schedule(std::move(work)); }) {
-                    scheduler_.Schedule(std::move(task));
-                } else {
-                    std::invoke(scheduler_, std::move(task));
-                }
-            }
-
-        private:
-            mutable S scheduler_;
-        };
-
-        template<typename>
-        inline constexpr bool kAlwaysFalse = false;
-
-    } // namespace Detail
-
-    /** @brief Build an event scheduler from either a @c Schedule(EventTask) object or a callable. */
-    template<typename Scheduler>
-        requires Detail::SchedulerObject<std::remove_cvref_t<Scheduler>>
-    [[nodiscard]] EventSchedulerPtr MakeEventScheduler(Scheduler&& scheduler) {
-        using S = std::remove_cvref_t<Scheduler>;
-        return std::make_shared<Detail::SchedulerModel<S>>(std::forward<Scheduler>(scheduler));
-    }
-
     /** @brief Dispatch budget attached to an event relation. */
     struct WoreBudget {
         static constexpr uint32_t kPersistent = 0xffffffffu; /**< Sentinel for a non-wearing relation. */
@@ -456,15 +401,15 @@ namespace Sora::Kernel {
     struct EventOptions {
         WoreBudget budget{Persistent}; /**< Successful dispatch budget for this relation. */
         int32_t priority{};            /**< Higher priority callbacks run first for immediate dispatch. */
-        EventSchedulerPtr scheduler{}; /**< Null for immediate invocation; non-null for deferred invocation. */
         EventId callbackId{Traits::EventIdOf<DefaultCallbackTag>}; /**< Callback policy tag. */
     };
 
     namespace Detail {
 
         struct SubscriptionState {
-            std::atomic<bool> active{true};                           /**< False after Drop or owner teardown. */
-            std::atomic<bool> suspended{};                            /**< True while dispatch is paused. */
+            std::atomic<bool> active{true}; /**< False when no future dispatch may enter. */
+            std::atomic<bool> canceled{};   /**< True after Drop, CancelAll, or zero budget. */
+            std::atomic<bool> suspended{};  /**< True while dispatch is paused. */
             std::atomic<uint32_t> remaining{WoreBudget::kPersistent}; /**< Successful dispatch budget. */
         };
 
@@ -472,34 +417,25 @@ namespace Sora::Kernel {
             std::atomic<bool> active{true};
         };
 
-        /** @brief Move-only intrusive strong anchor used by scheduler-owned callback tasks. */
-        class StrongObjectRef {
+        /** @brief Move-only pointer-like retainer that keeps a closure nucleus alive across deferred callbacks. */
+        class ClosureRetainerPtr {
         public:
-            StrongObjectRef() noexcept = default;
+            ClosureRetainerPtr() noexcept = default;
 
-            explicit StrongObjectRef(BaseUnknown* object) noexcept : object_(object ? object->Nucleus() : nullptr) {
-                Retain(object_);
-            }
+            /** @brief Retain the closure nucleus of @p object, if any. */
+            explicit ClosureRetainerPtr(BaseUnknown* object) noexcept
+                : nucleus_(object ? object->Nucleus() : nullptr) {}
 
-            StrongObjectRef(const StrongObjectRef&) = delete;
-            StrongObjectRef& operator=(const StrongObjectRef&) = delete;
+            ClosureRetainerPtr(const ClosureRetainerPtr&) = delete;
+            ClosureRetainerPtr& operator=(const ClosureRetainerPtr&) = delete;
+            ClosureRetainerPtr(ClosureRetainerPtr&&) noexcept = default;
+            ClosureRetainerPtr& operator=(ClosureRetainerPtr&&) noexcept = default;
 
-            StrongObjectRef(StrongObjectRef&& other) noexcept : object_(std::exchange(other.object_, nullptr)) {}
-
-            StrongObjectRef& operator=(StrongObjectRef&& other) noexcept {
-                if (this != std::addressof(other)) {
-                    Release(object_);
-                    object_ = std::exchange(other.object_, nullptr);
-                }
-                return *this;
-            }
-
-            ~StrongObjectRef() noexcept { Release(object_); }
-
-            [[nodiscard]] BaseUnknown* Get() const noexcept { return object_; }
+            /** @brief Return the retained nucleus pointer, or null when this retainer is empty. */
+            [[nodiscard]] BaseUnknown* Get() const noexcept { return nucleus_.Get(); }
 
         private:
-            BaseUnknown* object_{};
+            ComPtr<BaseUnknown> nucleus_{};
         };
 
     } // namespace Detail
@@ -513,44 +449,47 @@ namespace Sora::Kernel {
         /** @brief Return whether this handle still refers to an active relation. */
         [[nodiscard]] bool Active() const noexcept {
             auto state = state_.lock();
-            return state && state->active.load(std::memory_order_acquire);
+            return state && state->active.load(std::memory_order_acquire) &&
+                   !state->canceled.load(std::memory_order_acquire);
         }
 
     private:
-        friend void Drop(EventLink) noexcept;
-        friend void Suspend(EventLink) noexcept;
-        friend void Resume(EventLink) noexcept;
-        friend void SetBudget(EventLink, WoreBudget) noexcept;
+        friend void Drop(const EventLink&) noexcept;
+        friend void Suspend(const EventLink&) noexcept;
+        friend void Resume(const EventLink&) noexcept;
+        friend void SetBudget(const EventLink&, WoreBudget) noexcept;
 
         std::weak_ptr<Detail::SubscriptionState> state_{};
     };
 
     /** @brief Remove @p link from future dispatch without mutating relation storage immediately. */
-    inline void Drop(EventLink link) noexcept {
+    inline void Drop(const EventLink& link) noexcept {
         if (auto state = link.state_.lock()) {
             state->active.store(false, std::memory_order_release);
+            state->canceled.store(true, std::memory_order_release);
         }
     }
 
     /** @brief Pause @p link without consuming its dispatch budget. */
-    inline void Suspend(EventLink link) noexcept {
+    inline void Suspend(const EventLink& link) noexcept {
         if (auto state = link.state_.lock()) {
             state->suspended.store(true, std::memory_order_release);
         }
     }
 
     /** @brief Resume @p link after a previous @ref Suspend. */
-    inline void Resume(EventLink link) noexcept {
+    inline void Resume(const EventLink& link) noexcept {
         if (auto state = link.state_.lock()) {
             state->suspended.store(false, std::memory_order_release);
         }
     }
 
     /** @brief Replace @p link's successful-dispatch budget. */
-    inline void SetBudget(EventLink link, WoreBudget budget) noexcept {
+    inline void SetBudget(const EventLink& link, WoreBudget budget) noexcept {
         if (auto state = link.state_.lock()) {
             state->remaining.store(budget.value, std::memory_order_release);
             state->active.store(budget.value != 0, std::memory_order_release);
+            state->canceled.store(budget.value == 0, std::memory_order_release);
         }
     }
 
@@ -578,13 +517,13 @@ namespace Sora::Kernel {
     };
 
     namespace Detail {
+
         using ErasedCallback = std::move_only_function<EventFlow(EventContextBase&, const void*)>;
         using ErasedTrace = std::move_only_function<void(const EventTrace&)>;
 
         struct SubscriptionRecord {
             std::shared_ptr<SubscriptionState> state{};
             ErasedCallback callback{};
-            EventSchedulerPtr scheduler{};
             BaseUnknown* receiver{};
             WeakRef receiverWeak{};
             EventId eventId{};
@@ -610,8 +549,20 @@ namespace Sora::Kernel {
             std::vector<std::shared_ptr<TraceRecord>> records{};
         };
 
+        inline void Trace(const std::shared_ptr<const TraceSnapshot>& traces, const EventTrace& trace) {
+            if (!traces) {
+                return;
+            }
+            for (const auto& hook : traces->records) {
+                if (hook && hook->state->active.load(std::memory_order_acquire)) {
+                    hook->callback(trace);
+                }
+            }
+        }
+
         [[nodiscard]] inline bool TryConsume(SubscriptionState& state) noexcept {
-            if (!state.active.load(std::memory_order_acquire) || state.suspended.load(std::memory_order_acquire)) {
+            if (!state.active.load(std::memory_order_acquire) || state.canceled.load(std::memory_order_acquire) ||
+                state.suspended.load(std::memory_order_acquire)) {
                 return false;
             }
             for (uint32_t current = state.remaining.load(std::memory_order_acquire);;) {
@@ -640,7 +591,7 @@ namespace Sora::Kernel {
             } else if constexpr (std::same_as<R, void>) {
                 return EventFlow::Continue;
             } else {
-                static_assert(kAlwaysFalse<R>, "Event callback must return void or Sora::Kernel::EventFlow.");
+                static_assert(false, "Event callback must return void or Sora::Kernel::EventFlow.");
             }
         }
 
@@ -684,9 +635,9 @@ namespace Sora::Kernel {
                     return ToEventFlow(std::invoke(callback));
                 }
             } else {
-                static_assert(kAlwaysFalse<Callback>, "Event callback must accept EventContext<Event>&, "
-                                                      "(const Event&, EventContext<Event>&), const Event&, or no "
-                                                      "arguments.");
+                static_assert(false, "Event callback must accept EventContext<Event>&, "
+                                     "(const Event&, EventContext<Event>&), const Event&, or no "
+                                     "arguments.");
             }
         }
 
@@ -714,28 +665,121 @@ namespace Sora::Kernel {
                     return ToEventFlow(std::invoke(callback));
                 }
             } else {
-                static_assert(kAlwaysFalse<Callback>,
-                              "AnyEvent callback must accept EventContextBase&, BaseUnknown&, or no arguments.");
+                static_assert(false, "AnyEvent callback must accept EventContextBase&, BaseUnknown&, or no arguments.");
             }
         }
 
     } // namespace Detail
 
-    class EventHub;
+    /** @brief Stable asynchronous context shared by every delivery act created by one event emission. */
+    template<Concept::EventPayload Event>
+    struct EmissionFrame {
+        /** @brief Construct a stable emission frame from the source event and emitter. */
+        EmissionFrame(const Event& event, Detail::ClosureRetainerPtr emitter,
+                      std::shared_ptr<const Detail::TraceSnapshot> traces,
+                      uint64_t sequence) noexcept(std::is_nothrow_copy_constructible_v<Event>)
+            : payload(event), emitter(std::move(emitter)), traces(std::move(traces)), sequence(sequence) {}
+
+        Event payload;                                         /**< Stable payload copy shared by all deliveries. */
+        Detail::ClosureRetainerPtr emitter{};                  /**< Retains the emitter closure nucleus. */
+        std::shared_ptr<const Detail::TraceSnapshot> traces{}; /**< Trace hooks snapshotted at emission time. */
+        uint64_t sequence{};                                   /**< Monotone receive sequence. */
+    };
+
+    /** @brief Move-only delivery act that performs one lifetime-safe event callback invocation. */
+    template<Concept::EventPayload Event>
+    class EventDeliveryAct {
+    public:
+        EventDeliveryAct() noexcept = default;
+        EventDeliveryAct(const EventDeliveryAct&) = delete;
+        EventDeliveryAct& operator=(const EventDeliveryAct&) = delete;
+        EventDeliveryAct(EventDeliveryAct&&) noexcept = default;
+        EventDeliveryAct& operator=(EventDeliveryAct&&) noexcept = default;
+
+        /** @brief Return whether this delivery act has a callback relation to execute. */
+        [[nodiscard]] explicit operator bool() const noexcept { return frame_ != nullptr && record_ != nullptr; }
+
+        /** @brief Invoke the delivery act once on the current execution agent. */
+        EventFlow operator()() {
+            if (!frame_ || !record_ || !record_->state) {
+                return EventFlow::Continue;
+            }
+
+            BaseUnknown* receiverObject = receiver_.Get();
+            BaseUnknown* emitterObject = frame_->emitter.Get();
+            if (!receiverObject || !emitterObject || record_->state->canceled.load(std::memory_order_acquire) ||
+                record_->state->suspended.load(std::memory_order_acquire)) {
+                Trace(EventTracePhase::CallbackCanceled, receiverObject, emitterObject);
+                return EventFlow::Continue;
+            }
+
+            EventContext<Event> context{{.receiver = *receiverObject,
+                                         .emitter = *emitterObject,
+                                         .eventId = Traits::EventIdOf<Event>,
+                                         .callbackId = record_->callbackId,
+                                         .subscription = record_->id,
+                                         .sequence = frame_->sequence},
+                                        frame_->payload};
+            Trace(EventTracePhase::CallbackBegin, receiverObject, emitterObject);
+            const EventFlow flow = record_->callback(context, std::addressof(frame_->payload));
+            Trace(EventTracePhase::CallbackEnd, receiverObject, emitterObject);
+            return flow;
+        }
+
+    private:
+        friend class EventPort;
+
+        EventDeliveryAct(std::shared_ptr<const EmissionFrame<Event>> frame, Detail::ClosureRetainerPtr receiver,
+                         std::shared_ptr<Detail::SubscriptionRecord> record) noexcept
+            : frame_(std::move(frame)), receiver_(std::move(receiver)), record_(std::move(record)) {}
+
+        void Trace(EventTracePhase phase, BaseUnknown* receiver, BaseUnknown* emitter) const {
+            Detail::Trace(frame_->traces, EventTrace{.phase = phase,
+                                                     .receiver = receiver,
+                                                     .emitter = emitter,
+                                                     .eventId = Traits::EventIdOf<Event>,
+                                                     .callbackId = record_->callbackId,
+                                                     .subscription = record_->id,
+                                                     .sequence = frame_->sequence});
+        }
+
+        std::shared_ptr<const EmissionFrame<Event>> frame_{};
+        Detail::ClosureRetainerPtr receiver_{};
+        std::shared_ptr<Detail::SubscriptionRecord> record_{};
+    };
+
+    /** @brief Build a sender that invokes @p act after @p scheduler completes one schedule operation. */
+    template<typename Scheduler, typename Act>
+        requires stdexec::scheduler<std::remove_cvref_t<Scheduler>> && std::move_constructible<Act> &&
+                 std::invocable<Act&>
+    [[nodiscard]] auto EventSender(Scheduler&& scheduler, Act act) {
+        return stdexec::schedule(std::forward<Scheduler>(scheduler)) | stdexec::then(std::move(act));
+    }
+
+    /** @brief Start @p act as fire-and-forget work on @p scheduler. */
+    template<typename Scheduler, typename Act>
+        requires stdexec::scheduler<std::remove_cvref_t<Scheduler>> && std::move_constructible<Act> &&
+                 std::invocable<Act&>
+    void StartEvent(Scheduler&& scheduler, Act act) {
+        exec::start_detached(EventSender(std::forward<Scheduler>(scheduler), std::move(act)));
+    }
+
+    class EventPort;
 
     /** @brief Return the event hub associated with @p object. */
-    [[nodiscard]] EventHub& Events(BaseUnknown& object);
+    [[nodiscard]] EventPort& Events(BaseUnknown& object);
 
     /** @brief Cold callback manager stored as a closure-owned data extension on one closure nucleus. */
-    class [[= Sora::Kernel::$::Role{TypeOfClass::DataExtension}]] EventHub : public BaseUnknown {
+    class [[= Sora::Kernel::$::DataExtension, = Sora::Kernel::$::Extends<BaseUnknown>{}]] EventPort
+        : public BaseUnknown {
         S_OBJECT
 
     public:
         /** @brief Construct an unbound hub extension; @ref Events binds it to the closure nucleus on demand. */
-        EventHub() noexcept;
-        EventHub(const EventHub&) = delete;
-        EventHub& operator=(const EventHub&) = delete;
-        ~EventHub() noexcept;
+        EventPort() noexcept;
+        EventPort(const EventPort&) = delete;
+        EventPort& operator=(const EventPort&) = delete;
+        ~EventPort() noexcept;
 
         /** @brief Return the closure nucleus that owns this hub. */
         [[nodiscard]] BaseUnknown& Owner() noexcept { return *Nucleus(); }
@@ -744,14 +788,12 @@ namespace Sora::Kernel {
         [[nodiscard]] const BaseUnknown& Owner() const noexcept { return *Nucleus(); }
 
         /** @brief Return whether the owning nucleus is still alive. */
-        [[nodiscard]] bool OwnerAlive() const noexcept {
-            return Extendee() != nullptr && ownerWeak_.Get() == Nucleus();
-        }
+        [[nodiscard]] bool OwnerAlive() const noexcept { return Extendee() != nullptr; }
 
         /** @brief Attach a typed relation owned by this hub's emitter. */
         template<Concept::EventPayload Event, typename Callback>
         [[nodiscard]] EventLink ListenTyped(BaseUnknown* receiver, Callback&& callback, EventOptions options = {}) {
-            assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
+            assert(OwnerAlive() && "EventPort used after its owner nucleus was destroyed");
             using F = std::remove_cvref_t<Callback>;
             static_assert(std::move_constructible<F>);
 
@@ -769,7 +811,6 @@ namespace Sora::Kernel {
                     [callback = std::move(typedCallback)](EventContextBase& context, const void* payload) mutable {
                         return Detail::InvokeTypedCallback<Event>(callback, context, payload);
                     },
-                .scheduler = std::move(options.scheduler),
                 .receiver = actualReceiver,
                 .receiverWeak = actualReceiver ? actualReceiver->GetComponentWeakRef() : WeakRef{},
                 .eventId = Traits::EventIdOf<Event>,
@@ -783,7 +824,7 @@ namespace Sora::Kernel {
         /** @brief Attach an event-type-erased relation owned by this hub's emitter. */
         template<typename Callback>
         [[nodiscard]] EventLink ListenAny(BaseUnknown* receiver, Callback&& callback, EventOptions options = {}) {
-            assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
+            assert(OwnerAlive() && "EventPort used after its owner nucleus was destroyed");
             using F = std::remove_cvref_t<Callback>;
             static_assert(std::move_constructible<F>);
 
@@ -801,7 +842,6 @@ namespace Sora::Kernel {
                     [callback = std::move(anyCallback)](EventContextBase& context, const void* payload) mutable {
                         return Detail::InvokeAnyCallback(callback, context, payload);
                     },
-                .scheduler = std::move(options.scheduler),
                 .receiver = actualReceiver,
                 .receiverWeak = actualReceiver ? actualReceiver->GetComponentWeakRef() : WeakRef{},
                 .eventId = {},
@@ -815,7 +855,7 @@ namespace Sora::Kernel {
         /** @brief Deliver @p event to this hub as an accepted event. */
         template<Concept::EventPayload Event>
         void Emit(const Event& event, BaseUnknown* emitter = nullptr) {
-            assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
+            assert(OwnerAlive() && "EventPort used after its owner nucleus was destroyed");
             BaseUnknown* owner = Nucleus();
             BaseUnknown* actualEmitter = emitter ? emitter->Nucleus() : owner;
             if (!actualEmitter) {
@@ -830,14 +870,15 @@ namespace Sora::Kernel {
                              .eventId = Traits::EventIdOf<Event>,
                              .sequence = sequence});
 
-            std::shared_ptr<const Event> deferredPayload;
             for (const auto& record : subscriptions->records) {
                 if (!record || (!record->anyEvent && record->eventId != Traits::EventIdOf<Event>)) {
                     continue;
                 }
                 BaseUnknown* actualReceiver = record->receiver ? record->receiverWeak.Get() : actualEmitter;
-                if (!actualReceiver) {
-                    record->state->active.store(false, std::memory_order_release);
+                if (!actualReceiver || !record->state) {
+                    if (record->state) {
+                        record->state->active.store(false, std::memory_order_release);
+                    }
                     continue;
                 }
                 EventContext<Event> context{{.receiver = *actualReceiver,
@@ -847,7 +888,7 @@ namespace Sora::Kernel {
                                             event};
                 context.callbackId = record->callbackId;
                 context.subscription = record->id;
-                const EventFlow flow = DispatchRecord(record, context, event, deferredPayload);
+                const EventFlow flow = DispatchRecord(record, context, event);
                 if (flow == EventFlow::Stop) {
                     break;
                 }
@@ -857,6 +898,50 @@ namespace Sora::Kernel {
                              .receiver = owner,
                              .emitter = actualEmitter,
                              .eventId = Traits::EventIdOf<Event>,
+                             .sequence = sequence});
+        }
+
+        /** @brief Schedule all callbacks selected by @p event on @p scheduler without storing the scheduler. */
+        template<stdexec::scheduler Scheduler, Concept::EventPayload Event>
+        void EmitOn(Scheduler scheduler, const Event& event, BaseUnknown* emitter = nullptr) {
+            assert(OwnerAlive() && "EventPort used after its owner nucleus was destroyed");
+            BaseUnknown* owner = Nucleus();
+            BaseUnknown* actualEmitter = emitter ? emitter->Nucleus() : owner;
+            if (!actualEmitter) {
+                actualEmitter = owner;
+            }
+
+            const uint64_t sequence = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
+            const EventId eventId = Traits::EventIdOf<Event>;
+            auto subscriptions = Subscriptions();
+            Trace(EventTrace{.phase = EventTracePhase::ReceiveBegin,
+                             .receiver = owner,
+                             .emitter = actualEmitter,
+                             .eventId = eventId,
+                             .sequence = sequence});
+
+            auto matchingRecords = subscriptions->records | std::views::filter([eventId](const auto& record) {
+                                       return record && (record->anyEvent || record->eventId == eventId);
+                                   });
+            std::shared_ptr<const EmissionFrame<Event>> frame;
+            for (const auto& record : matchingRecords) {
+                BaseUnknown* actualReceiver = record->receiver ? record->receiverWeak.Get() : actualEmitter;
+                if (!actualReceiver || !record->state) {
+                    if (record->state) {
+                        record->state->active.store(false, std::memory_order_release);
+                    }
+                    continue;
+                }
+                auto deliveryAct = MakeDeliveryAct(record, *actualReceiver, *actualEmitter, event, sequence, frame);
+                if (deliveryAct) {
+                    StartEvent(scheduler, std::move(deliveryAct));
+                }
+            }
+
+            Trace(EventTrace{.phase = EventTracePhase::ReceiveEnd,
+                             .receiver = owner,
+                             .emitter = actualEmitter,
+                             .eventId = eventId,
                              .sequence = sequence});
         }
 
@@ -871,7 +956,7 @@ namespace Sora::Kernel {
         template<typename TraceCallback>
             requires std::invocable<TraceCallback&, const EventTrace&>
         [[nodiscard]] EventTraceHook AttachTrace(TraceCallback&& callback) {
-            assert(OwnerAlive() && "EventHub used after its owner nucleus was destroyed");
+            assert(OwnerAlive() && "EventPort used after its owner nucleus was destroyed");
             using F = std::remove_cvref_t<TraceCallback>;
             static_assert(std::move_constructible<F>);
             Detail::TraceRecord record{
@@ -885,8 +970,6 @@ namespace Sora::Kernel {
         void CancelAll() noexcept;
 
     private:
-        friend EventHub& Events(BaseUnknown& object);
-
         [[nodiscard]] EventLink AddSubscription(Detail::SubscriptionRecord record);
         [[nodiscard]] EventTraceHook AddTrace(Detail::TraceRecord record);
         [[nodiscard]] std::shared_ptr<const Detail::SubscriptionSnapshot> Subscriptions() const;
@@ -895,12 +978,11 @@ namespace Sora::Kernel {
         void Trace(const EventTrace& trace) const;
         static void Trace(std::shared_ptr<const Detail::TraceSnapshot> traces, const EventTrace& trace);
         EventFlow DispatchRecord(const std::shared_ptr<Detail::SubscriptionRecord>& record, EventContextBase& context,
-                                 const void* event, std::shared_ptr<const void>& deferredPayload) = delete;
+                                 const void* event) = delete;
 
         template<Concept::EventPayload Event>
         EventFlow DispatchRecord(const std::shared_ptr<Detail::SubscriptionRecord>& record,
-                                 EventContext<Event>& context, const Event& event,
-                                 std::shared_ptr<const Event>& deferredPayload) {
+                                 EventContext<Event>& context, const Event& event) {
             if (!record->state->active.load(std::memory_order_acquire)) {
                 return EventFlow::Continue;
             }
@@ -909,91 +991,51 @@ namespace Sora::Kernel {
                 return EventFlow::Continue;
             }
 
-            if (!record->scheduler) {
-                Trace(EventTrace{.phase = EventTracePhase::CallbackBegin,
-                                 .receiver = std::addressof(context.receiver),
-                                 .emitter = std::addressof(context.emitter),
-                                 .eventId = context.eventId,
-                                 .callbackId = record->callbackId,
-                                 .subscription = record->id,
-                                 .sequence = context.sequence});
-                const EventFlow flow = record->callback(context, std::addressof(event));
-                Trace(EventTrace{.phase = EventTracePhase::CallbackEnd,
-                                 .receiver = std::addressof(context.receiver),
-                                 .emitter = std::addressof(context.emitter),
-                                 .eventId = context.eventId,
-                                 .callbackId = record->callbackId,
-                                 .subscription = record->id,
-                                 .sequence = context.sequence});
-                return flow;
-            }
-
-            if (!deferredPayload) {
-                deferredPayload = std::make_shared<const Event>(event);
-            }
-
-            auto state = record->state;
-            auto scheduler = record->scheduler;
-            Detail::StrongObjectRef receiver{std::addressof(context.receiver)};
-            Detail::StrongObjectRef emitter{std::addressof(context.emitter)};
-            auto payload = deferredPayload;
-            EventId eventId = context.eventId;
-            EventId callbackId = record->callbackId;
-            uint64_t subscription = record->id;
-            uint64_t sequence = context.sequence;
-            auto traces = Traces();
-
-            Trace(EventTrace{.phase = EventTracePhase::CallbackScheduled,
+            Trace(EventTrace{.phase = EventTracePhase::CallbackBegin,
                              .receiver = std::addressof(context.receiver),
                              .emitter = std::addressof(context.emitter),
-                             .eventId = eventId,
-                             .callbackId = callbackId,
-                             .subscription = subscription,
-                             .sequence = sequence});
-
-            scheduler->Schedule([state = std::move(state), payload = std::move(payload), receiver = std::move(receiver),
-                                 emitter = std::move(emitter), eventId, callbackId, subscription, sequence, record,
-                                 traces = std::move(traces)]() mutable {
-                BaseUnknown* receiverObject = receiver.Get();
-                BaseUnknown* emitterObject = emitter.Get();
-                if (!receiverObject || !emitterObject || !state->active.load(std::memory_order_acquire) ||
-                    state->suspended.load(std::memory_order_acquire)) {
-                    Trace(traces, EventTrace{.phase = EventTracePhase::CallbackCanceled,
-                                             .receiver = receiverObject,
-                                             .emitter = emitterObject,
-                                             .eventId = eventId,
-                                             .callbackId = callbackId,
-                                             .subscription = subscription,
-                                             .sequence = sequence});
-                    return;
-                }
-                EventContext<Event> asyncContext{{.receiver = *receiverObject,
-                                                  .emitter = *emitterObject,
-                                                  .eventId = eventId,
-                                                  .callbackId = callbackId,
-                                                  .subscription = subscription,
-                                                  .sequence = sequence},
-                                                 *payload};
-                Trace(traces, EventTrace{.phase = EventTracePhase::CallbackBegin,
-                                         .receiver = receiverObject,
-                                         .emitter = emitterObject,
-                                         .eventId = eventId,
-                                         .callbackId = callbackId,
-                                         .subscription = subscription,
-                                         .sequence = sequence});
-                record->callback(asyncContext, payload.get());
-                Trace(traces, EventTrace{.phase = EventTracePhase::CallbackEnd,
-                                         .receiver = receiverObject,
-                                         .emitter = emitterObject,
-                                         .eventId = eventId,
-                                         .callbackId = callbackId,
-                                         .subscription = subscription,
-                                         .sequence = sequence});
-            });
-            return EventFlow::Continue;
+                             .eventId = context.eventId,
+                             .callbackId = record->callbackId,
+                             .subscription = record->id,
+                             .sequence = context.sequence});
+            const EventFlow flow = record->callback(context, std::addressof(event));
+            Trace(EventTrace{.phase = EventTracePhase::CallbackEnd,
+                             .receiver = std::addressof(context.receiver),
+                             .emitter = std::addressof(context.emitter),
+                             .eventId = context.eventId,
+                             .callbackId = record->callbackId,
+                             .subscription = record->id,
+                             .sequence = context.sequence});
+            return flow;
         }
 
-        WeakRef ownerWeak_{};
+        template<Concept::EventPayload Event>
+        EventDeliveryAct<Event> MakeDeliveryAct(const std::shared_ptr<Detail::SubscriptionRecord>& record,
+                                                BaseUnknown& receiver, BaseUnknown& emitter, const Event& event,
+                                                uint64_t sequence, std::shared_ptr<const EmissionFrame<Event>>& frame) {
+            if (!record || !record->state || !record->state->active.load(std::memory_order_acquire)) {
+                return {};
+            }
+
+            if (!Detail::TryConsume(*record->state)) {
+                return {};
+            }
+            if (!frame) {
+                frame = std::make_shared<const EmissionFrame<Event>>(
+                    event, Detail::ClosureRetainerPtr{std::addressof(emitter)}, Traces(), sequence);
+            }
+
+            Detail::Trace(frame->traces, EventTrace{.phase = EventTracePhase::CallbackScheduled,
+                                                    .receiver = std::addressof(receiver),
+                                                    .emitter = std::addressof(emitter),
+                                                    .eventId = Traits::EventIdOf<Event>,
+                                                    .callbackId = record->callbackId,
+                                                    .subscription = record->id,
+                                                    .sequence = frame->sequence});
+
+            return EventDeliveryAct<Event>{frame, Detail::ClosureRetainerPtr{std::addressof(receiver)}, record};
+        }
+
         mutable std::mutex mutex_{};
         std::shared_ptr<const Detail::SubscriptionSnapshot> subscriptions_{};
         std::shared_ptr<const Detail::TraceSnapshot> traces_{};
@@ -1069,7 +1111,7 @@ namespace Sora::Kernel {
     };
 
     /** @brief Return the event hub associated with @p object. */
-    [[nodiscard]] EventHub& Events(BaseUnknown* object);
+    [[nodiscard]] EventPort& Events(BaseUnknown* object);
 
     namespace Detail {
 
@@ -1116,8 +1158,7 @@ namespace Sora::Kernel {
                     return FlowOf(receiver.On(context));
                 }
             } else {
-                static_assert(kAlwaysFalse<Receiver>,
-                              "Receiver must provide On(event, emitter), On(event), or On(context).");
+                static_assert(false, "Receiver must provide On(event, emitter), On(event), or On(context).");
             }
         }
 
@@ -1183,7 +1224,7 @@ namespace Sora::Kernel {
                     return FlowOf(std::invoke(handler, context));
                 }
             } else {
-                static_assert(kAlwaysFalse<Handler>, "Handler is not compatible with this receiver/event relation.");
+                static_assert(false, "Handler is not compatible with this receiver/event relation.");
             }
         }
 
@@ -1242,20 +1283,24 @@ namespace Sora::Kernel {
                     return FlowOf(std::invoke(handler));
                 }
             } else {
-                static_assert(kAlwaysFalse<Handler>, "Handler is not compatible with this wildcard event relation.");
+                static_assert(false, "Handler is not compatible with this wildcard event relation.");
             }
         }
 
     } // namespace Detail
 
-    /** @brief Listen to one concrete event emitted by one concrete emitter using the receiver's default On overload. */
+    /**
+     * @brief Listen to one concrete event emitted by one concrete emitter using the receiver's default On overload.
+     */
 
     template<Concept::ComClass Receiver, Concept::ComClass Emitter, Concept::EventPayload Event>
     [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, WoreBudget budget = Persistent) {
         return Listen(receiver, emitter, Event{}, EventOptions{.budget = budget});
     }
 
-    /** @brief Listen to one concrete event emitted by one concrete emitter using the receiver's default On overload. */
+    /**
+     * @brief Listen to one concrete event emitted by one concrete emitter using the receiver's default On overload.
+     */
     template<Concept::ComClass Receiver, Concept::ComClass Emitter, Concept::EventPayload Event>
     [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options) {
         static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
@@ -1393,6 +1438,21 @@ namespace Sora::Kernel {
     void Emit(Emitter& emitter) {
         static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
         Events(emitter).template Emit<Event>(std::addressof(emitter));
+    }
+
+    /** @brief Typed event emission whose selected callbacks are scheduled on @p scheduler. */
+    template<Concept::ComClass Emitter, stdexec::scheduler Scheduler, Concept::EventPayload Event>
+    void EmitOn(Emitter& emitter, Scheduler scheduler, const Event& event) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
+        Events(emitter).EmitOn(std::move(scheduler), event, std::addressof(emitter));
+    }
+
+    /** @brief Typed scheduled event emission with a default-constructed payload. */
+    template<Concept::EventPayload Event, Concept::ComClass Emitter, stdexec::scheduler Scheduler>
+        requires std::default_initializable<Event>
+    void EmitOn(Emitter& emitter, Scheduler scheduler) {
+        static_assert(Traits::CanEmitEvent<Emitter, Event>, "Emitter class does not emit this event payload.");
+        Events(emitter).EmitOn(std::move(scheduler), Event{}, std::addressof(emitter));
     }
 
 } // namespace Sora::Kernel
