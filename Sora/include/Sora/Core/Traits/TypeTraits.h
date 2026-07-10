@@ -182,6 +182,22 @@ namespace Sora {
         inline constexpr auto DealiasedTypeName =
             std::meta::display_string_of(std::meta::dealias(std::meta::remove_cvref(^^T)));
 
+        /**
+         * @brief Smallest unsigned integer type capable of holding a @p Bits-wide value.
+         *
+         * Selects @c uint8_t / @c uint16_t / @c uint32_t / @c uint64_t. The mixin uses this to size the per-instance
+         * counter according to the user's expected reference-graph depth: a UI tree rarely needs more than 65k
+         * references, so a 16-bit counter halves the storage cost compared to a default @c uint32_t.
+         *
+         * @tparam Bits Counter width in bits. Must be one of @c {8, 16, 32, 64}; an unsupported value selects @c
+         * uint64_t to fail safe.
+         */
+        template<std::size_t Bits = 16>
+        using BestSizeType =
+            std::conditional_t<(Bits <= 8), std::uint8_t,
+                               std::conditional_t<(Bits <= 16), std::uint16_t,
+                                                  std::conditional_t<(Bits <= 32), std::uint32_t, std::uint64_t>>>;
+
     } // namespace Traits
 
     namespace Concept {
@@ -246,9 +262,18 @@ namespace Sora {
             *value;
         };
 
+        /** @brief String-like type (either `std::string` or convertible to `std::string_view`). */
         template<typename T>
         concept StringLike =
             std::same_as<std::remove_cvref_t<T>, std::string> || std::convertible_to<T, std::string_view>;
+
+        /** @brief Scalar field accepted by the stable wire serializer. */
+        template<typename T>
+        concept IntegerLike = std::integral<T> || std::is_enum_v<T>;
+
+        /** @brief Floating-point field accepted by the stable wire serializer. */
+        template<typename T>
+        concept FloatingLike = std::floating_point<T>;
 
         /** @brief Type that exposes a stable @c view() convertible to @c std::string_view. */
         template<typename T>
@@ -270,6 +295,28 @@ namespace Sora {
                              std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, std::uint8_t>);
 
     } // namespace Concept
+
+    /** @brief Cast an integer-like value to its unsigned representation. */
+    [[nodiscard]] constexpr auto CastToUnsigned(Concept::IntegerLike auto value) noexcept {
+        if constexpr (std::is_enum_v<decltype(value)>) {
+            using U = std::make_unsigned_t<std::underlying_type_t<decltype(value)>>;
+            return static_cast<U>(value);
+        } else {
+            using U = std::make_unsigned_t<decltype(value)>;
+            return static_cast<U>(value);
+        }
+    }
+
+    /** @brief Cast an integer-like value to its signed representation. */
+    [[nodiscard]] constexpr auto CastToSigned(Concept::IntegerLike auto&& value) noexcept {
+        if constexpr (std::is_enum_v<std::remove_cvref_t<decltype(value)>>) {
+            using U = std::make_signed_t<std::underlying_type_t<std::remove_cvref_t<decltype(value)>>>;
+            return static_cast<U>(value);
+        } else {
+            using U = std::make_signed_t<std::remove_cvref_t<decltype(value)>>;
+            return static_cast<U>(value);
+        }
+    }
 
     namespace Traits {
 
