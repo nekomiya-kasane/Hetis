@@ -16,7 +16,7 @@ namespace {
 
     struct WithSkip {
         int kept;
-        [[=Sora::SoA::Skip{}]] int skipped;
+        [[=Sora::SoA::$::Skip{}]] int skipped;
         double other;
     };
 
