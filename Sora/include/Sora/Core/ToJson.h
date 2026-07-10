@@ -487,14 +487,12 @@ namespace Sora {
                         array.push_back(ToJsonImpl(element));
                     }
                     return array;
-                } else if constexpr (ReflectableClass<U>) {
+                } else if constexpr (ReflectableClass<U> || HasNlohmannToJson<U>) {
                     if constexpr (HasNlohmannToJson<U>) {
                         return json(value);
                     } else {
                         return ClassToJson(value);
                     }
-                } else if constexpr (HasNlohmannToJson<U>) {
-                    return json(value);
                 } else {
                     static_assert(false, "Type cannot be serialized to JSON");
                 }
@@ -545,13 +543,10 @@ namespace Sora {
                                 if (matched) {
                                     return;
                                 }
-                                try {
-                                    std::variant_alternative_t<I, U> alternative{};
-                                    FromJsonImpl(input, alternative);
-                                    output = std::move(alternative);
-                                    matched = true;
-                                } catch (...) {
-                                }
+                                std::variant_alternative_t<I, U> alternative{};
+                                FromJsonImpl(input, alternative);
+                                output = std::move(alternative);
+                                matched = true;
                             }(),
                             ...);
                     }(std::make_index_sequence<std::variant_size_v<U>>{});
@@ -586,14 +581,12 @@ namespace Sora {
                         FromJsonImpl(element, temp);
                         output.push_back(std::move(temp));
                     }
-                } else if constexpr (ReflectableClass<U>) {
+                } else if constexpr (ReflectableClass<U> || HasNlohmannFromJson<U>) {
                     if constexpr (HasNlohmannFromJson<U>) {
                         output = input.template get<U>();
                     } else {
                         ClassFromJson(input, output);
                     }
-                } else if constexpr (HasNlohmannFromJson<U>) {
-                    output = input.template get<U>();
                 } else {
                     static_assert(false, "Type cannot be deserialized from JSON");
                 }
