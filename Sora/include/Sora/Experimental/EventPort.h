@@ -102,6 +102,7 @@ namespace Sora::Experimental {
         }();
 
     } // namespace Traits
+
     /** @brief Trace phase for observing delivery without becoming an event callback. */
     enum class EventTracePhase : uint8_t {
         ReceiveBegin,
@@ -430,19 +431,22 @@ namespace Sora::Experimental {
 
     } // namespace Concept
 
+    namespace Detail {
+
+        struct SubscriptionRecord;
+
+    } // namespace Detail
+
     /** @brief Stable handle for an explicit event relation. */
     class EventLink {
     public:
-        /** @brief Opaque relation state shared by handles and the owning port. */
-        struct State;
-
         EventLink() noexcept = default;
 
         /** @brief Return whether this handle still refers to an active relation. */
         [[nodiscard]] bool Active() const noexcept;
 
     private:
-        explicit EventLink(std::weak_ptr<State> state) noexcept : state_(std::move(state)) {}
+        explicit EventLink(std::weak_ptr<Detail::SubscriptionRecord> record) noexcept : record_(std::move(record)) {}
 
         friend class EventPort;
         friend void Drop(const EventLink&) noexcept;
@@ -450,7 +454,7 @@ namespace Sora::Experimental {
         friend void Resume(const EventLink&) noexcept;
         friend void SetBudget(const EventLink&, WoreBudget) noexcept;
 
-        std::weak_ptr<State> state_{};
+        std::weak_ptr<Detail::SubscriptionRecord> record_{};
     };
 
     /** @brief Remove @p link from future dispatch without mutating relation storage immediately. */
@@ -505,7 +509,6 @@ namespace Sora::Experimental {
 
     } // namespace Detail
 
-    struct EventLink::State : Detail::SubscriptionState {};
     struct EventTraceHook::State : Detail::TraceState {};
 
     /** @brief Return whether @p state is active and dispatchable before budget consumption. */
@@ -534,38 +537,6 @@ namespace Sora::Experimental {
             }
         }
         return false;
-    }
-
-    inline bool EventLink::Active() const noexcept {
-        auto state = state_.lock();
-        return state && Dispatchable(*state);
-    }
-
-    inline void Drop(const EventLink& link) noexcept {
-        if (auto state = link.state_.lock()) {
-            state->active.store(false, std::memory_order_release);
-            state->canceled.store(true, std::memory_order_release);
-        }
-    }
-
-    inline void Suspend(const EventLink& link) noexcept {
-        if (auto state = link.state_.lock()) {
-            state->suspended.store(true, std::memory_order_release);
-        }
-    }
-
-    inline void Resume(const EventLink& link) noexcept {
-        if (auto state = link.state_.lock()) {
-            state->suspended.store(false, std::memory_order_release);
-        }
-    }
-
-    inline void SetBudget(const EventLink& link, WoreBudget budget) noexcept {
-        if (auto state = link.state_.lock()) {
-            state->remaining.store(budget.value, std::memory_order_release);
-            state->active.store(budget.value != 0, std::memory_order_release);
-            state->canceled.store(budget.value == 0, std::memory_order_release);
-        }
     }
 
     inline void EventTraceHook::Cancel() noexcept {
@@ -682,7 +653,7 @@ namespace Sora::Experimental {
         }
 
         struct SubscriptionRecord {
-            std::shared_ptr<EventLink::State> state{};
+            SubscriptionState state{};
             ErasedCallback callback{};
             EventObjectRef receiver{};
             EventLifetimeToken receiverLifetime{};
@@ -692,7 +663,21 @@ namespace Sora::Experimental {
             uint64_t order{};
             int32_t priority{};
             bool anyEvent{};
+
+            auto operator<=>(const SubscriptionRecord& rhs) const noexcept {
+                if (priority != rhs.priority) {
+                    return priority > rhs.priority ? std::strong_ordering::less : std::strong_ordering::greater;
+                }
+                return std::tie(order, id, eventId, callbackId, anyEvent) <=>
+                       std::tie(rhs.order, rhs.id, rhs.eventId, rhs.callbackId, rhs.anyEvent);
+            }
         };
+
+        /** @brief Apply cancellation flags to a subscription relation. */
+        inline void Cancel(SubscriptionRecord& record) noexcept {
+            record.state.active.store(false, std::memory_order_release);
+            record.state.canceled.store(true, std::memory_order_release);
+        }
 
         struct TraceRecord {
             std::shared_ptr<EventTraceHook::State> state{};
@@ -710,6 +695,37 @@ namespace Sora::Experimental {
         };
 
     } // namespace Detail
+
+    inline bool EventLink::Active() const noexcept {
+        auto record = record_.lock();
+        return record && Dispatchable(record->state);
+    }
+
+    inline void Drop(const EventLink& link) noexcept {
+        if (auto record = link.record_.lock()) {
+            Detail::Cancel(*record);
+        }
+    }
+
+    inline void Suspend(const EventLink& link) noexcept {
+        if (auto record = link.record_.lock()) {
+            record->state.suspended.store(true, std::memory_order_release);
+        }
+    }
+
+    inline void Resume(const EventLink& link) noexcept {
+        if (auto record = link.record_.lock()) {
+            record->state.suspended.store(false, std::memory_order_release);
+        }
+    }
+
+    inline void SetBudget(const EventLink& link, WoreBudget budget) noexcept {
+        if (auto record = link.record_.lock()) {
+            record->state.remaining.store(budget.value, std::memory_order_release);
+            record->state.active.store(budget.value != 0, std::memory_order_release);
+            record->state.canceled.store(budget.value == 0, std::memory_order_release);
+        }
+    }
 
     /** @brief Immutable data shared by every deferred delivery act in one emission. */
     template<Concept::EventPayload Event>
@@ -791,27 +807,24 @@ namespace Sora::Experimental {
             static_assert(std::move_constructible<F>);
 
             auto typedCallback = F(std::forward<Callback>(callback));
-            auto state = std::make_shared<EventLink::State>();
-            state->remaining.store(options.budget.value, std::memory_order_relaxed);
-            state->active.store(options.budget.value != 0, std::memory_order_relaxed);
-
-            Detail::SubscriptionRecord record{
-                .state = state,
-                .callback =
-                    [callback = std::move(typedCallback)](EventContextBase& base, const void* payload) mutable {
-                        auto& event = *static_cast<const Event*>(payload);
-                        EventContext<Event> context{base, event};
-                        return Detail::InvokeTypedHandler<Event, R, E>(callback, context);
-                    },
-                .receiver = EventRef(receiver),
-                .receiverLifetime = EventLifetime(receiver),
-                .eventId = Traits::EventIdOf<Event>,
-                .callbackId = options.callbackId,
-                .priority = options.priority,
-                .anyEvent = false,
+            auto record = std::make_shared<Detail::SubscriptionRecord>();
+            record->callback = [callback = std::move(typedCallback)](EventContextBase& base,
+                                                                     const void* payload) mutable {
+                auto& event = *static_cast<const Event*>(payload);
+                EventContext<Event> context{base, event};
+                return Detail::InvokeTypedHandler<Event, R, E>(callback, context);
             };
-            Events(receiver).AttachInbound(state);
-            return AddSubscription(std::move(record));
+            record->receiver = EventRef(receiver);
+            record->receiverLifetime = EventLifetime(receiver);
+            record->eventId = Traits::EventIdOf<Event>;
+            record->callbackId = options.callbackId;
+            record->priority = options.priority;
+            record->anyEvent = false;
+            record->state.remaining.store(options.budget.value, std::memory_order_relaxed);
+            record->state.active.store(options.budget.value != 0, std::memory_order_relaxed);
+            auto stored = AddSubscription(std::move(record));
+            Events(receiver).AttachInbound(stored);
+            return EventLink{stored};
         }
 
         /** @brief Attach an event-type-erased relation owned by this port's emitter. */
@@ -824,24 +837,20 @@ namespace Sora::Experimental {
             static_assert(std::move_constructible<F>);
 
             auto anyCallback = F(std::forward<Callback>(callback));
-            auto state = std::make_shared<EventLink::State>();
-            state->remaining.store(options.budget.value, std::memory_order_relaxed);
-            state->active.store(options.budget.value != 0, std::memory_order_relaxed);
-
-            Detail::SubscriptionRecord record{
-                .state = state,
-                .callback =
-                    [callback = std::move(anyCallback)](EventContextBase& context, const void*) mutable {
-                        return Detail::InvokeAnyHandler<R, E>(callback, context);
-                    },
-                .receiver = EventRef(receiver),
-                .receiverLifetime = EventLifetime(receiver),
-                .callbackId = options.callbackId,
-                .priority = options.priority,
-                .anyEvent = true,
+            auto record = std::make_shared<Detail::SubscriptionRecord>();
+            record->callback = [callback = std::move(anyCallback)](EventContextBase& context, const void*) mutable {
+                return Detail::InvokeAnyHandler<R, E>(callback, context);
             };
-            Events(receiver).AttachInbound(state);
-            return AddSubscription(std::move(record));
+            record->receiver = EventRef(receiver);
+            record->receiverLifetime = EventLifetime(receiver);
+            record->callbackId = options.callbackId;
+            record->priority = options.priority;
+            record->anyEvent = true;
+            record->state.remaining.store(options.budget.value, std::memory_order_relaxed);
+            record->state.active.store(options.budget.value != 0, std::memory_order_relaxed);
+            auto stored = AddSubscription(std::move(record));
+            Events(receiver).AttachInbound(stored);
+            return EventLink{stored};
         }
 
         /** @brief Deliver @p event synchronously from @p emitter. */
@@ -860,10 +869,8 @@ namespace Sora::Experimental {
                     continue;
                 }
                 EventObjectRef receiverRef = record->receiverLifetime ? record->receiver : EventObjectRef{};
-                if (!receiverRef || !record->state) {
-                    if (record->state) {
-                        record->state->active.store(false, std::memory_order_release);
-                    }
+                if (!receiverRef) {
+                    record->state.active.store(false, std::memory_order_release);
                     continue;
                 }
 
@@ -905,10 +912,8 @@ namespace Sora::Experimental {
                                        return record && (record->anyEvent || record->eventId == eventId);
                                    });
             for (const auto& record : matchingRecords) {
-                if (!record->receiverLifetime || !record->state) {
-                    if (record->state) {
-                        record->state->active.store(false, std::memory_order_release);
-                    }
+                if (!record->receiverLifetime) {
+                    record->state.active.store(false, std::memory_order_release);
                     continue;
                 }
                 if (!frame) {
@@ -949,18 +954,16 @@ namespace Sora::Experimental {
         void CancelAll() noexcept {
             std::scoped_lock lock(mutex_);
             for (const auto& subscription : subscriptions_->records) {
-                if (subscription && subscription->state) {
-                    subscription->state->active.store(false, std::memory_order_release);
-                    subscription->state->canceled.store(true, std::memory_order_release);
+                if (subscription) {
+                    Detail::Cancel(*subscription);
                 }
             }
-            std::erase_if(inbound_, [](const std::weak_ptr<EventLink::State>& relation) {
-                auto state = relation.lock();
-                if (!state) {
+            std::erase_if(inbound_, [](const std::weak_ptr<Detail::SubscriptionRecord>& relation) {
+                auto record = relation.lock();
+                if (!record) {
                     return true;
                 }
-                state->active.store(false, std::memory_order_release);
-                state->canceled.store(true, std::memory_order_release);
+                Detail::Cancel(*record);
                 return false;
             });
             for (const auto& trace : traces_->records) {
@@ -974,25 +977,18 @@ namespace Sora::Experimental {
         template<Concept::EventPayload>
         friend class EventDeliveryAct;
 
-        EventLink AddSubscription(Detail::SubscriptionRecord record) {
-            record.id = nextSubscription_.fetch_add(1, std::memory_order_relaxed) + 1;
-            record.order = record.id;
-            auto state = record.state;
-            auto stored =
-                std::shared_ptr<Detail::SubscriptionRecord>{new Detail::SubscriptionRecord(std::move(record))};
+        [[nodiscard]] std::shared_ptr<Detail::SubscriptionRecord>
+        AddSubscription(std::shared_ptr<Detail::SubscriptionRecord> stored) {
+            stored->id = nextSubscription_.fetch_add(1, std::memory_order_relaxed) + 1;
+            stored->order = stored->id;
             {
                 std::scoped_lock lock(mutex_);
                 auto next = std::make_shared<Detail::SubscriptionSnapshot>(*subscriptions_);
-                next->records.push_back(std::move(stored));
-                std::ranges::stable_sort(next->records, [](const auto& lhs, const auto& rhs) noexcept {
-                    if (lhs->priority != rhs->priority) {
-                        return lhs->priority > rhs->priority;
-                    }
-                    return lhs->order < rhs->order;
-                });
+                next->records.push_back(stored);
+                std::ranges::stable_sort(next->records);
                 subscriptions_ = std::move(next);
             }
-            return EventLink{state};
+            return stored;
         }
 
         EventTraceHook AddTrace(Detail::TraceRecord record) {
@@ -1009,10 +1005,10 @@ namespace Sora::Experimental {
             return EventTraceHook{state};
         }
 
-        void AttachInbound(std::weak_ptr<EventLink::State> state) {
+        void AttachInbound(std::weak_ptr<Detail::SubscriptionRecord> record) {
             std::scoped_lock lock(mutex_);
-            std::erase_if(inbound_, [](const std::weak_ptr<EventLink::State>& relation) { return relation.expired(); });
-            inbound_.push_back(std::move(state));
+            std::erase_if(inbound_, [](const auto& relation) { return relation.expired(); });
+            inbound_.push_back(std::move(record));
         }
 
         [[nodiscard]] std::shared_ptr<const Detail::SubscriptionSnapshot> Subscriptions() const {
@@ -1041,7 +1037,7 @@ namespace Sora::Experimental {
         template<Concept::EventPayload Event>
         EventFlow DispatchRecord(const std::shared_ptr<Detail::SubscriptionRecord>& record,
                                  EventContext<Event>& context, const Event& event) {
-            if (!record || !record->state || !TryBeginDispatch(*record->state)) {
+            if (!record || !TryBeginDispatch(record->state)) {
                 return EventFlow::Continue;
             }
             return record->callback(context, std::addressof(event));
@@ -1050,7 +1046,7 @@ namespace Sora::Experimental {
         mutable std::mutex mutex_{};
         std::shared_ptr<Detail::SubscriptionSnapshot> subscriptions_{};
         std::shared_ptr<Detail::TraceSnapshot> traces_{};
-        std::vector<std::weak_ptr<EventLink::State>> inbound_{};
+        std::vector<std::weak_ptr<Detail::SubscriptionRecord>> inbound_{};
         std::atomic<uint64_t> nextSubscription_{};
         std::atomic<uint64_t> nextTrace_{};
         std::atomic<uint64_t> nextSequence_{};
@@ -1070,15 +1066,13 @@ namespace Sora::Experimental {
 
     template<Concept::EventPayload Event>
     void EventDeliveryAct<Event>::operator()() {
-        if (!frame_ || !record_ || !record_->state || !Dispatchable(*record_->state)) {
+        if (!frame_ || !record_ || !Dispatchable(record_->state)) {
             return;
         }
         EventObjectRef receiverRef = receiver_ ? record_->receiver : EventObjectRef{};
         EventObjectRef emitterRef = frame_->emitterLifetime ? frame_->emitter : EventObjectRef{};
         if (!receiverRef || !emitterRef) {
-            if (record_->state) {
-                record_->state->active.store(false, std::memory_order_release);
-            }
+            record_->state.active.store(false, std::memory_order_release);
             Trace(EventTracePhase::CallbackCanceled, receiverRef, emitterRef);
             return;
         }
@@ -1090,7 +1084,7 @@ namespace Sora::Experimental {
                                      .subscription = record_->id,
                                      .sequence = frame_->sequence},
                                     frame_->event};
-        if (TryBeginDispatch(*record_->state)) {
+        if (TryBeginDispatch(record_->state)) {
             std::ignore = record_->callback(context, std::addressof(frame_->event));
         }
         Trace(EventTracePhase::CallbackEnd, receiverRef, emitterRef);
