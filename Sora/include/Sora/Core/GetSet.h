@@ -182,6 +182,16 @@ namespace Sora {
     using Meta::Get;
     using Meta::Set;
 
+    constexpr auto&& GetMemberRef(auto&& obj, std::string_view name) {
+        using U = std::remove_cvref_t<decltype(obj)>;
+        template for (constexpr auto m : Meta::MembersOf(^^U)) {
+            if (std::meta::identifier_of(m) == name) {
+                return std::forward<decltype(obj)>(obj).[:m:];
+            }
+        }
+        static_assert(!sizeof(U), "GetMember: member not found");
+    }
+
 /** @brief Friend the reflection get/set member-access fast path for private exposed members. */
 #define ALLOW_GET_SET                                                                                                  \
     template<std::meta::info M, typename T>                                                                            \
