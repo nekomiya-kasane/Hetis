@@ -265,8 +265,7 @@ namespace Sora {
         }
 
         /** @brief Parse `scheme:` and leave the cursor immediately after the colon. */
-        [[nodiscard]] constexpr auto ParseScheme(Cursor& cursor) noexcept
-            -> std::expected<std::string_view, UriError> {
+        [[nodiscard]] constexpr auto ParseScheme(Cursor& cursor) noexcept -> std::expected<std::string_view, UriError> {
             const std::string_view scheme = cursor.TakeUntilAny(":");
             if (!cursor.Consume(':') || scheme.empty()) {
                 return std::unexpected(UriError::MissingScheme);
@@ -310,8 +309,7 @@ namespace Sora {
         }
 
         /** @brief Parse optional `?query` and leave the cursor at fragment or EOF. */
-        [[nodiscard]] constexpr auto ParseQuery(Cursor& cursor) noexcept
-            -> std::expected<OptionalComponent, UriError> {
+        [[nodiscard]] constexpr auto ParseQuery(Cursor& cursor) noexcept -> std::expected<OptionalComponent, UriError> {
             if (!cursor.Consume('?')) {
                 return OptionalComponent{};
             }
@@ -586,8 +584,7 @@ namespace Sora {
     };
 
     /** @brief Parse an absolute URI and keep the parsed components for repeated access. */
-    [[nodiscard]] constexpr auto ParseUriView(std::string_view text) noexcept -> std::expected<ParsedUri,
-                                                                                              UriError> {
+    [[nodiscard]] constexpr auto ParseUriView(std::string_view text) noexcept -> std::expected<ParsedUri, UriError> {
         auto parts = ParseUri(text);
         if (!parts) {
             return std::unexpected(parts.error());
@@ -606,8 +603,7 @@ namespace Sora {
         bool hasEquals = false;   /**< Whether the argument should be rendered as @c name=value. */
 
         /** @brief Construct a raw @c name=value query argument. */
-        [[nodiscard]] static constexpr UriQueryArgument Pair(std::string_view name,
-                                                             std::string_view value) noexcept {
+        [[nodiscard]] static constexpr UriQueryArgument Pair(std::string_view name, std::string_view value) noexcept {
             return UriQueryArgument{.name = name, .value = value, .hasEquals = true};
         }
 
@@ -900,10 +896,15 @@ namespace Sora {
                     return false;
                 }
                 if (component[i] == '%') {
-                    if (!Detail::Uri::Append(out, Ascii::ToUpperHex(component[++i])) ||
-                        !Detail::Uri::Append(out, Ascii::ToUpperHex(component[++i]))) {
+                    auto c1 = component[i + 1], c2 = component[i + 2];
+                    if (!Ascii::IsHexDigit(c1) || !Ascii::IsHexDigit(c2)) {
                         return false;
                     }
+                    if (!Detail::Uri::Append(out, Ascii::ToUpperHex(c1)) ||
+                        !Detail::Uri::Append(out, Ascii::ToUpperHex(c2))) {
+                        return false;
+                    }
+                    i += 2;
                 }
             }
             return true;
@@ -1118,15 +1119,13 @@ namespace Sora {
 
     /** @brief Try to construct a fixed-capacity URI carrier from runtime text. */
     template<size_t Capacity = 256>
-    [[nodiscard]] constexpr auto MakeUri(std::string_view text) noexcept -> std::expected<Uri<Capacity>,
-                                                                                          UriError> {
+    [[nodiscard]] constexpr auto MakeUri(std::string_view text) noexcept -> std::expected<Uri<Capacity>, UriError> {
         return Uri<Capacity>::Try(text);
     }
 
     /** @brief Compose a fixed-capacity URI carrier from component views. */
     template<size_t Capacity = 256>
-    [[nodiscard]] constexpr auto ComposeUri(const UriParts& parts) noexcept -> std::expected<Uri<Capacity>,
-                                                                                             UriError> {
+    [[nodiscard]] constexpr auto ComposeUri(const UriParts& parts) noexcept -> std::expected<Uri<Capacity>, UriError> {
         auto text = Detail::Uri::ComposeText<Capacity>(parts);
         if (!text) {
             return std::unexpected(text.error());
@@ -1365,9 +1364,7 @@ namespace Sora {
         }
 
         /** @brief Append @p name as a flag query argument. */
-        constexpr UriBuilder& Flag(std::string_view name) noexcept {
-            return Query(UriQueryArgument::Flag(name));
-        }
+        constexpr UriBuilder& Flag(std::string_view name) noexcept { return Query(UriQueryArgument::Flag(name)); }
 
         /** @brief Remove the query component. */
         constexpr UriBuilder& NoQuery() noexcept {
@@ -1406,8 +1403,7 @@ namespace Sora {
         [[nodiscard]] constexpr UriError Error() const noexcept { return error_; }
 
         /** @brief Compose the current components into fixed-capacity URI text. */
-        [[nodiscard]] constexpr auto BuildText() const noexcept -> std::expected<FixedString<Capacity>,
-                                                                                 UriError> {
+        [[nodiscard]] constexpr auto BuildText() const noexcept -> std::expected<FixedString<Capacity>, UriError> {
             if (error_ != UriError::Ok) {
                 return std::unexpected(error_);
             }

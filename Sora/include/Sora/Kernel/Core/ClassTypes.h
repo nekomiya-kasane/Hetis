@@ -92,6 +92,14 @@ namespace Sora::Kernel {
         /** @brief TIEchain role shorthand. */
         inline constexpr Role TIEchain{TypeOfClass::TIEchain};
 
+        /** @brief Declares the interface facets directly provided by an object-model class. */
+        template<typename... Interfaces>
+        struct Implements {};
+
+        /** @brief Declares the object-model classes extended by an extension class. */
+        template<typename... Extendees>
+        struct Extends {};
+
     } // namespace $
 
     namespace Meta {
@@ -157,18 +165,6 @@ namespace Sora::Kernel {
         concept VirtualObjectClass = std::is_base_of_v<BaseUnknown, T> && requires { T::kVirtualClassName.view(); };
 
     } // namespace Concept
-
-    namespace $ {
-
-        /** @brief Declares the interface facets directly provided by an object-model class. */
-        template<typename... Interfaces>
-        struct Implements {};
-
-        /** @brief Declares the object-model classes extended by an extension class. */
-        template<typename... Extendees>
-        struct Extends {};
-
-    } // namespace $
 
     namespace Meta {
 
