@@ -81,16 +81,15 @@ namespace Sora {
                     return loaded;
                 }
                 loaded.module = std::move(*module);
-                loaded.symSetOptions = loaded.module->TryFindSymbol<std::remove_pointer_t<SymSetOptionsFn>>(
-                    "SymSetOptions");
-                loaded.symInitialize = loaded.module->TryFindSymbol<std::remove_pointer_t<SymInitializeFn>>(
-                    "SymInitialize");
+                loaded.symSetOptions =
+                    loaded.module->TryFindSymbol<std::remove_pointer_t<SymSetOptionsFn>>("SymSetOptions");
+                loaded.symInitialize =
+                    loaded.module->TryFindSymbol<std::remove_pointer_t<SymInitializeFn>>("SymInitialize");
                 loaded.symFromAddr = loaded.module->TryFindSymbol<std::remove_pointer_t<SymFromAddrFn>>("SymFromAddr");
                 loaded.symGetLineFromAddr64 =
-                    loaded.module->TryFindSymbol<std::remove_pointer_t<SymGetLineFromAddr64Fn>>(
-                        "SymGetLineFromAddr64");
-                loaded.symGetModuleInfo64 = loaded.module->TryFindSymbol<std::remove_pointer_t<SymGetModuleInfo64Fn>>(
-                    "SymGetModuleInfo64");
+                    loaded.module->TryFindSymbol<std::remove_pointer_t<SymGetLineFromAddr64Fn>>("SymGetLineFromAddr64");
+                loaded.symGetModuleInfo64 =
+                    loaded.module->TryFindSymbol<std::remove_pointer_t<SymGetModuleInfo64Fn>>("SymGetModuleInfo64");
                 return loaded;
             }();
             return api;
@@ -141,7 +140,7 @@ namespace Sora {
             for (USHORT i = 0; i < captured; ++i) {
                 frames.push_back({.address = reinterpret_cast<uintptr_t>(rawFrames[i])});
             }
-            return StackTrace{std::move(frames)};
+            return StackTrace{frames};
         }
 
         std::lock_guard lock(DbgHelpMutex());
@@ -210,8 +209,8 @@ namespace Sora {
     std::string StackTrace::FormatFrame(const StackFrame& frame, size_t index) {
         const std::string symbol = Truncate(frame.DisplaySymbol(), 120);
         if (!frame.sourceFile.empty()) {
-            return std::format("#{:<2} {} ({}:{} +0x{:X})", index, symbol, Basename(frame.sourceFile),
-                               frame.sourceLine, frame.offset);
+            return std::format("#{:<2} {} ({}:{} +0x{:X})", index, symbol, Basename(frame.sourceFile), frame.sourceLine,
+                               frame.offset);
         }
         if (!frame.module.empty()) {
             return std::format("#{:<2} {} [{}+0x{:X}]", index, symbol, frame.module, frame.offset);
