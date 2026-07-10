@@ -2,7 +2,7 @@
  * @file Polymorphism.h
  * @brief Inheritance-free, reflection-driven runtime polymorphism.
  *
- * Provides a "structural duck-type adapter": given an interface type @p Iface (a class declaring
+ * Provides a "structural duck-type adaptor": given an interface type @p Iface (a class declaring
  * virtual member functions) and an unrelated implementation type @p Impl whose members satisfy those
  * signatures structurally, synthesises at compile time a flat function-pointer vtable @ref Vtable
  * that dispatches into @p Impl, with no inheritance relationship between @p Iface and @p Impl.
@@ -11,7 +11,7 @@
  * of @p Iface; each thunk is a non-capturing generic lambda that forwards to the matching method on
  * @p Impl. The resulting cost model is:
  *   - One indirect call per dispatch (identical to a classical virtual call).
- *   - Two pointers per @ref Adapter (one for the target object, one for the vtable).
+ *   - Two pointers per @ref Adaptor (one for the target object, one for the vtable).
  *   - Zero per-instance allocation, zero type-erasure boxing.
  *   - Inlinable thunks: the optimiser sees through the lambda into the target method.
  *
@@ -279,7 +279,7 @@ namespace Sora {
              *        methods of @p Iface, or an empty view when every selected method has a unique name.
              *
              * @TODO Lift this restriction by mangling overloaded slots with a stable signature suffix
-             * (e.g. @c Draw__int_int) and exposing a PMF-keyed @c Adapter::invoke<Pmf>() accessor that
+             * (e.g. @c Draw__int_int) and exposing a PMF-keyed @c Adaptor::invoke<Pmf>() accessor that
              * resolves the matching slot via reflection. The current single-pass design rejects
              * overload sets up front to keep slot identifiers (and the user-facing call surface
              * @c vtable().Name) clean while the broader vtable composition is still settling.
@@ -370,7 +370,7 @@ namespace Sora {
          * `[[=Anno::Skip{}]]`.
          *
          * @TODO Lift this restriction by mangling overloaded slots with a deterministic signature
-         * suffix (e.g. `Draw__int_int`) and exposing a PMF-keyed `Adapter::invoke<Pmf>()` accessor that
+         * suffix (e.g. `Draw__int_int`) and exposing a PMF-keyed `Adaptor::invoke<Pmf>()` accessor that
          * resolves the matching slot via reflection. Tracked as a future extension; the rejection is in
          * place to keep the user-facing call surface (`vtable().Name`) clean while the broader vtable
          * composition is still settling.
@@ -387,7 +387,7 @@ namespace Sora {
                     std::format("Polymorphism::Define: interface '{}' has overloaded selected method '{}'. "
                                 "The current name-keyed vtable cannot disambiguate overload sets — rename one "
                                 "of the overloads or skip it with [[=Anno::Skip{}]]. (Tracked TODO: signature-"
-                                "mangled slots + PMF-keyed Adapter::invoke<Pmf>().)",
+                                "mangled slots + PMF-keyed Adaptor::invoke<Pmf>().)",
                                 Sora::Meta::DisplayStringOf(^^Iface), collision));
             }
             std::meta::define_aggregate(^^Vtable<Iface, Impl>, Detail::VtableSpecs<Iface, Impl>());
@@ -401,7 +401,7 @@ namespace Sora {
          * The overload-uniqueness clause makes the concept honest: an interface with overloaded methods
          * cannot be projected through the current name-keyed aggregate, so it cannot model @ref Implements
          * until that limitation is lifted (see @ref Define). Failure produces a constraint-
-         * failure diagnostic at @ref kVtable / @ref Adapter request, pointing at the (Iface, Impl) pair.
+         * failure diagnostic at @ref kVtable / @ref Adaptor request, pointing at the (Iface, Impl) pair.
          */
         template<typename Impl, typename Iface>
         concept Implements = std::is_class_v<Iface> && std::is_class_v<Impl> && Detail::NoOverloadCollisions<Iface>() &&
@@ -563,14 +563,14 @@ namespace Sora {
          *     int  Width() const { return side; }
          * };
          * Square s{42};
-         * Adapter<IDrawable, Square> a{&s};
+         * Adaptor<IDrawable, Square> a{&s};
          * a.vtable().Draw(a.target);              // forwards to s.Draw()
          * int w = a.vtable().Width(a.target);     // 42
          * @endcode
          */
         template<typename Iface, typename Impl>
             requires Implements<Impl, Iface>
-        struct Adapter {
+        struct Adaptor {
             /** @brief The bound implementation object. */
             Impl* target = nullptr;
 
