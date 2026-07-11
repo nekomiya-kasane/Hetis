@@ -61,10 +61,10 @@ namespace Sora::Resources {
     [[nodiscard]] constexpr std::optional<ResourceUriView> ParseResourceUri(std::string_view uri) noexcept {
         auto parsed = Sora::ParseUriView(uri);
         if (!parsed || parsed->Scheme() != "res" || !parsed->HasAuthority() || parsed->Authority().empty() ||
-            parsed->HasQuery() || parsed->HasAnchor()) {
+            parsed->HasQuery() || parsed->HasAnchor() || !Sora::IsCanonicalUriIdentityPath(parsed->Path())) {
             return std::nullopt;
         }
-        if (uri.find('\\') != std::string_view::npos) {
+        if (uri.contains('\\')) {
             return std::nullopt;
         }
         return ResourceUriView{.parsed = *parsed};
@@ -77,16 +77,7 @@ namespace Sora::Resources {
 
     /** @brief Compile-time FNV-1a hash used for resource URI identity. */
     [[nodiscard]] constexpr uint64_t HashUri(std::string_view uri) noexcept {
-        if (uri.find('\\') == std::string_view::npos) {
-            return Sora::UriHash(uri);
-        }
-        auto state = Sora::Hashing::Fnv1a64State::Seed();
-        for (char c : uri) {
-            const auto normalized = static_cast<unsigned char>(c == '\\' ? '/' : c);
-            const std::byte b{normalized};
-            state.Feed(std::span<const std::byte>{&b, 1});
-        }
-        return state.Finalize();
+        return !uri.contains('\\') ? Sora::UriHash(uri) : Sora::Hashing::Hash(uri);
     }
 
     /** @brief Compile-time resource identity carrier. */
@@ -98,7 +89,7 @@ namespace Sora::Resources {
 
         inline static constexpr auto kUri = Uri;
         inline static constexpr ResourceType kType = Type;
-        inline static constexpr uint64_t kHash = HashUri(Uri.view());
+        inline static constexpr uint64_t kHash = Sora::Hashing::Hash(Uri.view());
 
         [[nodiscard]] static constexpr ResourceId Runtime() noexcept {
             return ResourceId{.hash = kHash, .type = Type, .uri = Uri.view()};

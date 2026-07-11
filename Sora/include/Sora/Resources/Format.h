@@ -2,6 +2,40 @@
  * @file Format.h
  * @brief Sora resource package wire-format declarations.
  * @ingroup Resources
+ *
+ * @details `.lpak` is optimized for the common case where payload bytes dominate file size and metadata is small.
+ * Package opening validates and deserializes metadata once, then resource lookup returns immutable spans directly into
+ * the backing byte image. Payload bytes are intentionally not scanned during mount; the operating system can keep mmap
+ * access lazy and page-granular.
+ *
+ * @verbatim
+ * .lpak
+ * +----------------------+ 0
+ * | FileHeader           | fixed wire header, metadata hash field is zeroed while hashing
+ * +----------------------+ header.sectionTableOffset
+ * | SectionDescriptor[]  | entries, strings, data; descriptor bytes are metadata
+ * +----------------------+
+ * | padding              | 8-byte metadata alignment
+ * +----------------------+
+ * | ResourceEntry[]      | sorted by semanticHash when layout == Sorted
+ * +----------------------+
+ * | padding              | 8-byte metadata alignment
+ * +----------------------+
+ * | URI string table     | NUL-terminated canonical res://... strings
+ * +----------------------+
+ * | padding              | kDefaultDataAlignment
+ * +----------------------+ first payloadOffset
+ * | payload bytes        | each payload may be page-aligned and is never copied by PakView
+ * +----------------------+
+ * @endverbatim
+ *
+ * | Region | Access pattern | Integrity checked by `PakView::Open` | Runtime payload cost |
+ * |---|---|---|---|
+ * | Header | One reflected little-endian read | Magic, version, sizes, and metadata hash | None |
+ * | Section table | Reflected little-endian reads | Bounds, alignment, overlap, and metadata hash | None |
+ * | Entries | Reflected reads into a compact vector | Sorted order, URI references, metadata hash | None |
+ * | Strings | Borrowed span | Canonical URI text and metadata hash | None |
+ * | Payload | Borrowed span by absolute file offset | Bounds during mount; content hash is advisory | Zero-copy |
  */
 #pragma once
 
@@ -19,7 +53,7 @@ namespace Sora::Resources {
     inline constexpr uint32_t kLpakMagic =
         uint32_t{'L'} | (uint32_t{'P'} << 8) | (uint32_t{'A'} << 16) | (uint32_t{'K'} << 24);
 
-    /** @brief Major format version for Sora resource packages. */
+    /** @brief Major format version for the canonical Sora resource package format. */
     inline constexpr uint16_t kLpakMajor = 1;
 
     /** @brief Minor format version for Sora resource packages. */
@@ -27,6 +61,15 @@ namespace Sora::Resources {
 
     /** @brief Default payload alignment. */
     inline constexpr uint64_t kDefaultDataAlignment = 4096;
+
+    /** @brief Canonical little-endian wire size of @ref FileHeader. */
+    inline constexpr uint16_t kFileHeaderWireSize = 64;
+
+    /** @brief Canonical little-endian wire size of @ref SectionDescriptor. */
+    inline constexpr uint16_t kSectionDescriptorWireSize = 40;
+
+    /** @brief Canonical little-endian wire size of @ref ResourceEntry. */
+    inline constexpr uint16_t kResourceEntryWireSize = 56;
 
     /** @brief Coarse semantic class of a resource. */
     enum class ResourceType : uint16_t {
@@ -84,21 +127,23 @@ namespace Sora::Resources {
     [[nodiscard]] constexpr bool HasOnlyKnownResourceFlags(uint16_t flags) noexcept {
         return flags == static_cast<uint16_t>(ResourceFlags::None);
     }
-    /** @brief File header for `.lpak`. Every field is little-endian on disk. */
+    /** @brief File header for `.lpak`. Every field is little-endian on disk and independent of C++ object padding. */
     struct FileHeader {
         uint32_t magic = kLpakMagic;
         uint16_t major = kLpakMajor;
         uint16_t minor = kLpakMinor;
         uint16_t headerSize = 0;
         uint16_t sectionCount = 0;
+        uint16_t sectionSize = 0;
+        uint16_t entrySize = 0;
         uint16_t layout = static_cast<uint16_t>(IndexLayout::Sorted);
         uint16_t reserved0 = 0;
         uint32_t flags = 0;
         uint64_t fileSize = 0;
         uint64_t sectionTableOffset = 0;
         uint64_t resourceCount = 0;
-        uint64_t headerHash = 0;
-        uint64_t fileHash = 0;
+        uint64_t metadataHash = 0;
+        uint64_t reserved1 = 0;
     };
 
     /** @brief Section descriptor for `.lpak`. Every field is little-endian on disk. */
@@ -116,7 +161,7 @@ namespace Sora::Resources {
     struct ResourceEntry {
         uint64_t semanticHash = 0;
         uint64_t contentHash = 0;
-        uint64_t dataOffset = 0;
+        uint64_t payloadOffset = 0;
         uint64_t packedSize = 0;
         uint64_t unpackedSize = 0;
         uint32_t uriOffset = 0;
@@ -124,12 +169,13 @@ namespace Sora::Resources {
         uint16_t type = static_cast<uint16_t>(ResourceType::Unknown);
         uint16_t codec = static_cast<uint16_t>(CompressionCodec::None);
         uint16_t flags = static_cast<uint16_t>(ResourceFlags::None);
-        uint16_t reserved = 0;
+        uint16_t alignmentLog2 = 0;
     };
 
-    static_assert(std::is_trivially_copyable_v<FileHeader>);
-    static_assert(std::is_trivially_copyable_v<SectionDescriptor>);
-    static_assert(std::is_trivially_copyable_v<ResourceEntry>);
+    static_assert(std::is_trivially_copyable_v<FileHeader> && sizeof(FileHeader) == kFileHeaderWireSize);
+    static_assert(std::is_trivially_copyable_v<SectionDescriptor> &&
+                  sizeof(SectionDescriptor) == kSectionDescriptorWireSize);
+    static_assert(std::is_trivially_copyable_v<ResourceEntry> && sizeof(ResourceEntry) == kResourceEntryWireSize);
     static_assert(std::endian::native == std::endian::little, "Sora currently supports little-endian hosts only.");
 
 } // namespace Sora::Resources
