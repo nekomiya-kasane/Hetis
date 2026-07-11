@@ -13,11 +13,9 @@
 
 #include <cstddef>
 #include <meta>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <typeinfo>
 #include <utility>
 
 namespace Sora {
@@ -203,77 +201,28 @@ namespace Sora {
     }
 
     /**
-     * @brief Return the data member named @p name as @p Member from @p obj.
-     * @details Runtime-name lookup cannot make the function return type depend on @p name, so callers must provide the
-     * expected member type explicitly. Search follows @p obj's single-inheritance chain from derived to base.
-     * @tparam Member Expected data-member type, including const qualification when reading through a const object.
-     * @param[in] obj Object whose member is selected.
-     * @param[in] name Source identifier to search in the inheritance chain.
-     * @return Reference to the selected member.
-     */
-    template<typename Member>
-    [[nodiscard]] constexpr Member& GetRef(auto&& obj, std::string_view name) {
-        using U = std::remove_cvref_t<decltype(obj)>;
-        template for (constexpr auto m : Traits::DataMembersInInheritanceChainOf<U>) {
-            if (std::meta::identifier_of(m) != name) {
-                continue;
-            }
-            if constexpr (!Meta::Detail::IsReflectivelyAccessible<m>()) {
-                throw std::out_of_range("Sora::GetRef: data member is not exposed");
-            }
-
-            using Ref = decltype((std::forward<decltype(obj)>(obj).[:m:]));
-            using Value = std::remove_reference_t<Ref>;
-            constexpr bool sameValue = std::same_as<std::remove_cv_t<Value>, std::remove_cv_t<Member>>;
-            constexpr bool constSafe = !std::is_const_v<Value> || std::is_const_v<Member>;
-            if constexpr (sameValue && constSafe) {
-                return static_cast<Member&>((std::forward<decltype(obj)>(obj).[:m:]));
-            } else {
-                throw std::bad_cast{};
-            }
-        }
-        throw std::out_of_range("Sora::GetRef: data member not found");
-    }
-
-    /**
-     * @brief Assign @p value to member @p Name selected from @p object.
+     * @brief Return the data member named @p Name as @p Member from @p object.
+     * @details The member name is a non-type template parameter, so missing names, inaccessible members, and type
+     * mismatches are diagnosed while instantiating this function instead of being reported at runtime.
+     * @tparam Member Expected member value type, including const qualification for const object access.
      * @tparam Name Fixed-string-like source identifier or schema name.
      * @tparam T Object type whose single-inheritance chain is searched.
-     * @tparam V Assigned value type.
-     * @param[in,out] object Object whose member is assigned.
-     * @param[in] value Value forwarded into the selected member.
+     * @param[in] object Object whose member is selected.
+     * @return Reference to the selected member.
      */
-    template<auto Name, typename T, typename V>
+    template<typename Member, auto Name, typename T>
         requires requires { Name.view(); }
-    constexpr void Set(T&& object, V&& value) {
-        Meta::Set<Name>(std::forward<T>(object), std::forward<V>(value));
-    }
-
-    /**
-     * @brief Assign @p value to the data member named @p name in @p obj's inheritance chain.
-     * @param[in,out] obj Object whose member is assigned.
-     * @param[in] name Source identifier to search in the inheritance chain.
-     * @param[in] value Value forwarded into the selected member.
-     */
-    constexpr void Set(auto&& obj, std::string_view name, auto&& value) {
-        using U = std::remove_cvref_t<decltype(obj)>;
-        template for (constexpr auto m : Traits::DataMembersInInheritanceChainOf<U>) {
-            if (std::meta::identifier_of(m) == name) {
-                if constexpr (Meta::Detail::IsReflectivelyAccessible<m>()) {
-                    if constexpr (requires {
-                                      std::forward<decltype(obj)>(obj).[:m:] = std::forward<decltype(value)>(value);
-                                  }) {
-                        std::forward<decltype(obj)>(obj).[:m:] = std::forward<decltype(value)>(value);
-                        return;
-                    } else {
-                        throw std::bad_cast{};
-                    }
-                } else {
-                    throw std::out_of_range("Sora::Set: data member is not exposed");
-                }
-            }
+    [[nodiscard]] constexpr Member& GetRef(T&& object) {
+        using Ref = decltype(Meta::Get<Name>(std::forward<T>(object)));
+        using Value = std::remove_reference_t<Ref>;
+        constexpr bool sameValue = std::same_as<std::remove_cv_t<Value>, std::remove_cv_t<Member>>;
+        constexpr bool constSafe = !std::is_const_v<Value> || std::is_const_v<Member>;
+        if constexpr (sameValue && constSafe) {
+            return static_cast<Member&>(Meta::Get<Name>(std::forward<T>(object)));
+        } else {
+            static_assert(sameValue && constSafe,
+                          "Sora::GetRef: requested member type is not compatible with the actual member type.");
         }
-        throw std::out_of_range("Sora::Set: data member not found");
     }
 
 /** @brief Friend the reflection get/set member-access fast path for private exposed members. */

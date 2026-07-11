@@ -48,11 +48,11 @@ int main() {
     float wValue = Sora::Meta::Get<"w"_FS>(pe);
     std::cout << "w: " << wValue << std::endl;
 
-    float& ww = Sora::GetRef<float>(pe, "w"_FS);
+    float& ww = Sora::GetRef<float, "w"_FS>(pe);
     ww = 8.0f;
     std::cout << "w: " << pe.GetW() << std::endl;
 
-    Sora::Set(pe, "w"_FS, 9.0f);
+    Sora::Set<"w"_FS>(pe, 9.0f);
     std::cout << "w: " << pe.GetW() << std::endl;
 
     return 0;
