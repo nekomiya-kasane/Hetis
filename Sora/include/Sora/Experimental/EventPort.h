@@ -20,7 +20,7 @@
  * | + liveness  |  EventRefOf(T)  | relations |           | observer+callback  |
  * +------+------+                 +-----+-----+           +---------+----------+
  *        |                              |                           |
- *        | EventLifetimeObserverOf(T)   | Emit / EmitOn             | TryRetain()
+ *        | EventLifetimeOf(T)           | Emit / EmitOn             | Acquire()
  *        v                              v                           v
  * +-------------------+        +---------------+          +--------------------+
  * | weak observer     |        | EmissionFrame | -------> | EventDeliveryAct   |
@@ -204,9 +204,8 @@ namespace Sora::Experimental {
 
     /** @brief Return whether event payload @p Event has an ADL probe hook. */
     template<typename Event>
-    inline constexpr bool EventProbeEnabled = requires(const EventProbeContext& context, const Event& event) {
-        ProbeEvent(context, event);
-    };
+    inline constexpr bool EventProbeEnabled =
+        requires(const EventProbeContext& context, const Event& event) { ProbeEvent(context, event); };
 
     /** @brief Emit an event probe only when @p Event provides an ADL hook. */
     template<typename Event>
@@ -356,121 +355,124 @@ namespace Sora::Experimental {
 
     } // namespace Detail
 
-    /** @brief Temporary retain acquired for one concrete event delivery. */
-    class EventLifetimeRetainer {
+    /** @brief Lifetime strength required by one event delivery path. */
+    enum class EventLeaseMode : uint8_t {
+        Immediate, /**< Callback runs before the current emit call returns; borrowed storage may be acceptable. */
+        Deferred,  /**< Callback may run later on a scheduler; the lease must own enough lifetime to stay valid. */
+    };
+
+    /** @brief Object access token acquired for one concrete event delivery. */
+    class EventObjectLease {
     public:
-        /** @brief Construct an empty retainer. */
-        EventLifetimeRetainer() noexcept = default;
+        /** @brief Construct an empty lease. */
+        EventObjectLease() noexcept = default;
 
-        /** @brief Construct a non-owning retainer for synchronous delivery under external lifetime control. */
-        [[nodiscard]] static EventLifetimeRetainer Borrowed(void* object) noexcept {
-            return EventLifetimeRetainer{object, nullptr};
+        /** @brief Construct a non-owning lease for immediate delivery under external lifetime control. */
+        [[nodiscard]] static EventObjectLease Borrowed(void* object) noexcept {
+            return EventObjectLease{object, nullptr};
         }
 
-        /** @brief Construct an owning retainer for deferred delivery through an arbitrary holder. */
-        [[nodiscard]] static EventLifetimeRetainer Retained(void* object, std::shared_ptr<void> holder) noexcept {
-            return holder ? EventLifetimeRetainer{object, std::move(holder)} : EventLifetimeRetainer{};
+        /** @brief Construct an owning lease for deferred delivery through an arbitrary holder. */
+        [[nodiscard]] static EventObjectLease Owned(void* object, std::shared_ptr<void> holder) noexcept {
+            return holder ? EventObjectLease{object, std::move(holder)} : EventObjectLease{};
         }
 
-        /** @brief Return the retained or borrowed object pointer. */
+        /** @brief Return the leased object pointer. */
         [[nodiscard]] void* Get() const noexcept { return object_; }
 
-        /** @brief Return whether this retainer carries a non-null object pointer. */
+        /** @brief Return whether this lease carries a non-null object pointer. */
         [[nodiscard]] explicit operator bool() const noexcept { return object_ != nullptr; }
 
-        /** @brief Return whether this retainer extends lifetime instead of merely borrowing. */
+        /** @brief Return whether this lease extends lifetime instead of merely borrowing. */
         [[nodiscard]] bool Owning() const noexcept { return holder_ != nullptr; }
 
     private:
-        EventLifetimeRetainer(void* object, std::shared_ptr<void> holder) noexcept
+        EventObjectLease(void* object, std::shared_ptr<void> holder) noexcept
             : object_(object), holder_(std::move(holder)) {}
 
         void* object_{};
         std::shared_ptr<void> holder_{};
     };
 
-    /** @brief Weak observer stored by subscription records without extending receiver or emitter lifetime. */
-    class EventLifetimeObserver {
+    /** @brief Weak lifetime model stored by event relations without keeping participants alive. */
+    class EventObjectLifetime {
     public:
-        /** @brief Function used by custom observers to produce one delivery retainer. */
-        using RetainFn = EventLifetimeRetainer (*)(const EventLifetimeObserver&, bool) noexcept;
+        /** @brief Function used by custom lifetime models to acquire one delivery lease. */
+        using AcquireFn = EventObjectLease (*)(const EventObjectLifetime&, EventLeaseMode) noexcept;
 
-        /** @brief Construct an empty observer. */
-        EventLifetimeObserver() noexcept = default;
+        /** @brief Construct an empty lifetime model. */
+        EventObjectLifetime() noexcept = default;
 
         /** @brief Observe an object whose liveness is guarded only by its EventPort. */
-        [[nodiscard]] static EventLifetimeObserver PortBound(void* object,
-                                                             std::weak_ptr<Detail::PortLiveness> port) noexcept {
-            return EventLifetimeObserver{object, {}, std::move(port), {}, &RetainPortBound};
+        [[nodiscard]] static EventObjectLifetime PortBound(void* object,
+                                                           std::weak_ptr<Detail::PortLiveness> port) noexcept {
+            return EventObjectLifetime{object, {}, std::move(port), {}, &AcquirePortBound};
         }
 
         /** @brief Observe an object owned by a weak shared control block. */
-        [[nodiscard]] static EventLifetimeObserver Shared(void* object, std::weak_ptr<void> holder) noexcept {
-            return EventLifetimeObserver{object, std::move(holder), {}, {}, &RetainShared};
+        [[nodiscard]] static EventObjectLifetime Shared(void* object, std::weak_ptr<void> holder) noexcept {
+            return EventObjectLifetime{object, std::move(holder), {}, {}, &AcquireShared};
         }
 
-        /** @brief Build a custom observer backed by @p state and @p retain. */
-        [[nodiscard]] static EventLifetimeObserver Custom(void* object, std::shared_ptr<void> state,
-                                                          RetainFn retain) noexcept {
-            return retain ? EventLifetimeObserver{object, {}, {}, std::move(state), retain} : EventLifetimeObserver{};
+        /** @brief Build a custom lifetime model backed by @p state and @p acquire. */
+        [[nodiscard]] static EventObjectLifetime Custom(void* object, std::shared_ptr<void> state,
+                                                        AcquireFn acquire) noexcept {
+            return acquire ? EventObjectLifetime{object, {}, {}, std::move(state), acquire} : EventObjectLifetime{};
         }
 
         /** @brief Return whether the observed object can be used for immediate synchronous delivery. */
-        [[nodiscard]] bool Alive() const noexcept { return static_cast<bool>(TryRetain()); }
+        [[nodiscard]] bool Alive() const noexcept { return static_cast<bool>(Acquire(EventLeaseMode::Immediate)); }
 
-        /** @brief Try to acquire a retainer for immediate synchronous delivery. */
-        [[nodiscard]] EventLifetimeRetainer TryRetain() const noexcept {
-            return retain_ ? retain_(*this, false) : EventLifetimeRetainer{};
+        /** @brief Try to acquire an object lease for @p mode. */
+        [[nodiscard]] EventObjectLease Acquire(EventLeaseMode mode) const noexcept {
+            return acquire_ ? acquire_(*this, mode) : EventObjectLease{};
         }
 
-        /** @brief Try to acquire an owning retainer for deferred delivery. */
-        [[nodiscard]] EventLifetimeRetainer TryRetainForDeferred() const noexcept {
-            return retain_ ? retain_(*this, true) : EventLifetimeRetainer{};
-        }
-
-        /** @brief Return the originally observed pointer. Custom retainers may use it as their payload pointer. */
+        /**
+         * @brief Return the originally observed pointer.
+         * @details Custom lifetime models may use this pointer as their payload pointer.
+         */
         [[nodiscard]] void* Object() const noexcept { return object_; }
 
         /** @brief Return custom observer state supplied by @ref Custom. */
         [[nodiscard]] const std::shared_ptr<void>& CustomState() const noexcept { return customState_; }
 
     private:
-        EventLifetimeObserver(void* object, std::weak_ptr<void> weakHolder,
-                              std::weak_ptr<Detail::PortLiveness> portLiveness, std::shared_ptr<void> customState,
-                              RetainFn retain) noexcept
+        EventObjectLifetime(void* object, std::weak_ptr<void> weakHolder,
+                            std::weak_ptr<Detail::PortLiveness> portLiveness, std::shared_ptr<void> customState,
+                            AcquireFn acquire) noexcept
             : object_(object),
               weakHolder_(std::move(weakHolder)),
               portLiveness_(std::move(portLiveness)),
               customState_(std::move(customState)),
-              retain_(retain) {}
+              acquire_(acquire) {}
 
-        [[nodiscard]] static EventLifetimeRetainer RetainShared(const EventLifetimeObserver& observer,
-                                                                bool) noexcept {
-            auto holder = observer.weakHolder_.lock();
-            return holder ? EventLifetimeRetainer::Retained(observer.object_, std::move(holder))
-                          : EventLifetimeRetainer{};
+        [[nodiscard]] static EventObjectLease AcquireShared(const EventObjectLifetime& lifetime,
+                                                            EventLeaseMode) noexcept {
+            auto holder = lifetime.weakHolder_.lock();
+            return holder ? EventObjectLease::Owned(lifetime.object_, std::move(holder)) : EventObjectLease{};
         }
 
-        [[nodiscard]] static EventLifetimeRetainer RetainPortBound(const EventLifetimeObserver& observer,
-                                                                   bool requireOwning) noexcept {
-            if (requireOwning) {
+        [[nodiscard]] static EventObjectLease AcquirePortBound(const EventObjectLifetime& lifetime,
+                                                               EventLeaseMode mode) noexcept {
+            if (mode == EventLeaseMode::Deferred) {
                 return {};
             }
-            auto port = observer.portLiveness_.lock();
+            auto port = lifetime.portLiveness_.lock();
             if (!port || !port->alive.load(std::memory_order_acquire)) {
                 return {};
             }
-            return EventLifetimeRetainer::Borrowed(observer.object_);
+            return EventObjectLease::Borrowed(lifetime.object_);
         }
 
         void* object_{};
         std::weak_ptr<void> weakHolder_{};
         std::weak_ptr<Detail::PortLiveness> portLiveness_{};
         std::shared_ptr<void> customState_{};
-        RetainFn retain_{};
+        AcquireFn acquire_{};
     };
 
-    namespace Detail {
+    namespace Concept {
 
         template<typename T>
         concept HasEventPort = requires(T& object) {
@@ -481,7 +483,7 @@ namespace Sora::Experimental {
             { object.Events() } -> std::same_as<EventPort&>;
         } || requires(T& object) { requires std::same_as<std::remove_cvref_t<decltype(object.events)>, EventPort>; };
 
-    } // namespace Detail
+    } // namespace Concept
 
     namespace Detail {
 
@@ -511,29 +513,28 @@ namespace Sora::Experimental {
             }
         };
 
-        /** @brief CPO functor that implements @c EventLifetimeObserverOf(object). */
-        struct EventLifetimeObserverOfFn {
+        /** @brief CPO functor that implements @c EventLifetimeOf(object). */
+        struct EventLifetimeOfFn {
             template<typename T>
-            [[nodiscard]] EventLifetimeObserver operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
+            [[nodiscard]] EventObjectLifetime operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
                 return Dispatch(object);
             }
 
         private:
             template<typename T>
-            [[nodiscard]] static EventLifetimeObserver Dispatch(T& object) {
-                if constexpr (requires { MakeEventLifetimeObserver(object); }) {
-                    return MakeEventLifetimeObserver(object);
-                } else if constexpr (requires { object.EventLifetimeObserver(); }) {
-                    return object.EventLifetimeObserver();
+            [[nodiscard]] static EventObjectLifetime Dispatch(T& object) {
+                if constexpr (requires { MakeEventLifetime(object); }) {
+                    return MakeEventLifetime(object);
+                } else if constexpr (requires { object.EventLifetime(); }) {
+                    return object.EventLifetime();
                 } else if constexpr (requires { object.weak_from_this(); }) {
                     std::weak_ptr<void> holder = object.weak_from_this();
-                    return EventLifetimeObserver::Shared(std::addressof(object), std::move(holder));
+                    return EventObjectLifetime::Shared(std::addressof(object), std::move(holder));
                 } else if constexpr (requires { object.shared_from_this(); }) {
                     std::weak_ptr<void> holder = object.shared_from_this();
-                    return EventLifetimeObserver::Shared(std::addressof(object), std::move(holder));
+                    return EventObjectLifetime::Shared(std::addressof(object), std::move(holder));
                 } else {
-                    return EventLifetimeObserver::PortBound(std::addressof(object),
-                                                            EventPortOf(object).LivenessState());
+                    return EventObjectLifetime::PortBound(std::addressof(object), EventPortOf(object).LivenessState());
                 }
             }
         };
@@ -561,8 +562,8 @@ namespace Sora::Experimental {
     /** @brief Customisation-point object returning an object's event port. */
     inline constexpr Detail::EventPortOfFn EventPortOf{};
 
-    /** @brief Customisation-point object returning an object's weak event lifetime observer. */
-    inline constexpr Detail::EventLifetimeObserverOfFn EventLifetimeObserverOf{};
+    /** @brief Customisation-point object returning an object's weak event lifetime model. */
+    inline constexpr Detail::EventLifetimeOfFn EventLifetimeOf{};
 
     /** @brief Customisation-point object returning an object's event reference. */
     inline constexpr Detail::EventRefOfFn EventRefOf{};
@@ -572,9 +573,9 @@ namespace Sora::Experimental {
         /** @brief Object type that exposes an event port through the @ref Events CPO. */
         template<typename T>
         concept EventParticipant =
-            std::is_class_v<std::remove_cvref_t<T>> && Detail::HasEventPort<T> && requires(T& object) {
+            std::is_class_v<std::remove_cvref_t<T>> && Concept::HasEventPort<T> && requires(T& object) {
                 { Sora::Experimental::EventPortOf(object) } -> std::same_as<EventPort&>;
-                { Sora::Experimental::EventLifetimeObserverOf(object) } -> std::same_as<EventLifetimeObserver>;
+                { Sora::Experimental::EventLifetimeOf(object) } -> std::same_as<EventObjectLifetime>;
                 { Sora::Experimental::EventRefOf(object) } -> std::same_as<EventObjectRef>;
             };
 
@@ -670,8 +671,8 @@ namespace Sora::Experimental {
             if (budget.value == 0) {
                 return kCanceledFlag;
             }
-            const uint32_t value = budget.value == WoreBudget::kPersistent ? kPersistentState
-                                                                           : budget.value & kBudgetMask;
+            const uint32_t value =
+                budget.value == WoreBudget::kPersistent ? kPersistentState : budget.value & kBudgetMask;
             return value == 0 ? kCanceledFlag : value;
         }
 
@@ -896,7 +897,7 @@ namespace Sora::Experimental {
             SubscriptionState state{};
             ErasedCallback callback{};
             EventObjectRef receiver{};
-            EventLifetimeObserver receiverObserver{};
+            EventObjectLifetime receiverLifetime{};
             EventPort* owner{};
             EventId eventId{};
             EventId callbackId{};
@@ -933,15 +934,20 @@ namespace Sora::Experimental {
             return false;
         }
         const uint32_t word = record->state.word.load(std::memory_order_acquire);
-        return (word & (Detail::kCanceledFlag | Detail::kSuspendedFlag)) == 0 &&
-               (word & Detail::kBudgetMask) != 0;
+        return (word & (Detail::kCanceledFlag | Detail::kSuspendedFlag)) == 0 && (word & Detail::kBudgetMask) != 0;
     }
 
-    inline void EventConnection::Disconnect() const noexcept { Sora::Experimental::Disconnect(*this); }
+    inline void EventConnection::Disconnect() const noexcept {
+        Sora::Experimental::Disconnect(*this);
+    }
 
-    inline void EventConnection::Suspend() const noexcept { Sora::Experimental::Suspend(*this); }
+    inline void EventConnection::Suspend() const noexcept {
+        Sora::Experimental::Suspend(*this);
+    }
 
-    inline void EventConnection::Resume() const noexcept { Sora::Experimental::Resume(*this); }
+    inline void EventConnection::Resume() const noexcept {
+        Sora::Experimental::Resume(*this);
+    }
 
     inline void EventConnection::SetBudget(WoreBudget budget) const noexcept {
         Sora::Experimental::SetBudget(*this, budget);
@@ -968,10 +974,10 @@ namespace Sora::Experimental {
     /** @brief Immutable data shared by every deferred delivery act in one emission. */
     template<Concept::EventPayload Event>
     struct EmissionFrame {
-        Event event;                              /**< Retained event payload. */
-        EventObjectRef emitter{};                 /**< Emitter reference retained by @ref emitterRetainer. */
-        EventLifetimeRetainer emitterRetainer{};  /**< Emitter retainer held by every deferred callback. */
-        uint64_t sequence{};                      /**< Emission sequence number. */
+        Event event;                     /**< Retained event payload. */
+        EventObjectRef emitter{};        /**< Emitter reference leased by @ref emitterLease. */
+        EventObjectLease emitterLease{}; /**< Emitter lease held by every deferred callback. */
+        uint64_t sequence{};             /**< Emission sequence number. */
     };
 
     /** @brief One move-only deferred callback act selected from an emission. */
@@ -993,14 +999,14 @@ namespace Sora::Experimental {
     private:
         friend class EventPort;
 
-        EventDeliveryAct(std::shared_ptr<const EmissionFrame<Event>> frame, EventLifetimeRetainer receiver,
+        EventDeliveryAct(std::shared_ptr<const EmissionFrame<Event>> frame, EventObjectLease receiver,
                          std::shared_ptr<Detail::SubscriptionRecord> record) noexcept
             : frame_(std::move(frame)), receiver_(std::move(receiver)), record_(std::move(record)) {}
 
         void Probe(EventProbePhase phase, EventObjectRef receiver, EventObjectRef emitter) const;
 
         std::shared_ptr<const EmissionFrame<Event>> frame_{};
-        EventLifetimeRetainer receiver_{};
+        EventObjectLease receiver_{};
         std::shared_ptr<Detail::SubscriptionRecord> record_{};
     };
 
@@ -1093,7 +1099,7 @@ namespace Sora::Experimental {
                 return Detail::InvokeTypedHandler<Event, R, E>(callback, context);
             };
             record->receiver = EventRefOf(receiver);
-            record->receiverObserver = EventLifetimeObserverOf(receiver);
+            record->receiverLifetime = EventLifetimeOf(receiver);
             record->owner = this;
             record->eventId = Traits::EventIdOf<Event>;
             record->callbackId = options.callbackId;
@@ -1121,7 +1127,7 @@ namespace Sora::Experimental {
                 return Detail::InvokeAnyHandler<R, E>(callback, context);
             };
             record->receiver = EventRefOf(receiver);
-            record->receiverObserver = EventLifetimeObserverOf(receiver);
+            record->receiverLifetime = EventLifetimeOf(receiver);
             record->owner = this;
             record->callbackId = options.callbackId;
             record->priority = options.priority;
@@ -1147,10 +1153,10 @@ namespace Sora::Experimental {
                 return record && (record->anyEvent || record->eventId == Traits::EventIdOf<Event>);
             });
             for (const auto& record : subscriptions->records | eventnessFilter) {
-                EventLifetimeRetainer receiverRetainer = record->receiverObserver.TryRetain();
-                EventObjectRef receiverRef = receiverRetainer ? record->receiver : EventObjectRef{};
+                EventObjectLease receiverLease = record->receiverLifetime.Acquire(EventLeaseMode::Immediate);
+                EventObjectRef receiverRef = receiverLease ? record->receiver : EventObjectRef{};
                 if (receiverRef) {
-                    receiverRef.object = receiverRetainer.Get();
+                    receiverRef.object = receiverLease.Get();
                 }
                 if (!receiverRef) {
                     Detail::Cancel(*record);
@@ -1179,28 +1185,28 @@ namespace Sora::Experimental {
             const uint64_t sequence = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
             const EventId eventId = Traits::EventIdOf<Event>;
             auto emitterRef = EventRefOf(emitter);
-            auto emitterRetainer = EventLifetimeObserverOf(emitter).TryRetainForDeferred();
+            auto emitterLease = EventLifetimeOf(emitter).Acquire(EventLeaseMode::Deferred);
             auto subscriptions = Subscriptions();
             ProbeEventIfEnabled(EventProbePhase::ReceiveBegin, event, {}, emitterRef, eventId, {}, 0, sequence);
 
             std::vector<EventDeliveryAct<Event>> acts;
             std::shared_ptr<const EmissionFrame<Event>> frame;
-            if (emitterRetainer) {
-                emitterRef.object = emitterRetainer.Get();
+            if (emitterLease) {
+                emitterRef.object = emitterLease.Get();
 
                 auto matchingRecords = subscriptions->records | std::views::filter([eventId](const auto& record) {
                                            return record && (record->anyEvent || record->eventId == eventId);
-                });
+                                       });
                 for (const auto& record : matchingRecords) {
                     const uint32_t word = record->state.word.load(std::memory_order_acquire);
                     if ((word & (Detail::kCanceledFlag | Detail::kSuspendedFlag)) != 0 ||
                         (word & Detail::kBudgetMask) == 0) {
                         continue;
                     }
-                    EventLifetimeRetainer receiverRetainer = record->receiverObserver.TryRetainForDeferred();
-                    EventObjectRef receiverRef = receiverRetainer ? record->receiver : EventObjectRef{};
+                    EventObjectLease receiverLease = record->receiverLifetime.Acquire(EventLeaseMode::Deferred);
+                    EventObjectRef receiverRef = receiverLease ? record->receiver : EventObjectRef{};
                     if (receiverRef) {
-                        receiverRef.object = receiverRetainer.Get();
+                        receiverRef.object = receiverLease.Get();
                     }
                     if (!receiverRef) {
                         Detail::Cancel(*record);
@@ -1210,12 +1216,12 @@ namespace Sora::Experimental {
                         frame = std::make_shared<const EmissionFrame<Event>>(
                             EmissionFrame<Event>{.event = event,
                                                  .emitter = emitterRef,
-                                                 .emitterRetainer = std::move(emitterRetainer),
+                                                 .emitterLease = std::move(emitterLease),
                                                  .sequence = sequence});
                     }
                     ProbeEventIfEnabled(EventProbePhase::CallbackScheduled, event, receiverRef, emitterRef, eventId,
                                         record->callbackId, record->id, sequence);
-                    auto act = EventDeliveryAct<Event>{frame, std::move(receiverRetainer), record};
+                    auto act = EventDeliveryAct<Event>{frame, std::move(receiverLease), record};
                     if (act) {
                         acts.push_back(std::move(act));
                     }
@@ -1316,8 +1322,8 @@ namespace Sora::Experimental {
             ProbeEventIfEnabled(EventProbePhase::CallbackBegin, event, context.receiver, context.emitter,
                                 context.eventId, context.callbackId, context.subscription, context.sequence);
             EventFlow flow = record->callback(context, std::addressof(event));
-            ProbeEventIfEnabled(EventProbePhase::CallbackEnd, event, context.receiver, context.emitter,
-                                context.eventId, context.callbackId, context.subscription, context.sequence);
+            ProbeEventIfEnabled(EventProbePhase::CallbackEnd, event, context.receiver, context.emitter, context.eventId,
+                                context.callbackId, context.subscription, context.sequence);
             return flow;
         }
 
@@ -1352,12 +1358,12 @@ namespace Sora::Experimental {
             return;
         }
         EventObjectRef receiverRef = receiver_ ? record_->receiver : EventObjectRef{};
-        EventObjectRef emitterRef = frame_->emitterRetainer ? frame_->emitter : EventObjectRef{};
+        EventObjectRef emitterRef = frame_->emitterLease ? frame_->emitter : EventObjectRef{};
         if (receiverRef) {
             receiverRef.object = receiver_.Get();
         }
         if (emitterRef) {
-            emitterRef.object = frame_->emitterRetainer.Get();
+            emitterRef.object = frame_->emitterLease.Get();
         }
         if (!receiverRef || !emitterRef) {
             Detail::Cancel(*record_);
@@ -1398,7 +1404,7 @@ namespace Sora::Experimental {
     EventConnection Connect(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options,
                             Handler&& handler) {
         return EventPortOf(emitter).template ConnectTyped<Event>(receiver, emitter, std::forward<Handler>(handler),
-                                                                options);
+                                                                 options);
     }
 
     /** @brief Subscribe @p receiver to @p emitter's @p Event with an explicit handler and budget shorthand. */
