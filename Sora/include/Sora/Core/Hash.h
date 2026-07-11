@@ -73,18 +73,18 @@ namespace Sora::Hashing {
      */
     [[nodiscard]] constexpr std::string_view UuidParseErrcMessage(UuidParseErrc e) noexcept {
         switch (e) {
-        case UuidParseErrc::Ok:
-            return "ok";
-        case UuidParseErrc::Empty:
-            return "empty UUID string";
-        case UuidParseErrc::BadLength:
-            return "UUID body must be 36 characters (8-4-4-4-12)";
-        case UuidParseErrc::MissingHyphen:
-            return "expected '-' at group boundary";
-        case UuidParseErrc::InvalidHexDigit:
-            return "invalid hexadecimal digit";
-        case UuidParseErrc::UnterminatedBrace:
-            return "missing closing '}'";
+            case UuidParseErrc::Ok:
+                return "ok";
+            case UuidParseErrc::Empty:
+                return "empty UUID string";
+            case UuidParseErrc::BadLength:
+                return "UUID body must be 36 characters (8-4-4-4-12)";
+            case UuidParseErrc::MissingHyphen:
+                return "expected '-' at group boundary";
+            case UuidParseErrc::InvalidHexDigit:
+                return "invalid hexadecimal digit";
+            case UuidParseErrc::UnterminatedBrace:
+                return "missing closing '}'";
         }
         return "unknown UUID parse error";
     }
@@ -865,87 +865,92 @@ namespace Sora::Hashing {
     // CPO: Hashing::Hash
     // =========================================================================
 
+    namespace HashCPOFn {
+
+        struct HashCPO {
+
+            /**
+             * @brief Hash a value using algorithm @p algo (default: Fnv1a64).
+             */
+            template<AnyAlgo A = DefaultAlgo, typename T>
+                requires Hashable<T, A>
+            [[nodiscard]] constexpr ResultOf<A> operator()(const T& value, const A& algo = {}) const noexcept {
+                return Dispatch<A>(value, algo);
+            }
+
+        private:
+            template<AnyAlgo A, typename T>
+            [[nodiscard]] constexpr ResultOf<A> Dispatch(const T& value, const A& algo) const noexcept {
+                using R = ResultOf<A>;
+
+                // 1. ADL hook
+                if constexpr (requires {
+                                  { HashValue(algo, value) } -> std::same_as<R>;
+                              }) {
+                    return HashValue(algo, value);
+                }
+                // 2. string-like
+                else if constexpr (std::convertible_to<T, std::string_view>) {
+                    auto sv = std::string_view(value);
+                    if constexpr (StatelessAlgo<A>) {
+                        return Detail::HashString(algo, sv);
+                    } else {
+                        auto state = A::Seed();
+                        Detail::FeedString(state, sv);
+                        return state.Finalize();
+                    }
+                }
+                // 3. byte span
+                else if constexpr (std::convertible_to<T, std::span<const std::byte>>) {
+                    return Detail::InvokeAlgo(algo, std::span<const std::byte>(value));
+                }
+                // 4. scalar / enum
+                else if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
+                    auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
+                    return Detail::InvokeAlgo(algo, std::span<const std::byte>(bytes));
+                }
+                // 5. class -> reflection-driven recursive structured hash
+                //    Respects [[=$::With<X>{}]] on the type to override algorithm.
+                else if constexpr (std::is_class_v<T> && !std::is_union_v<T>) {
+                    // Check type-level $::With<X> annotation
+                    constexpr auto effectiveAlgoInfo = Detail::GetAlgoFor(^^T, ^^A);
+                    using EffectiveAlgo = typename [:effectiveAlgoInfo:];
+
+                    // Ensure result types are compatible (same width)
+                    if constexpr (sizeof(ResultOf<EffectiveAlgo>) == sizeof(R)) {
+                        EffectiveAlgo effAlgo{};
+                        ResultOf<EffectiveAlgo> seed{};
+                        template for (constexpr auto m : Detail::GetHashableMembers<T>()) {
+                            auto memberHash = Dispatch<EffectiveAlgo>(value.[:m:], effAlgo);
+                            seed = Combine(seed, memberHash);
+                        }
+                        return static_cast<R>(seed);
+                    } else {
+                        // Width mismatch: fall back to caller's algo
+                        R seed{};
+                        template for (constexpr auto m : Detail::GetHashableMembers<T>()) {
+                            R memberHash = Dispatch<A>(value.[:m:], algo);
+                            seed = Combine(seed, memberHash);
+                        }
+                        return seed;
+                    }
+                }
+                // 6. trivially copyable fallback
+                else if constexpr (std::is_trivially_copyable_v<T>) {
+                    auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
+                    return Detail::InvokeAlgo(algo, std::span<const std::byte>(bytes));
+                } else {
+                    static_assert(false, "Type is not Hashable");
+                }
+            }
+        };
+
+    } // namespace HashCPOFn
+
     /**
      * @brief Customisation-point object for hashing any Hashable value.
      */
-    inline constexpr struct HashCPO {
-
-        /**
-         * @brief Hash a value using algorithm @p algo (default: Fnv1a64).
-         */
-        template<AnyAlgo A = DefaultAlgo, typename T>
-            requires Hashable<T, A>
-        [[nodiscard]] constexpr ResultOf<A> operator()(const T& value, const A& algo = {}) const noexcept {
-            return Dispatch<A>(value, algo);
-        }
-
-    private:
-        template<AnyAlgo A, typename T>
-        [[nodiscard]] constexpr ResultOf<A> Dispatch(const T& value, const A& algo) const noexcept {
-            using R = ResultOf<A>;
-
-            // 1. ADL hook
-            if constexpr (requires {
-                              { HashValue(algo, value) } -> std::same_as<R>;
-                          }) {
-                return HashValue(algo, value);
-            }
-            // 2. string-like
-            else if constexpr (std::convertible_to<T, std::string_view>) {
-                auto sv = std::string_view(value);
-                if constexpr (StatelessAlgo<A>) {
-                    return Detail::HashString(algo, sv);
-                } else {
-                    auto state = A::Seed();
-                    Detail::FeedString(state, sv);
-                    return state.Finalize();
-                }
-            }
-            // 3. byte span
-            else if constexpr (std::convertible_to<T, std::span<const std::byte>>) {
-                return Detail::InvokeAlgo(algo, std::span<const std::byte>(value));
-            }
-            // 4. scalar / enum
-            else if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
-                auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
-                return Detail::InvokeAlgo(algo, std::span<const std::byte>(bytes));
-            }
-            // 5. class -> reflection-driven recursive structured hash
-            //    Respects [[=$::With<X>{}]] on the type to override algorithm.
-            else if constexpr (std::is_class_v<T> && !std::is_union_v<T>) {
-                // Check type-level $::With<X> annotation
-                constexpr auto effectiveAlgoInfo = Detail::GetAlgoFor(^^T, ^^A);
-                using EffectiveAlgo = typename [:effectiveAlgoInfo:];
-
-                // Ensure result types are compatible (same width)
-                if constexpr (sizeof(ResultOf<EffectiveAlgo>) == sizeof(R)) {
-                    EffectiveAlgo effAlgo{};
-                    ResultOf<EffectiveAlgo> seed{};
-                    template for (constexpr auto m : Detail::GetHashableMembers<T>()) {
-                        auto memberHash = Dispatch<EffectiveAlgo>(value.[:m:], effAlgo);
-                        seed = Combine(seed, memberHash);
-                    }
-                    return static_cast<R>(seed);
-                } else {
-                    // Width mismatch: fall back to caller's algo
-                    R seed{};
-                    template for (constexpr auto m : Detail::GetHashableMembers<T>()) {
-                        R memberHash = Dispatch<A>(value.[:m:], algo);
-                        seed = Combine(seed, memberHash);
-                    }
-                    return seed;
-                }
-            }
-            // 6. trivially copyable fallback
-            else if constexpr (std::is_trivially_copyable_v<T>) {
-                auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
-                return Detail::InvokeAlgo(algo, std::span<const std::byte>(bytes));
-            } else {
-                static_assert(false, "Type is not Hashable");
-            }
-        }
-
-    } Hash;
+    inline constexpr HashCPOFn::HashCPO Hash;
 
     // =========================================================================
     // Streaming Hasher
