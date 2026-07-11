@@ -149,20 +149,20 @@ namespace Sora {
 
         [[nodiscard]] constexpr bool IsSubDelimiter(char c) noexcept {
             switch (c) {
-            case '!':
-            case '$':
-            case '&':
-            case '\'':
-            case '(':
-            case ')':
-            case '*':
-            case '+':
-            case ',':
-            case ';':
-            case '=':
-                return true;
-            default:
-                return false;
+                case '!':
+                case '$':
+                case '&':
+                case '\'':
+                case '(':
+                case ')':
+                case '*':
+                case '+':
+                case ',':
+                case ';':
+                case '=':
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -406,6 +406,117 @@ namespace Sora {
     /** @brief Return true when @p text is a syntactically valid absolute RFC 3986 URI. */
     [[nodiscard]] constexpr bool IsUri(std::string_view text) noexcept {
         return ParseUri(text).has_value();
+    }
+
+    /**
+     * @brief Return true when @p path has no empty, dot, or dot-dot path segments.
+     *
+     * @details This is stricter than RFC 3986 syntax and is intended for URI strings used as stable identity keys.
+     * Empty paths are accepted; a root-only @c "/" path is rejected because it contains no identity segment.
+     */
+    [[nodiscard]] constexpr bool IsCanonicalUriIdentityPath(std::string_view path) noexcept {
+        if (Detail::Uri::ValidateEncodedRange<Detail::Uri::IsPathPlain>(path) != UriError::Ok) {
+            return false;
+        }
+        if (path.empty()) {
+            return true;
+        }
+        if (path.ends_with('/')) {
+            return false;
+        }
+        if (path.starts_with('/')) {
+            path.remove_prefix(1);
+        }
+        while (!path.empty()) {
+            const size_t slash = path.find('/');
+            const std::string_view segment = slash == std::string_view::npos ? path : path.substr(0, slash);
+            if (segment.empty() || segment == "." || segment == "..") {
+                return false;
+            }
+            if (slash == std::string_view::npos) {
+                return true;
+            }
+            path.remove_prefix(slash + 1u);
+        }
+        return true;
+    }
+
+    /**
+     * @brief Return true when @p path is a canonical relative identity path.
+     *
+     * @details The path must contain at least one segment, must not start or end with @c /, must not contain raw
+     * query/fragment delimiters, and must not contain @c : so callers do not accidentally accept scheme-like input.
+     */
+    [[nodiscard]] constexpr bool IsCanonicalRelativeUriIdentityPath(std::string_view path) noexcept {
+        return !path.empty() && !path.starts_with('/') && !path.ends_with('/') &&
+               path.find(':') == std::string_view::npos && IsCanonicalUriIdentityPath(path);
+    }
+
+    /** @brief Return true when @p suffix is a dot-prefixed filename suffix usable inside a URI path segment. */
+    [[nodiscard]] constexpr bool IsUriPathFilenameSuffix(std::string_view suffix) noexcept {
+        return !suffix.empty() && suffix.front() == '.' && suffix != "." && suffix != ".." &&
+               suffix.find('/') == std::string_view::npos && suffix.find(':') == std::string_view::npos &&
+               Detail::Uri::ValidateEncodedRange<Detail::Uri::IsPathPlain>(suffix) == UriError::Ok;
+    }
+
+    /** @brief Return true when @p text is an absolute URI usable as a canonical identity key. */
+    [[nodiscard]] constexpr bool IsUriIdentity(std::string_view text) noexcept {
+        auto parsed = ParseUri(text);
+        return parsed.has_value() && !parsed->hasQuery && !parsed->hasFragment &&
+               IsCanonicalUriIdentityPath(parsed->path);
+    }
+
+    /** @brief Normalize a URI identity base by removing trailing path separators and validating identity spelling. */
+    template<size_t Capacity = 1024>
+    [[nodiscard]] constexpr auto NormalizeUriIdentityBase(std::string_view uri) noexcept
+        -> std::expected<FixedString<Capacity>, UriError> {
+        auto parsed = ParseUri(uri);
+        if (!parsed) {
+            return std::unexpected(parsed.error());
+        }
+        if (parsed->hasQuery || parsed->hasFragment) {
+            return std::unexpected(UriError::BadCharacter);
+        }
+
+        size_t normalizedSize = uri.size();
+        std::string_view path = parsed->path;
+        while (!path.empty() && path.back() == '/') {
+            path.remove_suffix(1);
+            --normalizedSize;
+        }
+
+        const std::string_view normalized = uri.substr(0, normalizedSize);
+        parsed = ParseUri(normalized);
+        if (!parsed) {
+            return std::unexpected(parsed.error());
+        }
+        if (parsed->hasQuery || parsed->hasFragment || !IsCanonicalUriIdentityPath(parsed->path)) {
+            return std::unexpected(UriError::BadPath);
+        }
+        return Detail::Uri::ToFixedString<Capacity>(normalized);
+    }
+
+    /** @brief Return @p base with canonical relative identity path @p relative appended to its path component. */
+    template<size_t Capacity = 1024>
+    [[nodiscard]] constexpr auto JoinUriIdentityPath(std::string_view base, std::string_view relative) noexcept
+        -> std::expected<FixedString<Capacity>, UriError> {
+        if (!IsCanonicalRelativeUriIdentityPath(relative)) {
+            return std::unexpected(UriError::BadPath);
+        }
+
+        auto normalized = NormalizeUriIdentityBase<Capacity>(base);
+        if (!normalized) {
+            return std::unexpected(normalized.error());
+        }
+
+        FixedString<Capacity> out = *normalized;
+        if (!Detail::Uri::Append(out, '/') || !Detail::Uri::Append(out, relative)) {
+            return std::unexpected(UriError::TooLong);
+        }
+        if (!IsUriIdentity(out.view())) {
+            return std::unexpected(UriError::BadPath);
+        }
+        return out;
     }
 
     /** @brief Stable FNV-1a hash of the exact URI bytes. */
