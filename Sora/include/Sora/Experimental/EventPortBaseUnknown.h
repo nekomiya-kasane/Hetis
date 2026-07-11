@@ -62,6 +62,33 @@ namespace Sora::Kernel {
 
     } // namespace Detail
 
+    namespace Detail {
+
+        /** @brief Weak BaseUnknown observer state used by the experimental EventPort bridge. */
+        struct ExperimentalEventLifetimeState {
+            WeakRef weak{}; /**< Weak reference to the observed closure nucleus. */
+        };
+
+        /** @brief Try to retain a BaseUnknown closure for one concrete event delivery. */
+        [[nodiscard]] inline Sora::Experimental::EventLifetimeRetainer
+        RetainExperimentalEventLifetime(const Sora::Experimental::EventLifetimeObserver& observer, bool) noexcept {
+            auto state = static_cast<ExperimentalEventLifetimeState*>(observer.CustomState().get());
+            if (!state) {
+                return {};
+            }
+            BaseUnknown* nucleus = state->weak.Get();
+            if (!nucleus) {
+                return {};
+            }
+
+            using Holder = ComPtr<BaseUnknown>;
+            auto holder = std::make_shared<Holder>(nucleus);
+            return Sora::Experimental::EventLifetimeRetainer::Retained(observer.Object(),
+                                                                       std::static_pointer_cast<void>(holder));
+        }
+
+    } // namespace Detail
+
     /** @brief ADL adaptor that gives BaseUnknown objects an experimental event port through DataExtension QI. */
     [[nodiscard]] inline Sora::Experimental::EventPort& EventPortOf(BaseUnknown& object) {
         Sora::Experimental::Detail::EnsureBaseUnknownEventPortExtensionRegistered();
@@ -70,13 +97,15 @@ namespace Sora::Kernel {
         return extension->Object();
     }
 
-    /** @brief ADL adaptor that strongly retains a BaseUnknown nucleus while deferred delivery is pending. */
-    [[nodiscard]] inline Sora::Experimental::EventLifetimeToken EventLifetimeOf(BaseUnknown& object) {
+    /** @brief ADL adaptor that observes a BaseUnknown nucleus without extending its lifetime. */
+    [[nodiscard]] inline Sora::Experimental::EventLifetimeObserver MakeEventLifetimeObserver(BaseUnknown& object) {
         BaseUnknown* nucleus = object.Nucleus();
         assert(nucleus != nullptr);
-        using Holder = ComPtr<BaseUnknown>;
-        auto holder = std::make_shared<Holder>(nucleus);
-        return Sora::Experimental::EventLifetimeToken::Retained(nucleus, std::static_pointer_cast<void>(holder));
+        auto state = std::make_shared<Detail::ExperimentalEventLifetimeState>();
+        state->weak = nucleus->GetComponentWeakRef();
+        return Sora::Experimental::EventLifetimeObserver::Custom(
+            std::addressof(object), std::static_pointer_cast<void>(state),
+            &Detail::RetainExperimentalEventLifetime);
     }
 
 } // namespace Sora::Kernel

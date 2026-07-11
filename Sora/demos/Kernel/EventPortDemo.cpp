@@ -1,10 +1,8 @@
 #include "Sora/Kernel/Core/ComPtr.h"
-#include "Sora/Kernel/Core/EventHub.h"
+#include "Sora/Kernel/Core/EventPort.h"
 
 #include <cassert>
 #include <print>
-#include <utility>
-#include <vector>
 
 namespace Concept = Sora::Kernel::Concept;
 namespace Traits = Sora::Kernel::Traits;
@@ -16,6 +14,7 @@ using Sora::Kernel::BaseUnknown;
 using Sora::Kernel::DefaultCallbackTag;
 using Sora::Kernel::Drop;
 using Sora::Kernel::Emit;
+using Sora::Kernel::EmitOn;
 using Sora::Kernel::EventContext;
 using Sora::Kernel::EventFlow;
 using Sora::Kernel::EventLink;
@@ -23,16 +22,14 @@ using Sora::Kernel::EventList;
 using Sora::Kernel::EventOptions;
 using Sora::Kernel::Events;
 using Sora::Kernel::EventSpace;
-using Sora::Kernel::EventTask;
 using Sora::Kernel::EventTrace;
 using Sora::Kernel::Iid;
 using Sora::Kernel::MakeComPtr;
-using Sora::Kernel::MakeEventScheduler;
 using Sora::Kernel::OneShot;
 using Sora::Kernel::Persistent;
 using Sora::Kernel::TypeOfClass;
 
-namespace EventHubDemo {
+namespace EventPortDemo {
 
     namespace Event {
 
@@ -104,22 +101,14 @@ namespace EventHubDemo {
         S_OBJECT
     };
 
-    struct ManualScheduler {
-        std::vector<EventTask>* tasks{};
-
-        void operator()(EventTask task) const { tasks->push_back(std::move(task)); }
-    };
-
-    void RunAll(std::vector<EventTask>& tasks) {
-        auto pending = std::exchange(tasks, {});
-        for (auto& task : pending) {
-            task();
-        }
+    void Run(stdexec::run_loop& loop) {
+        loop.finish();
+        loop.run();
     }
 
-} // namespace EventHubDemo
+} // namespace EventPortDemo
 
-using namespace EventHubDemo;
+using namespace EventPortDemo;
 
 int main() {
     static_assert(Traits::CanEmitEvent<EventfulPoint, Event::PositionChanged>);
@@ -154,6 +143,7 @@ int main() {
             ++traceCount;
         }
     });
+    assert(trace.Active());
 
     EventLink defaultOn = Listen(*point, *point, Event::RepaintRequested{});
     Emit<Event::RepaintRequested>(*point);
@@ -167,39 +157,40 @@ int main() {
                                 ++immediateCount;
                             });
 
-    std::vector<EventTask> tasks;
+    auto asyncPoint = MakeComPtr<EventfulPoint>();
     int asyncCount = 0;
-    auto async = Listen(*point, *point, Event::PositionChanged{},
-                        EventOptions{.scheduler = MakeEventScheduler(ManualScheduler{.tasks = &tasks})},
+    auto async = Listen(*asyncPoint, *asyncPoint, Event::PositionChanged{}, Persistent,
                         [&](const Event::PositionChanged& event, EventContext<Event::PositionChanged>& context) {
-                            assert(context.receiver.Nucleus() == point->Nucleus());
+                            assert(context.receiver.Nucleus() == asyncPoint->Nucleus());
                             assert(event.y == 2.0f || event.y == 3.0f);
                             ++asyncCount;
                         });
 
+    {
+        stdexec::run_loop loop;
+        EmitOn(*asyncPoint, loop.get_scheduler(), Event::PositionChanged{-1.0f, 2.0f});
+        assert(asyncCount == 0);
+        Run(loop);
+        assert(asyncCount == 1);
+    }
+
     Emit(*point, Event::PositionChanged{-1.0f, 2.0f});
     assert(immediateCount == 1);
-    assert(asyncCount == 0);
-    assert(tasks.size() == 1);
-    RunAll(tasks);
-    assert(asyncCount == 1);
 
     int onceCount = 0;
     auto once = Listen(*point, *point, Event::PositionChanged{}, EventOptions{.budget = OneShot, .priority = 10},
                        [&](const Event::PositionChanged&) { ++onceCount; });
+    assert(once.Active());
 
     point->MoveTo(1.0f, 2.0f);
     assert(immediateCount == 2);
     assert(onceCount == 1);
     assert(asyncCount == 1);
-    RunAll(tasks);
-    assert(asyncCount == 2);
 
     point->MoveTo(2.0f, 3.0f);
     assert(immediateCount == 3);
     assert(onceCount == 1);
-    RunAll(tasks);
-    assert(asyncCount == 3);
+    assert(asyncCount == 1);
 
     Drop(immediate);
     Drop(async);
@@ -243,32 +234,27 @@ int main() {
     Drop(stop);
     Drop(skipped);
 
-    std::vector<EventTask> releasedTasks;
+    stdexec::run_loop releasedLoop;
     int releasedCount = 0;
     {
         auto released = MakeComPtr<EventfulPoint>();
-        auto releasedSub =
-            Listen(*released, Event::PositionChanged{},
-                   EventOptions{.scheduler = MakeEventScheduler(ManualScheduler{.tasks = &releasedTasks})},
-                   [&] { ++releasedCount; });
-        Emit(*released, Event::PositionChanged{1.0f, 2.0f});
-        assert(releasedTasks.size() == 1);
+        auto releasedSub = Listen(*released, Event::PositionChanged{}, Persistent, [&] { ++releasedCount; });
+        assert(releasedSub.Active());
+        EmitOn(*released, releasedLoop.get_scheduler(), Event::PositionChanged{1.0f, 2.0f});
     }
-    RunAll(releasedTasks);
+    Run(releasedLoop);
     assert(releasedCount == 1);
 
-    std::vector<EventTask> canceledTasks;
+    stdexec::run_loop canceledLoop;
     int canceledCount = 0;
-    auto canceledSub = Listen(*point, Event::PositionChanged{},
-                              EventOptions{.scheduler = MakeEventScheduler(ManualScheduler{.tasks = &canceledTasks})},
-                              [&] { ++canceledCount; });
-    Emit(*point, Event::PositionChanged{1.0f, 2.0f});
+    auto canceledSub = Listen(*point, Event::PositionChanged{}, Persistent, [&] { ++canceledCount; });
+    EmitOn(*point, canceledLoop.get_scheduler(), Event::PositionChanged{1.0f, 2.0f});
     Drop(canceledSub);
-    RunAll(canceledTasks);
+    Run(canceledLoop);
     assert(canceledCount == 0);
 
     assert(traceCount >= 12);
-    std::println("EventHub demo passed: immediate={}, once={}, async={}, any={}, space={}, trace={}", immediateCount,
+    std::println("EventPort demo passed: immediate={}, once={}, async={}, any={}, space={}, trace={}", immediateCount,
                  onceCount, asyncCount, anyCount, spaceCount, traceCount);
     return 0;
 }

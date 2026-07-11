@@ -65,13 +65,12 @@ namespace Sora::Kernel {
             std::scoped_lock lock(mutex_);
             auto next = std::make_shared<Detail::TraceSnapshot>(*traces_);
             next->records.push_back(std::move(stored));
-            std::ranges::stable_sort(next->records, [](const auto& lhs, const auto& rhs) noexcept {
-                return lhs->order < rhs->order;
-            });
+            std::ranges::stable_sort(next->records,
+                                     [](const auto& lhs, const auto& rhs) noexcept { return lhs->order < rhs->order; });
             traces_ = std::move(next);
         }
 
-        return EventTraceHook{std::move(state)};
+        return EventTraceHook{state};
     }
 
     std::shared_ptr<const Detail::SubscriptionSnapshot> EventPort::Subscriptions() const {

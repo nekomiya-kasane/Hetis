@@ -4,9 +4,32 @@
  * @ingroup Experimental
  *
  * @details This header models event participation as four orthogonal capabilities: an event port, static event schema,
- * object identity, and an optional lifetime token. @ref EventPort itself is a plain final class and never inherits from
+ * object identity, and weak lifetime observation. @ref EventPort itself is a plain final class and never inherits from
  * @c BaseUnknown. COM participation is provided by a separate adaptor header, so the event model can be tested without
  * making COM/data-extension storage part of its core semantics.
+ *
+ * @verbatim
+ *                         +--------------------------+
+ *                         |  Event schema of T       |
+ *                         |  Emits/Accepts/Callbacks |
+ *                         +------------+-------------+
+ *                                      |
+ *                                      v
+ * +-------------+  EventPortOf(T) +-----------+  selects  +--------------------+
+ * | user object |  -------------> | EventPort | --------> | SubscriptionRecord |
+ * | + liveness  |  EventRefOf(T)  | relations |           | observer+callback  |
+ * +------+------+                 +-----+-----+           +---------+----------+
+ *        |                              |                           |
+ *        | EventLifetimeObserverOf(T)   | Emit / EmitOn             | TryRetain()
+ *        v                              v                           v
+ * +-------------------+        +---------------+          +--------------------+
+ * | weak observer     |        | EmissionFrame | -------> | EventDeliveryAct   |
+ * +-------------------+        +---------------+          | temporary retain   |
+ *                                                        +--------------------+
+ *
+ * Instrumentation is not stored in EventPort. Delivery sites call the no-op-by-default EventProbe CPO; external code
+ * can observe through ADL without adding trace records, trace hooks, or a second callback plane to the port.
+ * @endverbatim
  */
 #pragma once
 
@@ -30,7 +53,6 @@
 #include <utility>
 #include <vector>
 
-#include <exec/start_detached.hpp>
 #include <stdexec/execution.hpp>
 
 namespace Sora::Experimental {
@@ -89,6 +111,13 @@ namespace Sora::Experimental {
         int32_t priority{};            /**< Larger priority dispatches first. */
     };
 
+    /** @brief Direction selector for enumerating connections stored by an event port. */
+    enum class EventConnectionDirection : uint8_t {
+        Outgoing, /**< Connections emitted by this port. */
+        Incoming, /**< Connections received by this port from other ports. */
+        All,      /**< Both outgoing and incoming connections, with duplicates collapsed. */
+    };
+
     namespace Traits {
 
         /** @brief Reflected type-name hash for @p T. */
@@ -103,8 +132,8 @@ namespace Sora::Experimental {
 
     } // namespace Traits
 
-    /** @brief Trace phase for observing delivery without becoming an event callback. */
-    enum class EventTracePhase : uint8_t {
+    /** @brief Probe phase emitted by delivery code through the no-op-by-default @ref EventProbe CPO. */
+    enum class EventProbePhase : uint8_t {
         ReceiveBegin,
         CallbackScheduled,
         CallbackBegin,
@@ -113,11 +142,11 @@ namespace Sora::Experimental {
         ReceiveEnd,
     };
 
-    /** @brief Type-erased object reference used by event contexts and traces. */
+    /** @brief Type-erased object reference used by event contexts and probes. */
     struct EventObjectRef {
         void* object{};              /**< Borrowed object pointer. */
         EventId type{};              /**< Stable runtime type identifier associated with @p object. */
-        std::string_view typeName{}; /**< Stable display name for diagnostics and trace consumers. */
+        std::string_view typeName{}; /**< Stable display name for diagnostics and probe consumers. */
 
         /** @brief Return whether this reference is non-empty. */
         [[nodiscard]] explicit constexpr operator bool() const noexcept { return object != nullptr; }
@@ -139,7 +168,64 @@ namespace Sora::Experimental {
         }
     };
 
-    /** @brief Type-erased receive context shared by typed callbacks, any-event callbacks, and trace hooks. */
+    /** @brief Probe payload produced at delivery points and passed to @ref EventProbe. */
+    struct EventProbeContext {
+        EventProbePhase phase{};   /**< Current delivery phase. */
+        EventObjectRef receiver{}; /**< Receiver object, empty when a deferred act observes cancellation. */
+        EventObjectRef emitter{};  /**< Emitter object, empty when a deferred act observes cancellation. */
+        EventId eventId{};         /**< Reflected event payload identifier. */
+        EventId callbackId{};      /**< Reflected callback tag identifier. */
+        uint64_t subscription{};   /**< Subscription identifier, or zero for port-wide phases. */
+        uint64_t sequence{};       /**< Monotone emission sequence on the emitter port. */
+    };
+
+    namespace Detail::EventProbeCPOFn {
+
+        /** @brief Customisation-point object for non-invasive event instrumentation. */
+        struct EventProbeCPO {
+            /** @brief Invoke an ADL probe hook in @p anchor's namespace when one exists; otherwise compile to no-op. */
+            template<typename Context, typename Anchor>
+                requires std::same_as<std::remove_cvref_t<Context>, EventProbeContext>
+            constexpr void operator()(const Context& context, const Anchor& anchor) const noexcept {
+                if constexpr (requires(const Context& c, const Anchor& a) { ProbeEvent(c, a); }) {
+                    ProbeEvent(context, anchor);
+                }
+            }
+
+            /** @brief No-op fallback for instrumentation sites without a semantic anchor. */
+            template<typename Context>
+                requires std::same_as<std::remove_cvref_t<Context>, EventProbeContext>
+            constexpr void operator()(const Context&) const noexcept {}
+        };
+
+    } // namespace Detail::EventProbeCPOFn
+
+    inline constexpr Detail::EventProbeCPOFn::EventProbeCPO EventProbe;
+
+    /** @brief Return whether event payload @p Event has an ADL probe hook. */
+    template<typename Event>
+    inline constexpr bool EventProbeEnabled = requires(const EventProbeContext& context, const Event& event) {
+        ProbeEvent(context, event);
+    };
+
+    /** @brief Emit an event probe only when @p Event provides an ADL hook. */
+    template<typename Event>
+    constexpr void ProbeEventIfEnabled(EventProbePhase phase, const Event& event, EventObjectRef receiver = {},
+                                       EventObjectRef emitter = {}, EventId eventId = {}, EventId callbackId = {},
+                                       uint64_t subscription = 0, uint64_t sequence = 0) noexcept {
+        if constexpr (EventProbeEnabled<Event>) {
+            EventProbe(EventProbeContext{.phase = phase,
+                                         .receiver = receiver,
+                                         .emitter = emitter,
+                                         .eventId = eventId,
+                                         .callbackId = callbackId,
+                                         .subscription = subscription,
+                                         .sequence = sequence},
+                       event);
+        }
+    }
+
+    /** @brief Type-erased receive context shared by typed callbacks and any-event callbacks. */
     struct EventContextBase {
         EventObjectRef receiver{}; /**< Object selected as receiver. */
         EventObjectRef emitter{};  /**< Object that emitted the event. */
@@ -153,17 +239,6 @@ namespace Sora::Experimental {
     template<typename Event>
     struct EventContext : EventContextBase {
         const Event& event; /**< Event payload being delivered. */
-    };
-
-    /** @brief Trace hook payload produced by an event port. */
-    struct EventTrace {
-        EventTracePhase phase{};   /**< Current receive phase. */
-        EventObjectRef receiver{}; /**< Receiver object, empty when a deferred act observes cancellation. */
-        EventObjectRef emitter{};  /**< Emitter object, empty when a deferred act observes cancellation. */
-        EventId eventId{};         /**< Reflected event payload identifier. */
-        EventId callbackId{};      /**< Reflected callback tag identifier. */
-        uint64_t subscription{};   /**< Subscription identifier, or zero for port-wide phases. */
-        uint64_t sequence{};       /**< Monotone emission sequence on the emitter port. */
     };
 
     namespace Concept {
@@ -195,9 +270,6 @@ namespace Sora::Experimental {
     } // namespace Meta
 
     namespace Detail {
-
-        template<typename>
-        inline constexpr bool kDependentFalse = false;
 
         /** @brief Return a merged TypeList named @p name along @p type's single-inheritance chain. */
         template<std::meta::info Validator>
@@ -275,37 +347,127 @@ namespace Sora::Experimental {
 
     } // namespace Traits
 
-    /** @brief Copyable lifetime token retained by deferred event delivery. */
-    class EventLifetimeToken {
-    public:
-        /** @brief Construct an empty lifetime token. */
-        EventLifetimeToken() noexcept = default;
+    namespace Detail {
 
-        /** @brief Construct a borrowed token. This does not extend object lifetime. */
-        [[nodiscard]] static EventLifetimeToken Borrowed(void* object) noexcept {
-            return EventLifetimeToken{object, nullptr};
+        /** @brief Shared liveness bit owned by an EventPort and invalidated by its destructor. */
+        struct PortLiveness {
+            std::atomic_bool alive{true}; /**< False after the owning port starts destruction. */
+        };
+
+    } // namespace Detail
+
+    /** @brief Temporary retain acquired for one concrete event delivery. */
+    class EventLifetimeRetainer {
+    public:
+        /** @brief Construct an empty retainer. */
+        EventLifetimeRetainer() noexcept = default;
+
+        /** @brief Construct a non-owning retainer for synchronous delivery under external lifetime control. */
+        [[nodiscard]] static EventLifetimeRetainer Borrowed(void* object) noexcept {
+            return EventLifetimeRetainer{object, nullptr};
         }
 
-        /** @brief Construct a token that retains @p object through an arbitrary shared holder. */
-        [[nodiscard]] static EventLifetimeToken Retained(void* object, std::shared_ptr<void> holder) noexcept {
-            return EventLifetimeToken{object, std::move(holder)};
+        /** @brief Construct an owning retainer for deferred delivery through an arbitrary holder. */
+        [[nodiscard]] static EventLifetimeRetainer Retained(void* object, std::shared_ptr<void> holder) noexcept {
+            return holder ? EventLifetimeRetainer{object, std::move(holder)} : EventLifetimeRetainer{};
         }
 
         /** @brief Return the retained or borrowed object pointer. */
         [[nodiscard]] void* Get() const noexcept { return object_; }
 
-        /** @brief Return whether this token carries a non-null object pointer. */
+        /** @brief Return whether this retainer carries a non-null object pointer. */
         [[nodiscard]] explicit operator bool() const noexcept { return object_ != nullptr; }
 
-        /** @brief Return whether this token owns a lifetime holder. */
-        [[nodiscard]] bool Retaining() const noexcept { return holder_ != nullptr; }
+        /** @brief Return whether this retainer extends lifetime instead of merely borrowing. */
+        [[nodiscard]] bool Owning() const noexcept { return holder_ != nullptr; }
 
     private:
-        EventLifetimeToken(void* object, std::shared_ptr<void> holder) noexcept
+        EventLifetimeRetainer(void* object, std::shared_ptr<void> holder) noexcept
             : object_(object), holder_(std::move(holder)) {}
 
         void* object_{};
         std::shared_ptr<void> holder_{};
+    };
+
+    /** @brief Weak observer stored by subscription records without extending receiver or emitter lifetime. */
+    class EventLifetimeObserver {
+    public:
+        /** @brief Function used by custom observers to produce one delivery retainer. */
+        using RetainFn = EventLifetimeRetainer (*)(const EventLifetimeObserver&, bool) noexcept;
+
+        /** @brief Construct an empty observer. */
+        EventLifetimeObserver() noexcept = default;
+
+        /** @brief Observe an object whose liveness is guarded only by its EventPort. */
+        [[nodiscard]] static EventLifetimeObserver PortBound(void* object,
+                                                             std::weak_ptr<Detail::PortLiveness> port) noexcept {
+            return EventLifetimeObserver{object, {}, std::move(port), {}, &RetainPortBound};
+        }
+
+        /** @brief Observe an object owned by a weak shared control block. */
+        [[nodiscard]] static EventLifetimeObserver Shared(void* object, std::weak_ptr<void> holder) noexcept {
+            return EventLifetimeObserver{object, std::move(holder), {}, {}, &RetainShared};
+        }
+
+        /** @brief Build a custom observer backed by @p state and @p retain. */
+        [[nodiscard]] static EventLifetimeObserver Custom(void* object, std::shared_ptr<void> state,
+                                                          RetainFn retain) noexcept {
+            return retain ? EventLifetimeObserver{object, {}, {}, std::move(state), retain} : EventLifetimeObserver{};
+        }
+
+        /** @brief Return whether the observed object can be used for immediate synchronous delivery. */
+        [[nodiscard]] bool Alive() const noexcept { return static_cast<bool>(TryRetain()); }
+
+        /** @brief Try to acquire a retainer for immediate synchronous delivery. */
+        [[nodiscard]] EventLifetimeRetainer TryRetain() const noexcept {
+            return retain_ ? retain_(*this, false) : EventLifetimeRetainer{};
+        }
+
+        /** @brief Try to acquire an owning retainer for deferred delivery. */
+        [[nodiscard]] EventLifetimeRetainer TryRetainForDeferred() const noexcept {
+            return retain_ ? retain_(*this, true) : EventLifetimeRetainer{};
+        }
+
+        /** @brief Return the originally observed pointer. Custom retainers may use it as their payload pointer. */
+        [[nodiscard]] void* Object() const noexcept { return object_; }
+
+        /** @brief Return custom observer state supplied by @ref Custom. */
+        [[nodiscard]] const std::shared_ptr<void>& CustomState() const noexcept { return customState_; }
+
+    private:
+        EventLifetimeObserver(void* object, std::weak_ptr<void> weakHolder,
+                              std::weak_ptr<Detail::PortLiveness> portLiveness, std::shared_ptr<void> customState,
+                              RetainFn retain) noexcept
+            : object_(object),
+              weakHolder_(std::move(weakHolder)),
+              portLiveness_(std::move(portLiveness)),
+              customState_(std::move(customState)),
+              retain_(retain) {}
+
+        [[nodiscard]] static EventLifetimeRetainer RetainShared(const EventLifetimeObserver& observer,
+                                                                bool) noexcept {
+            auto holder = observer.weakHolder_.lock();
+            return holder ? EventLifetimeRetainer::Retained(observer.object_, std::move(holder))
+                          : EventLifetimeRetainer{};
+        }
+
+        [[nodiscard]] static EventLifetimeRetainer RetainPortBound(const EventLifetimeObserver& observer,
+                                                                   bool requireOwning) noexcept {
+            if (requireOwning) {
+                return {};
+            }
+            auto port = observer.portLiveness_.lock();
+            if (!port || !port->alive.load(std::memory_order_acquire)) {
+                return {};
+            }
+            return EventLifetimeRetainer::Borrowed(observer.object_);
+        }
+
+        void* object_{};
+        std::weak_ptr<void> weakHolder_{};
+        std::weak_ptr<Detail::PortLiveness> portLiveness_{};
+        std::shared_ptr<void> customState_{};
+        RetainFn retain_{};
     };
 
     namespace Detail {
@@ -324,7 +486,7 @@ namespace Sora::Experimental {
     namespace Detail {
 
         /** @brief CPO functor that implements @c Events(object) -> @ref EventPort. */
-        struct EventsFn {
+        struct EventPortOfFn {
             template<typename T>
             [[nodiscard]] EventPort& operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
                 return Dispatch(object);
@@ -344,36 +506,40 @@ namespace Sora::Experimental {
                                   "A member named 'events' must be Sora::Experimental::EventPort.");
                     return object.events;
                 } else {
-                    static_assert(Detail::kDependentFalse<T>, "Type does not expose an EventPort.");
+                    static_assert(Sora::kDependentFalse<T>, "Type does not expose an EventPort.");
                 }
             }
         };
 
-        /** @brief CPO functor that implements @c EventLifetime(object) -> @ref EventLifetimeToken. */
-        struct EventLifetimeFn {
+        /** @brief CPO functor that implements @c EventLifetimeObserverOf(object). */
+        struct EventLifetimeObserverOfFn {
             template<typename T>
-            [[nodiscard]] EventLifetimeToken operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
+            [[nodiscard]] EventLifetimeObserver operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
                 return Dispatch(object);
             }
 
         private:
             template<typename T>
-            [[nodiscard]] static EventLifetimeToken Dispatch(T& object) {
-                if constexpr (requires { EventLifetimeOf(object); }) {
-                    return EventLifetimeOf(object);
-                } else if constexpr (requires { object.EventLifetime(); }) {
-                    return object.EventLifetime();
+            [[nodiscard]] static EventLifetimeObserver Dispatch(T& object) {
+                if constexpr (requires { MakeEventLifetimeObserver(object); }) {
+                    return MakeEventLifetimeObserver(object);
+                } else if constexpr (requires { object.EventLifetimeObserver(); }) {
+                    return object.EventLifetimeObserver();
+                } else if constexpr (requires { object.weak_from_this(); }) {
+                    std::weak_ptr<void> holder = object.weak_from_this();
+                    return EventLifetimeObserver::Shared(std::addressof(object), std::move(holder));
                 } else if constexpr (requires { object.shared_from_this(); }) {
-                    auto holder = object.shared_from_this();
-                    return EventLifetimeToken::Retained(std::addressof(object), std::static_pointer_cast<void>(holder));
+                    std::weak_ptr<void> holder = object.shared_from_this();
+                    return EventLifetimeObserver::Shared(std::addressof(object), std::move(holder));
                 } else {
-                    return EventLifetimeToken::Borrowed(std::addressof(object));
+                    return EventLifetimeObserver::PortBound(std::addressof(object),
+                                                            EventPortOf(object).LivenessState());
                 }
             }
         };
 
         /** @brief CPO functor that implements @c EventRef(object) -> @ref EventObjectRef. */
-        struct EventRefFn {
+        struct EventRefOfFn {
             template<typename T>
             [[nodiscard]] EventObjectRef operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
                 return Dispatch(object);
@@ -393,13 +559,13 @@ namespace Sora::Experimental {
     } // namespace Detail
 
     /** @brief Customisation-point object returning an object's event port. */
-    inline constexpr Detail::EventsFn Events{};
+    inline constexpr Detail::EventPortOfFn EventPortOf{};
 
-    /** @brief Customisation-point object returning an object's event lifetime token. */
-    inline constexpr Detail::EventLifetimeFn EventLifetime{};
+    /** @brief Customisation-point object returning an object's weak event lifetime observer. */
+    inline constexpr Detail::EventLifetimeObserverOfFn EventLifetimeObserverOf{};
 
     /** @brief Customisation-point object returning an object's event reference. */
-    inline constexpr Detail::EventRefFn EventRef{};
+    inline constexpr Detail::EventRefOfFn EventRefOf{};
 
     namespace Concept {
 
@@ -407,9 +573,9 @@ namespace Sora::Experimental {
         template<typename T>
         concept EventParticipant =
             std::is_class_v<std::remove_cvref_t<T>> && Detail::HasEventPort<T> && requires(T& object) {
-                { Sora::Experimental::Events(object) } -> std::same_as<EventPort&>;
-                { Sora::Experimental::EventLifetime(object) } -> std::same_as<EventLifetimeToken>;
-                { Sora::Experimental::EventRef(object) } -> std::same_as<EventObjectRef>;
+                { Sora::Experimental::EventPortOf(object) } -> std::same_as<EventPort&>;
+                { Sora::Experimental::EventLifetimeObserverOf(object) } -> std::same_as<EventLifetimeObserver>;
+                { Sora::Experimental::EventRefOf(object) } -> std::same_as<EventObjectRef>;
             };
 
         /** @brief Class type that is either a concrete payload or the unspecified schema sentinel. */
@@ -438,129 +604,135 @@ namespace Sora::Experimental {
     } // namespace Detail
 
     /** @brief Stable handle for an explicit event relation. */
-    class EventLink {
+    class EventConnection {
     public:
-        EventLink() noexcept = default;
+        /** @brief Construct an empty connection handle. */
+        EventConnection() noexcept = default;
 
         /** @brief Return whether this handle still refers to an active relation. */
-        [[nodiscard]] bool Active() const noexcept;
+        [[nodiscard]] bool IsActive() const noexcept;
+
+        /** @brief Return whether this handle still names a relation record. */
+        [[nodiscard]] bool HasRecord() const noexcept { return !record_.expired(); }
+
+        /** @brief Disconnect this relation from future dispatch. */
+        void Disconnect() const noexcept;
+
+        /** @brief Pause this relation without consuming its dispatch budget. */
+        void Suspend() const noexcept;
+
+        /** @brief Resume this relation after a previous @ref Suspend. */
+        void Resume() const noexcept;
+
+        /** @brief Replace this relation's successful-dispatch budget. */
+        void SetBudget(WoreBudget budget) const noexcept;
 
     private:
-        explicit EventLink(std::weak_ptr<Detail::SubscriptionRecord> record) noexcept : record_(std::move(record)) {}
+        explicit EventConnection(std::weak_ptr<Detail::SubscriptionRecord> record) noexcept
+            : record_(std::move(record)) {}
 
         friend class EventPort;
-        friend void Drop(const EventLink&) noexcept;
-        friend void Suspend(const EventLink&) noexcept;
-        friend void Resume(const EventLink&) noexcept;
-        friend void SetBudget(const EventLink&, WoreBudget) noexcept;
+        friend void Disconnect(const EventConnection&) noexcept;
+        friend void Suspend(const EventConnection&) noexcept;
+        friend void Resume(const EventConnection&) noexcept;
+        friend void SetBudget(const EventConnection&, WoreBudget) noexcept;
 
         std::weak_ptr<Detail::SubscriptionRecord> record_{};
     };
 
-    /** @brief Remove @p link from future dispatch without mutating relation storage immediately. */
-    void Drop(const EventLink& link) noexcept;
+    /** @brief Disconnect @p link from future dispatch without mutating relation storage immediately. */
+    void Disconnect(const EventConnection& link) noexcept;
 
     /** @brief Pause @p link without consuming its dispatch budget. */
-    void Suspend(const EventLink& link) noexcept;
+    void Suspend(const EventConnection& link) noexcept;
 
     /** @brief Resume @p link after a previous @ref Suspend. */
-    void Resume(const EventLink& link) noexcept;
+    void Resume(const EventConnection& link) noexcept;
 
     /** @brief Replace @p link's successful-dispatch budget. */
-    void SetBudget(const EventLink& link, WoreBudget budget) noexcept;
-
-    /** @brief RAII-capable handle for a trace hook. */
-    class EventTraceHook {
-    public:
-        /** @brief Opaque trace state shared by handles and the owning port. */
-        struct State;
-
-        EventTraceHook() noexcept = default;
-
-        /** @brief Detach this trace hook if its port still exists. */
-        void Cancel() noexcept;
-
-        /** @brief Return whether this hook is still active. */
-        [[nodiscard]] bool Active() const noexcept;
-
-    private:
-        explicit EventTraceHook(std::weak_ptr<State> state) noexcept : state_(std::move(state)) {}
-
-        friend class EventPort;
-
-        std::weak_ptr<State> state_{};
-    };
+    void SetBudget(const EventConnection& link, WoreBudget budget) noexcept;
 
     namespace Detail {
 
         using ErasedCallback = std::move_only_function<EventFlow(EventContextBase&, const void*)>;
-        using ErasedTrace = std::move_only_function<void(const EventTrace&)>;
+
+        static constexpr uint32_t kCanceledFlag = 0x80000000u;
+        static constexpr uint32_t kSuspendedFlag = 0x40000000u;
+        static constexpr uint32_t kBudgetMask = 0x3fffffffu;
+        static constexpr uint32_t kPersistentState = kBudgetMask;
 
         struct SubscriptionState {
-            std::atomic<uint32_t> remaining{WoreBudget::kPersistent};
-            std::atomic_bool active{true};
-            std::atomic_bool suspended{false};
-            std::atomic_bool canceled{false};
+            std::atomic<uint32_t> word{kPersistentState}; /**< Packed canceled/suspended/budget state. */
         };
 
-        struct TraceState {
-            std::atomic_bool active{true};
-        };
+        /** @brief Encode @p budget as a packed subscription state word. */
+        [[nodiscard]] inline uint32_t PackDispatchState(WoreBudget budget) noexcept {
+            if (budget.value == 0) {
+                return kCanceledFlag;
+            }
+            const uint32_t value = budget.value == WoreBudget::kPersistent ? kPersistentState
+                                                                           : budget.value & kBudgetMask;
+            return value == 0 ? kCanceledFlag : value;
+        }
 
-    } // namespace Detail
-
-    struct EventTraceHook::State : Detail::TraceState {};
-
-    /** @brief Return whether @p state is active and dispatchable before budget consumption. */
-    [[nodiscard]] inline bool Dispatchable(const Detail::SubscriptionState& state) noexcept {
-        return state.active.load(std::memory_order_acquire) && !state.suspended.load(std::memory_order_acquire) &&
-               !state.canceled.load(std::memory_order_acquire) && state.remaining.load(std::memory_order_acquire) != 0;
-    }
-
-    /** @brief Consume one dispatch budget slot when @p state is active, returning whether callback may run. */
-    [[nodiscard]] inline bool TryBeginDispatch(Detail::SubscriptionState& state) noexcept {
-        if (!Dispatchable(state)) {
+        /** @brief Attempt to enter dispatch, consuming one finite budget slot on success. */
+        [[nodiscard]] inline bool TryBeginDispatch(SubscriptionState& state) noexcept {
+            uint32_t word = state.word.load(std::memory_order_acquire);
+            if ((word & (kCanceledFlag | kSuspendedFlag)) != 0) {
+                return false;
+            }
+            uint32_t remaining = word & kBudgetMask;
+            if (remaining == kPersistentState) {
+                return true;
+            }
+            while (remaining != 0) {
+                const uint32_t next = remaining == 1 ? kCanceledFlag : remaining - 1;
+                if (state.word.compare_exchange_weak(word, next, std::memory_order_acq_rel,
+                                                     std::memory_order_acquire)) {
+                    return true;
+                }
+                if ((word & (kCanceledFlag | kSuspendedFlag)) != 0) {
+                    return false;
+                }
+                remaining = word & kBudgetMask;
+            }
             return false;
         }
 
-        uint32_t remaining = state.remaining.load(std::memory_order_acquire);
-        if (remaining == WoreBudget::kPersistent) {
-            return true;
-        }
-        while (remaining != 0) {
-            if (state.remaining.compare_exchange_weak(remaining, remaining - 1, std::memory_order_acq_rel,
-                                                      std::memory_order_acquire)) {
-                if (remaining == 1) {
-                    state.active.store(false, std::memory_order_release);
+        /** @brief Replace @p state's dispatch budget while preserving suspension state. */
+        inline void SetDispatchBudget(SubscriptionState& state, WoreBudget budget) noexcept {
+            const uint32_t packed = PackDispatchState(budget);
+            uint32_t word = state.word.load(std::memory_order_acquire);
+            for (;;) {
+                const uint32_t next = (word & kSuspendedFlag) | packed;
+                if (state.word.compare_exchange_weak(word, next, std::memory_order_acq_rel,
+                                                     std::memory_order_acquire)) {
+                    return;
                 }
-                return true;
             }
         }
-        return false;
-    }
-
-    inline void EventTraceHook::Cancel() noexcept {
-        if (auto state = state_.lock()) {
-            state->active.store(false, std::memory_order_release);
-        }
-    }
-
-    inline bool EventTraceHook::Active() const noexcept {
-        auto state = state_.lock();
-        return state && state->active.load(std::memory_order_acquire);
-    }
-
-    namespace Detail {
 
         template<typename Result>
         [[nodiscard]] constexpr EventFlow FlowOf(Result&& result) noexcept {
-            if constexpr (std::same_as<std::remove_cvref_t<Result>, EventFlow>) {
-                return result;
-            } else {
-                return EventFlow::Continue;
-            }
+            return std::same_as<std::remove_cvref_t<Result>, EventFlow> ? std::forward<Result>(result)
+                                                                        : EventFlow::Continue;
         }
 
+        /**
+         * @brief Invoke a callable and normalize the result to @ref EventFlow.
+         *
+         * @protocol
+         * - Callables returning `void` map to `EventFlow::Continue`.
+         * - Callables returning `EventFlow` propagate that value directly.
+         * - Any other return type is treated as `EventFlow::Continue`.
+         * - The callable is invoked exactly once.
+         *
+         * @tparam Callable Callable type.
+         * @tparam Args Argument types.
+         * @param callable Callable to invoke.
+         * @param args Arguments to forward to the callable.
+         * @return Normalized event flow result.
+         */
         template<typename Callable, typename... Args>
         [[nodiscard]] EventFlow InvokeAndFlow(Callable& callable, Args&&... args) {
             if constexpr (std::same_as<void, std::invoke_result_t<Callable&, Args...>>) {
@@ -571,6 +743,26 @@ namespace Sora::Experimental {
             }
         }
 
+        /**
+         * @brief Invoke a default receiver handler using the best supported signature.
+         *
+         * @protocol
+         * - The receiver is resolved from @p context using the expected receiver type.
+         * - The emitter is resolved from @p context using the expected emitter type.
+         * - The first compatible overload in this order is called exactly once:
+         *   1. `receiver.On(context.event, emitter)`
+         *   2. `receiver.On(context.event)`
+         *   3. `receiver.On(context)`
+         *   4. `receiver.On()`
+         * - `void` results map to `EventFlow::Continue`; `EventFlow` results are propagated.
+         * - If no compatible overload exists, compilation fails.
+         *
+         * @tparam Event Event type.
+         * @tparam Receiver Receiver type.
+         * @tparam Emitter Emitter type.
+         * @param context Event invocation context.
+         * @return Normalized event flow result.
+         */
         template<typename Event, typename Receiver, typename Emitter>
         [[nodiscard]] EventFlow InvokeDefaultReceiver(EventContext<Event>& context) {
             Receiver& receiver = context.receiver.template As<Receiver>();
@@ -608,6 +800,32 @@ namespace Sora::Experimental {
             }
         }
 
+        /**
+         * @brief Invoke a typed handler using the most specific compatible signature.
+         *
+         * @protocol
+         * - The receiver and emitter are extracted from @p context before invocation.
+         * - The handler is matched against a fixed priority list, from most specific to least:
+         *   1. `(Receiver&, const Event&, Emitter&, EventContext<Event>&)`
+         *   2. `(Receiver&, const Event&, Emitter&)
+         *   3. `(Receiver&, const Event&)`
+         *   4. `(const Event&, Emitter&)`
+         *   5. `(const Event&, EventContext<Event>&)`
+         *   6. `(const Event&)`
+         *   7. `(EventContext<Event>&)`
+         *   8. `()`
+         * - The first compatible signature is invoked exactly once.
+         * - Return normalization follows @ref InvokeAndFlow.
+         * - If no compatible signature exists, compilation fails.
+         *
+         * @tparam Event Event type.
+         * @tparam Receiver Receiver type.
+         * @tparam Emitter Emitter type.
+         * @tparam Handler Handler type.
+         * @param handler Handler to invoke.
+         * @param context Event invocation context.
+         * @return Normalized event flow result.
+         */
         template<typename Event, typename Receiver, typename Emitter, typename Handler>
         [[nodiscard]] EventFlow InvokeTypedHandler(Handler& handler, EventContext<Event>& context) {
             Receiver& receiver = context.receiver.template As<Receiver>();
@@ -633,6 +851,28 @@ namespace Sora::Experimental {
             }
         }
 
+        /**
+         * @brief Invoke an any-event handler using the most specific compatible signature.
+         *
+         * @protocol
+         * - The receiver and emitter are extracted from @p context before invocation.
+         * - The handler is matched against a fixed priority list, from most specific to least:
+         *   1. `(Receiver&, Emitter&, EventContextBase&)`
+         *   2. `(Receiver&, Emitter&)`
+         *   3. `(Receiver&, EventContextBase&)`
+         *   4. `(EventContextBase&)`
+         *   5. `()`
+         * - The first compatible signature is invoked exactly once.
+         * - Return normalization follows @ref InvokeAndFlow.
+         * - If no compatible signature exists, compilation fails.
+         *
+         * @tparam Receiver Receiver type.
+         * @tparam Emitter Emitter type.
+         * @tparam Handler Handler type.
+         * @param handler Handler to invoke.
+         * @param context Event invocation context.
+         * @return Normalized event flow result.
+         */
         template<typename Receiver, typename Emitter, typename Handler>
         [[nodiscard]] EventFlow InvokeAnyHandler(Handler& handler, EventContextBase& context) {
             Receiver& receiver = context.receiver.template As<Receiver>();
@@ -656,7 +896,8 @@ namespace Sora::Experimental {
             SubscriptionState state{};
             ErasedCallback callback{};
             EventObjectRef receiver{};
-            EventLifetimeToken receiverLifetime{};
+            EventLifetimeObserver receiverObserver{};
+            EventPort* owner{};
             EventId eventId{};
             EventId callbackId{};
             uint64_t id{};
@@ -664,7 +905,9 @@ namespace Sora::Experimental {
             int32_t priority{};
             bool anyEvent{};
 
-            auto operator<=>(const SubscriptionRecord& rhs) const noexcept {
+            [[nodiscard]] auto operator==(const SubscriptionRecord& rhs) const noexcept { return this == &rhs; }
+
+            [[nodiscard]] auto operator<=>(const SubscriptionRecord& rhs) const noexcept {
                 if (priority != rhs.priority) {
                     return priority > rhs.priority ? std::strong_ordering::less : std::strong_ordering::greater;
                 }
@@ -675,66 +918,60 @@ namespace Sora::Experimental {
 
         /** @brief Apply cancellation flags to a subscription relation. */
         inline void Cancel(SubscriptionRecord& record) noexcept {
-            record.state.active.store(false, std::memory_order_release);
-            record.state.canceled.store(true, std::memory_order_release);
+            record.state.word.fetch_or(kCanceledFlag, std::memory_order_release);
         }
-
-        struct TraceRecord {
-            std::shared_ptr<EventTraceHook::State> state{};
-            ErasedTrace callback{};
-            uint64_t id{};
-            uint64_t order{};
-        };
 
         struct SubscriptionSnapshot {
             std::vector<std::shared_ptr<SubscriptionRecord>> records{};
         };
 
-        struct TraceSnapshot {
-            std::vector<std::shared_ptr<TraceRecord>> records{};
-        };
-
     } // namespace Detail
 
-    inline bool EventLink::Active() const noexcept {
+    inline bool EventConnection::IsActive() const noexcept {
         auto record = record_.lock();
-        return record && Dispatchable(record->state);
+        if (!record) {
+            return false;
+        }
+        const uint32_t word = record->state.word.load(std::memory_order_acquire);
+        return (word & (Detail::kCanceledFlag | Detail::kSuspendedFlag)) == 0 &&
+               (word & Detail::kBudgetMask) != 0;
     }
 
-    inline void Drop(const EventLink& link) noexcept {
+    inline void EventConnection::Disconnect() const noexcept { Sora::Experimental::Disconnect(*this); }
+
+    inline void EventConnection::Suspend() const noexcept { Sora::Experimental::Suspend(*this); }
+
+    inline void EventConnection::Resume() const noexcept { Sora::Experimental::Resume(*this); }
+
+    inline void EventConnection::SetBudget(WoreBudget budget) const noexcept {
+        Sora::Experimental::SetBudget(*this, budget);
+    }
+
+    inline void Suspend(const EventConnection& link) noexcept {
         if (auto record = link.record_.lock()) {
-            Detail::Cancel(*record);
+            record->state.word.fetch_or(Detail::kSuspendedFlag, std::memory_order_release);
         }
     }
 
-    inline void Suspend(const EventLink& link) noexcept {
+    inline void Resume(const EventConnection& link) noexcept {
         if (auto record = link.record_.lock()) {
-            record->state.suspended.store(true, std::memory_order_release);
+            record->state.word.fetch_and(~Detail::kSuspendedFlag, std::memory_order_release);
         }
     }
 
-    inline void Resume(const EventLink& link) noexcept {
+    inline void SetBudget(const EventConnection& link, WoreBudget budget) noexcept {
         if (auto record = link.record_.lock()) {
-            record->state.suspended.store(false, std::memory_order_release);
-        }
-    }
-
-    inline void SetBudget(const EventLink& link, WoreBudget budget) noexcept {
-        if (auto record = link.record_.lock()) {
-            record->state.remaining.store(budget.value, std::memory_order_release);
-            record->state.active.store(budget.value != 0, std::memory_order_release);
-            record->state.canceled.store(budget.value == 0, std::memory_order_release);
+            Detail::SetDispatchBudget(record->state, budget);
         }
     }
 
     /** @brief Immutable data shared by every deferred delivery act in one emission. */
     template<Concept::EventPayload Event>
     struct EmissionFrame {
-        Event event;                                           /**< Retained event payload. */
-        EventObjectRef emitter{};                              /**< Retained emitter reference. */
-        EventLifetimeToken emitterLifetime{};                  /**< Emitter lifetime token. */
-        std::shared_ptr<const Detail::TraceSnapshot> traces{}; /**< Trace snapshot for this emission. */
-        uint64_t sequence{};                                   /**< Emission sequence number. */
+        Event event;                              /**< Retained event payload. */
+        EventObjectRef emitter{};                 /**< Emitter reference retained by @ref emitterRetainer. */
+        EventLifetimeRetainer emitterRetainer{};  /**< Emitter retainer held by every deferred callback. */
+        uint64_t sequence{};                      /**< Emission sequence number. */
     };
 
     /** @brief One move-only deferred callback act selected from an emission. */
@@ -756,15 +993,41 @@ namespace Sora::Experimental {
     private:
         friend class EventPort;
 
-        EventDeliveryAct(std::shared_ptr<const EmissionFrame<Event>> frame, EventLifetimeToken receiver,
+        EventDeliveryAct(std::shared_ptr<const EmissionFrame<Event>> frame, EventLifetimeRetainer receiver,
                          std::shared_ptr<Detail::SubscriptionRecord> record) noexcept
             : frame_(std::move(frame)), receiver_(std::move(receiver)), record_(std::move(record)) {}
 
-        void Trace(EventTracePhase phase, EventObjectRef receiver, EventObjectRef emitter) const;
+        void Probe(EventProbePhase phase, EventObjectRef receiver, EventObjectRef emitter) const;
 
         std::shared_ptr<const EmissionFrame<Event>> frame_{};
-        EventLifetimeToken receiver_{};
+        EventLifetimeRetainer receiver_{};
         std::shared_ptr<Detail::SubscriptionRecord> record_{};
+    };
+
+    /** @brief Move-only batch of delivery acts produced by one asynchronous emission. */
+    template<Concept::EventPayload Event>
+    class EventDeliveryBatch {
+    public:
+        /** @brief Construct an empty batch. */
+        EventDeliveryBatch() noexcept = default;
+
+        /** @brief Construct a batch from selected delivery acts. */
+        explicit EventDeliveryBatch(std::vector<EventDeliveryAct<Event>> acts) noexcept : acts_(std::move(acts)) {}
+
+        EventDeliveryBatch(const EventDeliveryBatch&) = delete;
+        EventDeliveryBatch& operator=(const EventDeliveryBatch&) = delete;
+        EventDeliveryBatch(EventDeliveryBatch&&) noexcept = default;
+        EventDeliveryBatch& operator=(EventDeliveryBatch&&) noexcept = default;
+
+        /** @brief Run every selected delivery act on the current execution agent. */
+        void operator()() {
+            for (auto& act : acts_) {
+                act();
+            }
+        }
+
+    private:
+        std::vector<EventDeliveryAct<Event>> acts_{};
     };
 
     /** @brief Build a lazy sender that schedules @p act on @p scheduler and then invokes it. */
@@ -775,32 +1038,47 @@ namespace Sora::Experimental {
         return stdexec::schedule(std::forward<Scheduler>(scheduler)) | stdexec::then(std::move(act));
     }
 
-    /** @brief Start @p act detached on @p scheduler. */
-    template<typename Scheduler, typename Act>
-        requires stdexec::scheduler<std::remove_cvref_t<Scheduler>> && std::move_constructible<Act> &&
-                 std::invocable<Act&>
-    void StartEvent(Scheduler&& scheduler, Act act) {
-        exec::start_detached(EventSender(std::forward<Scheduler>(scheduler), std::move(act)));
-    }
-
     /** @brief Plain event relation container. */
     class EventPort final {
     public:
         /** @brief Construct an empty event port. */
         EventPort()
             : subscriptions_(std::make_shared<Detail::SubscriptionSnapshot>()),
-              traces_(std::make_shared<Detail::TraceSnapshot>()) {}
+              liveness_(std::make_shared<Detail::PortLiveness>()) {}
 
         EventPort(const EventPort&) = delete;
         EventPort& operator=(const EventPort&) = delete;
 
         /** @brief Cancel outgoing and incoming relations attached to this port. */
-        ~EventPort() noexcept { CancelAll(); }
+        ~EventPort() noexcept {
+            liveness_->alive.store(false, std::memory_order_release);
+            CancelAll();
+        }
+
+        /** @brief Return this port's weak liveness state for ordinary non-owning event participants. */
+        [[nodiscard]] std::weak_ptr<Detail::PortLiveness> LivenessState() const noexcept { return liveness_; }
+
+        /** @brief Return stable handles to relations known by this port. */
+        [[nodiscard]] std::vector<EventConnection>
+        Connections(EventConnectionDirection direction = EventConnectionDirection::Outgoing) const {
+            std::vector<EventConnection> result;
+            std::scoped_lock lock(mutex_);
+            if (direction == EventConnectionDirection::Outgoing || direction == EventConnectionDirection::All) {
+                for (const auto& record : subscriptions_->records) {
+                    AppendConnection(result, record);
+                }
+            }
+            if (direction == EventConnectionDirection::Incoming || direction == EventConnectionDirection::All) {
+                for (const auto& relation : inbound_) {
+                    AppendConnection(result, relation.lock());
+                }
+            }
+            return result;
+        }
 
         /** @brief Attach a typed relation owned by this port's emitter. */
         template<Concept::EventPayload Event, typename Receiver, typename Emitter, typename Callback>
-        [[nodiscard]] EventLink ListenTyped(Receiver& receiver, Emitter&, Callback&& callback,
-                                            EventOptions options = {}) {
+        EventConnection ConnectTyped(Receiver& receiver, Emitter&, Callback&& callback, EventOptions options = {}) {
             using R = std::remove_cvref_t<Receiver>;
             using E = std::remove_cvref_t<Emitter>;
             using F = std::remove_cvref_t<Callback>;
@@ -814,23 +1092,24 @@ namespace Sora::Experimental {
                 EventContext<Event> context{base, event};
                 return Detail::InvokeTypedHandler<Event, R, E>(callback, context);
             };
-            record->receiver = EventRef(receiver);
-            record->receiverLifetime = EventLifetime(receiver);
+            record->receiver = EventRefOf(receiver);
+            record->receiverObserver = EventLifetimeObserverOf(receiver);
+            record->owner = this;
             record->eventId = Traits::EventIdOf<Event>;
             record->callbackId = options.callbackId;
             record->priority = options.priority;
             record->anyEvent = false;
-            record->state.remaining.store(options.budget.value, std::memory_order_relaxed);
-            record->state.active.store(options.budget.value != 0, std::memory_order_relaxed);
+            record->state.word.store(Detail::PackDispatchState(options.budget), std::memory_order_relaxed);
+
             auto stored = AddSubscription(std::move(record));
-            Events(receiver).AttachInbound(stored);
-            return EventLink{stored};
+
+            EventPortOf(receiver).AttachInbound(stored);
+            return EventConnection{stored};
         }
 
         /** @brief Attach an event-type-erased relation owned by this port's emitter. */
         template<typename Receiver, typename Emitter, typename Callback>
-        [[nodiscard]] EventLink ListenAny(Receiver& receiver, Emitter&, Callback&& callback,
-                                          EventOptions options = {}) {
+        EventConnection ConnectAny(Receiver& receiver, Emitter&, Callback&& callback, EventOptions options = {}) {
             using R = std::remove_cvref_t<Receiver>;
             using E = std::remove_cvref_t<Emitter>;
             using F = std::remove_cvref_t<Callback>;
@@ -841,36 +1120,40 @@ namespace Sora::Experimental {
             record->callback = [callback = std::move(anyCallback)](EventContextBase& context, const void*) mutable {
                 return Detail::InvokeAnyHandler<R, E>(callback, context);
             };
-            record->receiver = EventRef(receiver);
-            record->receiverLifetime = EventLifetime(receiver);
+            record->receiver = EventRefOf(receiver);
+            record->receiverObserver = EventLifetimeObserverOf(receiver);
+            record->owner = this;
             record->callbackId = options.callbackId;
             record->priority = options.priority;
             record->anyEvent = true;
-            record->state.remaining.store(options.budget.value, std::memory_order_relaxed);
-            record->state.active.store(options.budget.value != 0, std::memory_order_relaxed);
+            record->state.word.store(Detail::PackDispatchState(options.budget), std::memory_order_relaxed);
+
             auto stored = AddSubscription(std::move(record));
-            Events(receiver).AttachInbound(stored);
-            return EventLink{stored};
+
+            EventPortOf(receiver).AttachInbound(stored);
+            return EventConnection{stored};
         }
 
         /** @brief Deliver @p event synchronously from @p emitter. */
         template<Concept::EventPayload Event, typename Emitter>
         void Emit(Emitter& emitter, const Event& event) {
             const uint64_t sequence = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
-            auto emitterRef = EventRef(emitter);
+            auto emitterRef = EventRefOf(emitter);
             auto subscriptions = Subscriptions();
-            Trace(EventTrace{.phase = EventTracePhase::ReceiveBegin,
-                             .emitter = emitterRef,
-                             .eventId = Traits::EventIdOf<Event>,
-                             .sequence = sequence});
+            ProbeEventIfEnabled(EventProbePhase::ReceiveBegin, event, {}, emitterRef, Traits::EventIdOf<Event>, {}, 0,
+                                sequence);
 
-            for (const auto& record : subscriptions->records) {
-                if (!record || (!record->anyEvent && record->eventId != Traits::EventIdOf<Event>)) {
-                    continue;
+            auto eventnessFilter = std::views::filter([](const auto& record) {
+                return record && (record->anyEvent || record->eventId == Traits::EventIdOf<Event>);
+            });
+            for (const auto& record : subscriptions->records | eventnessFilter) {
+                EventLifetimeRetainer receiverRetainer = record->receiverObserver.TryRetain();
+                EventObjectRef receiverRef = receiverRetainer ? record->receiver : EventObjectRef{};
+                if (receiverRef) {
+                    receiverRef.object = receiverRetainer.Get();
                 }
-                EventObjectRef receiverRef = record->receiverLifetime ? record->receiver : EventObjectRef{};
                 if (!receiverRef) {
-                    record->state.active.store(false, std::memory_order_release);
+                    Detail::Cancel(*record);
                     continue;
                 }
 
@@ -881,73 +1164,68 @@ namespace Sora::Experimental {
                                              .subscription = record->id,
                                              .sequence = sequence},
                                             event};
-                const EventFlow flow = DispatchRecord(record, context, event);
-                if (flow == EventFlow::Stop) {
+                if (DispatchRecord(record, context, event) == EventFlow::Stop) {
                     break;
                 }
             }
 
-            Trace(EventTrace{.phase = EventTracePhase::ReceiveEnd,
-                             .emitter = emitterRef,
-                             .eventId = Traits::EventIdOf<Event>,
-                             .sequence = sequence});
+            ProbeEventIfEnabled(EventProbePhase::ReceiveEnd, event, {}, emitterRef, Traits::EventIdOf<Event>, {}, 0,
+                                sequence);
         }
 
-        /** @brief Schedule every callback selected by @p event on @p scheduler without storing the scheduler. */
+        /** @brief Build a lazy sender that delivers every callback selected by @p event on @p scheduler. */
         template<stdexec::scheduler Scheduler, Concept::EventPayload Event, typename Emitter>
-        void EmitOn(Emitter& emitter, Scheduler scheduler, const Event& event) {
+        [[nodiscard]] auto EmitOn(Emitter& emitter, Scheduler scheduler, const Event& event) {
             const uint64_t sequence = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
             const EventId eventId = Traits::EventIdOf<Event>;
-            auto emitterRef = EventRef(emitter);
-            auto emitterLifetime = EventLifetime(emitter);
+            auto emitterRef = EventRefOf(emitter);
+            auto emitterRetainer = EventLifetimeObserverOf(emitter).TryRetainForDeferred();
             auto subscriptions = Subscriptions();
-            auto traces = Traces();
-            Trace(traces, EventTrace{.phase = EventTracePhase::ReceiveBegin,
-                                     .emitter = emitterRef,
-                                     .eventId = eventId,
-                                     .sequence = sequence});
+            ProbeEventIfEnabled(EventProbePhase::ReceiveBegin, event, {}, emitterRef, eventId, {}, 0, sequence);
 
+            std::vector<EventDeliveryAct<Event>> acts;
             std::shared_ptr<const EmissionFrame<Event>> frame;
-            auto matchingRecords = subscriptions->records | std::views::filter([eventId](const auto& record) {
-                                       return record && (record->anyEvent || record->eventId == eventId);
-                                   });
-            for (const auto& record : matchingRecords) {
-                if (!record->receiverLifetime) {
-                    record->state.active.store(false, std::memory_order_release);
-                    continue;
+            if (emitterRetainer) {
+                emitterRef.object = emitterRetainer.Get();
+
+                auto matchingRecords = subscriptions->records | std::views::filter([eventId](const auto& record) {
+                                           return record && (record->anyEvent || record->eventId == eventId);
+                });
+                for (const auto& record : matchingRecords) {
+                    const uint32_t word = record->state.word.load(std::memory_order_acquire);
+                    if ((word & (Detail::kCanceledFlag | Detail::kSuspendedFlag)) != 0 ||
+                        (word & Detail::kBudgetMask) == 0) {
+                        continue;
+                    }
+                    EventLifetimeRetainer receiverRetainer = record->receiverObserver.TryRetainForDeferred();
+                    EventObjectRef receiverRef = receiverRetainer ? record->receiver : EventObjectRef{};
+                    if (receiverRef) {
+                        receiverRef.object = receiverRetainer.Get();
+                    }
+                    if (!receiverRef) {
+                        Detail::Cancel(*record);
+                        continue;
+                    }
+                    if (!frame) {
+                        frame = std::make_shared<const EmissionFrame<Event>>(
+                            EmissionFrame<Event>{.event = event,
+                                                 .emitter = emitterRef,
+                                                 .emitterRetainer = std::move(emitterRetainer),
+                                                 .sequence = sequence});
+                    }
+                    ProbeEventIfEnabled(EventProbePhase::CallbackScheduled, event, receiverRef, emitterRef, eventId,
+                                        record->callbackId, record->id, sequence);
+                    auto act = EventDeliveryAct<Event>{frame, std::move(receiverRetainer), record};
+                    if (act) {
+                        acts.push_back(std::move(act));
+                    }
                 }
-                if (!frame) {
-                    frame = std::make_shared<const EmissionFrame<Event>>(
-                        EmissionFrame<Event>{.event = event,
-                                             .emitter = emitterRef,
-                                             .emitterLifetime = emitterLifetime,
-                                             .traces = traces,
-                                             .sequence = sequence});
-                }
-                auto act = EventDeliveryAct<Event>{frame, record->receiverLifetime, record};
-                if (act) {
-                    StartEvent(scheduler, std::move(act));
-                }
+            } else {
+                emitterRef = {};
             }
 
-            Trace(traces, EventTrace{.phase = EventTracePhase::ReceiveEnd,
-                                     .emitter = emitterRef,
-                                     .eventId = eventId,
-                                     .sequence = sequence});
-        }
-
-        /** @brief Attach a trace hook. */
-        template<typename Callback>
-            requires std::move_constructible<std::remove_cvref_t<Callback>> &&
-                     std::invocable<std::remove_cvref_t<Callback>&, const EventTrace&>
-        [[nodiscard]] EventTraceHook AttachTrace(Callback&& callback) {
-            using F = std::remove_cvref_t<Callback>;
-            auto state = std::make_shared<EventTraceHook::State>();
-            Detail::TraceRecord record{
-                .state = state,
-                .callback = F(std::forward<Callback>(callback)),
-            };
-            return AddTrace(std::move(record));
+            ProbeEventIfEnabled(EventProbePhase::ReceiveEnd, event, {}, emitterRef, eventId, {}, 0, sequence);
+            return EventSender(std::move(scheduler), EventDeliveryBatch<Event>{std::move(acts)});
         }
 
         /** @brief Cancel every relation owned by this port and every inbound relation known by this port. */
@@ -966,16 +1244,26 @@ namespace Sora::Experimental {
                 Detail::Cancel(*record);
                 return false;
             });
-            for (const auto& trace : traces_->records) {
-                if (trace && trace->state) {
-                    trace->state->active.store(false, std::memory_order_release);
-                }
-            }
         }
 
     private:
+        friend void Disconnect(const EventConnection&) noexcept;
+
         template<Concept::EventPayload>
         friend class EventDeliveryAct;
+
+        static void AppendConnection(std::vector<EventConnection>& result,
+                                     const std::shared_ptr<Detail::SubscriptionRecord>& record) {
+            if (!record) {
+                return;
+            }
+            const bool alreadyAdded = std::ranges::any_of(result, [&](const EventConnection& connection) {
+                return connection.record_.lock().get() == record.get();
+            });
+            if (!alreadyAdded) {
+                result.push_back(EventConnection{record});
+            }
+        }
 
         [[nodiscard]] std::shared_ptr<Detail::SubscriptionRecord>
         AddSubscription(std::shared_ptr<Detail::SubscriptionRecord> stored) {
@@ -985,24 +1273,27 @@ namespace Sora::Experimental {
                 std::scoped_lock lock(mutex_);
                 auto next = std::make_shared<Detail::SubscriptionSnapshot>(*subscriptions_);
                 next->records.push_back(stored);
-                std::ranges::stable_sort(next->records);
+                std::ranges::stable_sort(next->records, [](const auto& lhs, const auto& rhs) noexcept {
+                    if (lhs->priority != rhs->priority) {
+                        return lhs->priority > rhs->priority;
+                    }
+                    return lhs->order < rhs->order;
+                });
                 subscriptions_ = std::move(next);
             }
             return stored;
         }
 
-        EventTraceHook AddTrace(Detail::TraceRecord record) {
-            record.id = nextTrace_.fetch_add(1, std::memory_order_relaxed) + 1;
-            record.order = record.id;
-            auto state = record.state;
-            auto stored = std::shared_ptr<Detail::TraceRecord>{new Detail::TraceRecord(std::move(record))};
-            {
-                std::scoped_lock lock(mutex_);
-                auto next = std::make_shared<Detail::TraceSnapshot>(*traces_);
-                next->records.push_back(std::move(stored));
-                traces_ = std::move(next);
+        void RemoveSubscription(const std::shared_ptr<Detail::SubscriptionRecord>& target) noexcept {
+            if (!target) {
+                return;
             }
-            return EventTraceHook{state};
+            Detail::Cancel(*target);
+            std::scoped_lock lock(mutex_);
+            auto next = std::make_shared<Detail::SubscriptionSnapshot>(*subscriptions_);
+            std::erase_if(next->records, [&](const auto& record) { return !record || record.get() == target.get(); });
+            subscriptions_ = std::move(next);
+            std::erase_if(inbound_, [](const auto& relation) { return relation.expired(); });
         }
 
         void AttachInbound(std::weak_ptr<Detail::SubscriptionRecord> record) {
@@ -1016,67 +1307,67 @@ namespace Sora::Experimental {
             return subscriptions_;
         }
 
-        [[nodiscard]] std::shared_ptr<const Detail::TraceSnapshot> Traces() const {
-            std::scoped_lock lock(mutex_);
-            return traces_;
-        }
-
-        void Trace(const EventTrace& trace) const { Trace(Traces(), trace); }
-
-        static void Trace(std::shared_ptr<const Detail::TraceSnapshot> traces, const EventTrace& trace) {
-            if (!traces) {
-                return;
-            }
-            for (const auto& hook : traces->records) {
-                if (hook && hook->state && hook->state->active.load(std::memory_order_acquire)) {
-                    hook->callback(trace);
-                }
-            }
-        }
-
         template<Concept::EventPayload Event>
         EventFlow DispatchRecord(const std::shared_ptr<Detail::SubscriptionRecord>& record,
                                  EventContext<Event>& context, const Event& event) {
-            if (!record || !TryBeginDispatch(record->state)) {
+            if (!record || !Detail::TryBeginDispatch(record->state)) {
                 return EventFlow::Continue;
             }
-            return record->callback(context, std::addressof(event));
+            ProbeEventIfEnabled(EventProbePhase::CallbackBegin, event, context.receiver, context.emitter,
+                                context.eventId, context.callbackId, context.subscription, context.sequence);
+            EventFlow flow = record->callback(context, std::addressof(event));
+            ProbeEventIfEnabled(EventProbePhase::CallbackEnd, event, context.receiver, context.emitter,
+                                context.eventId, context.callbackId, context.subscription, context.sequence);
+            return flow;
         }
 
         mutable std::mutex mutex_{};
         std::shared_ptr<Detail::SubscriptionSnapshot> subscriptions_{};
-        std::shared_ptr<Detail::TraceSnapshot> traces_{};
         std::vector<std::weak_ptr<Detail::SubscriptionRecord>> inbound_{};
+        std::shared_ptr<Detail::PortLiveness> liveness_{};
         std::atomic<uint64_t> nextSubscription_{};
-        std::atomic<uint64_t> nextTrace_{};
         std::atomic<uint64_t> nextSequence_{};
     };
 
+    inline void Disconnect(const EventConnection& link) noexcept {
+        if (auto record = link.record_.lock()) {
+            if (record->owner) {
+                record->owner->RemoveSubscription(record);
+            } else {
+                Detail::Cancel(*record);
+            }
+        }
+    }
+
     template<Concept::EventPayload Event>
-    void EventDeliveryAct<Event>::Trace(EventTracePhase phase, EventObjectRef receiver, EventObjectRef emitter) const {
-        EventPort::Trace(frame_ ? frame_->traces : nullptr,
-                         EventTrace{.phase = phase,
-                                    .receiver = receiver,
-                                    .emitter = emitter,
-                                    .eventId = Traits::EventIdOf<Event>,
-                                    .callbackId = record_ ? record_->callbackId : EventId{},
-                                    .subscription = record_ ? record_->id : 0,
-                                    .sequence = frame_ ? frame_->sequence : 0});
+    void EventDeliveryAct<Event>::Probe(EventProbePhase phase, EventObjectRef receiver, EventObjectRef emitter) const {
+        ProbeEventIfEnabled(phase, frame_->event, receiver, emitter, Traits::EventIdOf<Event>,
+                            record_ ? record_->callbackId : EventId{}, record_ ? record_->id : 0,
+                            frame_ ? frame_->sequence : 0);
     }
 
     template<Concept::EventPayload Event>
     void EventDeliveryAct<Event>::operator()() {
-        if (!frame_ || !record_ || !Dispatchable(record_->state)) {
+        if (!frame_ || !record_) {
             return;
         }
         EventObjectRef receiverRef = receiver_ ? record_->receiver : EventObjectRef{};
-        EventObjectRef emitterRef = frame_->emitterLifetime ? frame_->emitter : EventObjectRef{};
+        EventObjectRef emitterRef = frame_->emitterRetainer ? frame_->emitter : EventObjectRef{};
+        if (receiverRef) {
+            receiverRef.object = receiver_.Get();
+        }
+        if (emitterRef) {
+            emitterRef.object = frame_->emitterRetainer.Get();
+        }
         if (!receiverRef || !emitterRef) {
-            record_->state.active.store(false, std::memory_order_release);
-            Trace(EventTracePhase::CallbackCanceled, receiverRef, emitterRef);
+            Detail::Cancel(*record_);
+            Probe(EventProbePhase::CallbackCanceled, receiverRef, emitterRef);
             return;
         }
-        Trace(EventTracePhase::CallbackBegin, receiverRef, emitterRef);
+        if (!Detail::TryBeginDispatch(record_->state)) {
+            return;
+        }
+        Probe(EventProbePhase::CallbackBegin, receiverRef, emitterRef);
         EventContext<Event> context{{.receiver = receiverRef,
                                      .emitter = emitterRef,
                                      .eventId = Traits::EventIdOf<Event>,
@@ -1084,68 +1375,67 @@ namespace Sora::Experimental {
                                      .subscription = record_->id,
                                      .sequence = frame_->sequence},
                                     frame_->event};
-        if (TryBeginDispatch(record_->state)) {
-            std::ignore = record_->callback(context, std::addressof(frame_->event));
-        }
-        Trace(EventTracePhase::CallbackEnd, receiverRef, emitterRef);
+        std::ignore = record_->callback(context, std::addressof(frame_->event));
+        Probe(EventProbePhase::CallbackEnd, receiverRef, emitterRef);
     }
 
     /** @brief Subscribe @p receiver to @p emitter's @p Event with the receiver's default On handler. */
     template<typename Receiver, typename Emitter, Concept::EventPayload Event>
         requires Concept::EventReceiver<Receiver, Event> && Concept::EventEmitter<Emitter, Event>
-    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options = {}) {
+    EventConnection Connect(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options = {}) {
         auto defaultHandler = [](Receiver& r, const Event& event, Emitter& e, EventContext<Event>& context) {
             std::ignore = r;
             std::ignore = event;
             std::ignore = e;
             return Detail::InvokeDefaultReceiver<Event, Receiver, Emitter>(context);
         };
-        return Events(emitter).template ListenTyped<Event>(receiver, emitter, std::move(defaultHandler), options);
+        return EventPortOf(emitter).template ConnectTyped<Event>(receiver, emitter, std::move(defaultHandler), options);
     }
 
     /** @brief Subscribe @p receiver to @p emitter's @p Event with an explicit handler. */
     template<typename Receiver, typename Emitter, Concept::EventPayload Event, typename Handler>
         requires Concept::EventReceiver<Receiver, Event> && Concept::EventEmitter<Emitter, Event>
-    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options,
-                                   Handler&& handler) {
-        return Events(emitter).template ListenTyped<Event>(receiver, emitter, std::forward<Handler>(handler), options);
+    EventConnection Connect(Receiver& receiver, Emitter& emitter, const Event&, EventOptions options,
+                            Handler&& handler) {
+        return EventPortOf(emitter).template ConnectTyped<Event>(receiver, emitter, std::forward<Handler>(handler),
+                                                                options);
     }
 
     /** @brief Subscribe @p receiver to @p emitter's @p Event with an explicit handler and budget shorthand. */
     template<typename Receiver, typename Emitter, Concept::EventPayload Event, typename Handler>
         requires Concept::EventReceiver<Receiver, Event> && Concept::EventEmitter<Emitter, Event>
-    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, const Event& event, WoreBudget budget,
-                                   Handler&& handler) {
-        return Listen(receiver, emitter, event, EventOptions{.budget = budget}, std::forward<Handler>(handler));
+    EventConnection Connect(Receiver& receiver, Emitter& emitter, const Event& event, WoreBudget budget,
+                            Handler&& handler) {
+        return Connect(receiver, emitter, event, EventOptions{.budget = budget}, std::forward<Handler>(handler));
     }
 
     /** @brief Subscribe @p receiver to every event emitted by @p emitter. */
     template<Concept::EventParticipant Receiver, Concept::EventParticipant Emitter, typename Handler>
         requires Traits::CanAcceptEvent<Receiver> && Traits::CanEmitEvent<Emitter>
-    [[nodiscard]] EventLink Listen(Receiver& receiver, Emitter& emitter, AnyEventTag, EventOptions options,
-                                   Handler&& handler) {
-        return Events(emitter).ListenAny(receiver, emitter, std::forward<Handler>(handler), options);
+    EventConnection Connect(Receiver& receiver, Emitter& emitter, AnyEventTag, EventOptions options,
+                            Handler&& handler) {
+        return EventPortOf(emitter).ConnectAny(receiver, emitter, std::forward<Handler>(handler), options);
     }
 
     /** @brief Emit @p event from @p emitter synchronously. */
     template<typename Emitter, Concept::EventPayload Event>
         requires Concept::EventEmitter<Emitter, Event>
     void Emit(Emitter& emitter, const Event& event) {
-        Events(emitter).Emit(emitter, event);
+        EventPortOf(emitter).Emit(emitter, event);
     }
 
     /** @brief Emit a default-constructed @p Event from @p emitter synchronously. */
     template<Concept::EventPayload Event, typename Emitter>
         requires Concept::EventEmitter<Emitter, Event>
     void Emit(Emitter& emitter) {
-        Events(emitter).template Emit<Event>(emitter, Event{});
+        EventPortOf(emitter).template Emit<Event>(emitter, Event{});
     }
 
-    /** @brief Emit @p event from @p emitter on @p scheduler. */
+    /** @brief Build a lazy sender that emits @p event from @p emitter on @p scheduler. */
     template<typename Emitter, stdexec::scheduler Scheduler, Concept::EventPayload Event>
         requires Concept::EventEmitter<Emitter, Event>
-    void EmitOn(Emitter& emitter, Scheduler scheduler, const Event& event) {
-        Events(emitter).EmitOn(emitter, std::move(scheduler), event);
+    [[nodiscard]] auto EmitOn(Emitter& emitter, Scheduler scheduler, const Event& event) {
+        return EventPortOf(emitter).EmitOn(emitter, std::move(scheduler), event);
     }
 
 } // namespace Sora::Experimental
