@@ -13,6 +13,8 @@ public:
 
     [[= Sora::$::Exposed]] float z;
 
+    float GetW() const { return w; }
+
 private:
     ALLOW_GET_SET
 
@@ -45,6 +47,13 @@ int main() {
     Sora::Meta::Set<PointExt, "w"_FS>(pe, 7.0f);
     float wValue = Sora::Meta::Get<"w"_FS>(pe);
     std::cout << "w: " << wValue << std::endl;
+
+    float& ww = Sora::GetRef<float>(pe, "w"_FS);
+    ww = 8.0f;
+    std::cout << "w: " << pe.GetW() << std::endl;
+
+    Sora::Set(pe, "w"_FS, 9.0f);
+    std::cout << "w: " << pe.GetW() << std::endl;
 
     return 0;
 }
