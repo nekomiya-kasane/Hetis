@@ -361,7 +361,28 @@ namespace Sora::Experimental {
         Deferred,  /**< Callback may run later on a scheduler; the lease must own enough lifetime to stay valid. */
     };
 
-    /** @brief Object access token acquired for one concrete event delivery. */
+    /**
+     * @brief Object access token acquired for one concrete event delivery.
+     *
+     * @details Callback address = the pointer assigned to `EventObjectRef::object` before invoking the callback.
+     *
+     * | Storage     | Meaning                                      | Valid use                  |
+     * |-------------|----------------------------------------------|----------------------------|
+     * | `borrowed_` | Callback address only, no ownership.          | Immediate delivery only.   |
+     * | `owned_`    | Callback address plus lifetime control block. | Immediate/deferred delivery. |
+     *
+     * @code{.cpp}
+     * // Plain immediate object:
+     * borrowed_ = &receiver;
+     *
+     * // shared_from_this object:
+     * owned_ = receiver.weak_from_this().lock();       // owned_.get() == &receiver
+     *
+     * // BaseUnknown view:
+     * auto root = std::make_shared<ComPtr<BaseUnknown>>(nucleus);
+     * owned_ = std::shared_ptr<void>{root, iface};     // owned_.get() == iface, root owns lifetime
+     * @endcode
+     */
     class EventObjectLease {
     public:
         /** @brief Construct an empty lease. */
@@ -369,29 +390,29 @@ namespace Sora::Experimental {
 
         /** @brief Construct a non-owning lease for immediate delivery under external lifetime control. */
         [[nodiscard]] static EventObjectLease Borrowed(void* object) noexcept {
-            return EventObjectLease{object, nullptr};
+            return EventObjectLease{object, {}};
         }
 
-        /** @brief Construct an owning lease for deferred delivery through an arbitrary holder. */
-        [[nodiscard]] static EventObjectLease Owned(void* object, std::shared_ptr<void> holder) noexcept {
-            return holder ? EventObjectLease{object, std::move(holder)} : EventObjectLease{};
+        /** @brief Construct an owning lease; @p object.get() must be the callback object address. */
+        [[nodiscard]] static EventObjectLease Owned(std::shared_ptr<void> object) noexcept {
+            return object ? EventObjectLease{nullptr, std::move(object)} : EventObjectLease{};
         }
 
         /** @brief Return the leased object pointer. */
-        [[nodiscard]] void* Get() const noexcept { return object_; }
+        [[nodiscard]] void* Get() const noexcept { return owned_ ? owned_.get() : borrowed_; }
 
         /** @brief Return whether this lease carries a non-null object pointer. */
-        [[nodiscard]] explicit operator bool() const noexcept { return object_ != nullptr; }
+        [[nodiscard]] explicit operator bool() const noexcept { return Get() != nullptr; }
 
         /** @brief Return whether this lease extends lifetime instead of merely borrowing. */
-        [[nodiscard]] bool Owning() const noexcept { return holder_ != nullptr; }
+        [[nodiscard]] bool Owning() const noexcept { return owned_ != nullptr; }
 
     private:
-        EventObjectLease(void* object, std::shared_ptr<void> holder) noexcept
-            : object_(object), holder_(std::move(holder)) {}
+        EventObjectLease(void* borrowed, std::shared_ptr<void> owned) noexcept
+            : borrowed_(borrowed), owned_(std::move(owned)) {}
 
-        void* object_{};
-        std::shared_ptr<void> holder_{};
+        void* borrowed_{};              /**< Non-owning callback address for immediate delivery only. */
+        std::shared_ptr<void> owned_{};  /**< Owning callback address; `get()` is the callback address. */
     };
 
     /** @brief Weak lifetime model stored by event relations without keeping participants alive. */
@@ -450,7 +471,7 @@ namespace Sora::Experimental {
         [[nodiscard]] static EventObjectLease AcquireShared(const EventObjectLifetime& lifetime,
                                                             EventLeaseMode) noexcept {
             auto holder = lifetime.weakHolder_.lock();
-            return holder ? EventObjectLease::Owned(lifetime.object_, std::move(holder)) : EventObjectLease{};
+            return EventObjectLease::Owned(std::move(holder));
         }
 
         [[nodiscard]] static EventObjectLease AcquirePortBound(const EventObjectLifetime& lifetime,

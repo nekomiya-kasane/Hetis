@@ -84,8 +84,8 @@ namespace Sora::Kernel {
 
             using Holder = ComPtr<BaseUnknown>;
             auto holder = std::make_shared<Holder>(nucleus);
-            return Sora::Experimental::EventObjectLease::Owned(lifetime.Object(),
-                                                               std::static_pointer_cast<void>(holder));
+            std::shared_ptr<void> lease{std::move(holder), lifetime.Object()};
+            return Sora::Experimental::EventObjectLease::Owned(std::move(lease));
         }
 
     } // namespace Detail
