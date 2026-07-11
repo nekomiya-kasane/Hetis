@@ -30,5 +30,19 @@ set_target_properties(Sora PROPERTIES
     COMPILE_PDB_NAME "Sora.Comp"
 )
 
+set_property(GLOBAL PROPERTY SORA_DEMO_TARGETS "")
+set_property(GLOBAL PROPERTY SORA_TEST_TARGETS "")
+
 add_subdirectory(demos)
 add_subdirectory(tests)
+
+get_property(SORA_DEMO_TARGETS GLOBAL PROPERTY SORA_DEMO_TARGETS)
+get_property(SORA_TEST_TARGETS GLOBAL PROPERTY SORA_TEST_TARGETS)
+
+add_custom_target(Sora.BuildAll)
+add_dependencies(Sora.BuildAll
+    Sora
+    ${SORA_DEMO_TARGETS}
+    ${SORA_TEST_TARGETS}
+)
+set_target_properties(Sora.BuildAll PROPERTIES FOLDER "Sora")
