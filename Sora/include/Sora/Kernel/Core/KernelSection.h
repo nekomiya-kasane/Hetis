@@ -54,7 +54,11 @@ namespace Sora::Kernel {
     namespace Meta {
 
         consteval bool IsKernelClass(std::meta::info info) {
-            return Meta::IsComClass(info) && !IsTie(Meta::RoleOf(info));
+            if (!Meta::IsComClass(info)) {
+                return false;
+            }
+            const TypeOfClass role = Meta::RoleOf(info);
+            return IsInterface(role) || IsComponent(role);
         }
 
     } // namespace Meta
