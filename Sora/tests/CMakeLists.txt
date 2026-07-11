@@ -11,6 +11,7 @@ function(add_sora_test CATEGORY TEST_NAME)
     )
     vk_tp_deploy_runtime(${TEST_TARGET})
     catch_discover_tests(${TEST_TARGET})
+    set_property(GLOBAL APPEND PROPERTY SORA_TEST_TARGETS ${TEST_TARGET})
 endfunction()
 
 include(CTest)
@@ -18,3 +19,4 @@ include(Catch)
 
 add_sora_test(Resources ResourcePackageTest)
 add_sora_test(Core RefPtrTest)
+add_sora_test(Core HiveTest)
