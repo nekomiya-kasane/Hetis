@@ -41,7 +41,6 @@
 
 #include <Sora/Core/Flags.h>
 
-#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -176,6 +175,5 @@ namespace Sora::Resources {
     static_assert(std::is_trivially_copyable_v<SectionDescriptor> &&
                   sizeof(SectionDescriptor) == kSectionDescriptorWireSize);
     static_assert(std::is_trivially_copyable_v<ResourceEntry> && sizeof(ResourceEntry) == kResourceEntryWireSize);
-    static_assert(std::endian::native == std::endian::little, "Sora currently supports little-endian hosts only.");
 
 } // namespace Sora::Resources

@@ -49,6 +49,8 @@ namespace Sora {
         PreconditionViolated = 0x0009, ///< A documented precondition was not met.
         ModuleLoadFailed = 0x000A,     ///< Dynamic module could not be loaded.
         SectionNotFound = 0x000B,      ///< Requested section does not exist in the module image.
+        DataTruncated = 0x000C,        ///< A byte stream ended before the requested data was complete.
+        DataCorrupted = 0x000D,        ///< A generic byte stream failed structural or integrity checks.
         /// @}
 
         /// @name Core Rendering (0x1000 – 0x1FFF)
