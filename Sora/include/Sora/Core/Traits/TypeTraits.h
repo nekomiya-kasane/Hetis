@@ -271,6 +271,11 @@ namespace Sora {
         template<typename T>
         concept IntegerLike = std::integral<T> || std::is_enum_v<T>;
 
+        /** @brief One-byte type that can be fed into byte-range hash helpers without reinterpret casts. */
+        template<typename T>
+        concept ByteLike = std::same_as<std::remove_cv_t<T>, std::byte> ||
+                           (std::integral<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1);
+
         /** @brief Floating-point field accepted by the stable wire serializer. */
         template<typename T>
         concept FloatingLike = std::floating_point<T>;

@@ -670,48 +670,18 @@ namespace Sora::Hashing {
         }
     }
 
-    /** @brief One-byte type that can be fed into byte-range hash helpers without reinterpret casts. */
-    template<typename T>
-    concept ByteLike = std::same_as<std::remove_cv_t<T>, std::byte> ||
-                       (std::integral<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1);
-
     /** @brief Hash a byte-like range with @p State, preserving constexpr legality for non-@c std::byte storage. */
-    template<StatefulAlgo State = Fnv1a64State, ByteLike Byte>
-    [[nodiscard]] constexpr typename State::ResultType HashByteRange(std::span<const Byte> bytes) noexcept {
+    template<StatefulAlgo State = Fnv1a64State, std::ranges::input_range Range>
+        requires Concept::ByteLike<std::remove_cvref_t<std::ranges::range_value_t<Range>>>
+    [[nodiscard]] constexpr typename State::ResultType HashByteRange(const Range& bytes) noexcept {
         auto state = State::Seed();
-        if constexpr (std::same_as<std::remove_cv_t<Byte>, std::byte>) {
-            state.Feed(bytes);
-        } else {
-            for (Byte byte : bytes) {
-                const std::byte b{static_cast<unsigned char>(byte)};
-                if constexpr (requires { state.FeedByte(b); }) {
-                    state.FeedByte(b);
-                } else {
-                    state.Feed(std::span<const std::byte>{&b, 1});
-                }
-            }
-        }
-        return state.Finalize();
-    }
-
-    /** @brief Hash a byte-like range while treating @p zeroSize bytes from @p zeroOffset as zero. */
-    template<StatefulAlgo State = Fnv1a64State, ByteLike Byte>
-    [[nodiscard]] constexpr typename State::ResultType
-    HashByteRangeWithZeroRange(std::span<const Byte> bytes, size_t zeroOffset, size_t zeroSize) noexcept {
-        auto state = State::Seed();
-        const size_t boundedOffset = std::min(zeroOffset, bytes.size());
-        const size_t boundedSize = std::min(zeroSize, bytes.size() - boundedOffset);
-        const size_t zeroEnd = boundedOffset + boundedSize;
-        for (size_t i = 0; i < bytes.size(); ++i) {
-            const bool zero = i >= boundedOffset && i < zeroEnd;
+        for (auto&& byte : bytes) {
             const std::byte b = [&] {
-                if (zero) {
-                    return std::byte{0};
-                }
-                if constexpr (std::same_as<std::remove_cv_t<Byte>, std::byte>) {
-                    return bytes[i];
+                using Byte = std::remove_cvref_t<decltype(byte)>;
+                if constexpr (std::same_as<Byte, std::byte>) {
+                    return byte;
                 } else {
-                    return std::byte{static_cast<unsigned char>(bytes[i])};
+                    return std::byte{static_cast<unsigned char>(byte)};
                 }
             }();
             if constexpr (requires { state.FeedByte(b); }) {
@@ -719,6 +689,41 @@ namespace Sora::Hashing {
             } else {
                 state.Feed(std::span<const std::byte>{&b, 1});
             }
+        }
+        return state.Finalize();
+    }
+
+    /** @brief Hash a byte-like range while treating @p zeroSize bytes from @p zeroOffset as zero. */
+    template<StatefulAlgo State = Fnv1a64State, std::ranges::input_range Range>
+        requires Concept::ByteLike<std::remove_cvref_t<std::ranges::range_value_t<Range>>> &&
+                 std::ranges::sized_range<Range>
+    [[nodiscard]] constexpr typename State::ResultType HashByteRangeWithZeroRange(const Range& bytes, size_t zeroOffset,
+                                                                                  size_t zeroSize) noexcept {
+        auto state = State::Seed();
+        using Byte = std::remove_cvref_t<std::ranges::range_value_t<Range>>;
+        const size_t size = static_cast<size_t>(std::ranges::size(bytes));
+        const size_t boundedOffset = std::min(zeroOffset, size);
+        const size_t boundedSize = std::min(zeroSize, size - boundedOffset);
+        const size_t zeroEnd = boundedOffset + boundedSize;
+        size_t i = 0;
+        for (auto&& byte : bytes) {
+            const bool zero = i >= boundedOffset && i < zeroEnd;
+            const std::byte b = [&] {
+                if (zero) {
+                    return std::byte{0};
+                }
+                if constexpr (std::same_as<std::remove_cv_t<Byte>, std::byte>) {
+                    return byte;
+                } else {
+                    return std::byte{static_cast<unsigned char>(byte)};
+                }
+            }();
+            if constexpr (requires { state.FeedByte(b); }) {
+                state.FeedByte(b);
+            } else {
+                state.Feed(std::span<const std::byte>{&b, 1});
+            }
+            ++i;
         }
         return state.Finalize();
     }
