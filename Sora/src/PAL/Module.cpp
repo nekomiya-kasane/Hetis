@@ -5,10 +5,12 @@
  * @ingroup PAL
  */
 
-#include "Sora/PAL/Module.h"
+#include <Sora/PAL/Module.h>
+#include <Sora/PAL/Path.h>
 
-#include "Sora/ErrorCode.h"
-#include "Sora/Platform.h"
+#include <Sora/Core/Wire.h>
+#include <Sora/ErrorCode.h>
+#include <Sora/Platform.h>
 
 #include <algorithm>
 #include <array>
@@ -47,48 +49,6 @@ namespace Sora::PAL {
     } // namespace Detail
 
     namespace {
-
-        /** @brief Native shared-library suffixes worth probing across supported toolchains. */
-        constexpr std::array kKnownSharedLibrarySuffixes{std::string_view{".dll"}, std::string_view{".so"},
-                                                         std::string_view{".dylib"}};
-
-        /** @brief Return true when @p name contains an explicit directory component. */
-        [[nodiscard]] constexpr bool HasPathSeparator(std::string_view name) noexcept {
-            return name.contains(Sora::Platform::kPathSeparator_Windows) ||
-                   name.contains(Sora::Platform::kPathSeparator_Unix);
-        }
-
-        /** @brief Return true when @p name has a suffix associated with a known shared-library format. */
-        [[nodiscard]] bool HasSharedLibrarySuffix(std::string_view name) {
-            for (std::string_view suffix : kKnownSharedLibrarySuffixes) {
-                if (name.ends_with(suffix) || name.contains(std::string{suffix} + '.')) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        /** @brief Split @p path into directory prefix and final filename. */
-        [[nodiscard]] std::pair<std::string_view, std::string_view> SplitDirectory(std::string_view path) noexcept {
-            const size_t slash = path.find_last_of("/\\");
-            if (slash == std::string_view::npos) {
-                return {{}, path};
-            }
-            return {path.substr(0, slash + 1), path.substr(slash + 1)};
-        }
-
-        /** @brief Return @p name without a known shared-library suffix. */
-        [[nodiscard]] std::string RemoveSharedLibrarySuffix(std::string_view name) {
-            for (std::string_view suffix : kKnownSharedLibrarySuffixes) {
-                if (name.ends_with(suffix)) {
-                    return std::string{name.substr(0, name.size() - suffix.size())};
-                }
-                if (auto pos = name.find(std::string{suffix} + '.'); pos != std::string_view::npos) {
-                    return std::string{name.substr(0, pos)};
-                }
-            }
-            return std::string{name};
-        }
 
         /** @brief Add @p candidate if it has not already appeared. */
         void AddCandidate(std::vector<std::string>& candidates, std::string candidate) {
@@ -167,30 +127,19 @@ namespace Sora::PAL {
             return bytes;
         }
 
-        /** @brief Return true when the byte range @p [offset, offset + size) lies inside @p bytes. */
-        [[nodiscard]] bool HasRange(std::span<const std::byte> bytes, uint64_t offset, uint64_t size) noexcept {
-            return offset <= bytes.size() && size <= bytes.size() - offset;
-        }
+        // TODO: this is bad, move HasRange to a proper place and use it in Wire.h as well
+        using Sora::Wire::Detail::HasRange;
 
         /** @brief Read an unsigned little-endian integer from @p bytes. */
         template<typename T>
         [[nodiscard]] T ReadLe(std::span<const std::byte> bytes, uint64_t offset) noexcept {
-            T value = 0;
-            for (size_t i = 0; i < sizeof(T); ++i) {
-                value |= static_cast<T>(std::to_integer<uint8_t>(bytes[static_cast<size_t>(offset) + i])) << (i * 8u);
-            }
-            return value;
+            return Sora::Wire::ReadLittleEndianUnchecked<T>(bytes, static_cast<size_t>(offset));
         }
 
         /** @brief Read an unsigned big-endian integer from @p bytes. */
         template<typename T>
         [[nodiscard]] T ReadBe(std::span<const std::byte> bytes, uint64_t offset) noexcept {
-            T value = 0;
-            for (size_t i = 0; i < sizeof(T); ++i) {
-                value =
-                    static_cast<T>((value << 8u) | std::to_integer<uint8_t>(bytes[static_cast<size_t>(offset) + i]));
-            }
-            return value;
+            return Sora::Wire::ReadBigEndianUnchecked<T>(bytes, static_cast<size_t>(offset));
         }
 
         /** @brief Read an endian-selected unsigned integer from @p bytes. */
@@ -363,8 +312,7 @@ namespace Sora::PAL {
                 is64 ? ReadEndian<uint16_t>(bytes, 62, littleEndian) : ReadEndian<uint16_t>(bytes, 50, littleEndian);
             const uint16_t minSectionHeaderSize = is64 ? 64u : 40u;
             const uint64_t sectionTableBytes = uint64_t{shentsize} * shnum;
-            if (shentsize < minSectionHeaderSize || shstrndx >= shnum ||
-                !HasRange(bytes, shoff, sectionTableBytes)) {
+            if (shentsize < minSectionHeaderSize || shstrndx >= shnum || !HasRange(bytes, shoff, sectionTableBytes)) {
                 return std::unexpected{ErrorCode::ModuleLoadFailed};
             }
             [[assume(shentsize >= minSectionHeaderSize)]];
@@ -650,6 +598,8 @@ namespace Sora::PAL {
 
         for (const std::string& candidate : attempted) {
             const std::string key = CacheKey(candidate, options);
+
+            // 1. See if the module is already cached and return it if so.
             if (options.cachePolicy == ModuleCachePolicy::Shared) {
                 std::scoped_lock lock{mutex_};
                 if (auto it = cache_.find(key); it != cache_.end()) {
@@ -660,6 +610,7 @@ namespace Sora::PAL {
                 }
             }
 
+            // 2. Try to load the module from the native loader and cache it if successful.
             if (void* handle = TryLoadNative(candidate, options)) {
                 ModulePtr module{new Module{handle, std::filesystem::path{candidate}, options.unloadOnDestroy}};
                 if (options.cachePolicy == ModuleCachePolicy::Shared) {
