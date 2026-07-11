@@ -187,6 +187,34 @@ namespace Sora {
             [pred = std::move(pred)](auto&& xs) { return std::views::filter(std::forward<decltype(xs)>(xs), pred); }};
     }
 
+    /** @brief Lazy standard-view helpers that intentionally return standard range adaptor closures. */
+    namespace View {
+
+        /**
+         * @brief Return a filter closure keeping elements whose projected value compares with @p expected.
+         *
+         * @details The predicate is equivalent to @c comparator(proj(element), expected). With the default comparator,
+         * this is the projected-value form of an equality filter.
+         *
+         * @tparam Expected Captured expected value type.
+         * @tparam Proj Projection applied to every input element.
+         * @tparam Comparator Binary predicate comparing projected element values against @p expected.
+         * @param[in] expected Value captured by the returned view closure.
+         * @param[in] proj Projection applied before comparison.
+         * @param[in] comparator Binary comparator, defaulting to equality.
+         * @return Pipeable @c std::views::filter closure.
+         */
+        template<typename Expected, typename Proj = std::identity, typename Comparator = std::ranges::equal_to>
+        [[nodiscard]] constexpr auto Where(Expected expected, Proj proj = {}, Comparator comparator = {}) {
+            return std::views::filter(
+                [expected = std::move(expected), proj = std::move(proj),
+                 comparator = std::move(comparator)]<typename T>(T&& value) mutable -> bool {
+                    return std::invoke(comparator, std::invoke(proj, std::forward<T>(value)), expected);
+                });
+        }
+
+    } // namespace View
+
     /**
      * @brief Left fold with an initial accumulator.
      *
