@@ -224,6 +224,27 @@ namespace Sora {
             return std::string_view{ret.data(), ret.size()};
         }
 
+        /** @brief Return all non-static data members in @p type's single-inheritance chain, derived class first. */
+        consteval auto DataMembersInInheritanceChainOf(std::meta::info type) {
+            std::vector<std::meta::info> members;
+            for (auto t : Sora::Meta::InheritanceChainOf(type)) {
+                for (auto member : std::meta::nonstatic_data_members_of(t, std::meta::access_context::unchecked())) {
+                    members.push_back(member);
+                }
+            }
+            return std::define_static_array(members);
+        }
+
+        consteval auto MembersInInheritanceChainOf(std::meta::info type) {
+            std::vector<std::meta::info> members;
+            for (auto t : Sora::Meta::InheritanceChainOf(type)) {
+                for (auto member : std::meta::members_of(t, std::meta::access_context::unchecked())) {
+                    members.push_back(member);
+                }
+            }
+            return std::define_static_array(members);
+        }
+
         consteval std::meta::info FindMemberInInheritanceChainOf(std::meta::info type, std::string_view name) {
             auto members = Sora::Meta::InheritanceChainOf(type) | std::views::transform([](std::meta::info scope) {
                                return std::meta::members_of(scope, std::meta::access_context::unchecked());
@@ -263,6 +284,14 @@ namespace Sora {
         /** @brief Dot-separated reflection display strings for @p T's single-inheritance chain. */
         template<Concept::SingleInheritanceChainClass T>
         inline constexpr std::string_view InheritanceChainDisplayString = Meta::InheritanceChainDisplayStringOf(^^T);
+
+        /** @brief Return all data members in @p T's single-inheritance chain, derived class first. */
+        template<typename T>
+        inline constexpr auto DataMembersInInheritanceChainOf = Meta::DataMembersInInheritanceChainOf(^^T);
+
+        /** @brief Return all data members in @p T's single-inheritance chain, derived class first. */
+        template<typename T>
+        inline constexpr auto MembersInInheritanceChainOf = Meta::MembersInInheritanceChainOf(^^T);
 
     } // namespace Traits
 
