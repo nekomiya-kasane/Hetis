@@ -7,9 +7,11 @@
  */
 
 #include <cstdint>
-#include <span>
+#include <limits>
+#include <string_view>
 #include <type_traits>
 
+#include <Sora/Core/FixedString.h>
 #include <Sora/Core/Flags.h>
 #include <Sora/Core/Traits/EnumTraits.h>
 
@@ -17,14 +19,24 @@ namespace Sora::CLI {
 
     using NameId = std::uint32_t;
     using CommandId = std::uint32_t;
+    using VariantId = std::uint32_t;
 
     inline constexpr NameId kInvalidNameId = std::numeric_limits<NameId>::max();
     inline constexpr CommandId kInvalidCommandId = std::numeric_limits<CommandId>::max();
+    inline constexpr VariantId kInvalidVariantId = std::numeric_limits<VariantId>::max();
 
     enum class OptionKind : uint8_t {
         Switch,
         Parameter,
+        Help,
     };
+
+    inline constexpr std::string_view kHelpOptionName = "help";
+    inline constexpr std::string_view kHelpOptionAbout = "Show help for this command.";
+    inline constexpr char kHelpOptionShortName = 'h';
+    inline constexpr std::string_view kHelpOptionLongToken = "--help";
+    inline constexpr std::string_view kHelpOptionShortToken = "-h";
+    inline constexpr std::string_view kHelpOptionAssignmentPrefix = "--help=";
 
     enum class ValueCardinality : uint8_t {
         None,
@@ -54,13 +66,56 @@ namespace Sora::CLI {
         Utf8 = 1ull << 7,
     };
 
-    using BindFn = void (*)(void* object, void const* value) noexcept;
-    using ParseValueFn = bool (*)(void* output, char const* first, char const* last) noexcept;
+    /** @brief Annotation for an option that consumes one value token, such as @c --message text. */
+    struct Parameter {
+        FixedString<64> name{};      /**< Long option name without leading dashes. */
+        char shortName = '\0';       /**< Optional one-character short option name. */
+        FixedString<32> valueName{}; /**< Human-readable metavariable name used by help renderers. */
+        FixedString<256> about{};    /**< Human-readable help text. */
+        bool required = false;       /**< Whether the option must appear after fallback resolution. */
+    };
+
+    /** @brief Annotation for an option that does not consume a value token, such as @c --verbose. */
+    struct Switch {
+        FixedString<64> name{};   /**< Long option name without leading dashes. */
+        char shortName = '\0';    /**< Optional one-character short option name. */
+        FixedString<256> about{}; /**< Human-readable help text. */
+    };
+
+    /** @brief Annotation for a positional token consumed by declaration order. */
+    struct Operand {
+        FixedString<64> name{};                                 /**< Operand name used by diagnostics and help. */
+        ValueCardinality cardinality = ValueCardinality::One;   /**< Positional arity. */
+        FixedString<256> about{};                               /**< Human-readable help text. */
+    };
+
+    /** @brief Annotation marking a root option as visible from subcommands. */
+    struct Global {
+        constexpr bool operator==(const Global&) const = default;
+    };
+
+    /** @brief Optional annotation overriding the default lower-kebab command name of a command type. */
+    struct CommandName {
+        FixedString<64> name{};   /**< Command path segment. */
+        FixedString<256> about{}; /**< Human-readable help text. */
+    };
+
+    /** @brief One interned string in a sealed schema image. */
+    struct NameEntry {
+        NameId id = kInvalidNameId;
+        std::string_view text{};
+        std::uint64_t hash = 0;
+    };
+
+    using BindValueFn = bool (*)(void* object, std::string_view value) noexcept;
+    using BindSwitchFn = bool (*)(void* object) noexcept;
     using ActionAdapterFn = int (*)(void const* command, void* context) noexcept;
 
     /** @brief Leaf option descriptor stored in the sealed schema. */
     struct OptionDesc {
         NameId longName = kInvalidNameId;
+        NameId valueName = kInvalidNameId;
+        NameId about = kInvalidNameId;
         char shortName = '\0';
         OptionKind kind = OptionKind::Switch;
         ValueCardinality cardinality = ValueCardinality::None;
@@ -68,23 +123,26 @@ namespace Sora::CLI {
         std::uint32_t fieldId = 0;
         std::uint32_t groupId = 0;
         std::uint32_t presenceBit = 0;
-        BindFn bind = nullptr;
-        ParseValueFn parseValue = nullptr;
+        bool required = false;
+        bool global = false;
+        BindValueFn bindValue = nullptr;
+        BindSwitchFn bindSwitch = nullptr;
     };
 
     /** @brief Positional operand descriptor stored in the sealed schema. */
     struct OperandDesc {
         NameId name = kInvalidNameId;
+        NameId about = kInvalidNameId;
         ValueCardinality cardinality = ValueCardinality::One;
         CommandId ownerCommandId = kInvalidCommandId;
         std::uint32_t fieldId = 0;
         std::uint32_t presenceBit = 0;
-        BindFn bind = nullptr;
-        ParseValueFn parseValue = nullptr;
+        BindValueFn bindValue = nullptr;
     };
 
     /** @brief Static edge from one command trie node to a child node. */
     struct CommandEdge {
+        CommandId parentCommandId = kInvalidCommandId;
         NameId name = kInvalidNameId;
         CommandId childCommandId = kInvalidCommandId;
     };
@@ -92,10 +150,16 @@ namespace Sora::CLI {
     /** @brief Command descriptor stored in the sealed schema. */
     struct CommandDesc {
         NameId name = kInvalidNameId;
+        NameId about = kInvalidNameId;
         CommandId commandId = kInvalidCommandId;
-        std::span<OptionDesc const> localOptions = {};
-        std::span<OperandDesc const> operands = {};
-        std::span<CommandEdge const> children = {};
+        CommandId parentCommandId = kInvalidCommandId;
+        VariantId variantId = kInvalidVariantId;
+        std::uint32_t optionBegin = 0;
+        std::uint32_t optionCount = 0;
+        std::uint32_t operandBegin = 0;
+        std::uint32_t operandCount = 0;
+        std::uint32_t childBegin = 0;
+        std::uint32_t childCount = 0;
         ActionAdapterFn action = nullptr;
     };
 
@@ -109,6 +173,42 @@ namespace Sora::CLI {
         NameId key = kInvalidNameId;
     };
 
+    enum class ParseErrorKind : uint8_t {
+        MissingCommand,
+        UnknownCommand,
+        UnknownOption,
+        MissingValue,
+        UnexpectedValue,
+        InvalidValue,
+        TooManyOperands,
+        MissingRequiredOption,
+        MissingRequiredOperand,
+    };
+
+    /** @brief Structured parse failure; formatting is intentionally outside the hot parser path. */
+    struct ParseError {
+        ParseErrorKind kind = ParseErrorKind::UnknownCommand;
+        SourceRef source{};
+        CommandId commandId = kInvalidCommandId;
+        NameId descriptorName = kInvalidNameId;
+        std::string_view token{};
+        char shortName = '\0';
+
+        /** @brief Conventional process exit code for command-line usage errors. */
+        [[nodiscard]] constexpr int ExitCode() const noexcept { return 2; }
+    };
+
+    namespace $ {
+
+        using Parameter = Sora::CLI::Parameter;
+        using Switch = Sora::CLI::Switch;
+        using Operand = Sora::CLI::Operand;
+        using Global = Sora::CLI::Global;
+        using CommandName = Sora::CLI::CommandName;
+
+    } // namespace $
+
+    static_assert(std::is_trivially_copyable_v<NameEntry> && std::is_default_constructible_v<NameEntry>);
     static_assert(std::is_trivially_copyable_v<OptionDesc> && std::is_default_constructible_v<OptionDesc>);
     static_assert(std::is_trivially_copyable_v<OperandDesc> && std::is_default_constructible_v<OperandDesc>);
     static_assert(std::is_trivially_copyable_v<CommandEdge> && std::is_default_constructible_v<CommandEdge>);
