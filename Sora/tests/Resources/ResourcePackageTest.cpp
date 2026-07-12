@@ -1,8 +1,9 @@
+#include <Sora/Core/Wire.h>
 #include <Sora/Resources/Resources.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <span>
@@ -10,7 +11,6 @@
 #include <vector>
 
 using namespace Sora::Resources;
-using namespace Sora::Literals;
 
 namespace {
 
@@ -24,23 +24,60 @@ namespace {
         return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
     }
 
-    [[nodiscard]] auto RewriteHeader(std::vector<std::byte>& pak, FileHeader header) -> Sora::VoidResult {
-        header.headerHash = 0;
-        header.fileHash = 0;
-        std::vector<std::byte> headerBytes;
-        Wire::Append(headerBytes, header);
-        header.headerHash = HashBytes(headerBytes);
-        auto write = Wire::WriteAt(pak, 0, header);
+    [[nodiscard]] constexpr auto ResourceView(uint64_t hash, ResourceType type, std::string_view uri,
+                                              const unsigned char* data, size_t size) -> ResourceBytesView {
+        ResourceBytesView view{};
+        view.hash = hash;
+        view.type = type;
+        view.uri = uri;
+        view.data = data;
+        view.size = size;
+        return view;
+    }
+
+    [[nodiscard]] auto RewriteMetadataHash(std::vector<std::byte>& pak) -> Sora::VoidResult {
+        size_t offset = 0;
+        auto header = Sora::Wire::Read<FileHeader>(pak, offset);
+        if (!header) {
+            return std::unexpected(header.error());
+        }
+
+        header->metadataHash = 0;
+        auto write = Sora::Wire::WriteAt(pak, 0, *header);
         if (!write) {
             return std::unexpected(write.error());
         }
-        header.fileHash = HashBytes(pak);
-        return Wire::WriteAt(pak, 0, header);
+
+        SectionDescriptor entries{};
+        SectionDescriptor strings{};
+        offset = static_cast<size_t>(header->sectionTableOffset);
+        for (uint16_t i = 0; i < header->sectionCount; ++i) {
+            auto section = Sora::Wire::Read<SectionDescriptor>(pak, offset);
+            if (!section) {
+                return std::unexpected(section.error());
+            }
+            if (static_cast<SectionKind>(section->kind) == SectionKind::Entries) {
+                entries = *section;
+            } else if (static_cast<SectionKind>(section->kind) == SectionKind::Strings) {
+                strings = *section;
+            }
+        }
+
+        auto hasher = Sora::Hashing::Hasher<>{};
+        hasher.FeedBytes(std::span<const std::byte>{pak}.subspan(0, header->headerSize));
+        hasher.FeedBytes(std::span<const std::byte>{pak}.subspan(static_cast<size_t>(header->sectionTableOffset),
+                                                                 header->sectionSize * header->sectionCount));
+        hasher.FeedBytes(std::span<const std::byte>{pak}.subspan(static_cast<size_t>(entries.offset),
+                                                                 static_cast<size_t>(entries.size)));
+        hasher.FeedBytes(std::span<const std::byte>{pak}.subspan(static_cast<size_t>(strings.offset),
+                                                                 static_cast<size_t>(strings.size)));
+        header->metadataHash = hasher.Finalize();
+        return Sora::Wire::WriteAt(pak, 0, *header);
     }
 
     [[nodiscard]] auto RewriteFirstEntryflags(std::vector<std::byte>& pak, uint16_t flags) -> Sora::VoidResult {
         size_t offset = 0;
-        auto header = Wire::Read<FileHeader>(pak, offset);
+        auto header = Sora::Wire::Read<FileHeader>(pak, offset);
         if (!header) {
             return std::unexpected(header.error());
         }
@@ -48,7 +85,7 @@ namespace {
         offset = static_cast<size_t>(header->sectionTableOffset);
         SectionDescriptor entries{};
         for (uint16_t i = 0; i < header->sectionCount; ++i) {
-            auto section = Wire::Read<SectionDescriptor>(pak, offset);
+            auto section = Sora::Wire::Read<SectionDescriptor>(pak, offset);
             if (!section) {
                 return std::unexpected(section.error());
             }
@@ -61,27 +98,75 @@ namespace {
         }
 
         offset = static_cast<size_t>(entries.offset);
-        auto entry = Wire::Read<ResourceEntry>(pak, offset);
+        auto entry = Sora::Wire::Read<ResourceEntry>(pak, offset);
         if (!entry) {
             return std::unexpected(entry.error());
         }
         entry->flags = flags;
 
-        auto write = Wire::WriteAt(pak, static_cast<size_t>(entries.offset), *entry);
+        auto write = Sora::Wire::WriteAt(pak, static_cast<size_t>(entries.offset), *entry);
         if (!write) {
             return std::unexpected(write.error());
         }
 
-        entries.checksum = HashBytes(std::span<const std::byte>{pak}.subspan(static_cast<size_t>(entries.offset),
-                                                                             static_cast<size_t>(entries.size)));
-        write = Wire::WriteAt(pak, static_cast<size_t>(header->sectionTableOffset), entries);
+        entries.checksum = Sora::Hashing::HashByteRange(std::span<const std::byte>{pak}.subspan(
+            static_cast<size_t>(entries.offset), static_cast<size_t>(entries.size)));
+        write = Sora::Wire::WriteAt(pak, static_cast<size_t>(header->sectionTableOffset), entries);
         if (!write) {
             return std::unexpected(write.error());
         }
-        return RewriteHeader(pak, *header);
+        return RewriteMetadataHash(pak);
     }
 
 } // namespace
+
+namespace StaticResourceResolution {
+
+    namespace [[= Sora::Resources::$::Resource{
+        .uri = "res://image/ui", .type = Sora::Resources::ResourceType::Image, .extension = ".ktx2"}]] Ui {
+
+        inline constexpr unsigned char Logo[] = {'l', 'o', 'g', 'o'};
+
+        namespace Icons {
+
+            inline constexpr unsigned char Close[] = {'x'};
+
+        } // namespace Icons
+
+        namespace [[= Sora::Resources::$::Resource{.uri = "dark"}]] Theme {
+
+            inline constexpr unsigned char Close[] = {'d'};
+
+        } // namespace Theme
+
+        [[= Sora::Resources::$::Resource{.uri = "logo.webp"}]] inline constexpr unsigned char WebLogo[] = {'w'};
+
+    } // namespace Ui
+
+    namespace [[= Sora::Resources::$::Resource{
+        .uri = "res://asset/root", .type = Sora::Resources::ResourceType::Raw, .extension = ".bin"}]] Assets {
+
+        namespace [[= Sora::Resources::$::Resource{.uri = "data"}]] Tables {
+
+            inline constexpr unsigned char Table[] = {'t'};
+
+        } // namespace Tables
+
+    } // namespace Assets
+
+    namespace Shader {
+
+        inline constexpr unsigned char Fullscreen[] = {'s'};
+
+    } // namespace Shader
+
+    namespace Image {
+
+        [[= Sora::Resources::$::Resource{.extension = ".webp"}]] inline constexpr unsigned char Portrait[] = {'p'};
+
+    } // namespace Image
+
+} // namespace StaticResourceResolution
 
 TEST_CASE("PakBuilder serializes and PakView reads lpak", "[Sora][Resources]") {
     PakBuilder builder;
@@ -107,60 +192,112 @@ TEST_CASE("PakBuilder serializes and PakView reads lpak", "[Sora][Resources]") {
     REQUIRE(*uri == "res://core/config/app.json");
 }
 
-TEST_CASE("StaticBundle provides compile-time embedded resources", "[Sora][Resources]") {
+TEST_CASE("ResourceListOf resolves namespace prefixes and relative resource URIs", "[Sora][Resources]") {
+    using ResourceList = ResourceListOf<^^StaticResourceResolution>;
+    using SparseResources = StaticSparseTableFor<ResourceList>;
+    using PakImage = StaticPakImage<ResourceList>;
+
+    constexpr auto table = SparseResources::Table();
+    REQUIRE(table.count == 7);
+
+    auto findSparse = [&](std::string_view uri) -> const ModuleResourceEntry* {
+        for (const ModuleResourceEntry& entry : std::span{table.entries, static_cast<size_t>(table.count)}) {
+            if (std::string_view{entry.uri, entry.uriSize} == uri) {
+                return &entry;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto* logo = findSparse("res://image/ui/logo.ktx2");
+    REQUIRE(logo != nullptr);
+    REQUIRE(static_cast<ResourceType>(logo->type) == ResourceType::Image);
+
+    const auto* close = findSparse("res://image/ui/icons/close.ktx2");
+    REQUIRE(close != nullptr);
+    REQUIRE(static_cast<ResourceType>(close->type) == ResourceType::Image);
+
+    const auto* dark = findSparse("res://image/ui/dark/close.ktx2");
+    REQUIRE(dark != nullptr);
+    REQUIRE(static_cast<ResourceType>(dark->type) == ResourceType::Image);
+
+    const auto* webLogo = findSparse("res://image/ui/logo.webp");
+    REQUIRE(webLogo != nullptr);
+    REQUIRE(static_cast<ResourceType>(webLogo->type) == ResourceType::Image);
+
+    const auto* tableEntry = findSparse("res://asset/root/data/table.bin");
+    REQUIRE(tableEntry != nullptr);
+    REQUIRE(static_cast<ResourceType>(tableEntry->type) == ResourceType::Raw);
+
+    const auto* shader = findSparse("res://shader/fullscreen.wgsl");
+    REQUIRE(shader != nullptr);
+    REQUIRE(static_cast<ResourceType>(shader->type) == ResourceType::Shader);
+
+    const auto* portrait = findSparse("res://image/portrait.webp");
+    REQUIRE(portrait != nullptr);
+    REQUIRE(static_cast<ResourceType>(portrait->type) == ResourceType::Image);
+
+    auto view = PakView::Open(std::as_bytes(std::span{PakImage::kBytes.data(), PakImage::kBytes.size()}));
+    REQUIRE(view.has_value());
+    REQUIRE(view->Count() == table.count);
+    REQUIRE(view->Find(HashUri("res://image/ui/icons/close.ktx2")) != nullptr);
+    REQUIRE(view->Find(HashUri("res://image/ui/logo.webp")) != nullptr);
+    REQUIRE(view->Find(HashUri("res://asset/root/data/table.bin")) != nullptr);
+}
+
+TEST_CASE("PakBuilder and StaticPakImage share the canonical lpak writer", "[Sora][Resources]") {
+    using ResourceList = ResourceListOf<^^StaticResourceResolution>;
+    using PakImage = StaticPakImage<ResourceList>;
+
+    PakBuilder builder;
+    REQUIRE(builder.Add("res://image/ui/dark/close.ktx2", ResourceType::Image, Bytes("d")).has_value());
+    REQUIRE(builder.Add("res://asset/root/data/table.bin", ResourceType::Raw, Bytes("t")).has_value());
+    REQUIRE(builder.Add("res://image/ui/logo.ktx2", ResourceType::Image, Bytes("logo")).has_value());
+    REQUIRE(builder.Add("res://shader/fullscreen.wgsl", ResourceType::Shader, Bytes("s")).has_value());
+    REQUIRE(builder.Add("res://image/ui/logo.webp", ResourceType::Image, Bytes("w")).has_value());
+    REQUIRE(builder.Add("res://image/portrait.webp", ResourceType::Image, Bytes("p")).has_value());
+    REQUIRE(builder.Add("res://image/ui/icons/close.ktx2", ResourceType::Image, Bytes("x")).has_value());
+
+    auto runtimePak = builder.Serialize();
+    REQUIRE(runtimePak.has_value());
+
+    auto staticPak = std::as_bytes(std::span{PakImage::kBytes.data(), PakImage::kBytes.size()});
+    REQUIRE(runtimePak->size() == staticPak.size());
+    REQUIRE(std::ranges::equal(*runtimePak, staticPak));
+}
+
+TEST_CASE("PakBuilder accepts borrowed resource byte views", "[Sora][Resources]") {
     static constexpr unsigned char kText[] = {'h', 'e', 'l', 'l', 'o'};
-    static constexpr unsigned char kJson[] = {'{', '}', '\n'};
 
-    constexpr auto text = MakeEmbeddedResource<"res://bundle/text.txt"_FS, ResourceType::Raw>(kText);
-    constexpr auto json = MakeEmbeddedResource<"res://bundle/config.json"_FS, ResourceType::Config>(kJson);
-    constexpr auto bundle = MakeStaticBundle(text, json);
+    PakBuilder builder;
+    REQUIRE(builder
+                .Add(ResourceView(HashUri("res://borrowed/text.txt"), ResourceType::Raw, "res://borrowed/text.txt",
+                                  kText, std::size(kText)))
+                .has_value());
+    REQUIRE(builder
+                .Add(ResourceView(HashUri("res://borrowed/empty.bin"), ResourceType::Raw, "res://borrowed/empty.bin",
+                                  nullptr, 0))
+                .has_value());
+    REQUIRE_FALSE(builder
+                      .Add(ResourceView(HashUri("res://borrowed/bad.bin"), ResourceType::Raw, "res://borrowed/bad.bin",
+                                        nullptr, 1))
+                      .has_value());
 
-    static_assert(bundle.Count() == 2);
-
-    auto data = bundle.Get(HashUri("res://bundle/text.txt"));
-    REQUIRE(data.has_value());
-    REQUIRE(Text(*data) == "hello");
-
-    auto pak = bundle.ToPakBytes();
+    auto pak = builder.Serialize();
     REQUIRE(pak.has_value());
     auto view = PakView::Open(*pak);
     REQUIRE(view.has_value());
-    REQUIRE(view->Count() == 2);
-}
 
-TEST_CASE("StaticBundle validates views and permits empty payloads", "[Sora][Resources]") {
-    std::array<EmbeddedResourceView, 1> empty{EmbeddedResourceView{
-        .Hash = HashUri("res://bundle/empty.bin"),
-        .Type = ResourceType::Raw,
-        .Data = nullptr,
-        .Size = 0,
-        .Uri = "res://bundle/empty.bin",
-    }};
-    StaticBundle<1> bundle(empty);
-    auto data = bundle.Get(HashUri("res://bundle/empty.bin"));
+    auto data = view->Get(HashUri("res://borrowed/text.txt"));
+    REQUIRE(data.has_value());
+    REQUIRE(Text(*data) == "hello");
+
+    data = view->Get(HashUri("res://borrowed/empty.bin"));
     REQUIRE(data.has_value());
     REQUIRE(data->empty());
-
-    std::array<EmbeddedResourceView, 1> forged{EmbeddedResourceView{
-        .Hash = HashUri("res://bundle/other.bin"),
-        .Type = ResourceType::Raw,
-        .Data = nullptr,
-        .Size = 0,
-        .Uri = "res://bundle/empty.bin",
-    }};
-    REQUIRE_THROWS_AS(StaticBundle<1>(forged), const char*);
-
-    std::array<EmbeddedResourceView, 1> nonCanonical{EmbeddedResourceView{
-        .Hash = HashUri("res://bundle\\empty.bin"),
-        .Type = ResourceType::Raw,
-        .Data = nullptr,
-        .Size = 0,
-        .Uri = "res://bundle\\empty.bin",
-    }};
-    REQUIRE_THROWS_AS(StaticBundle<1>(nonCanonical), const char*);
 }
 
-TEST_CASE("ResourceStore resolves higher-priority mounted packages", "[Sora][Resources]") {
+TEST_CASE("ResourceRegistry resolves higher-priority directly mounted packages", "[Sora][Resources]") {
     PakBuilder low;
     PakBuilder high;
     REQUIRE(low.Add("res://shared/value.txt", ResourceType::Raw, Bytes("low")).has_value());
@@ -171,15 +308,16 @@ TEST_CASE("ResourceStore resolves higher-priority mounted packages", "[Sora][Res
     REQUIRE(lowPak.has_value());
     REQUIRE(highPak.has_value());
 
-    ResourceStore store;
-    REQUIRE(store.MountPak("low", std::move(*lowPak), 0).has_value());
-    REQUIRE(store.MountPak("high", std::move(*highPak), 10).has_value());
-    REQUIRE(store.MountCount() == 2);
-    REQUIRE(store.ResourceCount() == 1);
+    ResourceRegistry registry;
+    REQUIRE(registry.MountPak("low", std::move(*lowPak), 0).has_value());
+    REQUIRE(registry.MountPak("high", std::move(*highPak), 10).has_value());
+    REQUIRE(registry.ModuleCount() == 0);
+    REQUIRE(registry.LayoutCount() == 2);
+    REQUIRE(registry.ResourceCount() == 1);
 
-    auto data = store.Get(HashUri("res://shared/value.txt"));
+    auto data = registry.Open("res://shared/value.txt");
     REQUIRE(data.has_value());
-    REQUIRE(Text(*data) == "high");
+    REQUIRE(Text(data->Bytes()) == "high");
 }
 
 TEST_CASE("PakView rejects corrupted package bytes", "[Sora][Resources]") {
@@ -193,6 +331,24 @@ TEST_CASE("PakView rejects corrupted package bytes", "[Sora][Resources]") {
     auto view = PakView::Open(*pak);
     REQUIRE_FALSE(view.has_value());
     REQUIRE(view.error() == Sora::ErrorCode::ResourceCorrupted);
+}
+
+TEST_CASE("PakView mount validation does not scan payload bytes", "[Sora][Resources]") {
+    PakBuilder builder;
+    REQUIRE(builder.Add("res://lazy/raw.bin", ResourceType::Raw, Bytes("payload")).has_value());
+    auto pak = builder.Serialize();
+    REQUIRE(pak.has_value());
+
+    auto view = PakView::Open(*pak);
+    REQUIRE(view.has_value());
+    const auto& entry = view->Entries()[0];
+    (*pak)[static_cast<size_t>(entry.payloadOffset)] = std::byte{'P'};
+
+    auto reopened = PakView::Open(*pak);
+    REQUIRE(reopened.has_value());
+    auto data = reopened->Get(HashUri("res://lazy/raw.bin"));
+    REQUIRE(data.has_value());
+    REQUIRE(Text(*data) == "Payload");
 }
 
 TEST_CASE("PakBuilder accepts empty payloads and rejects duplicate semantic ids", "[Sora][Resources]") {
@@ -215,17 +371,17 @@ TEST_CASE("PakBuilder accepts empty payloads and rejects duplicate semantic ids"
     REQUIRE(duplicatePak.error() == Sora::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("ResourceStore mounts borrowed packages", "[Sora][Resources]") {
+TEST_CASE("ResourceRegistry mounts borrowed packages", "[Sora][Resources]") {
     PakBuilder builder;
     REQUIRE(builder.Add("res://io/value.txt", ResourceType::Raw, Bytes("written")).has_value());
     auto pak = builder.Serialize();
     REQUIRE(pak.has_value());
 
-    ResourceStore store;
-    REQUIRE(store.MountEmbeddedPak("borrowed", std::span<const std::byte>{pak->data(), pak->size()}).has_value());
-    auto borrowed = store.Get(HashUri("res://io/value.txt"));
+    ResourceRegistry registry;
+    REQUIRE(registry.MountEmbeddedPak("borrowed", std::span<const std::byte>{pak->data(), pak->size()}).has_value());
+    auto borrowed = registry.Open("res://io/value.txt");
     REQUIRE(borrowed.has_value());
-    REQUIRE(Text(*borrowed) == "written");
+    REQUIRE(Text(borrowed->Bytes()) == "written");
 }
 
 TEST_CASE("PakBuilder normalizes URIs and rejects malformed resource ids", "[Sora][Resources]") {
@@ -256,7 +412,7 @@ TEST_CASE("PakBuilder normalizes URIs and rejects malformed resource ids", "[Sor
     REQUIRE(*uri == "res://folder/shader.slang");
 }
 
-TEST_CASE("ResourceStore mount names and equal-priority overlays are deterministic", "[Sora][Resources]") {
+TEST_CASE("ResourceRegistry mount names and equal-priority overlays are deterministic", "[Sora][Resources]") {
     PakBuilder first;
     PakBuilder second;
     REQUIRE(first.Add("res://shared/equal.txt", ResourceType::Raw, Bytes("first")).has_value());
@@ -267,18 +423,18 @@ TEST_CASE("ResourceStore mount names and equal-priority overlays are determinist
     REQUIRE(firstPak.has_value());
     REQUIRE(secondPak.has_value());
 
-    ResourceStore store;
-    REQUIRE_FALSE(store.MountPak("", std::vector<std::byte>{}, 0).has_value());
-    REQUIRE(store.MountPak("overlay", std::move(*firstPak), 0).has_value());
-    REQUIRE_FALSE(store.MountPak("overlay", std::move(*secondPak), 0).has_value());
+    ResourceRegistry registry;
+    REQUIRE_FALSE(registry.MountPak("", std::vector<std::byte>{}, 0).has_value());
+    REQUIRE(registry.MountPak("overlay", std::move(*firstPak), 0).has_value());
+    REQUIRE_FALSE(registry.MountPak("overlay", std::move(*secondPak), 0).has_value());
 
     auto secondPakAgain = second.Serialize();
     REQUIRE(secondPakAgain.has_value());
-    REQUIRE(store.MountPak("overlay-2", std::move(*secondPakAgain), 0).has_value());
+    REQUIRE(registry.MountPak("overlay-2", std::move(*secondPakAgain), 0).has_value());
 
-    auto data = store.Get(HashUri("res://shared/equal.txt"));
+    auto data = registry.Open("res://shared/equal.txt");
     REQUIRE(data.has_value());
-    REQUIRE(Text(*data) == "second");
+    REQUIRE(Text(data->Bytes()) == "second");
 }
 
 TEST_CASE("PakView rejects forged entry descriptors", "[Sora][Resources]") {

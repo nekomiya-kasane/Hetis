@@ -8,18 +8,18 @@
 #include "Sora/Core/Traits/AnnotationTraits.h"
 #include <Sora/ErrorCode.h>
 #include <Sora/Platform.h>
-#include <Sora/Core/MemoryLayout.h>
-#include <Sora/Core/Wire.h>
 #include <Sora/Core/Traits/ScopeTraits.h>
 #include <Sora/Core/Traits/TypeTraits.h>
 #include <Sora/Core/StringUtils.h>
 #include <Sora/Resources/Format.h>
+#include <Sora/Resources/PakLayout.h>
 #include <Sora/Resources/ResourceAnnotation.h>
 #include <Sora/Resources/ResourceId.h>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <meta>
 #include <optional>
 #include <span>
@@ -507,21 +507,20 @@ namespace Sora::Resources {
         struct StaticPakResourceLayout {
             uint64_t hash = 0;                     /**< Semantic URI hash. */
             ResourceType type = ResourceType::Raw; /**< Semantic resource type. */
-            size_t size = 0;                       /**< Payload size in bytes. */
+            uint64_t size = 0;                     /**< Payload size in bytes. */
             size_t index = 0;                      /**< Original resource-pack index. */
-            size_t uriOffset = 0;                  /**< Offset inside the lpak string section. */
-            size_t dataOffset = 0;                 /**< Offset inside the lpak data section during layout building. */
+            uint32_t uriOffset = 0;                /**< Offset inside the `.lpak` string section. */
+            uint32_t uriSize = 0;                  /**< URI byte length. */
+            uint64_t dataOffset = 0;               /**< Offset inside the `.lpak` data section. */
             std::string_view uri{};                /**< Canonical URI. */
         };
 
-        /** @brief Align @p value upward to @p alignment. */
-        [[nodiscard]] consteval size_t AlignUp(size_t value, size_t alignment) {
-            auto aligned = Sora::TryAlignUp(static_cast<uint64_t>(value), static_cast<uint64_t>(alignment));
-            if (!aligned || *aligned > std::numeric_limits<size_t>::max()) {
-                throw std::define_static_string("Sora static resource layout alignment overflow.");
-            }
-            return static_cast<size_t>(*aligned);
-        }
+        /** @brief Complete compile-time `.lpak` plan for a static resource pack. */
+        template<size_t N>
+        struct StaticPakPlan {
+            std::array<StaticPakResourceLayout, N> resources{}; /**< Sorted resource layout descriptors. */
+            PakLayout layout{};                                /**< Canonical file layout. */
+        };
 
         /** @brief Return the content hash of @p Resource. */
         template<typename Resource>
@@ -563,181 +562,97 @@ namespace Sora::Resources {
             throw std::define_static_string("Sora static pak resource index is out of range.");
         }
 
-        /** @brief Return sorted static resource layouts and section-local offsets. */
+        /** @brief Return sorted static resource layouts and canonical file offsets. */
         template<typename... Resources>
-        [[nodiscard]] consteval auto SortedResourceLayouts() {
-            std::array<StaticPakResourceLayout, sizeof...(Resources)> layouts{
+        [[nodiscard]] consteval auto StaticPakPlanOf() {
+            StaticPakPlan<sizeof...(Resources)> plan{.resources = {
                 StaticPakResourceLayout{.hash = Resources::kHash,
                                         .type = Resources::kType,
                                         .size = Resources::kSize,
                                         .index = 0,
-                                        .uri = Resources::kUri.view()}...};
+                                        .uri = Resources::kUri.view()}...}};
 
-            for (size_t i = 0; i < layouts.size(); ++i) {
-                layouts[i].index = i;
+            for (size_t i = 0; i < plan.resources.size(); ++i) {
+                plan.resources[i].index = i;
             }
-            for (size_t i = 1; i < layouts.size(); ++i) {
-                auto key = layouts[i];
+            for (size_t i = 1; i < plan.resources.size(); ++i) {
+                auto key = plan.resources[i];
                 size_t j = i;
-                while (j != 0 && key.hash < layouts[j - 1u].hash) {
-                    layouts[j] = layouts[j - 1u];
+                while (j != 0 && key.hash < plan.resources[j - 1u].hash) {
+                    plan.resources[j] = plan.resources[j - 1u];
                     --j;
                 }
-                layouts[j] = key;
+                plan.resources[j] = key;
             }
-            for (size_t i = 1; i < layouts.size(); ++i) {
-                if (layouts[i - 1u].hash == layouts[i].hash) {
+            for (size_t i = 1; i < plan.resources.size(); ++i) {
+                if (plan.resources[i - 1u].hash == plan.resources[i].hash) {
                     throw std::define_static_string("Sora static pak contains duplicate resource semantic hashes.");
                 }
             }
 
-            size_t stringOffset = 0;
-            size_t dataOffset = 0;
-            for (auto& layout : layouts) {
-                layout.uriOffset = stringOffset;
-                stringOffset += layout.uri.size() + 1u;
-                dataOffset = AlignUp(dataOffset, static_cast<size_t>(kDefaultDataAlignment));
-                layout.dataOffset = dataOffset;
-                dataOffset += layout.size;
+            uint64_t stringsSize = 0;
+            uint64_t dataSize = 0;
+            for (auto& resource : plan.resources) {
+                auto uriOffset = PlacePakUri(stringsSize, resource.uri.size());
+                auto dataOffset = PlacePakPayload(dataSize, resource.size);
+                if (!uriOffset || !dataOffset) {
+                    throw std::define_static_string("Sora static pak layout overflow.");
+                }
+                resource.uriOffset = *uriOffset;
+                resource.uriSize = static_cast<uint32_t>(resource.uri.size());
+                resource.dataOffset = *dataOffset;
             }
-            return layouts;
+
+            auto layout = MakePakLayout(sizeof...(Resources), stringsSize, dataSize);
+            if (!layout || layout->fileSize > std::numeric_limits<size_t>::max()) {
+                throw std::define_static_string("Sora static pak file size is not representable.");
+            }
+            plan.layout = *layout;
+            return plan;
         }
 
         /** @brief Return the byte size of the generated static `.lpak` image. */
         template<typename... Resources>
         [[nodiscard]] consteval size_t StaticPakSize() {
-            constexpr auto layouts = SortedResourceLayouts<Resources...>();
-            size_t stringsSize = 0;
-            size_t dataSize = 0;
-            for (const auto& layout : layouts) {
-                stringsSize += layout.uri.size() + 1u;
-                dataSize = AlignUp(dataSize, static_cast<size_t>(kDefaultDataAlignment));
-                dataSize += layout.size;
-            }
-
-            constexpr size_t headerSize = Wire::SizeOf<FileHeader>();
-            constexpr size_t sectionSize = Wire::SizeOf<SectionDescriptor>();
-            constexpr size_t entrySize = Wire::SizeOf<ResourceEntry>();
-            constexpr size_t sectionCount = 3;
-            const size_t sectionTableEnd = headerSize + sectionSize * sectionCount;
-            const size_t entriesOffset = AlignUp(sectionTableEnd, 8);
-            const size_t stringsOffset = AlignUp(entriesOffset + entrySize * sizeof...(Resources), 8);
-            const size_t dataOffset = AlignUp(stringsOffset + stringsSize, static_cast<size_t>(kDefaultDataAlignment));
-            return dataOffset + dataSize;
+            constexpr auto plan = StaticPakPlanOf<Resources...>();
+            return static_cast<size_t>(plan.layout.fileSize);
         }
 
         /** @brief Build the canonical static `.lpak` image for @p Resources. */
         template<typename... Resources>
         [[nodiscard]] consteval auto BuildStaticPak() {
-            constexpr auto layouts = SortedResourceLayouts<Resources...>();
+            constexpr auto plan = StaticPakPlanOf<Resources...>();
             constexpr size_t fileSize = StaticPakSize<Resources...>();
-            constexpr size_t headerSize = Wire::SizeOf<FileHeader>();
-            constexpr size_t sectionSize = Wire::SizeOf<SectionDescriptor>();
-            constexpr size_t entrySize = Wire::SizeOf<ResourceEntry>();
-            constexpr size_t sectionCount = 3;
-            constexpr size_t sectionTableOffset = headerSize;
-            constexpr size_t entriesOffset = AlignUp(headerSize + sectionSize * sectionCount, 8);
-
-            size_t stringsSize = 0;
-            size_t dataSize = 0;
-            for (const auto& layout : layouts) {
-                stringsSize += layout.uri.size() + 1u;
-                dataSize = AlignUp(dataSize, static_cast<size_t>(kDefaultDataAlignment));
-                dataSize += layout.size;
-            }
-
-            constexpr size_t entriesSize = entrySize * sizeof...(Resources);
-            const size_t stringsOffset = AlignUp(entriesOffset + entriesSize, 8);
-            const size_t dataOffset = AlignUp(stringsOffset + stringsSize, static_cast<size_t>(kDefaultDataAlignment));
             std::array<unsigned char, fileSize> file{};
+            auto bytes = std::span<unsigned char>{file};
 
-            size_t entryCursor = entriesOffset;
-            for (const auto& layout : layouts) {
-                const ResourceEntry entry{.semanticHash = layout.hash,
-                                          .contentHash = ResourceHashByIndex<0, Resources...>(layout.index),
-                                          .payloadOffset = dataOffset + layout.dataOffset,
-                                          .packedSize = layout.size,
-                                          .unpackedSize = layout.size,
-                                          .uriOffset = static_cast<uint32_t>(layout.uriOffset),
-                                          .uriSize = static_cast<uint32_t>(layout.uri.size()),
-                                          .type = static_cast<uint16_t>(layout.type),
-                                          .codec = static_cast<uint16_t>(CompressionCodec::None),
-                                          .flags = static_cast<uint16_t>(ResourceFlags::None),
-                                          .alignmentLog2 = 12};
-                Wire::WriteUnchecked(file, entryCursor, entry);
-                entryCursor += entrySize;
+            for (size_t i = 0; i < plan.resources.size(); ++i) {
+                const auto& resource = plan.resources[i];
+                const auto entry = MakePakEntry(resource.hash, ResourceHashByIndex<0, Resources...>(resource.index),
+                                                plan.layout.dataOffset + resource.dataOffset, resource.size,
+                                                resource.uriOffset, resource.uriSize, resource.type);
+                WritePakEntryUnchecked(bytes, plan.layout, i, entry);
             }
 
-            size_t stringCursor = stringsOffset;
-            for (const auto& layout : layouts) {
-                for (char c : layout.uri) {
+            for (const auto& resource : plan.resources) {
+                size_t stringCursor = static_cast<size_t>(plan.layout.stringsOffset + resource.uriOffset);
+                for (char c : resource.uri) {
                     file[stringCursor++] = static_cast<unsigned char>(c);
                 }
                 file[stringCursor++] = 0;
             }
 
-            for (const auto& layout : layouts) {
-                CopyResourceByIndex<0, Resources...>(layout.index, file, dataOffset + layout.dataOffset);
+            for (const auto& resource : plan.resources) {
+                CopyResourceByIndex<0, Resources...>(
+                    resource.index, file, static_cast<size_t>(plan.layout.dataOffset + resource.dataOffset));
             }
 
-            const SectionDescriptor entrySection{
-                .kind = static_cast<uint32_t>(SectionKind::Entries),
-                .flags = 0,
-                .alignment = 8,
-                .reserved = 0,
-                .offset = entriesOffset,
-                .size = entriesSize,
-                .checksum = Sora::Hashing::HashByteRange(
-                    std::span<const unsigned char>{file.data() + entriesOffset, entriesSize})};
-            const SectionDescriptor stringSection{
-                .kind = static_cast<uint32_t>(SectionKind::Strings),
-                .flags = 0,
-                .alignment = 8,
-                .reserved = 0,
-                .offset = stringsOffset,
-                .size = stringsSize,
-                .checksum = Sora::Hashing::HashByteRange(
-                    std::span<const unsigned char>{file.data() + stringsOffset, stringsSize})};
-            const SectionDescriptor dataSection{.kind = static_cast<uint32_t>(SectionKind::Data),
-                                                .flags = 0,
-                                                .alignment = static_cast<uint32_t>(kDefaultDataAlignment),
-                                                .reserved = 0,
-                                                .offset = dataOffset,
-                                                .size = dataSize,
-                                                .checksum = 0};
-            Wire::WriteUnchecked(file, sectionTableOffset, entrySection);
-            Wire::WriteUnchecked(file, sectionTableOffset + sectionSize, stringSection);
-            Wire::WriteUnchecked(file, sectionTableOffset + sectionSize * 2u, dataSection);
-
-            FileHeader header{.magic = kLpakMagic,
-                              .major = kLpakMajor,
-                              .minor = kLpakMinor,
-                              .headerSize = static_cast<uint16_t>(headerSize),
-                              .sectionCount = static_cast<uint16_t>(sectionCount),
-                              .sectionSize = static_cast<uint16_t>(sectionSize),
-                              .entrySize = static_cast<uint16_t>(entrySize),
-                              .layout = static_cast<uint16_t>(IndexLayout::Sorted),
-                              .reserved0 = 0,
-                              .flags = 0,
-                              .fileSize = fileSize,
-                              .sectionTableOffset = sectionTableOffset,
-                              .resourceCount = sizeof...(Resources),
-                              .metadataHash = 0,
-                              .reserved1 = 0};
-            Wire::WriteUnchecked(file, 0, header);
-            auto hashState = Sora::Hashing::Fnv1a64State::Seed();
-            auto feedRange = [&]<size_t N>(const std::array<unsigned char, N>& bytes, size_t rangeOffset,
-                                           size_t rangeSize) {
-                for (size_t i = 0; i < rangeSize; ++i) {
-                    hashState.FeedByte(static_cast<std::byte>(bytes[rangeOffset + i]));
-                }
-            };
-            feedRange(file, 0, headerSize);
-            feedRange(file, sectionTableOffset, sectionSize * sectionCount);
-            feedRange(file, entriesOffset, entriesSize);
-            feedRange(file, stringsOffset, stringsSize);
-            header.metadataHash = hashState.Finalize();
-            Wire::WriteUnchecked(file, 0, header);
+            const uint64_t entriesChecksum =
+                Sora::Hashing::HashByteRange(PakEntriesRegion(std::span<const unsigned char>{file}, plan.layout));
+            const uint64_t stringsChecksum =
+                Sora::Hashing::HashByteRange(PakStringsRegion(std::span<const unsigned char>{file}, plan.layout));
+            WritePakPreambleUnchecked(bytes, plan.layout, entriesChecksum, stringsChecksum);
+            FinalizePakHeaderUnchecked(bytes, plan.layout);
             return file;
         }
 
