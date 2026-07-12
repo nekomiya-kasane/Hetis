@@ -97,30 +97,27 @@ namespace Sora::Wire {
             }
         }
 
-        /** @brief Return true when byte range @c [offset, offset + size) lies inside a byte image of @p extent bytes.
-         */
-        [[nodiscard]] constexpr bool HasRange(uint64_t extent, uint64_t offset, uint64_t size) noexcept {
-            return offset <= extent && size <= extent - offset;
-        }
-
-        /** @brief Return true when byte range @c [offset, offset + size) lies inside @p bytes. */
-        [[nodiscard]] constexpr bool HasRange(std::span<const std::byte> bytes, uint64_t offset,
-                                              uint64_t size) noexcept {
-            return HasRange(static_cast<uint64_t>(bytes.size()), offset, size);
-        }
-
-        /** @brief Return a checked byte subspan, or @ref ErrorCode::DataTruncated when the range is outside @p bytes.
-         */
-        [[nodiscard]] constexpr auto Subspan(std::span<const std::byte> bytes, uint64_t offset, uint64_t size)
-            -> Result<std::span<const std::byte>> {
-            if (!HasRange(bytes, offset, size) || offset > std::numeric_limits<size_t>::max() ||
-                size > std::numeric_limits<size_t>::max()) {
-                return std::unexpected(ErrorCode::DataTruncated);
-            }
-            return bytes.subspan(static_cast<size_t>(offset), static_cast<size_t>(size));
-        }
-
     } // namespace Detail
+
+    /** @brief Return true when byte range @c [offset, offset + size) lies inside a byte image of @p extent bytes. */
+    [[nodiscard]] constexpr bool HasRange(uint64_t extent, uint64_t offset, uint64_t size) noexcept {
+        return offset <= extent && size <= extent - offset;
+    }
+
+    /** @brief Return true when byte range @c [offset, offset + size) lies inside @p bytes. */
+    [[nodiscard]] constexpr bool HasRange(std::span<const std::byte> bytes, uint64_t offset, uint64_t size) noexcept {
+        return HasRange(static_cast<uint64_t>(bytes.size()), offset, size);
+    }
+
+    /** @brief Return a checked byte subspan, or @ref ErrorCode::DataTruncated when the range is outside @p bytes. */
+    [[nodiscard]] constexpr auto Subspan(std::span<const std::byte> bytes, uint64_t offset, uint64_t size)
+        -> Result<std::span<const std::byte>> {
+        if (!HasRange(bytes, offset, size) || offset > std::numeric_limits<size_t>::max() ||
+            size > std::numeric_limits<size_t>::max()) {
+            return std::unexpected(ErrorCode::DataTruncated);
+        }
+        return bytes.subspan(static_cast<size_t>(offset), static_cast<size_t>(size));
+    }
 
     /** @brief Read @p T from @p bytes at @p offset as a little-endian scalar without bounds checks. */
     template<Concept::Scalar T>

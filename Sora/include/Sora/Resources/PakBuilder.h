@@ -1,15 +1,17 @@
 /**
  * @file PakBuilder.h
- * @brief `.lpak` package construction from embedded or runtime resources.
+ * @brief `.lpak` package construction from runtime or borrowed resource bytes.
  * @ingroup Resources
  */
 #pragma once
 
 #include "Sora/Core/Hash.h"
+#include <Sora/Core/MemoryLayout.h>
+#include <Sora/Core/Wire.h>
 #include <Sora/ErrorCode.h>
-#include <Sora/Resources/EmbeddedResource.h>
 #include <Sora/Resources/Format.h>
-#include <Sora/Resources/Wire.h>
+#include <Sora/Resources/ResourceBytes.h>
+#include <Sora/Resources/ResourceId.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -17,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,53 +37,10 @@ namespace Sora::Resources {
 
         std::vector<PendingResource> resources_;
 
-        [[nodiscard]] static auto NormalizeUri(std::string_view uri) -> Result<std::string> {
-            if (uri.empty() || uri.size() > std::numeric_limits<uint32_t>::max()) {
-                return std::unexpected(ErrorCode::InvalidArgument);
-            }
-            std::string normalized;
-            normalized.reserve(uri.size());
-            for (char c : uri) {
-                if (c == '\0') {
-                    return std::unexpected(ErrorCode::InvalidArgument);
-                }
-                normalized.push_back(c == '\\' ? '/' : c);
-            }
-            if (!ParseResourceUri(normalized).has_value()) {
-                return std::unexpected(ErrorCode::InvalidArgument);
-            }
-            return normalized;
-        }
-
-        [[nodiscard]] static constexpr auto CheckedAdd(uint64_t a, uint64_t b) -> Result<uint64_t> {
-            if (b > std::numeric_limits<uint64_t>::max() - a) {
-                return std::unexpected(ErrorCode::InvalidArgument);
-            }
-            return a + b;
-        }
-
-        [[nodiscard]] static constexpr auto CheckedAlignUp(uint64_t value, uint64_t alignment) -> Result<uint64_t> {
-            if (alignment == 0) {
-                return value;
-            }
-            auto biased = CheckedAdd(value, alignment - 1);
-            if (!biased) {
-                return std::unexpected(biased.error());
-            }
-            return (*biased / alignment) * alignment;
-        }
-
-        [[nodiscard]] static constexpr auto ToSize(uint64_t value) -> Result<size_t> {
-            if (value > std::numeric_limits<size_t>::max()) {
-                return std::unexpected(ErrorCode::InvalidArgument);
-            }
-            return static_cast<size_t>(value);
-        }
-
     public:
         /** @brief Add a resource. The payload is copied into the builder. */
         auto Add(std::string_view uri, ResourceType type, std::span<const std::byte> bytes) -> VoidResult {
-            auto normalized = NormalizeUri(uri);
+            auto normalized = NormalizeResourceUri(uri);
             if (!normalized || !IsKnownResourceType(type)) {
                 return std::unexpected(ErrorCode::InvalidArgument);
             }
@@ -92,8 +52,8 @@ namespace Sora::Resources {
             return {};
         }
 
-        /** @brief Add an embedded resource. */
-        auto Add(EmbeddedResourceView resource) -> VoidResult {
+        /** @brief Add a borrowed resource byte view. The payload is copied into the builder. */
+        auto Add(ResourceBytesView resource) -> VoidResult {
             if (resource.size != 0 && resource.data == nullptr) {
                 return std::unexpected(ErrorCode::InvalidArgument);
             }
@@ -128,7 +88,7 @@ namespace Sora::Resources {
                 built.push_back(BuiltResource{.entry = entry, .uri = r.uri, .bytes = r.bytes});
             }
 
-            std::sort(built.begin(), built.end(), [](const BuiltResource& a, const BuiltResource& b) {
+            std::ranges::sort(built, [](const BuiltResource& a, const BuiltResource& b) {
                 return a.entry.semanticHash < b.entry.semanticHash;
             });
 
@@ -157,15 +117,58 @@ namespace Sora::Resources {
             for (auto& r : built) {
                 auto aligned = CheckedAlignUp(data.size(), kDefaultDataAlignment);
                 if (!aligned) {
-                    return std::unexpected(aligned.error());
+                    return std::unexpected(ErrorCode::InvalidArgument);
                 }
-                auto alignedSize = ToSize(*aligned);
-                if (!alignedSize) {
-                    return std::unexpected(alignedSize.error());
-                }
-                data.resize(*alignedSize, std::byte{0});
-                r.entry.dataOffset = data.size();
+                data.resize(static_cast<size_t>(*aligned), std::byte{0});
+                r.entry.payloadOffset = data.size();
                 data.insert_range(data.end(), r.bytes);
+            }
+
+            constexpr auto headerSize = Wire::SizeOf<FileHeader>();
+            constexpr auto sectionSize = Wire::SizeOf<SectionDescriptor>();
+            constexpr auto entrySize = Wire::SizeOf<ResourceEntry>();
+            constexpr uint16_t sectionCount = 3;
+            static_assert(headerSize == kFileHeaderWireSize);
+            static_assert(sectionSize == kSectionDescriptorWireSize);
+            static_assert(entrySize == kResourceEntryWireSize);
+
+            auto entriesSize = entrySize * built.size();
+            if (!entriesSize) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            const uint64_t sectionTableOffset = headerSize;
+            auto sectionTableEnd = sectionTableOffset + sectionSize * sectionCount;
+            if (!sectionTableEnd) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            auto entriesOffset = CheckedAlignUp(sectionTableEnd, 8);
+            if (!entriesOffset) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            auto entriesEnd = *entriesOffset + entriesSize;
+            if (!entriesEnd) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            auto stringsOffset = CheckedAlignUp(entriesEnd, 8);
+            if (!stringsOffset) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            auto stringsEnd = *stringsOffset + strings.size();
+            if (!stringsEnd) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            auto dataOffset = CheckedAlignUp(stringsEnd, kDefaultDataAlignment);
+            if (!dataOffset) {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+
+            for (auto& r : built) {
+                auto absolutePayloadOffset = *dataOffset + r.entry.payloadOffset;
+                if (!absolutePayloadOffset) {
+                    return std::unexpected(ErrorCode::InvalidArgument);
+                }
+                r.entry.payloadOffset = absolutePayloadOffset;
+                r.entry.alignmentLog2 = 12;
             }
 
             std::vector<std::byte> entries;
@@ -173,42 +176,13 @@ namespace Sora::Resources {
                 Wire::Append(entries, r.entry);
             }
 
-            constexpr auto headerSize = Wire::SizeOf<FileHeader>();
-            constexpr auto sectionSize = Wire::SizeOf<SectionDescriptor>();
-            constexpr uint16_t sectionCount = 3;
-
-            const uint64_t sectionTableOffset = headerSize;
-            auto sectionTableEnd = CheckedAdd(sectionTableOffset, sectionSize * sectionCount);
-            if (!sectionTableEnd) {
-                return std::unexpected(sectionTableEnd.error());
-            }
-            auto entriesOffset = CheckedAlignUp(*sectionTableEnd, 8);
-            if (!entriesOffset) {
-                return std::unexpected(entriesOffset.error());
-            }
-            auto entriesEnd = CheckedAdd(*entriesOffset, entries.size());
-            if (!entriesEnd) {
-                return std::unexpected(entriesEnd.error());
-            }
-            auto stringsOffset = CheckedAlignUp(*entriesEnd, 8);
-            if (!stringsOffset) {
-                return std::unexpected(stringsOffset.error());
-            }
-            auto stringsEnd = CheckedAdd(*stringsOffset, strings.size());
-            if (!stringsEnd) {
-                return std::unexpected(stringsEnd.error());
-            }
-            auto dataOffset = CheckedAlignUp(*stringsEnd, kDefaultDataAlignment);
-            if (!dataOffset) {
-                return std::unexpected(dataOffset.error());
-            }
-            auto fileSize = CheckedAdd(*dataOffset, data.size());
+            auto fileSize = *dataOffset + data.size();
             if (!fileSize) {
-                return std::unexpected(fileSize.error());
+                return std::unexpected(ErrorCode::InvalidArgument);
             }
-            auto fileCapacity = ToSize(*fileSize);
+            auto fileCapacity = static_cast<size_t>(fileSize);
             if (!fileCapacity) {
-                return std::unexpected(fileCapacity.error());
+                return std::unexpected(ErrorCode::InvalidArgument);
             }
 
             SectionDescriptor entrySection{
@@ -230,20 +204,22 @@ namespace Sora::Resources {
                 .alignment = static_cast<uint32_t>(kDefaultDataAlignment),
                 .offset = *dataOffset,
                 .size = data.size(),
-                .checksum = Sora::Hashing::HashByteRange(data),
+                .checksum = 0,
             };
 
             FileHeader header{
                 .headerSize = static_cast<uint16_t>(headerSize),
                 .sectionCount = sectionCount,
+                .sectionSize = static_cast<uint16_t>(sectionSize),
+                .entrySize = static_cast<uint16_t>(entrySize),
                 .layout = static_cast<uint16_t>(IndexLayout::Sorted),
-                .fileSize = *fileSize,
+                .fileSize = static_cast<uint32_t>(fileSize),
                 .sectionTableOffset = sectionTableOffset,
                 .resourceCount = built.size(),
             };
 
             std::vector<std::byte> file;
-            file.reserve(*fileCapacity);
+            file.reserve(fileCapacity);
             Wire::Append(file, header);
             Wire::Append(file, entrySection);
             Wire::Append(file, stringSection);
@@ -254,21 +230,20 @@ namespace Sora::Resources {
             file.insert(file.end(), strings.begin(), strings.end());
             file.resize(static_cast<size_t>(*dataOffset), std::byte{0});
             file.insert(file.end(), data.begin(), data.end());
-            if (file.size() != *fileSize) {
+            if (file.size() != static_cast<size_t>(fileSize)) {
                 return std::unexpected(ErrorCode::InvalidState);
             }
 
-            header.headerHash = 0;
-            header.fileHash = 0;
-            std::vector<std::byte> headerBytes;
-            Wire::Append(headerBytes, header);
-            header.headerHash = Sora::Hashing::HashByteRange(headerBytes);
+            auto hasher = Sora::Hashing::Hasher<>{};
+            hasher.FeedBytes(std::span<const std::byte>{file}.subspan(0, headerSize));
+            hasher.FeedBytes(std::span<const std::byte>{file}.subspan(static_cast<size_t>(sectionTableOffset),
+                                                                      sectionSize * sectionCount));
+            hasher.FeedBytes(
+                std::span<const std::byte>{file}.subspan(static_cast<size_t>(*entriesOffset), entries.size()));
+            hasher.FeedBytes(
+                std::span<const std::byte>{file}.subspan(static_cast<size_t>(*stringsOffset), strings.size()));
+            header.metadataHash = hasher.Finalize();
             auto writeHeader = Wire::WriteAt(file, 0, header);
-            if (!writeHeader) {
-                return std::unexpected(writeHeader.error());
-            }
-            header.fileHash = Sora::Hashing::HashByteRange(file);
-            writeHeader = Wire::WriteAt(file, 0, header);
             if (!writeHeader) {
                 return std::unexpected(writeHeader.error());
             }

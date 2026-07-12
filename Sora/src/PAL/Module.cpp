@@ -127,8 +127,7 @@ namespace Sora::PAL {
             return bytes;
         }
 
-        // TODO: this is bad, move HasRange to a proper place and use it in Wire.h as well
-        using Sora::Wire::Detail::HasRange;
+        using Sora::Wire::HasRange;
 
         /** @brief Read an unsigned little-endian integer from @p bytes. */
         template<typename T>

@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <Sora/ErrorCode.h>
 #include <Sora/Core/FixedString.h>
 #include <Sora/Core/Hash.h>
 #include <Sora/Core/Uri.h>
@@ -68,6 +69,24 @@ namespace Sora::Resources {
             return std::nullopt;
         }
         return ResourceUriView{.parsed = *parsed};
+    }
+
+    [[nodiscard]] constexpr auto NormalizeResourceUri(std::string_view uri) -> Result<std::string> {
+        if (uri.empty() || uri.size() > std::numeric_limits<uint32_t>::max()) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+        std::string normalized;
+        normalized.reserve(uri.size());
+        for (char c : uri) {
+            if (c == '\0') {
+                return std::unexpected(ErrorCode::InvalidArgument);
+            }
+            normalized.push_back(c == '\\' ? '/' : c);
+        }
+        if (!ParseResourceUri(normalized).has_value()) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+        return normalized;
     }
 
     /** @brief True when @p uri uses the canonical resource identity form. */

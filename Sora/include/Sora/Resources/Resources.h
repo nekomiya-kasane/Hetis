@@ -13,4 +13,3 @@
 #include <Sora/Resources/ResourceId.h>
 #include <Sora/Resources/ResourceModule.h>
 #include <Sora/Resources/ResourceRegistry.h>
-#include <Sora/Resources/ResourceStore.h>

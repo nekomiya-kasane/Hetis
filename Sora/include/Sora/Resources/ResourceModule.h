@@ -5,15 +5,17 @@
  */
 #pragma once
 
+#include "Sora/Core/Traits/AnnotationTraits.h"
 #include <Sora/ErrorCode.h>
 #include <Sora/Platform.h>
+#include <Sora/Core/MemoryLayout.h>
+#include <Sora/Core/Wire.h>
 #include <Sora/Core/Traits/ScopeTraits.h>
 #include <Sora/Core/Traits/TypeTraits.h>
 #include <Sora/Core/StringUtils.h>
-#include <Sora/Resources/EmbeddedResource.h>
 #include <Sora/Resources/Format.h>
+#include <Sora/Resources/ResourceAnnotation.h>
 #include <Sora/Resources/ResourceId.h>
-#include <Sora/Resources/Wire.h>
 
 #include <array>
 #include <cstddef>
@@ -194,14 +196,14 @@ namespace Sora::Resources {
 
     namespace Detail {
 
-        /** @brief Resource kind inferred from a namespace segment. */
+        /** @brief Conventional resource defaults inferred from a namespace segment. */
         struct ResourceKind {
             ResourceType type = ResourceType::Unknown; /**< Semantic type. */
-            std::string_view directory{};              /**< Canonical URI directory. */
+            std::string_view directory{};              /**< Default URI authority or nested directory. */
             std::string_view extension{};              /**< Default filename extension. */
         };
 
-        /** @brief Return the resource kind carried by a namespace segment. */
+        /** @brief Return the conventional resource defaults carried by a namespace segment. */
         [[nodiscard]] consteval ResourceKind ResourceKindOf(std::string_view name) {
             if (name == "Image") {
                 return {ResourceType::Image, "image", ".png"};
@@ -245,9 +247,22 @@ namespace Sora::Resources {
             return {};
         }
 
-        /** @brief Return the single resource annotation on @p variable, if one exists. */
-        [[nodiscard]] consteval std::optional<$::Resource> ResourceAnnotationOf(std::meta::info variable) {
-            auto annotations = std::meta::annotations_of(variable, ^^$::Resource);
+        /** @brief Active resource-tree defaults inherited while walking reflected namespaces. */
+        struct ResourceScopeContext {
+            FixedString<256> baseUri{};                /**< Canonical resource-tree base URI. */
+            ResourceType type = ResourceType::Unknown; /**< Inherited semantic resource type. */
+            FixedString<32> extension{};               /**< Inherited filename suffix. */
+        };
+
+        /** @brief Fully resolved static resource declaration. */
+        struct ResolvedResourceDecl {
+            FixedString<256> uri{};                    /**< Canonical resource URI. */
+            ResourceType type = ResourceType::Unknown; /**< Semantic resource type. */
+        };
+
+        /** @brief Return the single resource annotation on @p entity, if one exists. */
+        [[nodiscard]] consteval std::optional<$::Resource> ResourceAnnotationOf(std::meta::info entity) {
+            auto annotations = Sora::$::GetAll(entity, {^^$::Resource});
             if (annotations.size() > 1) {
                 throw std::define_static_string("A Sora resource declaration can carry at most one "
                                                 "Resource annotation.");
@@ -258,17 +273,102 @@ namespace Sora::Resources {
             return std::meta::extract<$::Resource>(annotations.front());
         }
 
-        /** @brief Find the nearest resource-kind namespace in @p variable's parent chain. */
-        [[nodiscard]] consteval std::meta::info ResourceKindScopeOf(std::meta::info variable) {
-            std::meta::info scope = std::meta::parent_of(variable);
-            while (scope != ^^::) {
-                if (std::meta::is_namespace(scope) &&
-                    ResourceKindOf(std::meta::identifier_of(scope)).type != ResourceType::Unknown) {
-                    return scope;
-                }
-                scope = std::meta::parent_of(scope);
+        /** @brief Return true when @p text is an absolute canonical resource URI. */
+        [[nodiscard]] consteval bool IsAbsoluteResourceUri(std::string_view text) {
+            return ParseResourceUri(text).has_value();
+        }
+
+        /** @brief Return true when @p text is a dot-prefixed filename suffix usable for inferred resource leaves. */
+        [[nodiscard]] consteval bool IsResourceExtension(std::string_view text) {
+            return Sora::IsUriPathFilenameSuffix(text);
+        }
+
+        /** @brief Return @p uri without trailing separators so it can be used as a resource-tree base. */
+        [[nodiscard]] consteval FixedString<256> NormalizeResourceBase(std::string_view uri) {
+            auto normalized = Sora::NormalizeUriIdentityBase<256>(uri);
+            if (!normalized || !IsAbsoluteResourceUri(normalized->view())) {
+                throw std::define_static_string("Sora resource namespace URI must be a canonical res:// URI.");
             }
-            return {};
+            return *normalized;
+        }
+
+        /** @brief Resolve relative resource path @p relative against canonical base URI @p base. */
+        [[nodiscard]] consteval FixedString<256> JoinResourcePath(std::string_view base, std::string_view relative) {
+            auto joined = Sora::JoinUriIdentityPath<256>(base, relative);
+            if (!joined) {
+                throw std::define_static_string("Sora resource relative URI must be a canonical slash-separated path.");
+            }
+            if (!IsAbsoluteResourceUri(joined->view())) {
+                throw std::define_static_string("Resolved Sora resource URI is not canonical.");
+            }
+            return *joined;
+        }
+
+        /** @brief Resolve annotation URI text against @p context as a namespace base URI. */
+        [[nodiscard]] consteval FixedString<256> ResolveNamespaceBase(ResourceScopeContext context,
+                                                                      std::string_view uri) {
+            if (uri.empty()) {
+                return context.baseUri;
+            }
+            if (Sora::ParseUri(uri).has_value()) {
+                return NormalizeResourceBase(uri);
+            }
+            return JoinResourcePath(context.baseUri.view(), uri);
+        }
+
+        /** @brief Return lower-kebab spelling for a reflected namespace identifier. */
+        [[nodiscard]] consteval std::string KebabNamespaceSegment(std::meta::info scope) {
+            if (!std::meta::has_identifier(scope)) {
+                throw std::define_static_string("Sora resource namespaces must be named.");
+            }
+            std::string segment = Sora::Ascii::ToLowerKebab(std::meta::identifier_of(scope));
+            if (!Sora::IsCanonicalRelativeUriIdentityPath(segment)) {
+                throw std::define_static_string("Sora resource namespace name does not form a canonical path segment.");
+            }
+            return segment;
+        }
+
+        /** @brief Return lower-kebab filename stem for a reflected resource variable. */
+        [[nodiscard]] consteval std::string KebabResourceStem(std::meta::info variable) {
+            std::string stem = Sora::Ascii::ToLowerKebab(std::meta::identifier_of(variable));
+            if (stem.empty() || stem.find('/') != std::string::npos ||
+                !Sora::IsCanonicalRelativeUriIdentityPath(stem)) {
+                throw std::define_static_string("Sora resource variable name does not form a canonical path segment.");
+            }
+            return stem;
+        }
+
+        /** @brief Return context for @p scope after applying namespace annotations and naming conventions. */
+        [[nodiscard]] consteval ResourceScopeContext ResolveScopeContext(std::meta::info scope,
+                                                                         ResourceScopeContext parent) {
+            ResourceScopeContext context = parent;
+            const auto annotation = ResourceAnnotationOf(scope);
+            const ResourceKind kind =
+                std::meta::has_identifier(scope) ? ResourceKindOf(std::meta::identifier_of(scope)) : ResourceKind{};
+
+            if (kind.type != ResourceType::Unknown) {
+                context.type = kind.type;
+                context.extension = FixedString<32>{kind.extension};
+            }
+            if (annotation.has_value() && annotation->type != ResourceType::Unknown) {
+                context.type = annotation->type;
+            }
+            if (annotation.has_value() && !annotation->extension.empty()) {
+                if (!IsResourceExtension(annotation->extension.view())) {
+                    throw std::define_static_string("Sora resource namespace extension must be a dot-prefixed suffix.");
+                }
+                context.extension = annotation->extension;
+            }
+
+            if (annotation.has_value() && !annotation->uri.empty()) {
+                context.baseUri = ResolveNamespaceBase(parent, annotation->uri.view());
+            } else if (kind.type != ResourceType::Unknown) {
+                context.baseUri = parent.baseUri.empty() ? NormalizeResourceBase(std::string{"res://"} + kind.directory)
+                                                         : JoinResourcePath(parent.baseUri.view(), kind.directory);
+            } else if (!parent.baseUri.empty()) {
+                context.baseUri = JoinResourcePath(parent.baseUri.view(), KebabNamespaceSegment(scope));
+            }
+            return context;
         }
 
         /** @brief Return true when @p type is an unsigned byte-like scalar. */
@@ -282,7 +382,7 @@ namespace Sora::Resources {
             if (!std::meta::is_variable(variable) || !std::meta::has_identifier(variable)) {
                 return false;
             }
-            if (!ResourceAnnotationOf(variable).has_value() && ResourceKindScopeOf(variable) == std::meta::info{}) {
+            if (!std::meta::is_namespace(std::meta::parent_of(variable))) {
                 return false;
             }
             auto type = std::meta::remove_cvref(std::meta::type_of(variable));
@@ -292,60 +392,53 @@ namespace Sora::Resources {
             return IsUnsignedByteType(std::meta::remove_extent(type));
         }
 
-        /** @brief Infer the semantic type for a namespace-scoped static resource variable. */
-        [[nodiscard]] consteval ResourceType ResourceTypeOf(std::meta::info variable) {
-            if (auto annotation = ResourceAnnotationOf(variable);
-                annotation.has_value() && annotation->type != ResourceType::Unknown) {
-                return annotation->type;
+        /** @brief Resolve the resource identity declared by @p variable under @p context. */
+        [[nodiscard]] consteval std::optional<ResolvedResourceDecl> ResolveResourceDecl(std::meta::info variable,
+                                                                                        ResourceScopeContext context) {
+            const auto annotation = ResourceAnnotationOf(variable);
+            if (!annotation.has_value() && context.baseUri.empty() && context.type == ResourceType::Unknown &&
+                context.extension.empty()) {
+                return std::nullopt;
             }
-            const std::meta::info scope = ResourceKindScopeOf(variable);
-            if (scope == std::meta::info{}) {
-                throw std::define_static_string("A Sora resource declaration must be under a "
-                                                "resource-kind namespace.");
-            }
-            return ResourceKindOf(std::meta::identifier_of(scope)).type;
-        }
 
-        /** @brief Infer the canonical URI for a namespace-scoped static resource variable. */
-        [[nodiscard]] consteval FixedString<256> ResourceUriOf(std::meta::info variable) {
-            if (auto annotation = ResourceAnnotationOf(variable); annotation.has_value() && !annotation->uri.empty()) {
-                if (!ParseResourceUri(annotation->uri.view()).has_value()) {
-                    throw std::define_static_string("Annotated Sora resource URI must use canonical res://path form.");
+            ResourceType type = context.type;
+            FixedString<32> extension = context.extension;
+            if (annotation.has_value() && annotation->type != ResourceType::Unknown) {
+                type = annotation->type;
+            }
+            if (annotation.has_value() && !annotation->extension.empty()) {
+                if (!IsResourceExtension(annotation->extension.view())) {
+                    throw std::define_static_string("Sora resource variable extension must be a dot-prefixed suffix.");
                 }
-                return annotation->uri;
+                extension = annotation->extension;
+            }
+            if (!IsKnownResourceType(type)) {
+                throw std::define_static_string("Sora resource type must be declared or inferred from namespace.");
             }
 
-            const std::meta::info kindScope = ResourceKindScopeOf(variable);
-            if (kindScope == std::meta::info{}) {
-                throw std::define_static_string("A Sora resource declaration must be under a "
-                                                "resource-kind namespace.");
-            }
-
-            const ResourceKind kind = ResourceKindOf(std::meta::identifier_of(kindScope));
-            std::vector<std::meta::info> scopes;
-            for (std::meta::info scope = std::meta::parent_of(variable); scope != kindScope;
-                 scope = std::meta::parent_of(scope)) {
-                if (!std::meta::is_namespace(scope)) {
-                    throw std::define_static_string("Sora resource declarations must live under namespace scopes.");
+            FixedString<256> uri{};
+            if (annotation.has_value() && !annotation->uri.empty()) {
+                if (IsAbsoluteResourceUri(annotation->uri.view())) {
+                    uri = annotation->uri;
+                } else {
+                    uri = JoinResourcePath(context.baseUri.view(), annotation->uri.view());
                 }
-                scopes.push_back(scope);
+            } else {
+                if (context.baseUri.empty()) {
+                    throw std::define_static_string("Inferred Sora resource URI requires a namespace resource base.");
+                }
+                if (!IsResourceExtension(extension.view())) {
+                    throw std::define_static_string("Inferred Sora resource URI requires a dot-prefixed extension.");
+                }
+                std::string leaf = KebabResourceStem(variable);
+                leaf += extension.view();
+                uri = JoinResourcePath(context.baseUri.view(), leaf);
             }
 
-            std::string uri = "res://";
-            uri.reserve(4 + kind.directory.size() + scopes.size() * 32 + std::meta::identifier_of(variable).size() +
-                        kind.extension.size());
-            uri += kind.directory;
-            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-                uri.push_back('/');
-                uri += Sora::Ascii::ToLowerKebab(std::meta::identifier_of(*it));
+            if (!IsAbsoluteResourceUri(uri.view())) {
+                throw std::define_static_string("Resolved Sora resource URI is not canonical.");
             }
-            uri.push_back('/');
-            uri += Sora::Ascii::ToLowerKebab(std::meta::identifier_of(variable));
-            uri += kind.extension;
-            if (!ParseResourceUri(uri).has_value()) {
-                throw std::define_static_string("Inferred Sora resource URI is not canonical.");
-            }
-            return FixedString<256>(std::string_view{uri});
+            return ResolvedResourceDecl{.uri = uri, .type = type};
         }
 
     } // namespace Detail
@@ -353,19 +446,24 @@ namespace Sora::Resources {
     /**
      * @brief Normalized static resource generated from a namespace-scoped byte-array declaration.
      * @tparam Variable Reflected variable whose value is a static byte array, usually initialized with @c #embed.
+     * @tparam Uri Canonical resource URI resolved from namespace and variable annotations.
+     * @tparam Type Semantic resource type resolved from namespace and variable annotations.
      */
-    template<std::meta::info Variable>
+    template<std::meta::info Variable, FixedString<256> Uri, ResourceType Type>
     struct StaticResourceFrom {
         static_assert(Detail::IsStaticResourceVariable(Variable),
                       "StaticResourceFrom requires a namespace-scoped unsigned byte array resource declaration.");
+        static_assert(Detail::IsAbsoluteResourceUri(Uri.view()),
+                      "StaticResourceFrom requires a canonical resource URI.");
+        static_assert(IsKnownResourceType(Type), "StaticResourceFrom requires a known resource type.");
 
-        inline static constexpr auto kUri = Detail::ResourceUriOf(Variable); /**< Canonical resource URI. */
+        inline static constexpr auto kUri = Uri; /**< Canonical resource URI. */
         /** @brief Static-storage URI text used by ABI descriptors. */
         inline static constexpr const char* kUriText = std::define_static_string(kUri.view());
-        inline static constexpr ResourceType kType = Detail::ResourceTypeOf(Variable); /**< Semantic resource type. */
-        inline static constexpr auto& kBytes = [:Variable:];                           /**< Static resource bytes. */
-        inline static constexpr size_t kSize = std::size(kBytes);                      /**< Payload size in bytes. */
-        inline static constexpr uint64_t kHash = HashUri(kUri.view());                 /**< Semantic URI hash. */
+        inline static constexpr ResourceType kType = Type;             /**< Semantic resource type. */
+        inline static constexpr auto& kBytes = [:Variable:];           /**< Static resource bytes. */
+        inline static constexpr size_t kSize = std::size(kBytes);      /**< Payload size in bytes. */
+        inline static constexpr uint64_t kHash = HashUri(kUri.view()); /**< Semantic URI hash. */
         inline static constexpr uint64_t kContentHash =
             Sora::Hashing::HashByteRange(std::span<const unsigned char>{kBytes, kSize});
 
@@ -387,12 +485,20 @@ namespace Sora::Resources {
     namespace Detail {
 
         /** @brief Append reflected static resource types found under @p scope into @p out. */
-        consteval void AppendResourceTypesOf(std::vector<std::meta::info>& out, std::meta::info scope) {
+        consteval void AppendResourceTypesOf(std::vector<std::meta::info>& out, std::meta::info scope,
+                                             ResourceScopeContext context = {}) {
+            const ResourceScopeContext current = ResolveScopeContext(scope, context);
             for (std::meta::info member : Sora::Meta::MembersOf(scope)) {
                 if (std::meta::is_namespace(member)) {
-                    AppendResourceTypesOf(out, member);
+                    AppendResourceTypesOf(out, member, current);
                 } else if (IsStaticResourceVariable(member)) {
-                    out.push_back(std::meta::substitute(^^StaticResourceFrom, {std::meta::reflect_constant(member)}));
+                    auto resolved = ResolveResourceDecl(member, current);
+                    if (resolved.has_value()) {
+                        out.push_back(
+                            std::meta::substitute(^^StaticResourceFrom, {std::meta::reflect_constant(member),
+                                                                         std::meta::reflect_constant(resolved->uri),
+                                                                         std::meta::reflect_constant(resolved->type)}));
+                    }
                 }
             }
         }
@@ -404,13 +510,17 @@ namespace Sora::Resources {
             size_t size = 0;                       /**< Payload size in bytes. */
             size_t index = 0;                      /**< Original resource-pack index. */
             size_t uriOffset = 0;                  /**< Offset inside the lpak string section. */
-            size_t dataOffset = 0;                 /**< Offset inside the lpak data section. */
+            size_t dataOffset = 0;                 /**< Offset inside the lpak data section during layout building. */
             std::string_view uri{};                /**< Canonical URI. */
         };
 
         /** @brief Align @p value upward to @p alignment. */
         [[nodiscard]] consteval size_t AlignUp(size_t value, size_t alignment) {
-            return alignment == 0 ? value : ((value + alignment - 1u) / alignment) * alignment;
+            auto aligned = Sora::TryAlignUp(static_cast<uint64_t>(value), static_cast<uint64_t>(alignment));
+            if (!aligned || *aligned > std::numeric_limits<size_t>::max()) {
+                throw std::define_static_string("Sora static resource layout alignment overflow.");
+            }
+            return static_cast<size_t>(*aligned);
         }
 
         /** @brief Return the content hash of @p Resource. */
@@ -545,7 +655,7 @@ namespace Sora::Resources {
             for (const auto& layout : layouts) {
                 const ResourceEntry entry{.semanticHash = layout.hash,
                                           .contentHash = ResourceHashByIndex<0, Resources...>(layout.index),
-                                          .dataOffset = layout.dataOffset,
+                                          .payloadOffset = dataOffset + layout.dataOffset,
                                           .packedSize = layout.size,
                                           .unpackedSize = layout.size,
                                           .uriOffset = static_cast<uint32_t>(layout.uriOffset),
@@ -553,7 +663,7 @@ namespace Sora::Resources {
                                           .type = static_cast<uint16_t>(layout.type),
                                           .codec = static_cast<uint16_t>(CompressionCodec::None),
                                           .flags = static_cast<uint16_t>(ResourceFlags::None),
-                                          .reserved = 0};
+                                          .alignmentLog2 = 12};
                 Wire::WriteUnchecked(file, entryCursor, entry);
                 entryCursor += entrySize;
             }
@@ -594,8 +704,7 @@ namespace Sora::Resources {
                                                 .reserved = 0,
                                                 .offset = dataOffset,
                                                 .size = dataSize,
-                                                .checksum = Sora::Hashing::HashByteRange(std::span<const unsigned char>{
-                                                    file.data() + dataOffset, dataSize})};
+                                                .checksum = 0};
             Wire::WriteUnchecked(file, sectionTableOffset, entrySection);
             Wire::WriteUnchecked(file, sectionTableOffset + sectionSize, stringSection);
             Wire::WriteUnchecked(file, sectionTableOffset + sectionSize * 2u, dataSection);
@@ -605,20 +714,29 @@ namespace Sora::Resources {
                               .minor = kLpakMinor,
                               .headerSize = static_cast<uint16_t>(headerSize),
                               .sectionCount = static_cast<uint16_t>(sectionCount),
+                              .sectionSize = static_cast<uint16_t>(sectionSize),
+                              .entrySize = static_cast<uint16_t>(entrySize),
                               .layout = static_cast<uint16_t>(IndexLayout::Sorted),
                               .reserved0 = 0,
                               .flags = 0,
                               .fileSize = fileSize,
                               .sectionTableOffset = sectionTableOffset,
                               .resourceCount = sizeof...(Resources),
-                              .headerHash = 0,
-                              .fileHash = 0};
+                              .metadataHash = 0,
+                              .reserved1 = 0};
             Wire::WriteUnchecked(file, 0, header);
-            header.headerHash = Sora::Hashing::HashByteRange(std::span<const unsigned char>{file.data(), headerSize});
-            Wire::WriteUnchecked(file, 0, header);
-            constexpr size_t fileHashOffset = Wire::OffsetOf<FileHeader, ^^FileHeader::fileHash>();
-            header.fileHash = Sora::Hashing::HashByteRangeWithZeroRange(std::span<const unsigned char>{file},
-                                                                        fileHashOffset, sizeof(header.fileHash));
+            auto hashState = Sora::Hashing::Fnv1a64State::Seed();
+            auto feedRange = [&]<size_t N>(const std::array<unsigned char, N>& bytes, size_t rangeOffset,
+                                           size_t rangeSize) {
+                for (size_t i = 0; i < rangeSize; ++i) {
+                    hashState.FeedByte(static_cast<std::byte>(bytes[rangeOffset + i]));
+                }
+            };
+            feedRange(file, 0, headerSize);
+            feedRange(file, sectionTableOffset, sectionSize * sectionCount);
+            feedRange(file, entriesOffset, entriesSize);
+            feedRange(file, stringsOffset, stringsSize);
+            header.metadataHash = hashState.Finalize();
             Wire::WriteUnchecked(file, 0, header);
             return file;
         }

@@ -18,8 +18,8 @@ namespace Sora::Resources {
 
         /** @brief Registration state carried through the ABI sink's opaque pointer. */
         struct RegistrationContext {
-            ResourceRegistry* Registry = nullptr;
-            PAL::ModulePtr Owner{};
+            ResourceRegistry* registry = nullptr;
+            PAL::ModulePtr owner{};
         };
 
         /** @brief Convert a fallible operation to the ABI error-code form. */
@@ -76,28 +76,28 @@ namespace Sora::Resources {
         /** @brief Add a disclosed `.lpak` block through a registry sink. */
         ErrorCode AddLpakCallback(void* registry, const LpakBlock* block) noexcept {
             auto* context = static_cast<RegistrationContext*>(registry);
-            if (context == nullptr || context->Registry == nullptr || block == nullptr) {
+            if (context == nullptr || context->registry == nullptr || block == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
-            return ToErrorCode(context->Registry->AddLpak(*block, context->Owner));
+            return ToErrorCode(context->registry->AddLpak(*block, context->owner));
         }
 
         /** @brief Add a disclosed sparse table through a registry sink. */
         ErrorCode AddSparseCallback(void* registry, const SparseTable* table) noexcept {
             auto* context = static_cast<RegistrationContext*>(registry);
-            if (context == nullptr || context->Registry == nullptr || table == nullptr) {
+            if (context == nullptr || context->registry == nullptr || table == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
-            return ToErrorCode(context->Registry->AddSparse(*table, context->Owner));
+            return ToErrorCode(context->registry->AddSparse(*table, context->owner));
         }
 
         /** @brief Add a disclosed callback provider through a registry sink. */
         ErrorCode AddProviderCallback(void* registry, const ResourceProvider* provider) noexcept {
             auto* context = static_cast<RegistrationContext*>(registry);
-            if (context == nullptr || context->Registry == nullptr || provider == nullptr) {
+            if (context == nullptr || context->registry == nullptr || provider == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
-            return ToErrorCode(context->Registry->AddProvider(*provider, context->Owner));
+            return ToErrorCode(context->registry->AddProvider(*provider, context->owner));
         }
 
     } // namespace
@@ -155,9 +155,9 @@ namespace Sora::Resources {
             return;
         }
         std::scoped_lock lock{mutex_};
-        const auto sameName = [&name](const Candidate& candidate) { return candidate.Name == name; };
+        const auto sameName = [&name](const Candidate& candidate) { return candidate.name == name; };
         if (!std::ranges::any_of(candidates_, sameName)) {
-            candidates_.push_back(Candidate{.Name = std::move(name)});
+            candidates_.push_back(Candidate{.name = std::move(name)});
         }
     }
 
@@ -166,47 +166,52 @@ namespace Sora::Resources {
             return std::unexpected(ErrorCode::InvalidArgument);
         }
 
+        // 1. Optimization cache: check if the module is already loaded or failed.
         std::string ownedName{name};
         std::vector<std::filesystem::path> searchPaths;
         {
             std::scoped_lock lock{mutex_};
             searchPaths = searchPaths_;
             for (const auto& candidate : candidates_) {
-                if (candidate.Name == name && candidate.State == ResourceModuleState::Indexed) {
+                if (candidate.name != name) {
+                    continue;
+                }
+                if (candidate.state == ResourceModuleState::Indexed) {
                     return {};
                 }
-                if (candidate.Name == name && candidate.State == ResourceModuleState::Failed) {
-                    return std::unexpected(candidate.LastError);
+                if (candidate.state == ResourceModuleState::Failed) {
+                    return std::unexpected(candidate.lastError);
                 }
             }
         }
 
+        // 2. Load the module and register its disclosed layouts.
         std::array<std::string_view, 1> names{ownedName};
         PAL::ModuleLoadOptions options;
         options.searchPaths = searchPaths;
         auto loaded = PAL::ModuleLoader::Default().Load(names, options);
         if (!loaded) {
             std::scoped_lock lock{mutex_};
-            auto it = std::ranges::find(candidates_, name, &Candidate::Name);
+            auto it = std::ranges::find(candidates_, name, &Candidate::name);
             if (it == candidates_.end()) {
-                candidates_.push_back(Candidate{.Name = std::move(ownedName)});
+                candidates_.push_back(Candidate{.name = std::move(ownedName)});
                 it = std::prev(candidates_.end());
             }
-            it->State = ResourceModuleState::Failed;
-            it->LastError = loaded.error();
+            it->state = ResourceModuleState::Failed;
+            it->lastError = loaded.error();
             return std::unexpected(loaded.error());
         }
 
         auto registered = RegisterModule(*loaded);
         std::scoped_lock lock{mutex_};
-        auto it = std::ranges::find(candidates_, name, &Candidate::Name);
+        auto it = std::ranges::find(candidates_, name, &Candidate::name);
         if (it == candidates_.end()) {
-            candidates_.push_back(Candidate{.Name = std::move(ownedName)});
+            candidates_.push_back(Candidate{.name = std::move(ownedName)});
             it = std::prev(candidates_.end());
         }
-        it->Module = *loaded;
-        it->State = registered ? ResourceModuleState::Indexed : ResourceModuleState::Failed;
-        it->LastError = registered ? ErrorCode::Ok : registered.error();
+        it->module = *loaded;
+        it->state = registered ? ResourceModuleState::Indexed : ResourceModuleState::Failed;
+        it->lastError = registered ? ErrorCode::Ok : registered.error();
         return registered;
     }
 
@@ -215,8 +220,8 @@ namespace Sora::Resources {
         {
             std::scoped_lock lock{mutex_};
             for (const auto& candidate : candidates_) {
-                if (candidate.State == ResourceModuleState::Candidate) {
-                    pending.push_back(candidate.Name);
+                if (candidate.state == ResourceModuleState::Candidate) {
+                    pending.push_back(candidate.name);
                 }
             }
         }
@@ -257,9 +262,55 @@ namespace Sora::Resources {
         return Open(resourceUri->Hash());
     }
 
+    VoidResult ResourceRegistry::MountPak(std::string name, std::vector<std::byte> bytes, int32_t priority) {
+        if (name.empty()) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+
+        std::scoped_lock lock{mutex_};
+        if (ContainsSourceNameLocked(name)) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+        auto pak = PakView::Open(bytes);
+        if (!pak) {
+            return std::unexpected(pak.error());
+        }
+        sources_.push_back(Source{.kind = SourceKind::Lpak,
+                                  .name = std::move(name),
+                                  .priority = priority,
+                                  .serial = ++insertionSerial_,
+                                  .ownedBytes = std::move(bytes),
+                                  .pakView = std::move(*pak)});
+        RebuildIndex();
+        return {};
+    }
+
+    VoidResult ResourceRegistry::MountEmbeddedPak(std::string name, std::span<const std::byte> bytes,
+                                                  int32_t priority) {
+        if (name.empty()) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+
+        std::scoped_lock lock{mutex_};
+        if (ContainsSourceNameLocked(name)) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+        auto pak = PakView::Open(bytes);
+        if (!pak) {
+            return std::unexpected(pak.error());
+        }
+        sources_.push_back(Source{.kind = SourceKind::Lpak,
+                                  .name = std::move(name),
+                                  .priority = priority,
+                                  .serial = ++insertionSerial_,
+                                  .pakView = std::move(*pak)});
+        RebuildIndex();
+        return {};
+    }
+
     size_t ResourceRegistry::ModuleCount() const {
         std::scoped_lock lock{mutex_};
-        return static_cast<size_t>(std::ranges::count(candidates_, ResourceModuleState::Indexed, &Candidate::State));
+        return static_cast<size_t>(std::ranges::count(candidates_, ResourceModuleState::Indexed, &Candidate::state));
     }
 
     size_t ResourceRegistry::LayoutCount() const {
@@ -286,11 +337,11 @@ namespace Sora::Resources {
         }
 
         std::scoped_lock lock{mutex_};
-        sources_.push_back(Source{.Kind = SourceKind::Lpak,
-                                  .Owner = std::move(owner),
-                                  .Priority = block.priority,
-                                  .Serial = ++insertionSerial_,
-                                  .Pak = std::move(*pak)});
+        sources_.push_back(Source{.kind = SourceKind::Lpak,
+                                  .owner = std::move(owner),
+                                  .priority = block.priority,
+                                  .serial = ++insertionSerial_,
+                                  .pakView = std::move(*pak)});
         RebuildIndex();
         return {};
     }
@@ -311,11 +362,11 @@ namespace Sora::Resources {
         }
 
         std::scoped_lock lock{mutex_};
-        sources_.push_back(Source{.Kind = SourceKind::Sparse,
-                                  .Owner = std::move(owner),
-                                  .Priority = table.priority,
-                                  .Serial = ++insertionSerial_,
-                                  .Entries = std::move(entries)});
+        sources_.push_back(Source{.kind = SourceKind::Sparse,
+                                  .owner = std::move(owner),
+                                  .priority = table.priority,
+                                  .serial = ++insertionSerial_,
+                                  .entries = std::move(entries)});
         RebuildIndex();
         return {};
     }
@@ -337,12 +388,12 @@ namespace Sora::Resources {
         }
 
         std::scoped_lock lock{mutex_};
-        sources_.push_back(Source{.Kind = SourceKind::Provider,
-                                  .Owner = std::move(owner),
-                                  .Priority = provider.priority,
-                                  .Serial = ++insertionSerial_,
-                                  .Entries = std::move(entries),
-                                  .Provider = provider});
+        sources_.push_back(Source{.kind = SourceKind::Provider,
+                                  .owner = std::move(owner),
+                                  .priority = provider.priority,
+                                  .serial = ++insertionSerial_,
+                                  .entries = std::move(entries),
+                                  .provider = provider});
         RebuildIndex();
         return {};
     }
@@ -359,18 +410,22 @@ namespace Sora::Resources {
             sourceCheckpoint = sources_.size();
         }
 
+        // 1. Find the module's exported resource descriptor function (`ResourceModule`).
         auto* getModule = module->TryFindFunction<ResourceModuleExportFn>(kResourceModuleSymbol);
         if (getModule == nullptr) {
             return std::unexpected(ErrorCode::ModuleLoadFailed);
         }
 
+        // 2. Call the module's `ResourceModule` function to get its descriptor of type
+        // `Sora::Resources::ResourceModule` and validate it.
         const ResourceModule* descriptor = getModule();
         if (descriptor == nullptr || !IsCompatible(descriptor->header, sizeof(ResourceModule)) ||
             descriptor->registerModule == nullptr) {
             return std::unexpected(ErrorCode::ModuleLoadFailed);
         }
 
-        RegistrationContext context{.Registry = this, .Owner = std::move(module)};
+        // 3. Create a registry sink and call the module's `registerModule` function to let it disclose its layouts.
+        RegistrationContext context{.registry = this, .owner = std::move(module)};
         RegistrySink sink{.registry = &context,
                           .addLpak = AddLpakCallback,
                           .addSparse = AddSparseCallback,
@@ -387,94 +442,89 @@ namespace Sora::Resources {
 
     Result<ResourceBlob> ResourceRegistry::OpenIndexed(uint64_t hash) const {
         std::scoped_lock lock{mutex_};
-        const auto it =
-            std::lower_bound(index_.begin(), index_.end(), hash,
-                             [](const Resolved& resolved, uint64_t value) { return resolved.Hash < value; });
-        if (it == index_.end() || it->Hash != hash) {
+        const auto it = std::ranges::lower_bound(index_, hash, {}, &Resolved::hash);
+        if (it == index_.end() || it->hash != hash) {
             return std::unexpected(ErrorCode::ResourceNotFound);
         }
 
-        const Source& source = sources_[it->SourceIndex];
-        switch (source.Kind) {
-        case SourceKind::Lpak: {
-            const ResourceEntry& entry = source.Pak.Entries()[it->EntryIndex];
-            auto uri = source.Pak.UriOf(entry);
-            auto bytes = source.Pak.DataOf(entry);
-            if (!uri) {
-                return std::unexpected(uri.error());
+        switch (const Source& source = sources_[it->sourceIndex]; source.kind) {
+            case SourceKind::Lpak: {
+                const ResourceEntry& entry = source.pakView.Entries()[it->entryIndex];
+                auto uri = source.pakView.UriOf(entry);
+                auto bytes = source.pakView.DataOf(entry);
+                if (!uri) {
+                    return std::unexpected(uri.error());
+                }
+                if (!bytes) {
+                    return std::unexpected(bytes.error());
+                }
+                return ResourceBlob{
+                    ResourceId{.hash = entry.semanticHash, .type = static_cast<ResourceType>(entry.type), .uri = *uri},
+                    *bytes, source.owner};
             }
-            if (!bytes) {
-                return std::unexpected(bytes.error());
+            case SourceKind::Sparse: {
+                const ModuleResourceEntry& entry = source.entries[it->entryIndex];
+                auto bytes = BytesOf(entry.data, entry.size);
+                if (!bytes) {
+                    return std::unexpected(bytes.error());
+                }
+                return ResourceBlob{ResourceId{.hash = entry.semanticHash,
+                                               .type = static_cast<ResourceType>(entry.type),
+                                               .uri = std::string_view{entry.uri, entry.uriSize}},
+                                    *bytes, source.owner};
             }
-            return ResourceBlob{
-                ResourceId{.hash = entry.semanticHash, .type = static_cast<ResourceType>(entry.type), .uri = *uri},
-                *bytes, source.Owner};
-        }
-        case SourceKind::Sparse: {
-            const ModuleResourceEntry& entry = source.Entries[it->EntryIndex];
-            auto bytes = BytesOf(entry.data, entry.size);
-            if (!bytes) {
-                return std::unexpected(bytes.error());
+            case SourceKind::Provider: {
+                const ModuleResourceEntry& entry = source.entries[it->entryIndex];
+                ResourcePayload payload{};
+                const ErrorCode opened = source.provider.open(source.provider.context, entry.semanticHash, &payload);
+                if (opened != ErrorCode::Ok) {
+                    return std::unexpected(opened);
+                }
+                auto bytes = BytesOf(payload.data, payload.size);
+                if (!bytes) {
+                    return std::unexpected(bytes.error());
+                }
+                return ResourceBlob{ResourceId{.hash = entry.semanticHash,
+                                               .type = static_cast<ResourceType>(entry.type),
+                                               .uri = std::string_view{entry.uri, entry.uriSize}},
+                                    *bytes, source.owner};
             }
-            return ResourceBlob{ResourceId{.hash = entry.semanticHash,
-                                           .type = static_cast<ResourceType>(entry.type),
-                                           .uri = std::string_view{entry.uri, entry.uriSize}},
-                                *bytes, source.Owner};
-        }
-        case SourceKind::Provider: {
-            const ModuleResourceEntry& entry = source.Entries[it->EntryIndex];
-            ResourcePayload payload{};
-            const ErrorCode opened = source.Provider.open(source.Provider.context, entry.semanticHash, &payload);
-            if (opened != ErrorCode::Ok) {
-                return std::unexpected(opened);
-            }
-            auto bytes = BytesOf(payload.data, payload.size);
-            if (!bytes) {
-                return std::unexpected(bytes.error());
-            }
-            return ResourceBlob{ResourceId{.hash = entry.semanticHash,
-                                           .type = static_cast<ResourceType>(entry.type),
-                                           .uri = std::string_view{entry.uri, entry.uriSize}},
-                                *bytes, source.Owner};
-        }
         }
         return std::unexpected(ErrorCode::InvalidState);
+    }
+
+    bool ResourceRegistry::ContainsSourceNameLocked(std::string_view name) const noexcept {
+        return !name.empty() && std::ranges::any_of(sources_, [name](const Source& source) {
+                   return source.name == name;
+               });
     }
 
     void ResourceRegistry::RebuildIndex() {
         index_.clear();
         for (size_t sourceIndex = 0; sourceIndex < sources_.size(); ++sourceIndex) {
             const Source& source = sources_[sourceIndex];
-            if (source.Kind == SourceKind::Lpak) {
-                auto entries = source.Pak.Entries();
+            if (source.kind == SourceKind::Lpak) {
+                auto entries = source.pakView.Entries();
                 for (size_t entryIndex = 0; entryIndex < entries.size(); ++entryIndex) {
-                    index_.push_back(Resolved{.Hash = entries[entryIndex].semanticHash,
-                                              .Priority = source.Priority,
-                                              .Serial = source.Serial,
-                                              .SourceIndex = sourceIndex,
-                                              .EntryIndex = entryIndex});
+                    index_.push_back(Resolved{.hash = entries[entryIndex].semanticHash,
+                                              .priority = source.priority,
+                                              .serial = source.serial,
+                                              .sourceIndex = sourceIndex,
+                                              .entryIndex = entryIndex});
                 }
             } else {
-                for (size_t entryIndex = 0; entryIndex < source.Entries.size(); ++entryIndex) {
-                    index_.push_back(Resolved{.Hash = source.Entries[entryIndex].semanticHash,
-                                              .Priority = source.Priority,
-                                              .Serial = source.Serial,
-                                              .SourceIndex = sourceIndex,
-                                              .EntryIndex = entryIndex});
+                for (size_t entryIndex = 0; entryIndex < source.entries.size(); ++entryIndex) {
+                    index_.push_back(Resolved{.hash = source.entries[entryIndex].semanticHash,
+                                              .priority = source.priority,
+                                              .serial = source.serial,
+                                              .sourceIndex = sourceIndex,
+                                              .entryIndex = entryIndex});
                 }
             }
         }
 
-        std::ranges::sort(index_, [](const Resolved& a, const Resolved& b) {
-            if (a.Hash != b.Hash) {
-                return a.Hash < b.Hash;
-            }
-            if (a.Priority != b.Priority) {
-                return a.Priority > b.Priority;
-            }
-            return a.Serial > b.Serial;
-        });
-        const auto [first, last] = std::ranges::unique(index_, {}, &Resolved::Hash);
+        std::ranges::sort(index_);
+        const auto [first, last] = std::ranges::unique(index_, {}, &Resolved::hash);
         index_.erase(first, last);
     }
 

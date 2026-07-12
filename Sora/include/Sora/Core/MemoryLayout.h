@@ -15,10 +15,14 @@
 namespace Sora {
 
     /** @brief Return whether @p value is a non-zero power of two. */
-    [[nodiscard]] constexpr bool IsPowerOfTwo(uint64_t value) noexcept { return std::has_single_bit(value); }
+    [[nodiscard]] constexpr bool IsPowerOfTwo(uint64_t value) noexcept {
+        return std::has_single_bit(value);
+    }
 
     /** @brief Return whether @p value can represent a concrete byte alignment. */
-    [[nodiscard]] constexpr bool IsValidAlignment(uint64_t value) noexcept { return IsPowerOfTwo(value); }
+    [[nodiscard]] constexpr bool IsValidAlignment(uint64_t value) noexcept {
+        return IsPowerOfTwo(value);
+    }
 
     /** @brief Return log2(@p value), where @p value must be a non-zero power of two. */
     [[nodiscard]] constexpr uint8_t Log2OfPowerOfTwo(uint64_t value) noexcept {
@@ -154,10 +158,14 @@ namespace Sora {
     }
 
     /** @brief Encode an optional alignment, using zero for undefined. */
-    [[nodiscard]] constexpr unsigned Encode(MaybeAlign alignment) noexcept { return alignment.Encode(); }
+    [[nodiscard]] constexpr unsigned Encode(MaybeAlign alignment) noexcept {
+        return alignment.Encode();
+    }
 
     /** @brief Decode an optional alignment from the representation produced by @ref Encode. */
-    [[nodiscard]] constexpr MaybeAlign DecodeMaybeAlign(unsigned encoded) { return MaybeAlign::Decode(encoded); }
+    [[nodiscard]] constexpr MaybeAlign DecodeMaybeAlign(unsigned encoded) {
+        return MaybeAlign::Decode(encoded);
+    }
 
     /** @brief Return @p value + @p size, saturated to the largest @c uint64_t on overflow. */
     [[nodiscard]] constexpr uint64_t SaturatingEnd(uint64_t value, uint64_t size) noexcept {
@@ -268,6 +276,15 @@ namespace Sora {
     [[nodiscard]] inline std::optional<uint64_t> TryOffsetToAlignedAddress(const void* address,
                                                                            Align alignment) noexcept {
         return TryOffsetToAlignment(reinterpret_cast<uintptr_t>(address), alignment);
+    }
+
+    /** @brief Align @p value upward without overflow; return @c std::nullopt when the result is not representable. */
+    [[nodiscard]] constexpr auto CheckedAlignUp(uint64_t value, uint64_t alignment) -> std::optional<uint64_t> {
+        auto aligned = Sora::TryAlignUp(value, alignment);
+        if (!aligned) {
+            return {};
+        }
+        return aligned;
     }
 
 } // namespace Sora

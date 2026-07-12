@@ -10,6 +10,7 @@
 #include <Sora/Resources/PakView.h>
 #include <Sora/Resources/ResourceModule.h>
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -98,6 +99,13 @@ namespace Sora::Resources {
         /** @brief Open a resource by canonical URI, lazily indexing pending modules if needed. */
         [[nodiscard]] Result<ResourceBlob> Open(std::string_view uri);
 
+        /** @brief Mount an owned `.lpak` byte vector directly into this registry. */
+        [[nodiscard]] VoidResult MountPak(std::string name, std::vector<std::byte> bytes, int32_t priority = 0);
+
+        /** @brief Mount a borrowed `.lpak` byte span directly into this registry. */
+        [[nodiscard]] VoidResult MountEmbeddedPak(std::string name, std::span<const std::byte> bytes,
+                                                  int32_t priority = 0);
+
         /** @brief Return the number of indexed dynamic resource modules. */
         [[nodiscard]] size_t ModuleCount() const;
 
@@ -119,10 +127,10 @@ namespace Sora::Resources {
     private:
         /** @brief Candidate module known to the registry but loaded only when lookup needs it. */
         struct Candidate {
-            std::string Name;
-            ResourceModuleState State = ResourceModuleState::Candidate;
-            PAL::ModulePtr Module{};
-            ErrorCode LastError = ErrorCode::Ok;
+            std::string name;
+            ResourceModuleState state = ResourceModuleState::Candidate;
+            PAL::ModulePtr module{};
+            ErrorCode lastError = ErrorCode::Ok;
         };
 
         /** @brief Internal source family stored after a module registers one layout. */
@@ -134,23 +142,45 @@ namespace Sora::Resources {
 
         /** @brief One indexed provider of resources, owned by a loaded module. */
         struct Source {
-            SourceKind Kind = SourceKind::Sparse;
-            PAL::ModulePtr Owner{};
-            int32_t Priority = 0;
-            uint64_t Serial = 0;
-            PakView Pak{};
-            std::vector<ModuleResourceEntry> Entries{};
-            ResourceProvider Provider{};
+            SourceKind kind = SourceKind::Sparse;
+            std::string name{};
+            PAL::ModulePtr owner{};
+            int32_t priority = 0;
+            uint64_t serial = 0;
+            std::vector<std::byte> ownedBytes{};
+            PakView pakView{};
+            std::vector<ModuleResourceEntry> entries{};
+            ResourceProvider provider{};
         };
 
         /** @brief One visible hash winner after priority and insertion-order resolution. */
         struct Resolved {
-            uint64_t Hash = 0;
-            int32_t Priority = 0;
-            uint64_t Serial = 0;
-            size_t SourceIndex = 0;
-            size_t EntryIndex = 0;
+            uint64_t hash = 0;
+            int32_t priority = 0;
+            uint64_t serial = 0;
+            size_t sourceIndex = 0;
+            size_t entryIndex = 0;
+
+            friend bool operator==(const Resolved& a, const Resolved& b) noexcept {
+                return a.hash == b.hash && a.priority == b.priority && a.serial == b.serial &&
+                       a.sourceIndex == b.sourceIndex && a.entryIndex == b.entryIndex;
+            }
+
+            friend std::partial_ordering operator<=>(const Resolved& a, const Resolved& b) noexcept {
+                if (a.hash != b.hash) {
+                    return a.hash <=> b.hash;
+                }
+                if (a.priority != b.priority) {
+                    return a.priority > b.priority ? std::partial_ordering::less : std::partial_ordering::greater;
+                }
+                if (a.serial != b.serial) {
+                    return a.serial > b.serial ? std::partial_ordering::less : std::partial_ordering::greater;
+                }
+                return std::partial_ordering::unordered;
+            }
         };
+
+        [[nodiscard]] bool ContainsSourceNameLocked(std::string_view name) const noexcept;
         [[nodiscard]] VoidResult RegisterModule(PAL::ModulePtr module);
         [[nodiscard]] Result<ResourceBlob> OpenIndexed(uint64_t hash) const;
         void RebuildIndex();
