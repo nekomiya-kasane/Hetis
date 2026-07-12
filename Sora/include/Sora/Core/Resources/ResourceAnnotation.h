@@ -6,7 +6,7 @@
 #pragma once
 
 #include <Sora/Core/FixedString.h>
-#include <Sora/Resources/Format.h>
+#include <Sora/Core/Resources/Format.h>
 
 namespace Sora {
 

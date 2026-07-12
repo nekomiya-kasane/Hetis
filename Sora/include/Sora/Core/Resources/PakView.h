@@ -8,8 +8,8 @@
 #include <Sora/Core/MemoryLayout.h>
 #include <Sora/Core/Wire.h>
 #include <Sora/ErrorCode.h>
-#include <Sora/Resources/Format.h>
-#include <Sora/Resources/ResourceId.h>
+#include <Sora/Core/Resources/Format.h>
+#include <Sora/Core/Resources/ResourceId.h>
 
 #include <algorithm>
 #include <cstddef>

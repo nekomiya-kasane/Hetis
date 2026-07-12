@@ -9,7 +9,7 @@
 #include <Sora/Core/FixedString.h>
 #include <Sora/Core/Hash.h>
 #include <Sora/Core/Uri.h>
-#include <Sora/Resources/Format.h>
+#include <Sora/Core/Resources/Format.h>
 
 #include <cstddef>
 #include <cstdint>

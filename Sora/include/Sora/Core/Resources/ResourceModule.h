@@ -11,10 +11,10 @@
 #include <Sora/Core/Traits/ScopeTraits.h>
 #include <Sora/Core/Traits/TypeTraits.h>
 #include <Sora/Core/StringUtils.h>
-#include <Sora/Resources/Format.h>
-#include <Sora/Resources/PakLayout.h>
-#include <Sora/Resources/ResourceAnnotation.h>
-#include <Sora/Resources/ResourceId.h>
+#include <Sora/Core/Resources/Format.h>
+#include <Sora/Core/Resources/PakLayout.h>
+#include <Sora/Core/Resources/ResourceAnnotation.h>
+#include <Sora/Core/Resources/ResourceId.h>
 
 #include <array>
 #include <cstddef>

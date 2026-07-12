@@ -1,7 +1,7 @@
-#include "Sora/Experimental/EventPortBaseUnknown.h"
 #include "Sora/Kernel/Core/ComAdaptor.h"
 #include "Sora/Kernel/Core/Query.h"
 #include "Sora/Kernel/Core/Registry.h"
+#include "Sora/Kernel/Command/EventPortAdaptor.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -58,7 +58,8 @@ namespace {
 
 TEST_CASE("ComAdaptor wraps ordinary objects as extensible COM nuclei", "[Sora.Core.ComAdaptor]") {
     static_assert(Sora::Kernel::Concept::ImplementationClass<PayloadObject>);
-    static_assert(Sora::Kernel::Traits::RoleOf<Sora::Kernel::ComAdaptor<int>> == Sora::Kernel::TypeOfClass::NothingType);
+    static_assert(Sora::Kernel::Traits::RoleOf<Sora::Kernel::ComAdaptor<int>> ==
+                  Sora::Kernel::TypeOfClass::NothingType);
     static_assert(Sora::Kernel::Meta::ImplementedInterfaceTypesOf<MetadataObject>().size() == 1);
     static_assert(Sora::Kernel::Meta::ImplementedInterfaceTypesOf<MetadataObject>()[0] ==
                   ^^Sora::Kernel::Test::ITaggedPayload);
@@ -83,15 +84,13 @@ TEST_CASE("ComAdaptor wraps ordinary objects as extensible COM nuclei", "[Sora.C
     CHECK(Sora::Kernel::QueryInterface<PayloadExtension>(*object)->extra == 23);
 }
 
-TEST_CASE("Experimental EventPort for BaseUnknown is backed by a DataExtension", "[Sora.Core.ComAdaptor]") {
-    static_assert(Sora::Kernel::Concept::DataExtensionClass<
-                  Sora::Kernel::ComAdaptor<Sora::Experimental::EventPort>>);
+TEST_CASE("EventPort for BaseUnknown is backed by a DataExtension", "[Sora.Core.ComAdaptor]") {
+    static_assert(Sora::Kernel::Concept::DataExtensionClass<Sora::Kernel::ComAdaptor<Sora::EventPort>>);
 
     auto object = Sora::Kernel::MakeComAdaptor<int>(42);
 
-    Sora::Experimental::EventPort& port = Sora::Kernel::EventPortOf(*object);
-    auto* extension =
-        Sora::Kernel::QueryInterface<Sora::Kernel::ComAdaptor<Sora::Experimental::EventPort>>(*object);
+    Sora::EventPort& port = Sora::Kernel::EventPortOf(*object);
+    auto* extension = Sora::Kernel::QueryInterface<Sora::Kernel::ComAdaptor<Sora::EventPort>>(*object);
 
     REQUIRE(extension != nullptr);
     CHECK(&extension->Object() == &port);

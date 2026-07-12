@@ -4,7 +4,7 @@
  * @ingroup Resources
  */
 
-#include "Sora/Resources/ResourceRegistry.h"
+#include "Sora/Core/Resources/ResourceRegistry.h"
 
 #include <algorithm>
 #include <array>

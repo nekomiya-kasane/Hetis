@@ -1,5 +1,5 @@
 #include <Sora/Core/Wire.h>
-#include <Sora/Resources/Resources.h>
+#include <Sora/Core/Resources/Resources.h>
 
 #include <catch2/catch_test_macros.hpp>
 

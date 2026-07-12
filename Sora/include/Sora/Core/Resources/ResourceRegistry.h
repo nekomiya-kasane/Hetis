@@ -7,8 +7,8 @@
 
 #include <Sora/ErrorCode.h>
 #include <Sora/PAL/Module.h>
-#include <Sora/Resources/PakView.h>
-#include <Sora/Resources/ResourceModule.h>
+#include <Sora/Core/Resources/PakView.h>
+#include <Sora/Core/Resources/ResourceModule.h>
 
 #include <compare>
 #include <cstddef>

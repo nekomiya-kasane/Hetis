@@ -5,7 +5,7 @@
  */
 #pragma once
 
-#include <Sora/Resources/ResourceId.h>
+#include <Sora/Core/Resources/ResourceId.h>
 
 #include <cstddef>
 #include <span>

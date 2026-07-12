@@ -7,10 +7,10 @@
 
 #include "Sora/Core/Hash.h"
 #include <Sora/ErrorCode.h>
-#include <Sora/Resources/Format.h>
-#include <Sora/Resources/PakLayout.h>
-#include <Sora/Resources/ResourceBytes.h>
-#include <Sora/Resources/ResourceId.h>
+#include <Sora/Core/Resources/Format.h>
+#include <Sora/Core/Resources/PakLayout.h>
+#include <Sora/Core/Resources/ResourceBytes.h>
+#include <Sora/Core/Resources/ResourceId.h>
 
 #include <algorithm>
 #include <cstddef>
