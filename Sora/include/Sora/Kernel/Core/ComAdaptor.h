@@ -49,8 +49,7 @@ namespace Sora::Kernel {
             Sora::Traits::ApplyT<Sora::Kernel::$::Implements, typename ComAdaptorDecl<T>::Implements>;
 
         template<typename T>
-        using ComAdaptorExtends =
-            Sora::Traits::ApplyT<Sora::Kernel::$::Extends, typename ComAdaptorDecl<T>::Extends>;
+        using ComAdaptorExtends = Sora::Traits::ApplyT<Sora::Kernel::$::Extends, typename ComAdaptorDecl<T>::Extends>;
 
     } // namespace Detail
 
@@ -122,38 +121,35 @@ namespace Sora::Kernel {
         [[nodiscard]] static TypeOfClass GetRoleStatic() noexcept { return Detail::ComAdaptorRoleOf<T>; }
         [[nodiscard]] TypeOfClass GetRole() const noexcept override { return Self::GetRoleStatic(); }
 
-        /** @brief Return the mutable wrapped object. */
-        [[nodiscard]] constexpr T& Object() & noexcept { return object_; }
-
-        /** @brief Return the const wrapped object. */
-        [[nodiscard]] constexpr const T& Object() const& noexcept { return object_; }
-
-        /** @brief Move out the wrapped object from an rvalue adaptor. */
-        [[nodiscard]] constexpr T&& Object() && noexcept { return std::move(object_); }
+        /** @brief Return the wrapped object. */
+        template<typename Self>
+        [[nodiscard]] constexpr auto Object(this Self&& self) noexcept {
+            if constexpr (std::is_rvalue_reference_v<Self&&>) {
+                return std::move(self.object_);
+            } else if constexpr (std::is_const_v<std::remove_reference_t<Self>>) {
+                return std::as_const(self.object_);
+            } else {
+                return self.object_;
+            }
+        }
 
         /** @brief Alias for @ref Object. */
-        [[nodiscard]] constexpr T& Get() & noexcept { return object_; }
-
-        /** @brief Alias for @ref Object. */
-        [[nodiscard]] constexpr const T& Get() const& noexcept { return object_; }
-
-        /** @brief Pointer-like access to the wrapped object. */
-        [[nodiscard]] constexpr T* operator->() noexcept { return std::addressof(object_); }
+        template<typename Self>
+        [[nodiscard]] constexpr auto Get(this Self&& self) noexcept {
+            return std::forward<Self>(self).Object();
+        }
 
         /** @brief Pointer-like access to the wrapped object. */
-        [[nodiscard]] constexpr const T* operator->() const noexcept { return std::addressof(object_); }
+        template<typename Self>
+        [[nodiscard]] constexpr auto operator->(this Self&& self) noexcept {
+            return std::addressof(self.object_);
+        }
 
         /** @brief Dereference to the wrapped object. */
-        [[nodiscard]] constexpr T& operator*() & noexcept { return object_; }
-
-        /** @brief Dereference to the wrapped object. */
-        [[nodiscard]] constexpr const T& operator*() const& noexcept { return object_; }
-
-        /** @brief Dereference to the wrapped object and preserve rvalue category. */
-        [[nodiscard]] constexpr T&& operator*() && noexcept { return std::move(object_); }
-
-        /** @brief Dereference to the wrapped object and preserve const rvalue category. */
-        [[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move(object_); }
+        template<typename Self>
+        [[nodiscard]] constexpr auto operator*(this Self&& self) noexcept {
+            return std::forward<Self>(self).Object();
+        }
 
     private:
         T object_;
