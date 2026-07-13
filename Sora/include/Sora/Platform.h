@@ -173,11 +173,13 @@ namespace Sora {
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Win32;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::PE;
 #elif defined(__EMSCRIPTEN__)
+#    define PLATFORM_EMSCRIPTEN 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::Emscripten;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::WebAssembly;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::None;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::Wasm;
 #elif defined(__wasi__)
+#    define PLATFORM_WASI 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::WASI;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::WebAssembly;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::None;
@@ -195,6 +197,7 @@ namespace Sora {
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::ELF;
 #elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#    define PLATFORM_IOS 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::iOS;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::XNU;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::UIKit;
@@ -206,21 +209,25 @@ namespace Sora {
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Cocoa;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::MachO;
 #elif defined(__FreeBSD__)
+#    define PLATFORM_FREEBSD 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::FreeBSD;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::BSD;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::ELF;
 #elif defined(__OpenBSD__)
+#    define PLATFORM_OPENBSD 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::OpenBSD;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::BSD;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::ELF;
 #elif defined(__NetBSD__)
+#    define PLATFORM_NETBSD 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::NetBSD;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::BSD;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::ELF;
 #elif defined(__DragonFly__)
+#    define PLATFORM_DRAGONFLY 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::DragonFlyBSD;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::BSD;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
