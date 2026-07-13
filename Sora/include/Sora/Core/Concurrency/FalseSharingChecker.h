@@ -112,7 +112,7 @@ namespace Sora {
 
                 CacheLayoutReport r{
                     .cacheLine = line,
-                    .memberCount = Sora::Traits::MembersCount<T>,
+                    .memberCount = Sora::Traits::DataMembersCount<T>,
                     .objectSize = sizeof(T),
                     .objectAlign = alignof(T),
                     .classifiedAll = true,
@@ -121,9 +121,9 @@ namespace Sora {
                     .valid = false,
                 };
 
-                std::array<Detail::MemberExtent, Traits::MembersCount<T>> ext{};
+                std::array<Detail::MemberExtent, Traits::DataMembersCount<T>> ext{};
                 size_t idx = 0;
-                template for (constexpr auto m : Traits::Members<T>) {
+                template for (constexpr auto m : Traits::DataMembers<T>) {
                     const size_t offset = static_cast<size_t>(std::meta::offset_of(m).bytes);
                     const size_t size = std::meta::size_of(std::meta::type_of(m));
 
@@ -135,21 +135,19 @@ namespace Sora {
                         .classified = false,
                     };
 
-                    auto typedAnnos = Sora::$::GetAll(m) | std::views::filter(std::meta::is_class_type);
-                    static_assert(std::ranges::count_if(typedAnnos,
-                                                        [](auto e) {
-                                                            return Sora::Meta::DerivedFrom(
-                                                                e, ^^Sora::Concurrency::$::ContentionDomain);
-                                                        }) <= 1,
-                                  "There cannot be more than one ContentionDomain annotations.");
-
-                    template for (constexpr auto a : typedAnnos) {
-                        auto type = std::meta::type_of(a);
-                        e.domain = type;
-                        if constexpr (Sora::Meta::DerivedFrom(type, ^^Sora::Concurrency::$::ContentionDomain)) {
+                    size_t domainCount = 0;
+                    template for (constexpr auto annotation : Sora::Meta::AnnotationsOf(m)) {
+                        constexpr auto type = std::meta::type_of(annotation);
+                        if constexpr (std::meta::is_class_type(type) &&
+                                      Sora::Meta::DerivedFrom(type, ^^Sora::Concurrency::$::ContentionDomain)) {
+                            if (++domainCount > 1) {
+                                throw std::define_static_string(
+                                    "A data member cannot have more than one contention-domain annotation.");
+                            }
+                            e.domain = type;
                             e.inert = Sora::Meta::DerivedFrom(type, ^^Sora::Concurrency::$::InertContentionDomain);
+                            e.classified = true;
                         }
-                        e.classified = true;
                     }
 
                     r.classifiedAll &= e.classified;
@@ -217,7 +215,7 @@ namespace Sora {
             constexpr bool IsDomainStartsAlignedToCacheLine = [] {
                 bool found = false;
                 size_t lowest = std::numeric_limits<size_t>::max();
-                for (auto m : Sora::Meta::MembersOf(^^T)) {
+                for (auto m : Sora::Traits::DataMembers<T>) {
                     if (!Sora::$::Has<D>(m)) {
                         continue;
                     }
@@ -240,7 +238,7 @@ namespace Sora {
                 bool found = false;
                 size_t lo = std::numeric_limits<size_t>::max();
                 size_t hi = 0;
-                for (auto m : Sora::Meta::MembersOf(^^T)) {
+                for (auto m : Sora::Traits::DataMembers<T>) {
                     if (!Sora::$::Has<D>(m)) {
                         continue;
                     }
@@ -249,7 +247,8 @@ namespace Sora {
                     const size_t offset = static_cast<size_t>(std::meta::offset_of(m).bytes);
                     const size_t size = std::meta::size_of(std::meta::type_of(m));
                     const size_t first = offset / line, last = (offset + (size ? size - 1 : 0)) / line;
-                    std::tie(lo, hi) = std::tie(std::min(lo, first), std::max(hi, last));
+                    lo = std::min(lo, first);
+                    hi = std::max(hi, last);
                 }
                 return found ? (hi - lo + 1) : 0;
             }();

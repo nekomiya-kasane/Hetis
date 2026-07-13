@@ -88,15 +88,25 @@ namespace Sora {
         /** @brief General string algorithms used by compile-time metadata generators and runtime helpers. */
         inline namespace String {
 
-            /** @brief Return @p text without leading and trailing ASCII whitespace. */
-            [[nodiscard]] constexpr std::string_view Trim(std::string_view text) noexcept {
+            /** @brief Return @p text without leading ASCII whitespace. */
+            [[nodiscard]] constexpr std::string_view TrimStart(std::string_view text) noexcept {
                 while (!text.empty() && IsWhitespace(text.front())) {
                     text.remove_prefix(1);
                 }
+                return text;
+            }
+
+            /** @brief Return @p text without trailing ASCII whitespace. */
+            [[nodiscard]] constexpr std::string_view TrimEnd(std::string_view text) noexcept {
                 while (!text.empty() && IsWhitespace(text.back())) {
                     text.remove_suffix(1);
                 }
                 return text;
+            }
+
+            /** @brief Return @p text without leading or trailing ASCII whitespace. */
+            [[nodiscard]] constexpr std::string_view Trim(std::string_view text) noexcept {
+                return TrimEnd(TrimStart(text));
             }
 
             /**

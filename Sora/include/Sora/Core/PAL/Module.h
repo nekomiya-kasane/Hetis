@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Sora/Core/PAL/NativeError.h"
 #include "Sora/ErrorCode.h"
 
 namespace Sora::PAL {
@@ -67,10 +68,25 @@ namespace Sora::PAL {
         std::span<const std::filesystem::path> searchPaths = {};
     };
 
-    /** @brief Diagnostics produced when no candidate module can be loaded. */
+    /** @brief One failed native module-load attempt. */
+    struct ModuleLoadAttempt {
+        std::string candidate;  /**< Candidate path or module spelling passed to the native loader. */
+        NativeError nativeError; /**< Category-bearing OS error when the loader reports one. */
+        std::string diagnostic; /**< Loader-specific diagnostic when no native error code represents the failure. */
+
+        /** @brief Materialize the most specific diagnostic available for this attempt. */
+        [[nodiscard]] std::string Message() const;
+    };
+
+    /** @brief Structured diagnostics produced when no candidate module can be loaded. */
     struct ModuleLoadError {
-        std::vector<std::string> attempted;   /**< Candidate spellings attempted in order. */
-        std::vector<std::string> diagnostics; /**< Platform loader diagnostics, one entry per failed candidate. */
+        std::vector<ModuleLoadAttempt> attempts; /**< Failed candidates in native-loader invocation order. */
+
+        /** @brief Return the portable semantic error represented by this diagnostic. */
+        [[nodiscard]] constexpr ErrorCode Code() const noexcept { return ErrorCode::ModuleLoadFailed; }
+
+        /** @brief Materialize a concise multi-attempt diagnostic. */
+        [[nodiscard]] std::string Message() const;
     };
 
     /** @brief Section flags normalized from PE, ELF, and Mach-O image metadata. */
@@ -224,6 +240,9 @@ namespace Sora::PAL {
     /** @brief Shared handle type returned by the process module loader. */
     using ModulePtr = std::shared_ptr<const Module>;
 
+    /** @brief Result of dynamic module loading with structured per-candidate diagnostics. */
+    using ModuleLoadResult = std::expected<ModulePtr, ModuleLoadError>;
+
     /** @brief Process-level service for module search paths, image inspection, loading, and module cache ownership. */
     class ModuleLoader {
     public:
@@ -240,7 +259,7 @@ namespace Sora::PAL {
          * @param[in] options Candidate-generation, cache, search, and native-loader options.
          * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
          */
-        [[nodiscard]] Result<ModulePtr> Load(std::span<const std::string_view> names, ModuleLoadOptions options = {});
+        [[nodiscard]] ModuleLoadResult Load(std::span<const std::string_view> names, ModuleLoadOptions options = {});
 
         /**
          * @brief Open @p path as a read-only module image without loading or initializing it.
@@ -279,7 +298,7 @@ namespace Sora::PAL {
      * @param[in] options Candidate-generation and native-loader options.
      * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
      */
-    [[nodiscard]] Result<ModulePtr> LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options = {});
+    [[nodiscard]] ModuleLoadResult LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options = {});
 
     /**
      * @brief Convenience overload for brace-init candidate lists.
@@ -287,24 +306,7 @@ namespace Sora::PAL {
      * @param[in] options Candidate-generation and native-loader options.
      * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
      */
-    [[nodiscard]] Result<ModulePtr> LoadModule(std::initializer_list<std::string_view> names,
-                                               ModuleLoadOptions options = {});
-
-    /**
-     * @brief Compatibility overload mapping a boolean native-candidate switch to @ref ModuleLoadOptions.
-     * @param[in] names Candidate module spellings in priority order.
-     * @param[in] includeNativeCandidates Whether to try @c lib prefixes and shared-library suffix variants.
-     * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
-     */
-    [[nodiscard]] Result<ModulePtr> LoadModule(std::span<const std::string_view> names, bool includeNativeCandidates);
-
-    /**
-     * @brief Compatibility overload for brace-init candidate lists and a boolean native-candidate switch.
-     * @param[in] names Candidate module spellings in priority order.
-     * @param[in] includeNativeCandidates Whether to try @c lib prefixes and shared-library suffix variants.
-     * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
-     */
-    [[nodiscard]] Result<ModulePtr> LoadModule(std::initializer_list<std::string_view> names,
-                                               bool includeNativeCandidates);
+    [[nodiscard]] ModuleLoadResult LoadModule(std::initializer_list<std::string_view> names,
+                                              ModuleLoadOptions options = {});
 
 } // namespace Sora::PAL

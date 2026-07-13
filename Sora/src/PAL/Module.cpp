@@ -6,6 +6,7 @@
  */
 
 #include <Sora/Core/PAL/Module.h>
+#include <Sora/Core/PAL/NativeError.h>
 #include <Sora/Core/PAL/Path.h>
 
 #include <Sora/Core/Wire.h>
@@ -49,6 +50,14 @@ namespace Sora::PAL {
     } // namespace Detail
 
     namespace {
+
+        /** @brief Native-loader failure retained without formatting OS messages on the success path. */
+        struct NativeLoadFailure {
+            NativeError error;
+            std::string diagnostic;
+        };
+
+        using NativeLoadResult = std::expected<void*, NativeLoadFailure>;
 
         /** @brief Add @p candidate if it has not already appeared. */
         void AddCandidate(std::vector<std::string>& candidates, std::string candidate) {
@@ -460,31 +469,17 @@ namespace Sora::PAL {
             return result;
         }
 
-        /** @brief Return the last Win32 error as a short diagnostic string. */
-        [[nodiscard]] std::string LastNativeError(std::string_view candidate) {
-            DWORD error = ::GetLastError();
-            char* message = nullptr;
-            DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
-            DWORD length = ::FormatMessageA(flags, nullptr, error, 0, reinterpret_cast<char*>(&message), 0, nullptr);
-            std::string result{candidate};
-            result += ": ";
-            if (length != 0 && message != nullptr) {
-                result.append(message, length);
-                ::LocalFree(message);
-            } else {
-                result += "Win32 error ";
-                result += std::to_string(error);
-            }
-            return result;
-        }
-
         /** @brief Load @p candidate through the Win32 loader. */
-        [[nodiscard]] void* TryLoadNative(std::string_view candidate, ModuleLoadOptions) noexcept {
+        [[nodiscard]] NativeLoadResult TryLoadNative(std::string_view candidate, ModuleLoadOptions) {
             std::wstring wide = ToWide(candidate);
             if (wide.empty()) {
-                return nullptr;
+                return std::unexpected{NativeLoadFailure{
+                    .diagnostic = "module name is empty or cannot be converted to a native Windows path"}};
             }
-            return reinterpret_cast<void*>(::LoadLibraryW(wide.c_str()));
+            if (HMODULE handle = ::LoadLibraryW(wide.c_str())) {
+                return reinterpret_cast<void*>(handle);
+            }
+            return std::unexpected{NativeLoadFailure{.error = CaptureLastNativeError()}};
         }
 
         /** @brief Close a Win32 module handle. */
@@ -494,21 +489,18 @@ namespace Sora::PAL {
             }
         }
 #else
-        /** @brief Return the last POSIX dynamic-loader error as a short diagnostic string. */
-        [[nodiscard]] std::string LastNativeError(std::string_view candidate) {
-            const char* error = ::dlerror();
-            std::string result{candidate};
-            result += ": ";
-            result += error != nullptr ? error : "unknown dynamic-loader error";
-            return result;
-        }
-
         /** @brief Load @p candidate through the POSIX dynamic loader. */
-        [[nodiscard]] void* TryLoadNative(std::string_view candidate, ModuleLoadOptions options) noexcept {
+        [[nodiscard]] NativeLoadResult TryLoadNative(std::string_view candidate, ModuleLoadOptions options) {
             int flags = options.bindMode == ModuleBindMode::Now ? RTLD_NOW : RTLD_LAZY;
             flags |= options.visibility == ModuleVisibility::Global ? RTLD_GLOBAL : RTLD_LOCAL;
             std::string name{candidate};
-            return ::dlopen(name.c_str(), flags);
+            ::dlerror();
+            if (void* handle = ::dlopen(name.c_str(), flags)) {
+                return handle;
+            }
+            const char* error = ::dlerror();
+            return std::unexpected{NativeLoadFailure{
+                .diagnostic = error != nullptr ? std::string{error} : "unknown dynamic-loader error"}};
         }
 
         /** @brief Close a POSIX module handle. */
@@ -592,8 +584,30 @@ namespace Sora::PAL {
         return candidates;
     }
 
-    Result<ModulePtr> ModuleLoader::Load(std::span<const std::string_view> names, ModuleLoadOptions options) {
+    std::string ModuleLoadAttempt::Message() const {
+        if (!diagnostic.empty()) {
+            return diagnostic;
+        }
+        return nativeError.ToString();
+    }
+
+    std::string ModuleLoadError::Message() const {
+        if (attempts.empty()) {
+            return "no module candidates were generated";
+        }
+        std::string message = "failed to load module candidates:";
+        for (const ModuleLoadAttempt& attempt : attempts) {
+            message += "\n  ";
+            message += attempt.candidate;
+            message += ": ";
+            message += attempt.Message();
+        }
+        return message;
+    }
+
+    ModuleLoadResult ModuleLoader::Load(std::span<const std::string_view> names, ModuleLoadOptions options) {
         auto attempted = GenerateCandidates(names, options);
+        ModuleLoadError error;
 
         for (const std::string& candidate : attempted) {
             const std::string key = CacheKey(candidate, options);
@@ -610,16 +624,23 @@ namespace Sora::PAL {
             }
 
             // 2. Try to load the module from the native loader and cache it if successful.
-            if (void* handle = TryLoadNative(candidate, options)) {
-                ModulePtr module{new Module{handle, std::filesystem::path{candidate}, options.unloadOnDestroy}};
+            NativeLoadResult loaded = TryLoadNative(candidate, options);
+            if (loaded) {
+                ModulePtr module{new Module{*loaded, std::filesystem::path{candidate}, options.unloadOnDestroy}};
                 if (options.cachePolicy == ModuleCachePolicy::Shared) {
                     std::scoped_lock lock{mutex_};
                     cache_[key] = module;
                 }
                 return module;
             }
+            if (error.attempts.empty()) {
+                error.attempts.reserve(attempted.size());
+            }
+            error.attempts.push_back(ModuleLoadAttempt{.candidate = candidate,
+                                                       .nativeError = loaded.error().error,
+                                                       .diagnostic = std::move(loaded.error().diagnostic)});
         }
-        return std::unexpected{ErrorCode::ModuleLoadFailed};
+        return std::unexpected{std::move(error)};
     }
 
     Result<ModuleImage> ModuleLoader::OpenImage(const std::filesystem::path& path) const {
@@ -666,23 +687,12 @@ namespace Sora::PAL {
         std::erase_if(cache_, [](const auto& entry) { return entry.second.expired(); });
     }
 
-    Result<ModulePtr> LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options) {
+    ModuleLoadResult LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options) {
         return ModuleLoader::Default().Load(names, options);
     }
 
-    Result<ModulePtr> LoadModule(std::initializer_list<std::string_view> names, ModuleLoadOptions options) {
+    ModuleLoadResult LoadModule(std::initializer_list<std::string_view> names, ModuleLoadOptions options) {
         return LoadModule(std::span<const std::string_view>{names.begin(), names.size()}, options);
-    }
-
-    Result<ModulePtr> LoadModule(std::span<const std::string_view> names, bool includeNativeCandidates) {
-        ModuleLoadOptions options;
-        options.candidatePolicy =
-            includeNativeCandidates ? ModuleCandidatePolicy::NativeDecorated : ModuleCandidatePolicy::ExactOnly;
-        return LoadModule(names, options);
-    }
-
-    Result<ModulePtr> LoadModule(std::initializer_list<std::string_view> names, bool includeNativeCandidates) {
-        return LoadModule(std::span<const std::string_view>{names.begin(), names.size()}, includeNativeCandidates);
     }
 
 } // namespace Sora::PAL
