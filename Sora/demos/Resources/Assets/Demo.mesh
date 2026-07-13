@@ -1,0 +1,2 @@
+mesh vertices: position.xyz normal.xyz uv.xy
+indices: 0 1 2 2 3 0

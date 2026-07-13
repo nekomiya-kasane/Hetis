@@ -1,29 +1,28 @@
-#include "Sora/Kernel/Core/ComPtr.h"
-#include "Sora/Kernel/Core/EventPort.h"
+#include "Sora/Core/EventPort.h"
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <print>
 #include <utility>
 
 #include <exec/start_detached.hpp>
 #include <stdexec/execution.hpp>
 
-namespace Concept = Sora::Kernel::Concept;
-namespace Traits = Sora::Kernel::Traits;
+namespace Concept = Sora::Concept;
+namespace Traits = Sora::Traits;
 
-using Sora::Kernel::BaseUnknown;
-using Sora::Kernel::DefaultCallbackTag;
-using Sora::Kernel::Drop;
-using Sora::Kernel::EmitOn;
-using Sora::Kernel::EventContext;
-using Sora::Kernel::EventList;
-using Sora::Kernel::Events;
-using Sora::Kernel::EventTrace;
-using Sora::Kernel::Listen;
-using Sora::Kernel::MakeComPtr;
-using Sora::Kernel::Persistent;
-using Sora::Kernel::TypeOfClass;
+using Sora::Connect;
+using Sora::DefaultCallbackTag;
+using Sora::Disconnect;
+using Sora::EmitOn;
+using Sora::EventContext;
+using Sora::EventList;
+using Sora::EventOptions;
+using Sora::EventPort;
+using Sora::EventProbeContext;
+using Sora::EventProbePhase;
+using Sora::Persistent;
 
 namespace AsyncEventCallbackDemo {
 
@@ -34,6 +33,14 @@ namespace AsyncEventCallbackDemo {
             float y{};
         };
 
+        inline int callbackScheduled{};
+
+        void ProbeEvent(const EventProbeContext& context, const PositionChanged&) {
+            if (context.phase == EventProbePhase::CallbackScheduled) {
+                ++callbackScheduled;
+            }
+        }
+
     } // namespace Event
 
     namespace Callback {
@@ -42,18 +49,17 @@ namespace AsyncEventCallbackDemo {
 
     } // namespace Callback
 
-    class [[= Sora::Kernel::$::Role{TypeOfClass::Implementation}]] EventfulPoint : public BaseUnknown {
-        S_OBJECT
+    struct EventfulPoint : std::enable_shared_from_this<EventfulPoint> {
+        EventPort events;
 
-    public:
         using Emits = EventList<Event::PositionChanged>;
         using Accepts = EventList<Event::PositionChanged>;
         using Callbacks = EventList<Callback::PersistPosition, DefaultCallbackTag>;
 
-        void MoveTo(stdexec::run_loop::scheduler scheduler, float x, float y) {
+        void MoveTo(stdexec::scheduler auto scheduler, float x, float y) {
             x_ = x;
             y_ = y;
-            EmitOn(*this, scheduler, Event::PositionChanged{x_, y_});
+            exec::start_detached(EmitOn(*this, std::move(scheduler), Event::PositionChanged{x_, y_}));
         }
 
     private:
@@ -87,7 +93,6 @@ namespace AsyncEventCallbackDemo {
         void operator()(const Event::PositionChanged& event, EventContext<Event::PositionChanged>& context) const {
             ++log->eventCallbacks;
             SchedulePersistPosition(worker, *log, event, context.sequence);
-
         }
     };
 
@@ -105,22 +110,16 @@ int main() {
     static_assert(Concept::EventReceiver<EventfulPoint, Event::PositionChanged>);
     static_assert(Traits::CanAttachCallback<EventfulPoint, Callback::PersistPosition>);
 
-    auto point = MakeComPtr<EventfulPoint>();
+    auto point = std::make_shared<EventfulPoint>();
     stdexec::run_loop dispatchLoop;
     stdexec::run_loop workerLoop;
     AuditLog log{};
-    int traceScheduled{};
 
-    auto trace = Events(*point).AttachTrace([&](const EventTrace& trace) {
-        if (trace.eventId == Traits::EventIdOf<Event::PositionChanged>) {
-            traceScheduled += trace.phase == Sora::Kernel::EventTracePhase::CallbackScheduled ? 1 : 0;
-        }
-    });
-    assert(trace.Active());
-
-    auto link = Listen(*point, *point, Event::PositionChanged{}, Persistent,
-                       PersistPositionCallback{.worker = workerLoop.get_scheduler(), .log = &log});
-    assert(link.Active());
+    auto link =
+        Connect(*point, *point, Event::PositionChanged{},
+                EventOptions{.budget = Persistent, .callbackId = Traits::EventIdOf<Callback::PersistPosition>},
+                PersistPositionCallback{.worker = workerLoop.get_scheduler(), .log = &log});
+    assert(link.IsActive());
 
     point->MoveTo(dispatchLoop.get_scheduler(), 3.0f, 4.0f);
     assert(log.eventCallbacks == 0);
@@ -129,7 +128,7 @@ int main() {
     Run(dispatchLoop);
     assert(log.eventCallbacks == 1);
     assert(log.persisted == 0);
-    assert(traceScheduled == 1);
+    assert(Event::callbackScheduled == 1);
 
     Run(workerLoop);
     assert(log.persisted == 1);
@@ -137,8 +136,8 @@ int main() {
     assert(log.lastY == 4.0f);
     assert(log.lastSequence == 1);
 
-    Drop(link);
-    std::println("Async event callback demo passed: callback={}, persisted={}, sequence={}", log.eventCallbacks,
+    Disconnect(link);
+    std::println("Core async event callback demo passed: callback={}, persisted={}, sequence={}", log.eventCallbacks,
                  log.persisted, log.lastSequence);
     return 0;
 }
