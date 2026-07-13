@@ -198,8 +198,8 @@ namespace Sora::Resources {
                 it = std::prev(candidates_.end());
             }
             it->state = ResourceModuleState::Failed;
-            it->lastError = loaded.error();
-            return std::unexpected(loaded.error());
+            it->lastError = ErrorCode::ModuleLoadFailed;
+            return std::unexpected(ErrorCode::ModuleLoadFailed);
         }
 
         auto registered = RegisterModule(*loaded);

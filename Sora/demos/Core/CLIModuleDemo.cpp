@@ -53,7 +53,7 @@ namespace {
         };
         auto loaded = Sora::PAL::LoadModule(names, options);
         if (!loaded) {
-            return std::unexpected(std::format("failed to load runtime CLI module '{}'", moduleName));
+            return std::unexpected(loaded.error().Message());
         }
 
         const Sora::PAL::ModulePtr& module = *loaded;

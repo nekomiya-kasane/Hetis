@@ -76,7 +76,7 @@ namespace Sora {
         [[nodiscard]] DbgHelpApi& DbgHelp() noexcept {
             static DbgHelpApi api = [] {
                 DbgHelpApi loaded{};
-                auto module = PAL::LoadModule({"dbghelp"}, true);
+                auto module = PAL::LoadModule({"dbghelp"});
                 if (!module) {
                     return loaded;
                 }

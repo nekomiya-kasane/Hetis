@@ -45,7 +45,7 @@ namespace Sora::Meta::ABI {
         [[nodiscard]] LoadedFunction<Fn> LoadFunction(std::initializer_list<std::string_view> modules,
                                                       std::string_view symbol) noexcept {
             for (std::string_view moduleName : modules) {
-                auto module = PAL::LoadModule({moduleName}, true);
+                auto module = PAL::LoadModule({moduleName});
                 if (!module) {
                     continue;
                 }
@@ -162,4 +162,3 @@ namespace Sora::Meta::ABI {
     }
 
 } // namespace Sora::Meta::ABI
-
