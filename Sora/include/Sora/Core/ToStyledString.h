@@ -49,7 +49,7 @@ namespace Sora {
     /** @brief Default automatic formatting policy used by @c std::format and @c std::println. */
     inline constexpr RenderMode kDefaultRenderMode = RenderMode::Styled;
 
-    namespace $::Serialization {
+    namespace Styled {
 
         /** @brief Escaping mode used when appending data-owned text to styled output. */
         enum class StyledEscapePolicy : uint8_t {
@@ -218,7 +218,7 @@ namespace Sora {
             std::string out_{};
         };
 
-    } // namespace $::Serialization
+    } // namespace Styled
 
     namespace Hook {
 
@@ -240,7 +240,7 @@ namespace Sora {
     namespace Detail {
 
         template<typename T>
-        void ToStyledStringImpl($::Serialization::StyledStringBuilder& builder, T&& value);
+        void ToStyledStringImpl(Styled::StyledStringBuilder& builder, T&& value);
 
         /** @name ADL hook detection @{ */
         namespace ADL {
@@ -251,13 +251,13 @@ namespace Sora {
 
                 /** @brief True if @c ToStyledString(builder, value) is found via ADL. */
                 template<typename T>
-                concept Available = requires($::Serialization::StyledStringBuilder& builder, T&& value) {
+                concept Available = requires(Styled::StyledStringBuilder& builder, T&& value) {
                     { ToStyledString(builder, std::forward<T>(value)) } -> std::same_as<void>;
                 };
 
                 template<typename T>
                     requires Available<T>
-                void Invoke($::Serialization::StyledStringBuilder& builder, T&& value) {
+                void Invoke(Styled::StyledStringBuilder& builder, T&& value) {
                     ToStyledString(builder, std::forward<T>(value));
                 }
             } // namespace FreeToStyledString
@@ -267,27 +267,27 @@ namespace Sora {
 
         /** @brief Detects a member @c value.ToStyledString(builder). */
         template<typename T>
-        concept HasMemberToStyledString = requires(T&& value, $::Serialization::StyledStringBuilder& builder) {
+        concept HasMemberToStyledString = requires(T&& value, Styled::StyledStringBuilder& builder) {
             { std::forward<T>(value).ToStyledString(builder) } -> std::same_as<void>;
         };
 
         /** @brief Detects a usable @ref Sora::Hook::ToStyledStringHook specialisation for @p T. */
         template<typename T>
-        concept HasHookToStyledString = requires(const T& value, $::Serialization::StyledStringBuilder& builder) {
+        concept HasHookToStyledString = requires(const T& value, Styled::StyledStringBuilder& builder) {
             { Hook::ToStyledStringHook<T>::Render(builder, value) } -> std::same_as<void>;
         };
 
         /** @brief Append @p value through @c std::to_string under numeric styling. */
         template<typename T>
-        void AppendStdToString($::Serialization::StyledStringBuilder& builder, T&& value) {
-            builder.Text($::Serialization::StyledRole::Number, std::to_string(std::forward<T>(value)));
+        void AppendStdToString(Styled::StyledStringBuilder& builder, T&& value) {
+            builder.Text(Styled::StyledRole::Number, std::to_string(std::forward<T>(value)));
         }
 
         /** @brief Core dispatch from a value to styled terminal text. */
         template<typename T>
-        void ToStyledStringImpl($::Serialization::StyledStringBuilder& builder, T&& value) {
+        void ToStyledStringImpl(Styled::StyledStringBuilder& builder, T&& value) {
             using U = std::remove_cvref_t<T>;
-            namespace $$ = $::Serialization;
+            namespace $$ = Styled;
 
             if constexpr (HasHookToStyledString<U>) {
                 Hook::ToStyledStringHook<U>::Render(builder, value);
@@ -412,13 +412,13 @@ namespace Sora {
             /** @brief Convert @p value to a styled string with default options. */
             template<typename T>
             [[nodiscard]] std::string operator()(T&& value) const {
-                return (*this)(std::forward<T>(value), $::Serialization::StyledStringOptions{});
+                return (*this)(std::forward<T>(value), Styled::StyledStringOptions{});
             }
 
             /** @brief Convert @p value to a styled string with explicit options. */
             template<typename T>
-            [[nodiscard]] std::string operator()(T&& value, $::Serialization::StyledStringOptions options) const {
-                $::Serialization::StyledStringBuilder builder{options};
+            [[nodiscard]] std::string operator()(T&& value, Styled::StyledStringOptions options) const {
+                Styled::StyledStringBuilder builder{options};
                 ToStyledStringImpl(builder, std::forward<T>(value));
                 return std::move(builder).Finish();
             }

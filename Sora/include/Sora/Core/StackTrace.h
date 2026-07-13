@@ -66,7 +66,7 @@ namespace Sora {
         [[nodiscard]] std::string ToString() const;
 
         /** @brief Styled terminal representation used by @ref Sora::ToStyledString. */
-        void ToStyledString(Sora::$::Serialization::StyledStringBuilder& builder) const;
+        void ToStyledString(Sora::Styled::StyledStringBuilder& builder) const;
 
         friend auto&& Traits::AdaptorAppliedTarget<StackTrace>(StackTrace&& self);
 

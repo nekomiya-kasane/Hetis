@@ -12,4 +12,5 @@
 #include <Sora/Core/CLI/Help.h>
 #include <Sora/Core/CLI/Program.h>
 #include <Sora/Core/CLI/Fragment.h>
+#include <Sora/Core/CLI/LinkedProgram.h>
 #include <Sora/Core/CLI/RuntimeModule.h>

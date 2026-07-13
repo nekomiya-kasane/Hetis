@@ -68,7 +68,7 @@ namespace Sora {
 
         /** @brief Build one styled log line through Sora's terminal-safe rich string builder. */
         [[nodiscard]] std::string FormatStyledRecord(const LogRecord& record) {
-            namespace Styled = Sora::$::Serialization;
+            namespace Styled = Sora::Styled;
             Styled::StyledStringBuilder builder{};
             const Styled::StyledRole levelRole =
                 record.level >= LogLevel::Error ? Styled::StyledRole::Error : Styled::StyledRole::EnumName;

@@ -3,10 +3,28 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <charconv>
 #include <string_view>
 #include <vector>
 
 namespace {
+
+    struct Port {
+        int value = 0;
+    };
+
+    [[nodiscard]] bool ParseValue(Port& port, std::string_view text) noexcept {
+        if (!text.starts_with("tcp:")) {
+            return false;
+        }
+        int value = 0;
+        const auto [end, error] = std::from_chars(text.data() + 4, text.data() + text.size(), value);
+        if (error != std::errc{} || end != text.data() + text.size()) {
+            return false;
+        }
+        port.value = value;
+        return true;
+    }
 
     struct TestContext {
         int base = 0;
@@ -18,6 +36,9 @@ namespace {
 
         [[=Sora::CLI::Switch{.name = "amend", .shortName = 'a'}]]
         bool amend = false;
+
+        [[=Sora::CLI::Parameter{.name = "port"}]]
+        Port port{};
 
         [[=Sora::CLI::Operand{.name = "paths", .cardinality = Sora::CLI::ValueCardinality::ZeroOrMore}]]
         std::vector<std::string_view> paths;
@@ -38,6 +59,9 @@ namespace {
     };
 
     struct Remote {
+        [[=Sora::CLI::Parameter{.name = "endpoint", .required = true}]]
+        std::string_view endpoint{};
+
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<RemoteAdd>>;
     };
 
@@ -48,7 +72,7 @@ namespace {
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<Commit>, Sora::CLI::Command<Remote>>;
 
         static consteval void BuildSchema(Sora::CLI::SchemaBuilder<TestProgram>& schema) {
-            schema.Name("tool").Policy(Sora::CLI::Policy::GnuStyle | Sora::CLI::Policy::GlobalOptionsAnywhere)
+            schema.Name("tool").Policy(Sora::CLI::Policy::GlobalOptionsAnywhere)
                 .Command<Commit>("commit")
                 .Command<Remote>("remote")
                 .Command<RemoteAdd>("add");
@@ -56,6 +80,8 @@ namespace {
     };
 
     inline constexpr auto kProgram = Sora::CLI::Compile<TestProgram>();
+    static_assert(decltype(kProgram)::kCommandDepth == 2);
+    static_assert(sizeof(Sora::CLI::NormalizedSchema) <= 128);
 
     [[nodiscard]] Sora::CLI::ArgvView Tokens(std::span<const std::string_view> tokens) noexcept {
         return Sora::CLI::ArgvView{.tokens = tokens};
@@ -65,7 +91,8 @@ namespace {
 
 TEST_CASE("CLI parses annotated options, short clusters, and variadic operands", "[Sora][Core][CLI]") {
     const std::array args{std::string_view{"-v"}, std::string_view{"commit"}, std::string_view{"-am"},
-                          std::string_view{"hello"}, std::string_view{"src"}, std::string_view{"include"}};
+                          std::string_view{"hello"}, std::string_view{"--port"}, std::string_view{"tcp:443"},
+                          std::string_view{"src"}, std::string_view{"include"}};
 
     auto parsed = kProgram.Parse(Tokens(args));
 
@@ -73,6 +100,7 @@ TEST_CASE("CLI parses annotated options, short clusters, and variadic operands",
     REQUIRE(parsed->root.verbose);
     REQUIRE(parsed->CommandObject<Commit>().amend);
     REQUIRE(parsed->CommandObject<Commit>().message == "hello");
+    REQUIRE(parsed->CommandObject<Commit>().port.value == 443);
     REQUIRE(parsed->CommandObject<Commit>().paths == std::vector<std::string_view>{"src", "include"});
 
     TestContext context{.base = 10};
@@ -91,15 +119,38 @@ TEST_CASE("CLI accepts global options after a subcommand when policy allows it",
 }
 
 TEST_CASE("CLI parses nested subcommands from the static command tree", "[Sora][Core][CLI]") {
-    const std::array args{std::string_view{"remote"}, std::string_view{"add"}, std::string_view{"origin"},
+    const std::array args{std::string_view{"remote"}, std::string_view{"--endpoint"}, std::string_view{"upstream"},
+                          std::string_view{"add"}, std::string_view{"origin"},
                           std::string_view{"https://example.invalid/repo.git"}};
 
     auto parsed = kProgram.Parse(Tokens(args));
 
     REQUIRE(parsed.has_value());
+    REQUIRE(parsed->CommandObject<Remote>().endpoint == "upstream");
     REQUIRE(parsed->CommandObject<RemoteAdd>().name == "origin");
     REQUIRE(parsed->CommandObject<RemoteAdd>().url == "https://example.invalid/repo.git");
     REQUIRE(kProgram.Dispatch(*parsed) == 0);
+}
+
+TEST_CASE("CLI validates required fields on every selected command path node", "[Sora][Core][CLI]") {
+    const std::array args{std::string_view{"remote"}, std::string_view{"add"}, std::string_view{"origin"},
+                          std::string_view{"https://example.invalid/repo.git"}};
+
+    auto parsed = kProgram.Parse(Tokens(args));
+
+    REQUIRE_FALSE(parsed.has_value());
+    REQUIRE(parsed.error().kind == Sora::CLI::ParseErrorKind::MissingRequiredOption);
+    REQUIRE(kProgram.schema.NameText(parsed.error().descriptorName) == "endpoint");
+}
+
+TEST_CASE("CLI requires a child command when the selected scope has subcommands", "[Sora][Core][CLI]") {
+    const std::array args{std::string_view{"remote"}, std::string_view{"--endpoint"},
+                          std::string_view{"upstream"}};
+
+    auto parsed = kProgram.Parse(Tokens(args));
+
+    REQUIRE_FALSE(parsed.has_value());
+    REQUIRE(parsed.error().kind == Sora::CLI::ParseErrorKind::MissingCommand);
 }
 
 TEST_CASE("CLI reports missing values and required options structurally", "[Sora][Core][CLI]") {

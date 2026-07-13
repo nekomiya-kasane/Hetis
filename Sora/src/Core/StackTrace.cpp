@@ -229,8 +229,8 @@ namespace Sora {
         return out;
     }
 
-    void StackTrace::ToStyledString(Sora::$::Serialization::StyledStringBuilder& builder) const {
-        namespace Styled = Sora::$::Serialization;
+    void StackTrace::ToStyledString(Sora::Styled::StyledStringBuilder& builder) const {
+        namespace Styled = Sora::Styled;
         builder.Text(Styled::StyledRole::TypeName, "StackTrace");
         builder.Raw(Styled::StyledRole::Punctuation, "(");
         builder.Text(Styled::StyledRole::Number, std::format("{}", frames_.size()));
