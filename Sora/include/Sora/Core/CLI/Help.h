@@ -20,6 +20,7 @@
 
 #include <tapioca/pal.h>
 #include <tapioca/terminal.h>
+#include <tapioca/unicode_width.h>
 
 namespace Sora::CLI {
 
@@ -40,7 +41,7 @@ namespace Sora::CLI {
 
     namespace Detail {
 
-        namespace Styled = Sora::$::Serialization;
+        namespace Styled = Sora::Styled;
 
         struct HelpEntry {
             std::string label;
@@ -65,6 +66,11 @@ namespace Sora::CLI {
             std::uint32_t width = 100;
             tapioca::terminal_caps caps = tapioca::terminal_caps::legacy_win_cmd();
         };
+
+        /** @brief Return the number of terminal columns occupied by UTF-8 text. */
+        [[nodiscard]] inline std::size_t DisplayWidth(std::string_view text) noexcept {
+            return static_cast<std::size_t>(std::max(tapioca::string_width(text), 0));
+        }
 
         [[nodiscard]] inline ResolvedHelpRenderOptions ResolveHelpRenderOptions(HelpRenderOptions options) noexcept {
             ResolvedHelpRenderOptions resolved{};
@@ -106,8 +112,9 @@ namespace Sora::CLI {
                 const std::string_view word = text.substr(position, end == std::string_view::npos
                                                                         ? text.size() - position
                                                                         : end - position);
+                const std::size_t wordWidth = DisplayWidth(word);
                 const std::size_t separator = firstWord ? 0 : 1;
-                if (!firstWord && column + separator + word.size() > width) {
+                if (!firstWord && column + separator + wordWidth > width) {
                     builder.Raw("\n");
                     builder.Raw(std::string(continuationColumn, ' '));
                     column = continuationColumn;
@@ -118,7 +125,7 @@ namespace Sora::CLI {
                     ++column;
                 }
                 builder.Text(role, word);
-                column += word.size();
+                column += wordWidth;
                 firstWord = false;
                 position = end == std::string_view::npos ? text.size() : end + 1;
             }
@@ -148,7 +155,7 @@ namespace Sora::CLI {
 
                 std::size_t labelWidth = 0;
                 for (const HelpEntry& entry : section.entries) {
-                    labelWidth = std::max(labelWidth, entry.label.size());
+                    labelWidth = std::max(labelWidth, DisplayWidth(entry.label));
                 }
                 labelWidth = std::min(labelWidth, std::min<std::size_t>(32, resolved.width / 2));
                 const std::size_t descriptionColumn = 4 + labelWidth;
@@ -161,8 +168,9 @@ namespace Sora::CLI {
                         builder.Raw("\n");
                         continue;
                     }
-                    std::size_t column = 2 + entry.label.size();
-                    if (entry.label.size() > labelWidth) {
+                    const std::size_t entryLabelWidth = DisplayWidth(entry.label);
+                    std::size_t column = 2 + entryLabelWidth;
+                    if (entryLabelWidth > labelWidth) {
                         builder.Raw("\n");
                         builder.Raw(std::string(descriptionColumn, ' '));
                         column = descriptionColumn;

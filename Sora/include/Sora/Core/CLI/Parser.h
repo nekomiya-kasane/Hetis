@@ -6,11 +6,11 @@
  * @ingroup Core
  */
 
+#include <array>
 #include <cstddef>
 #include <expected>
 #include <span>
 #include <string_view>
-#include <utility>
 #include <variant>
 
 #include <Sora/Core/CLI/Descriptions.h>
@@ -45,14 +45,14 @@ namespace Sora::CLI {
         return ArgvView{.argc = argc - 1, .argv = argv + 1};
     }
 
-    /** @brief Typed parse result carrying root-scope options and the selected command object. */
-    template<typename Root, typename CommandVariant>
+    /** @brief Typed parse result carrying root-scope options and command objects along the selected path. */
+    template<typename Root, typename CommandVariant, std::size_t MaxDepth>
     struct ParseResult {
         using RootType = Root;
         using CommandVariantType = CommandVariant;
 
         Root root{};                              /**< Parsed root-scope state. */
-        CommandVariant command{};                 /**< Selected command object, or monostate before selection. */
+        std::array<CommandVariant, MaxDepth> commandPath{}; /**< One lazily constructed object per selected depth. */
         CommandId commandId = kInvalidCommandId;  /**< Descriptor id of the selected command. */
         CommandId helpCommandId = kInvalidCommandId; /**< Command scope selected by built-in @c -h or @c --help. */
 
@@ -68,20 +68,30 @@ namespace Sora::CLI {
         /** @brief Return the parsed root object. */
         [[nodiscard]] constexpr const Root& RootObject() const noexcept { return root; }
 
-        /** @brief Return the selected command as @p T. */
+        /** @brief Return the selected path object of type @p T. */
         template<typename T>
         [[nodiscard]] constexpr T& CommandObject() {
-            return std::get<T>(command);
+            for (CommandVariant& command : commandPath) {
+                if (T* value = std::get_if<T>(&command); value != nullptr) {
+                    return *value;
+                }
+            }
+            throw std::bad_variant_access{};
         }
 
-        /** @brief Return the selected command as @p T. */
+        /** @brief Return the selected path object of type @p T. */
         template<typename T>
         [[nodiscard]] constexpr const T& CommandObject() const {
-            return std::get<T>(command);
+            for (const CommandVariant& command : commandPath) {
+                if (const T* value = std::get_if<T>(&command); value != nullptr) {
+                    return *value;
+                }
+            }
+            throw std::bad_variant_access{};
         }
     };
 
-    template<typename Root, typename CommandVariant>
-    using ParseExpected = std::expected<ParseResult<Root, CommandVariant>, ParseError>;
+    template<typename Root, typename CommandVariant, std::size_t MaxDepth>
+    using ParseExpected = std::expected<ParseResult<Root, CommandVariant, MaxDepth>, ParseError>;
 
 } // namespace Sora::CLI

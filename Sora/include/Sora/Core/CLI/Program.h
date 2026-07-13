@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <expected>
 #include <format>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -58,16 +59,17 @@ namespace Sora::CLI {
         using RootType = Root;
         using CommandTreeType = CommandTree;
         using CommandVariantType = CommandVariantOf<CommandTree>;
-        using ResultType = ParseResult<Root, CommandVariantType>;
-        using ExpectedResult = ParseExpected<Root, CommandVariantType>;
+        inline static constexpr std::size_t kCommandDepth = CommandDepthOf<CommandTree>;
+        using ResultType = ParseResult<Root, CommandVariantType, kCommandDepth>;
+        using ExpectedResult = ParseExpected<Root, CommandVariantType, kCommandDepth>;
 
         NormalizedSchema schema = {}; /**< Sealed descriptor image. */
 
-        /** @brief Parse @p argv into a typed root object and selected command object. */
+        /** @brief Parse @p argv into a typed root object and the selected command path. */
         [[nodiscard]] ExpectedResult Parse(ArgvView argv) const {
             ResultType result{};
-            std::array<bool, 1024> presence{};
-            std::array<std::uint32_t, 1024> operandCounts{};
+            std::array<bool, kMaxSchemaPresences> presence{};
+            std::array<std::uint32_t, kMaxSchemaPresences> operandCounts{};
 
             CommandId current = 0;
             std::uint32_t operandIndex = 0;
@@ -75,7 +77,7 @@ namespace Sora::CLI {
 
             for (std::size_t i = 0; i < argv.Size(); ++i) {
                 const std::string_view token = argv[i];
-                const SourceRef source{.tokenIndex = static_cast<std::uint32_t>(i)};
+                const SourceRef source{.tokenIndex = i};
 
                 if (!afterDelimiter && token == "--") {
                     afterDelimiter = true;
@@ -215,16 +217,16 @@ namespace Sora::CLI {
                 }
             }
 
-            if (current == 0 && schema.commands[0].childCount != 0) {
-                return std::unexpected(ParseError{.kind = ParseErrorKind::MissingCommand, .commandId = 0});
+            if (schema.commands[current].childCount != 0) {
+                return std::unexpected(ParseError{.kind = ParseErrorKind::MissingCommand, .commandId = current});
             }
 
-            if (auto error = CheckRequired(schema.commands[0], presence, operandCounts); error.has_value()) {
-                return std::unexpected(*error);
-            }
-            if (current != 0) {
-                if (auto error = CheckRequired(schema.commands[current], presence, operandCounts); error.has_value()) {
+            for (CommandId scope = current;; scope = schema.commands[scope].parentCommandId) {
+                if (auto error = CheckRequired(schema.commands[scope], presence, operandCounts); error.has_value()) {
                     return std::unexpected(*error);
+                }
+                if (scope == 0) {
+                    break;
                 }
             }
 
@@ -238,8 +240,12 @@ namespace Sora::CLI {
                 PrintHelp(result);
                 return 0;
             }
-            return std::visit([&](const auto& command) { return Detail::DispatchCommand(command, context); },
-                              result.command);
+            if (!result.HasCommand()) {
+                return 0;
+            }
+            const CommandDesc& command = schema.commands[result.commandId];
+            return std::visit([&](const auto& value) { return Detail::DispatchCommand(value, context); },
+                              result.commandPath[command.depth - 1]);
         }
 
         /** @brief Dispatch the selected command without an explicit context object. */
@@ -367,8 +373,8 @@ namespace Sora::CLI {
         }
 
         [[nodiscard]] bool BindOperand(ResultType& result, CommandId commandId, std::uint32_t& operandIndex,
-                                       std::string_view token, std::array<bool, 1024>& presence,
-                                       std::array<std::uint32_t, 1024>& operandCounts) const noexcept {
+                                       std::string_view token, std::array<bool, kMaxSchemaPresences>& presence,
+                                       std::array<std::uint32_t, kMaxSchemaPresences>& operandCounts) const noexcept {
             const CommandDesc& command = schema.commands[commandId];
             if (operandIndex >= command.operandCount) {
                 return false;
@@ -398,8 +404,8 @@ namespace Sora::CLI {
         }
 
         [[nodiscard]] std::optional<ParseError> CheckRequired(
-            const CommandDesc& command, const std::array<bool, 1024>& presence,
-            const std::array<std::uint32_t, 1024>& operandCounts) const noexcept {
+            const CommandDesc& command, const std::array<bool, kMaxSchemaPresences>& presence,
+            const std::array<std::uint32_t, kMaxSchemaPresences>& operandCounts) const noexcept {
             for (std::uint32_t i = 0; i < command.optionCount; ++i) {
                 const OptionDesc& option = schema.options[command.optionBegin + i];
                 if (option.required && !presence[option.presenceBit]) {
@@ -422,26 +428,25 @@ namespace Sora::CLI {
         }
 
         [[nodiscard]] bool EmplaceCommand(ResultType& result, CommandId commandId) const {
-            const VariantId variantId = schema.commands[commandId].variantId;
-            return EmplaceVariant(result.command, variantId);
+            const CommandDesc& command = schema.commands[commandId];
+            return EmplaceVariant(result.commandPath[command.depth - 1], command.typeId);
         }
 
         [[nodiscard]] void* ObjectFor(ResultType& result, CommandId commandId) const noexcept {
             if (commandId == 0) {
                 return &result.root;
             }
-            if (result.commandId != commandId) {
-                return nullptr;
-            }
-            return VariantObject(result.command, schema.commands[commandId].variantId);
+            const CommandDesc& command = schema.commands[commandId];
+            return VariantObject(result.commandPath[command.depth - 1], command.typeId);
         }
 
         template<typename... Ts>
-        [[nodiscard]] static bool EmplaceVariant(std::variant<std::monostate, Ts...>& variant, VariantId variantId) {
+        [[nodiscard]] static bool EmplaceVariant(std::variant<std::monostate, Ts...>& variant,
+                                                 CommandTypeId typeId) {
             bool matched = false;
             [&]<std::size_t... I>(std::index_sequence<I...>) {
                 auto emplaceOne = [&]<std::size_t Index> {
-                    if (variantId == Index) {
+                    if (typeId == Index) {
                         variant.template emplace<Index + 1>();
                         matched = true;
                     }
@@ -453,12 +458,12 @@ namespace Sora::CLI {
 
         template<typename... Ts>
         [[nodiscard]] static void* VariantObject(std::variant<std::monostate, Ts...>& variant,
-                                                 VariantId variantId) noexcept {
+                                                 CommandTypeId typeId) noexcept {
             void* result = nullptr;
             [&]<std::size_t... I>(std::index_sequence<I...>) {
                 auto selectOne = [&]<std::size_t Index> {
-                    if (variantId == Index) {
-                        result = static_cast<void*>(&std::get<Index + 1>(variant));
+                    if (typeId == Index) {
+                        result = static_cast<void*>(std::addressof(std::get<Index + 1>(variant)));
                     }
                 };
                 (selectOne.template operator()<I>(), ...);
@@ -472,8 +477,6 @@ namespace Sora::CLI {
         SchemaBuilder<Root> builder;
         if constexpr (Concept::HasBuildSchema<Root>) {
             Root::BuildSchema(builder);
-        } else if constexpr (Concept::HasDescribe<Root>) {
-            Root::Describe(builder);
         }
         return Program<Root>{.schema = builder.Seal()};
     }

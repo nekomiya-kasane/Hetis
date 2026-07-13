@@ -6,21 +6,19 @@
  * @ingroup Core
  */
 
-#include <algorithm>
 #include <array>
 #include <charconv>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <expected>
 #include <meta>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include <Sora/Core/ADT/FixedCapacityVector.h>
 #include <Sora/Core/CLI/Descriptions.h>
@@ -37,24 +35,20 @@ namespace Sora::CLI {
 
     namespace Detail {
 
-        template<typename T, typename = void>
-        struct DeclaredCommands {
-            using Type = Commands<>;
-        };
-
-        template<typename T, typename = void>
-        struct HasDeclaredCommands : std::false_type {};
+        template<typename T>
+        [[nodiscard]] consteval auto DeclaredCommandsOf() {
+            if constexpr (requires { typename T::Commands; }) {
+                return std::type_identity<typename T::Commands>{};
+            } else {
+                return std::type_identity<Commands<>>{};
+            }
+        }
 
         template<typename T>
-        struct DeclaredCommands<T, std::void_t<typename T::Commands>> {
-            using Type = typename T::Commands;
-        };
+        using DeclaredCommandsType = typename decltype(DeclaredCommandsOf<T>())::type;
 
         template<typename T>
-        struct HasDeclaredCommands<T, std::void_t<typename T::Commands>> : std::true_type {};
-
-        template<typename T>
-        inline constexpr bool HasDeclaredCommandsV = HasDeclaredCommands<T>::value;
+        concept HasDeclaredCommands = requires { typename T::Commands; };
 
     } // namespace Detail
 
@@ -63,7 +57,7 @@ namespace Sora::CLI {
      * @tparam T Typed command object constructed after successful parsing.
      * @tparam Children Static child commands visible below @p T.
      */
-    template<typename T, typename Children = typename Detail::DeclaredCommands<T>::Type>
+    template<typename T, typename Children = Detail::DeclaredCommandsType<T>>
     struct Command {
         using Type = T;
         using ChildrenType = Children;
@@ -80,27 +74,37 @@ namespace Sora::CLI {
 
     /** @brief Canonical sealed descriptor image produced by consteval schema lowering. */
     struct NormalizedSchema {
-        NameId programName = kInvalidNameId;        /**< Program display name. */
-        Policy policy = Policy::None;               /**< Global parser policy. */
-        std::uint32_t presenceCount = 0;            /**< Number of presence bits used by the schema. */
-        FixedCapacityVector<NameEntry> names = {};  /**< Interned static-storage strings. */
-        FixedCapacityVector<CommandDesc> commands = {};
-        FixedCapacityVector<OptionDesc> options = {};
-        FixedCapacityVector<OperandDesc> operands = {};
-        FixedCapacityVector<CommandEdge> edges = {};
+        NameId programName = kInvalidNameId;     /**< Program display name. */
+        Policy policy = Policy::None;            /**< Global parser policy. */
+        std::uint32_t presenceCount = 0;         /**< Number of presence bits used by the schema. */
+        std::span<const NameEntry> names{};      /**< Interned static-storage strings. */
+        std::span<const CommandDesc> commands{}; /**< Command descriptors in depth-first order. */
+        std::span<const OptionDesc> options{};   /**< Option descriptors grouped by owning command. */
+        std::span<const OperandDesc> operands{}; /**< Operand descriptors grouped by owning command. */
+        std::span<const CommandEdge> edges{};    /**< Parent-to-child command edges. */
 
         /** @brief Return interned text for @p id, or an empty view when @p id is invalid. */
         [[nodiscard]] constexpr std::string_view NameText(NameId id) const noexcept {
-            for (const NameEntry& entry : names) {
-                if (entry.id == id) {
-                    return entry.text;
-                }
+            if (id < names.size()) {
+                return names[id].Text();
             }
             return {};
         }
     };
 
     namespace Detail {
+
+        /** @brief Mutable consteval storage used only while lowering a schema into static descriptor arrays. */
+        struct SchemaStorage {
+            NameId programName = kInvalidNameId;
+            Policy policy = Policy::None;
+            std::uint32_t presenceCount = 0;
+            FixedCapacityVector<NameEntry, kMaxSchemaNames> names{};
+            FixedCapacityVector<CommandDesc, kMaxSchemaCommands> commands{};
+            FixedCapacityVector<OptionDesc, kMaxSchemaOptions> options{};
+            FixedCapacityVector<OperandDesc, kMaxSchemaOperands> operands{};
+            FixedCapacityVector<CommandEdge, kMaxSchemaEdges> edges{};
+        };
 
         template<typename T>
         struct IsCommands : std::false_type {};
@@ -118,15 +122,19 @@ namespace Sora::CLI {
         concept StringField = std::same_as<T, std::string_view> || std::same_as<T, std::string>;
 
         template<typename T>
-        concept ScalarField =
-            StringField<T> || (std::integral<T> && !std::same_as<T, bool>) || std::floating_point<T> ||
-            std::is_enum_v<T> || std::same_as<T, bool>;
+        concept CustomField = requires(T& value, std::string_view text) {
+            { ParseValue(value, text) } noexcept -> std::same_as<bool>;
+        };
+
+        template<typename T>
+        concept ScalarField = CustomField<T> || StringField<T> || (std::integral<T> && !std::same_as<T, bool>) ||
+                              std::floating_point<T> || std::is_enum_v<T> || std::same_as<T, bool>;
 
         template<typename T>
         concept VectorField = requires(T value, typename T::value_type item) {
             typename T::value_type;
             value.push_back(std::move(item));
-        };
+        } && ScalarField<typename T::value_type>;
 
         template<typename T>
         concept ParseableField = ScalarField<T> || VectorField<T>;
@@ -146,29 +154,20 @@ namespace Sora::CLI {
             return FixedText<64>(Sora::Ascii::ToLowerKebab(source), "Sora CLI identifier exceeds 64 bytes.");
         }
 
-        [[nodiscard]] consteval std::uint64_t NameHash(std::string_view text) noexcept {
-            std::uint64_t hash = 14695981039346656037ull;
-            for (char c : text) {
-                hash ^= static_cast<unsigned char>(c);
-                hash *= 1099511628211ull;
-            }
-            return hash;
-        }
-
-        [[nodiscard]] consteval NameId Intern(NormalizedSchema& schema, std::string_view text) {
+        [[nodiscard]] consteval NameId Intern(SchemaStorage& schema, std::string_view text) {
             if (text.empty()) {
                 return kInvalidNameId;
             }
 
-            for (const NameEntry& entry : schema.names) {
-                if (entry.text == text) {
-                    return entry.id;
+            for (std::size_t index = 0; index < schema.names.size(); ++index) {
+                if (schema.names[index].Text() == text) {
+                    return static_cast<NameId>(index);
                 }
             }
 
             const auto id = static_cast<NameId>(schema.names.size());
             const char* stable = std::define_static_string(text);
-            schema.names.push_back(NameEntry{.id = id, .text = {stable, text.size()}, .hash = NameHash(text)});
+            schema.names.push_back(NameEntry{.data = stable, .size = static_cast<std::uint32_t>(text.size())});
             return id;
         }
 
@@ -183,8 +182,8 @@ namespace Sora::CLI {
             }
 
             const CommandName annotation = std::meta::extract<CommandName>(annotations.front());
-            if (annotation.name.empty()) {
-                throw "Sora CLI command_name annotation must not be empty.";
+            if (!Detail::IsCliName(annotation.name.view())) {
+                throw "Sora CLI command_name annotation must contain one valid command path segment.";
             }
             return annotation.name;
         }
@@ -204,7 +203,9 @@ namespace Sora::CLI {
 
         template<typename T>
         [[nodiscard]] constexpr bool ParseScalar(T& out, std::string_view text) noexcept {
-            if constexpr (std::same_as<T, std::string_view>) {
+            if constexpr (CustomField<T>) {
+                return ParseValue(out, text);
+            } else if constexpr (std::same_as<T, std::string_view>) {
                 out = text;
                 return true;
             } else if constexpr (std::same_as<T, std::string>) {
@@ -310,6 +311,14 @@ namespace Sora::CLI {
         }
 
         template<typename CommandType, std::meta::info Member, typename = MemberBindingToken<Member>>
+        [[nodiscard]] bool ValidateValue(std::string_view value) noexcept {
+            using RawFieldType = typename [:std::meta::type_of(Member):];
+            using FieldType = std::remove_cvref_t<RawFieldType>;
+            CommandType object{};
+            return ParseField<FieldType>(object.[:Member:], value);
+        }
+
+        template<typename CommandType, std::meta::info Member, typename = MemberBindingToken<Member>>
         [[nodiscard]] bool BindSwitch(void* object) noexcept {
             using RawFieldType = typename [:std::meta::type_of(Member):];
             using FieldType = std::remove_cvref_t<RawFieldType>;
@@ -323,24 +332,6 @@ namespace Sora::CLI {
                 return true;
             } else {
                 return false;
-            }
-        }
-
-        template<typename CommandType>
-        int ActionAdapter(void const* command, void* context) noexcept {
-            const auto& typed = *static_cast<const CommandType*>(command);
-            static_cast<void>(context);
-            try {
-                if constexpr (requires { { typed() } -> std::convertible_to<int>; }) {
-                    return typed();
-                } else if constexpr (requires { typed(); }) {
-                    typed();
-                    return 0;
-                } else {
-                    return 0;
-                }
-            } catch (...) {
-                return 1;
             }
         }
 
@@ -368,9 +359,21 @@ namespace Sora::CLI {
         template<typename CommandsList>
         struct CommandTypes;
 
+        template<typename CommandsList>
+        struct CommandDepth;
+
         template<typename... Nodes>
         struct CommandTypes<Commands<Nodes...>> {
             using Type = Sora::Traits::Concat<typename CommandTypes<Nodes>::Type...>;
+        };
+
+        template<typename... Nodes>
+        struct CommandDepth<Commands<Nodes...>> {
+            static constexpr std::size_t value = [] {
+                std::size_t depth = 0;
+                ((depth = depth < CommandDepth<Nodes>::value ? CommandDepth<Nodes>::value : depth), ...);
+                return depth;
+            }();
         };
 
         template<typename T, typename Children>
@@ -378,10 +381,17 @@ namespace Sora::CLI {
             using Type = Sora::Traits::PushFront<T, typename CommandTypes<Children>::Type>;
         };
 
+        template<typename T, typename Children>
+        struct CommandDepth<Command<T, Children>>
+            : std::integral_constant<std::size_t, 1 + CommandDepth<Children>::value> {};
+
         template<>
         struct CommandTypes<Commands<>> {
             using Type = Sora::Traits::TypeList<>;
         };
+
+        template<>
+        struct CommandDepth<Commands<>> : std::integral_constant<std::size_t, 0> {};
 
         template<typename List>
         struct VariantOf;
@@ -417,7 +427,7 @@ namespace Sora::CLI {
         }
 
         template<typename CommandType, typename Root>
-        consteval void AppendFields(NormalizedSchema& schema, const SchemaBuilder<Root>& builder, CommandId owner) {
+        consteval void AppendFields(SchemaStorage& schema, const SchemaBuilder<Root>& builder, CommandId owner) {
             auto& command = schema.commands[owner];
             command.optionBegin = static_cast<std::uint32_t>(schema.options.size());
             command.operandBegin = static_cast<std::uint32_t>(schema.operands.size());
@@ -434,6 +444,14 @@ namespace Sora::CLI {
                 if (option.has_value() && positional.has_value()) {
                     throw "Sora CLI field cannot be both an option and an operand.";
                 }
+                const bool global = Sora::$::Has<Global>(member);
+                const bool overridesGlobal = Sora::$::Has<Override>(member);
+                if (global && (!option.has_value() || owner != 0)) {
+                    throw "Sora CLI Global annotation is valid only on root-scope options.";
+                }
+                if (overridesGlobal && (!option.has_value() || owner == 0)) {
+                    throw "Sora CLI Override annotation is valid only on local options.";
+                }
                 if (!option.has_value() && !positional.has_value()) {
                     continue;
                 }
@@ -441,29 +459,38 @@ namespace Sora::CLI {
                 const auto presenceBit = schema.presenceCount++;
                 if (option.has_value()) {
                     OptionDesc desc{.ownerCommandId = owner,
-                                    .fieldId = presenceBit,
                                     .presenceBit = presenceBit,
                                     .required = IsRequiredOverride(builder, member),
-                                    .global = Sora::$::Has<Global>(member)};
+                                    .global = global,
+                                    .overridesGlobal = overridesGlobal};
 
                     if (std::holds_alternative<Parameter>(*option)) {
                         const auto annotation = std::get<Parameter>(*option);
+                        const auto longName = annotation.name.empty() ? DefaultFieldName<member>() : annotation.name;
+                        if (!Detail::IsCliName(longName.view()) ||
+                            (!annotation.valueName.empty() && !Detail::IsCliName(annotation.valueName.view())) ||
+                            !Detail::IsShortOptionName(annotation.shortName)) {
+                            throw "Sora CLI parameter names must be valid long, short, and metavariable names.";
+                        }
                         desc.kind = OptionKind::Parameter;
                         desc.cardinality = ValueCardinality::One;
-                        desc.longName = Intern(schema, annotation.name.empty() ? DefaultFieldName<member>().view()
-                                                                               : annotation.name.view());
+                        desc.longName = Intern(schema, longName.view());
                         desc.valueName = Intern(schema, annotation.valueName.view());
                         desc.about = Intern(schema, annotation.about.view());
                         desc.shortName = annotation.shortName;
                         desc.required = desc.required || annotation.required;
                         ValidateOptionField<CommandType, member>(OptionKind::Parameter);
                         desc.bindValue = &BindValue<CommandType, member>;
+                        desc.validateValue = &ValidateValue<CommandType, member>;
                     } else {
                         const auto annotation = std::get<Switch>(*option);
+                        const auto longName = annotation.name.empty() ? DefaultFieldName<member>() : annotation.name;
+                        if (!Detail::IsCliName(longName.view()) || !Detail::IsShortOptionName(annotation.shortName)) {
+                            throw "Sora CLI switch names must be valid long and short option names.";
+                        }
                         desc.kind = OptionKind::Switch;
                         desc.cardinality = ValueCardinality::None;
-                        desc.longName = Intern(schema, annotation.name.empty() ? DefaultFieldName<member>().view()
-                                                                               : annotation.name.view());
+                        desc.longName = Intern(schema, longName.view());
                         desc.about = Intern(schema, annotation.about.view());
                         desc.shortName = annotation.shortName;
                         ValidateOptionField<CommandType, member>(OptionKind::Switch);
@@ -488,6 +515,10 @@ namespace Sora::CLI {
                     schema.options.push_back(desc);
                 } else {
                     const auto annotation = *positional;
+                    const auto operandName = annotation.name.empty() ? DefaultFieldName<member>() : annotation.name;
+                    if (!Detail::IsCliName(operandName.view())) {
+                        throw "Sora CLI operand names must be valid metavariable names.";
+                    }
                     using RawFieldType = typename [:std::meta::type_of(member):];
                     using FieldType = std::remove_cvref_t<RawFieldType>;
                     if constexpr (!ParseableField<FieldType>) {
@@ -500,13 +531,10 @@ namespace Sora::CLI {
                         }
                     }
 
-                    schema.operands.push_back(OperandDesc{.name = Intern(schema, annotation.name.empty()
-                                                                                     ? DefaultFieldName<member>().view()
-                                                                                     : annotation.name.view()),
+                    schema.operands.push_back(OperandDesc{.name = Intern(schema, operandName.view()),
                                                           .about = Intern(schema, annotation.about.view()),
                                                           .cardinality = annotation.cardinality,
                                                           .ownerCommandId = owner,
-                                                          .fieldId = presenceBit,
                                                           .presenceBit = presenceBit,
                                                           .bindValue = &BindValue<CommandType, member>});
                 }
@@ -533,8 +561,8 @@ namespace Sora::CLI {
         }
 
         template<typename Node, typename Root>
-        consteval CommandId ReserveCommand(NormalizedSchema& schema, const SchemaBuilder<Root>& builder,
-                                           CommandId parent, VariantId variantId) {
+        consteval CommandId ReserveCommand(SchemaStorage& schema, const SchemaBuilder<Root>& builder, CommandId parent,
+                                           CommandTypeId typeId) {
             using CommandType = typename Node::Type;
             ValidateCommandNode<CommandType>();
 
@@ -546,31 +574,34 @@ namespace Sora::CLI {
                 }
                 about = override->about;
             }
+            if (!Detail::IsCliName(name.view())) {
+                throw "Sora CLI command names must be valid path segments.";
+            }
 
             const auto id = static_cast<CommandId>(schema.commands.size());
             schema.commands.push_back(CommandDesc{.name = Intern(schema, name.view()),
                                                   .about = Intern(schema, about.view()),
                                                   .commandId = id,
                                                   .parentCommandId = parent,
-                                                  .variantId = variantId,
-                                                  .action = &ActionAdapter<CommandType>});
+                                                  .typeId = typeId,
+                                                  .depth = schema.commands[parent].depth + 1});
             return id;
         }
 
         template<typename Node, typename Root>
-        consteval void FillCommand(NormalizedSchema& schema, const SchemaBuilder<Root>& builder, CommandId id,
-                                   VariantId& nextVariant);
+        consteval void FillCommand(SchemaStorage& schema, const SchemaBuilder<Root>& builder, CommandId id,
+                                   CommandTypeId& nextType);
 
         template<typename... Nodes, typename Root>
-        consteval void AppendChildren(NormalizedSchema& schema, const SchemaBuilder<Root>& builder, CommandId parent,
-                                      VariantId& nextVariant, Commands<Nodes...>) {
+        consteval void AppendChildren(SchemaStorage& schema, const SchemaBuilder<Root>& builder, CommandId parent,
+                                      CommandTypeId& nextType, Commands<Nodes...>) {
             constexpr std::size_t count = sizeof...(Nodes);
             auto& parentDesc = schema.commands[parent];
             parentDesc.childBegin = static_cast<std::uint32_t>(schema.edges.size());
 
             std::array<CommandId, count> childIds{};
             [&]<std::size_t... I>(std::index_sequence<I...>) {
-                ((childIds[I] = ReserveCommand<Nodes>(schema, builder, parent, nextVariant++),
+                ((childIds[I] = ReserveCommand<Nodes>(schema, builder, parent, nextType++),
                   schema.edges.push_back(CommandEdge{.parentCommandId = parent,
                                                      .name = schema.commands[childIds[I]].name,
                                                      .childCommandId = childIds[I]})),
@@ -588,32 +619,112 @@ namespace Sora::CLI {
             }
 
             [&]<std::size_t... I>(std::index_sequence<I...>) {
-                (FillCommand<Nodes>(schema, builder, childIds[I], nextVariant), ...);
+                (FillCommand<Nodes>(schema, builder, childIds[I], nextType), ...);
             }(std::make_index_sequence<count>{});
         }
 
         template<typename Node, typename Root>
-        consteval void FillCommand(NormalizedSchema& schema, const SchemaBuilder<Root>& builder, CommandId id,
-                                   VariantId& nextVariant) {
+        consteval void FillCommand(SchemaStorage& schema, const SchemaBuilder<Root>& builder, CommandId id,
+                                   CommandTypeId& nextType) {
             using CommandType = typename Node::Type;
             using Children = typename Node::ChildrenType;
             AppendFields<CommandType>(schema, builder, id);
-            AppendChildren(schema, builder, id, nextVariant, Children{});
+            AppendChildren(schema, builder, id, nextType, Children{});
+        }
+
+        template<typename CommandsList, typename Root>
+        consteval void ValidateBuilderOverrides(const SchemaBuilder<Root>& builder) {
+            using CommandTypes = typename Detail::CommandTypes<CommandsList>::Type;
+            const auto commandTypes = Sora::Meta::TypeListTypesOf(std::meta::dealias(^^CommandTypes));
+
+            for (const CommandOverride& override : builder.CommandOverrides()) {
+                bool found = false;
+                for (std::meta::info type : commandTypes) {
+                    found = found || std::meta::dealias(type) == std::meta::dealias(override.type);
+                }
+                if (!found) {
+                    throw "Sora CLI command override targets a type outside the command tree.";
+                }
+            }
+
+            for (const RequiredOverride& required : builder.RequiredOverrides()) {
+                if (!std::meta::is_nonstatic_data_member(required.member)) {
+                    throw "Sora CLI required override must target a non-static data member.";
+                }
+                const auto owner = std::meta::dealias(Sora::Meta::ParentScopeOf(required.member));
+                bool foundOwner = owner == std::meta::dealias(^^Root);
+                for (std::meta::info type : commandTypes) {
+                    foundOwner = foundOwner || owner == std::meta::dealias(type);
+                }
+                const bool hasBinding = !std::meta::annotations_of(required.member, ^^Parameter).empty() ||
+                                        !std::meta::annotations_of(required.member, ^^Switch).empty() ||
+                                        !std::meta::annotations_of(required.member, ^^Operand).empty();
+                if (!foundOwner || !hasBinding) {
+                    throw "Sora CLI required override targets a member without a CLI binding in this program.";
+                }
+            }
+        }
+
+        consteval void ValidateGlobalOptionConflicts(const SchemaStorage& schema, bool allowExternalOverrides) {
+            const CommandDesc& root = schema.commands[0];
+            for (std::size_t commandIndex = 1; commandIndex < schema.commands.size(); ++commandIndex) {
+                const CommandDesc& command = schema.commands[commandIndex];
+                for (std::uint32_t localIndex = 0; localIndex < command.optionCount; ++localIndex) {
+                    const OptionDesc& local = schema.options[command.optionBegin + localIndex];
+                    bool matchedOverride = false;
+                    for (std::uint32_t rootIndex = 0; rootIndex < root.optionCount; ++rootIndex) {
+                        const OptionDesc& global = schema.options[root.optionBegin + rootIndex];
+                        if (!global.global) {
+                            continue;
+                        }
+                        if (local.longName == global.longName ||
+                            (local.shortName != '\0' && local.shortName == global.shortName)) {
+                            if (!local.overridesGlobal || local.longName != global.longName ||
+                                local.shortName != global.shortName || local.kind != global.kind ||
+                                local.cardinality != global.cardinality) {
+                                throw "Sora CLI local/global option collisions require an exact Override declaration.";
+                            }
+                            matchedOverride = true;
+                        }
+                    }
+                    if (local.overridesGlobal && !matchedOverride && !allowExternalOverrides) {
+                        throw "Sora CLI Override option does not match a visible root-global option.";
+                    }
+                }
+            }
         }
 
         template<typename CommandsList, typename Root>
         [[nodiscard]] consteval NormalizedSchema SealSchema(const SchemaBuilder<Root>& builder) {
             ValidateCommandList<CommandsList>();
+            ValidateBuilderOverrides<CommandsList>(builder);
 
-            NormalizedSchema schema{};
+            using CommandTypes = typename Detail::CommandTypes<CommandsList>::Type;
+            static_assert(CommandTypes::size == Sora::Traits::Unique<CommandTypes>::size,
+                          "Sora CLI command types must be unique within one static command tree.");
+
+            SchemaStorage schema{};
             schema.policy = builder.PolicyValue();
             schema.programName = Intern(schema, ProgramNameOf(builder).view());
             schema.commands.push_back(CommandDesc{.name = schema.programName, .commandId = 0});
             AppendFields<Root>(schema, builder, 0);
 
-            VariantId nextVariant = 0;
-            AppendChildren(schema, builder, 0, nextVariant, CommandsList{});
-            return schema;
+            CommandTypeId nextType = 0;
+            AppendChildren(schema, builder, 0, nextType, CommandsList{});
+            ValidateGlobalOptionConflicts(schema, builder.AllowsExternalOptionOverrides());
+            const auto names = std::define_static_array(schema.names);
+            const auto commands = std::define_static_array(schema.commands);
+            const auto options = std::define_static_array(schema.options);
+            const auto operands = std::define_static_array(schema.operands);
+            const auto edges = std::define_static_array(schema.edges);
+            return NormalizedSchema{.programName = schema.programName,
+                                    .policy = schema.policy,
+                                    .presenceCount = schema.presenceCount,
+                                    .names = names,
+                                    .commands = commands,
+                                    .options = options,
+                                    .operands = operands,
+                                    .edges = edges};
         }
 
     } // namespace Detail
@@ -623,12 +734,9 @@ namespace Sora::CLI {
         template<typename T>
         concept HasBuildSchema = requires(SchemaBuilder<T>& builder) { T::BuildSchema(builder); };
 
-        template<typename T>
-        concept HasDescribe = requires(SchemaBuilder<T>& builder) { T::Describe(builder); };
-
         /** @brief Type that can be lowered into a sealed Sora command-line program. */
         template<typename T>
-        concept ProgramRoot = Detail::HasDeclaredCommandsV<T> || HasBuildSchema<T> || HasDescribe<T>;
+        concept ProgramRoot = Detail::HasDeclaredCommands<T> || HasBuildSchema<T>;
 
     } // namespace Concept
 
@@ -637,12 +745,16 @@ namespace Sora::CLI {
     class SchemaBuilder {
         FixedString<64> programName_{};
         Policy policy_ = Policy::None;
-        FixedCapacityVector<Detail::CommandOverride> commandOverrides_{};
-        FixedCapacityVector<Detail::RequiredOverride> requiredOverrides_{};
+        bool allowExternalOptionOverrides_ = false;
+        FixedCapacityVector<Detail::CommandOverride, kMaxSchemaCommands> commandOverrides_{};
+        FixedCapacityVector<Detail::RequiredOverride, kMaxSchemaPresences> requiredOverrides_{};
 
     public:
         /** @brief Set the program name shown by diagnostics and help. */
         consteval SchemaBuilder& Name(std::string_view name) {
+            if (!Detail::IsCliName(name)) {
+                throw "Sora CLI program names must be valid executable path segments.";
+            }
             programName_ = Detail::FixedText<64>(name, "Sora CLI program name exceeds 64 bytes.");
             return *this;
         }
@@ -653,17 +765,24 @@ namespace Sora::CLI {
             return *this;
         }
 
+        /** @brief Defer unmatched Override validation to startup linking against the host root globals. */
+        consteval SchemaBuilder& AllowExternalOptionOverrides() noexcept {
+            allowExternalOptionOverrides_ = true;
+            return *this;
+        }
+
         /** @brief Override the path segment and help text of command @p Cmd. */
         template<typename Cmd>
         consteval SchemaBuilder& Command(std::string_view name = {}, std::string_view about = {}) {
-            Detail::CommandOverride override{.type = ^^Cmd,
-                                             .name = name.empty() ? FixedString<64>{}
-                                                                  : Detail::FixedText<64>(
-                                                                        name,
-                                                                        "Sora CLI command name exceeds 64 bytes."),
-                                             .about = Detail::FixedText<256>(
-                                                 about, "Sora CLI command description exceeds 256 bytes."),
-                                             .hasName = !name.empty()};
+            if (!name.empty() && !Detail::IsCliName(name)) {
+                throw "Sora CLI command override names must be valid path segments.";
+            }
+            Detail::CommandOverride override{
+                .type = ^^Cmd,
+                .name = name.empty() ? FixedString<64>{}
+                                     : Detail::FixedText<64>(name, "Sora CLI command name exceeds 64 bytes."),
+                .about = Detail::FixedText<256>(about, "Sora CLI command description exceeds 256 bytes."),
+                .hasName = !name.empty()};
             for (Detail::CommandOverride& existing : commandOverrides_) {
                 if (existing.type == override.type) {
                     existing = override;
@@ -676,12 +795,22 @@ namespace Sora::CLI {
 
         /** @brief Mark a reflected field as required after all fallback sources are considered. */
         consteval SchemaBuilder& Requires(std::meta::info member) {
+            for (const Detail::RequiredOverride& required : requiredOverrides_) {
+                if (required.member == member) {
+                    return *this;
+                }
+            }
             requiredOverrides_.push_back(Detail::RequiredOverride{.member = member});
             return *this;
         }
 
         /** @brief Return the configured policy bits. */
         [[nodiscard]] consteval Sora::CLI::Policy PolicyValue() const noexcept { return policy_; }
+
+        /** @brief Return whether startup linking must resolve otherwise unmatched Override annotations. */
+        [[nodiscard]] consteval bool AllowsExternalOptionOverrides() const noexcept {
+            return allowExternalOptionOverrides_;
+        }
 
         /** @brief Return the configured program name, or an empty string when defaulted. */
         [[nodiscard]] consteval FixedString<64> ProgramNameOverride() const noexcept { return programName_; }
@@ -694,7 +823,7 @@ namespace Sora::CLI {
 
         /** @brief Seal the schema using @p Root::Commands as the command grammar. */
         [[nodiscard]] consteval NormalizedSchema Seal() const {
-            return Detail::SealSchema<typename Detail::DeclaredCommands<Root>::Type>(*this);
+            return Detail::SealSchema<Detail::DeclaredCommandsType<Root>>(*this);
         }
     };
 
@@ -732,7 +861,7 @@ namespace Sora::CLI {
     } // namespace Detail
 
     template<typename Root>
-    using CommandTreeOf = typename Detail::DeclaredCommands<Root>::Type;
+    using CommandTreeOf = Detail::DeclaredCommandsType<Root>;
 
     template<typename CommandsList>
     using CommandTypeListOf = typename Detail::CommandTypes<CommandsList>::Type;
@@ -740,8 +869,8 @@ namespace Sora::CLI {
     template<typename CommandsList>
     using CommandVariantOf = typename Detail::VariantOf<CommandTypeListOf<CommandsList>>::Type;
 
-    template<typename Root>
-    using ProgramCommandVariant = CommandVariantOf<CommandTreeOf<Root>>;
+    template<typename CommandsList>
+    inline constexpr std::size_t CommandDepthOf = Detail::CommandDepth<CommandsList>::value;
 
 } // namespace Sora::CLI
 

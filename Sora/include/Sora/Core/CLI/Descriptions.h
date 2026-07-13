@@ -6,6 +6,7 @@
  * @ingroup Core
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string_view>
@@ -13,17 +14,25 @@
 
 #include <Sora/Core/FixedString.h>
 #include <Sora/Core/Flags.h>
-#include <Sora/Core/Traits/EnumTraits.h>
+#include <Sora/Core/StringUtils.h>
 
 namespace Sora::CLI {
 
     using NameId = std::uint32_t;
     using CommandId = std::uint32_t;
-    using VariantId = std::uint32_t;
+    using CommandTypeId = std::uint32_t;
+
+    inline constexpr std::size_t kMaxSchemaNames = 1024;
+    inline constexpr std::size_t kMaxSchemaCommands = 1024;
+    inline constexpr std::size_t kMaxSchemaOptions = 1024;
+    inline constexpr std::size_t kMaxSchemaOperands = 1024;
+    inline constexpr std::size_t kMaxSchemaEdges = 1024;
+    inline constexpr std::size_t kMaxSchemaPresences = kMaxSchemaOptions + kMaxSchemaOperands;
 
     inline constexpr NameId kInvalidNameId = std::numeric_limits<NameId>::max();
     inline constexpr CommandId kInvalidCommandId = std::numeric_limits<CommandId>::max();
-    inline constexpr VariantId kInvalidVariantId = std::numeric_limits<VariantId>::max();
+    inline constexpr CommandTypeId kInvalidCommandTypeId = std::numeric_limits<CommandTypeId>::max();
+    inline constexpr std::uint32_t kInvalidPresenceBit = std::numeric_limits<std::uint32_t>::max();
 
     enum class OptionKind : uint8_t {
         Switch,
@@ -38,6 +47,29 @@ namespace Sora::CLI {
     inline constexpr std::string_view kHelpOptionShortToken = "-h";
     inline constexpr std::string_view kHelpOptionAssignmentPrefix = "--help=";
 
+    namespace Detail {
+
+        /** @brief Return true when @p text is a valid command path segment, option name, or metavariable name. */
+        [[nodiscard]] constexpr bool IsCliName(std::string_view text) noexcept {
+            if (text.empty() || (!Sora::Ascii::IsAlpha(text.front()) && !Sora::Ascii::IsDigit(text.front())) ||
+                (!Sora::Ascii::IsAlpha(text.back()) && !Sora::Ascii::IsDigit(text.back()))) {
+                return false;
+            }
+            for (char c : text) {
+                if (!Sora::Ascii::IsAlpha(c) && !Sora::Ascii::IsDigit(c) && c != '-' && c != '.') {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /** @brief Return true when @p name can be used as a one-character short option. */
+        [[nodiscard]] constexpr bool IsShortOptionName(char name) noexcept {
+            return name == '\0' || Sora::Ascii::IsAlpha(name) || Sora::Ascii::IsDigit(name);
+        }
+
+    } // namespace Detail
+
     enum class ValueCardinality : uint8_t {
         None,
         One,
@@ -46,24 +78,9 @@ namespace Sora::CLI {
         ZeroOrMore,
     };
 
-    enum class SourceKind : uint8_t {
-        Argv,
-        ResponseFile,
-        Environment,
-        Config,
-        DefaultValue,
-    };
-
-    enum class Policy : uint64_t {
+    enum class Policy : uint8_t {
         None = 0,
-        GnuStyle = 1ull << 0,
-        PosixStrict = 1ull << 1,
-        AllowResponseFile = 1ull << 2,
-        AllowAbbreviation = 1ull << 3,
-        GlobalOptionsBeforeSubcommand = 1ull << 4,
-        GlobalOptionsAnywhere = 1ull << 5,
-        AllowInterspersedOperands = 1ull << 6,
-        Utf8 = 1ull << 7,
+        GlobalOptionsAnywhere = 1ull << 0,
     };
 
     /** @brief Annotation for an option that consumes one value token, such as @c --message text. */
@@ -84,14 +101,19 @@ namespace Sora::CLI {
 
     /** @brief Annotation for a positional token consumed by declaration order. */
     struct Operand {
-        FixedString<64> name{};                                 /**< Operand name used by diagnostics and help. */
-        ValueCardinality cardinality = ValueCardinality::One;   /**< Positional arity. */
-        FixedString<256> about{};                               /**< Human-readable help text. */
+        FixedString<64> name{};                               /**< Operand name used by diagnostics and help. */
+        ValueCardinality cardinality = ValueCardinality::One; /**< Positional arity. */
+        FixedString<256> about{};                             /**< Human-readable help text. */
     };
 
     /** @brief Annotation marking a root option as visible from subcommands. */
     struct Global {
         constexpr bool operator==(const Global&) const = default;
+    };
+
+    /** @brief Annotation explicitly replacing a visible root-global option in one local command scope. */
+    struct Override {
+        constexpr bool operator==(const Override&) const = default;
     };
 
     /** @brief Optional annotation overriding the default lower-kebab command name of a command type. */
@@ -102,14 +124,18 @@ namespace Sora::CLI {
 
     /** @brief One interned string in a sealed schema image. */
     struct NameEntry {
-        NameId id = kInvalidNameId;
-        std::string_view text{};
-        std::uint64_t hash = 0;
+        const char* data = nullptr;
+        std::uint32_t size = 0;
+
+        /** @brief Project the static pointer/length pair as a standard string view. */
+        [[nodiscard]] constexpr std::string_view Text() const noexcept {
+            return size == 0 ? std::string_view{} : std::string_view{data, size};
+        }
     };
 
     using BindValueFn = bool (*)(void* object, std::string_view value) noexcept;
     using BindSwitchFn = bool (*)(void* object) noexcept;
-    using ActionAdapterFn = int (*)(void const* command, void* context) noexcept;
+    using ValidateValueFn = bool (*)(std::string_view value) noexcept;
 
     /** @brief Leaf option descriptor stored in the sealed schema. */
     struct OptionDesc {
@@ -120,13 +146,13 @@ namespace Sora::CLI {
         OptionKind kind = OptionKind::Switch;
         ValueCardinality cardinality = ValueCardinality::None;
         CommandId ownerCommandId = kInvalidCommandId;
-        std::uint32_t fieldId = 0;
-        std::uint32_t groupId = 0;
-        std::uint32_t presenceBit = 0;
+        std::uint32_t presenceBit = kInvalidPresenceBit;
         bool required = false;
         bool global = false;
+        bool overridesGlobal = false;
         BindValueFn bindValue = nullptr;
         BindSwitchFn bindSwitch = nullptr;
+        ValidateValueFn validateValue = nullptr;
     };
 
     /** @brief Positional operand descriptor stored in the sealed schema. */
@@ -135,8 +161,7 @@ namespace Sora::CLI {
         NameId about = kInvalidNameId;
         ValueCardinality cardinality = ValueCardinality::One;
         CommandId ownerCommandId = kInvalidCommandId;
-        std::uint32_t fieldId = 0;
-        std::uint32_t presenceBit = 0;
+        std::uint32_t presenceBit = kInvalidPresenceBit;
         BindValueFn bindValue = nullptr;
     };
 
@@ -153,24 +178,19 @@ namespace Sora::CLI {
         NameId about = kInvalidNameId;
         CommandId commandId = kInvalidCommandId;
         CommandId parentCommandId = kInvalidCommandId;
-        VariantId variantId = kInvalidVariantId;
+        CommandTypeId typeId = kInvalidCommandTypeId;
+        std::uint32_t depth = 0; /**< One-based command depth; the synthetic root uses zero. */
         std::uint32_t optionBegin = 0;
         std::uint32_t optionCount = 0;
         std::uint32_t operandBegin = 0;
         std::uint32_t operandCount = 0;
         std::uint32_t childBegin = 0;
         std::uint32_t childCount = 0;
-        ActionAdapterFn action = nullptr;
     };
 
-    /** @brief Structured provenance for a parsed token or fallback value. */
+    /** @brief Position of a token in the caller-provided argument stream. */
     struct SourceRef {
-        SourceKind kind = SourceKind::Argv;
-        uint32_t tokenIndex = 0;
-        uint32_t fileId = 0;
-        uint32_t line = 0;
-        uint32_t column = 0;
-        NameId key = kInvalidNameId;
+        uint64_t tokenIndex = 0;
     };
 
     enum class ParseErrorKind : uint8_t {
@@ -204,6 +224,7 @@ namespace Sora::CLI {
         using Switch = Sora::CLI::Switch;
         using Operand = Sora::CLI::Operand;
         using Global = Sora::CLI::Global;
+        using Override = Sora::CLI::Override;
         using CommandName = Sora::CLI::CommandName;
 
     } // namespace $
