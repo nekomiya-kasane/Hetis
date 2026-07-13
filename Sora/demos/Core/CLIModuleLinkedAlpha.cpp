@@ -20,8 +20,7 @@ namespace {
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<LinkedAlpha>>;
 
         static consteval void BuildSchema(Sora::CLI::SchemaBuilder<AlphaSubprogram>& builder) {
-            builder.Policy(Sora::CLI::Policy::GnuStyle)
-                .Command<LinkedAlpha>("linked-alpha", "Command injected by a link-time DLL dependency.");
+            builder.Command<LinkedAlpha>("linked-alpha", "Command injected by a link-time DLL dependency.");
         }
     };
 

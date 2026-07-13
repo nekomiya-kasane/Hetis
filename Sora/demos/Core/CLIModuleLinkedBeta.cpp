@@ -19,8 +19,7 @@ namespace {
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<LinkedBeta>>;
 
         static consteval void BuildSchema(Sora::CLI::SchemaBuilder<BetaSubprogram>& builder) {
-            builder.Policy(Sora::CLI::Policy::GnuStyle)
-                .Command<LinkedBeta>("linked-beta", "Command injected by the second link-time DLL dependency.");
+            builder.Command<LinkedBeta>("linked-beta", "Command injected by the second link-time DLL dependency.");
         }
     };
 

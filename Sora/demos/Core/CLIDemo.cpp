@@ -33,7 +33,7 @@ struct MyProgram {
     using Commands = Sora::CLI::Commands<Sora::CLI::Command<Commit>, Sora::CLI::Command<Push>>;
 
     static consteval void BuildSchema(SchemaBuilder<MyProgram>& builder) {
-        builder.Name("greet").Policy(Policy::Utf8 | Policy::GnuStyle | Policy::GlobalOptionsAnywhere)
+        builder.Name("greet").Policy(Policy::GlobalOptionsAnywhere)
             .Command<Commit>("commit")
             .Command<Push>("push");
     }

@@ -20,8 +20,7 @@ namespace {
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<PluginDelta>>;
 
         static consteval void BuildSchema(Sora::CLI::SchemaBuilder<DeltaSubprogram>& builder) {
-            builder.Policy(Sora::CLI::Policy::GnuStyle)
-                .Command<PluginDelta>("plugin-delta", "Command imported from the second runtime plugin DLL.");
+            builder.Command<PluginDelta>("plugin-delta", "Command imported from the second runtime plugin DLL.");
         }
     };
 

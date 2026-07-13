@@ -34,7 +34,7 @@ namespace {
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<HostCommand>>;
 
         static consteval void BuildSchema(Sora::CLI::SchemaBuilder<HostProgram>& builder) {
-            builder.Name("sora-cli-modules").Policy(Sora::CLI::Policy::GnuStyle)
+            builder.Name("sora-cli-modules")
                 .Command<HostCommand>("host", "Command defined directly by the executable.");
         }
     };

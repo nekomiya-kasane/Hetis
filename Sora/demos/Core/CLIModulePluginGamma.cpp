@@ -20,8 +20,7 @@ namespace {
         using Commands = Sora::CLI::Commands<Sora::CLI::Command<PluginGamma>>;
 
         static consteval void BuildSchema(Sora::CLI::SchemaBuilder<GammaSubprogram>& builder) {
-            builder.Policy(Sora::CLI::Policy::GnuStyle)
-                .Command<PluginGamma>("plugin-gamma", "Command imported through the runtime module ABI.");
+            builder.Command<PluginGamma>("plugin-gamma", "Command imported through the runtime module ABI.");
         }
     };
 

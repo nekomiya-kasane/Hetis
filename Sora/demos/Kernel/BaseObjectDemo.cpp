@@ -19,14 +19,14 @@ consteval {
 int main() {
 
     Sora::Polymorphism::Vtable<IPosition, Position2DImpl> vtable;
-    Sora::Polymorphism::Adapter<IPosition, Position2DImpl> adapter;
+    Sora::Polymorphism::Adaptor<IPosition, Position2DImpl> adaptor;
     auto point = MakeComPtr<Position2DImpl>();
     Position2DImpl* pointImpl = point.Get();
     pointImpl->SetPosition(1.0f, 2.0f);
-    adapter.target = pointImpl;
+    adaptor.target = pointImpl;
 
     float x, y;
-    adapter.vtable().GetPosition(adapter.target, x, y);
+    adaptor.vtable().GetPosition(adaptor.target, x, y);
 
     std::cout << x << ", " << y << std::endl;
 
