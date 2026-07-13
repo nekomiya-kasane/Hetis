@@ -9,6 +9,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <limits>
 #include <string_view>
 
@@ -61,6 +62,13 @@
 namespace Sora {
 
     inline namespace Platform {
+
+        /** @brief Cache line size for false-sharing avoidance (`alignas(kCacheLineSize)`). */
+#ifdef __cpp_lib_hardware_interference_size
+        inline constexpr size_t kCacheLineSize = std::hardware_destructive_interference_size;
+#else
+        inline constexpr size_t kCacheLineSize = 64;
+#endif
 
         /** @brief Operating-system family selected for the current translation unit. */
         enum class OperatingSystem : uint8_t {

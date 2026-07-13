@@ -5,7 +5,7 @@
  */
 #pragma once
 
-#include <Sora/Core/MemoryLayout.h>
+#include <Sora/Core/Memory/MemoryLayout.h>
 #include <Sora/Core/Wire.h>
 #include <Sora/ErrorCode.h>
 #include <Sora/Core/Resources/Format.h>

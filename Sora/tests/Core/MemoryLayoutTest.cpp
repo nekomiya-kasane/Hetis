@@ -1,4 +1,4 @@
-#include <Sora/Core/MemoryLayout.h>
+#include <Sora/Core/Memory/MemoryLayout.h>
 
 #include <catch2/catch_test_macros.hpp>
 
