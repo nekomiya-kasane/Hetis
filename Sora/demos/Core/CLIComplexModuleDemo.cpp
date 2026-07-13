@@ -1,7 +1,7 @@
 #include "Core/CLIComplexModuleDemo/LinkedModules.h"
 
 #include <Sora/Core/CLI.h>
-#include <Sora/PAL/Module.h>
+#include <Sora/Core/PAL/Module.h>
 
 #include <array>
 #include <cstdint>

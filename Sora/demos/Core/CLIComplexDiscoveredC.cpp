@@ -9,12 +9,13 @@
 namespace {
 
     struct IndexAdd {
-        [[= Sora::CLI::Switch{
-            .name = "replace", .shortName = 'r', .about = "Replace existing index entries."}]] bool replace = false;
+        [[= Sora::CLI::Switch{ .name = "replace", .shortName = 'r', .about = "Replace existing index entries."}]] 
+        bool replace = false;
 
         [[= Sora::CLI::Operand{.name = "resource",
                                .cardinality = Sora::CLI::ValueCardinality::OneOrMore,
-                               .about = "Resources added to the index."}]] std::vector<std::string_view> resources;
+                               .about = "Resources added to the index."}]] 
+        std::vector<std::string_view> resources;
 
         [[nodiscard]] int operator()() const noexcept {
             std::println("discovered C: index/add replace={} resources={}", replace, resources.size());
@@ -25,7 +26,8 @@ namespace {
     struct IndexRemove {
         [[= Sora::CLI::Operand{.name = "resource",
                                .cardinality = Sora::CLI::ValueCardinality::OneOrMore,
-                               .about = "Resources removed from the index."}]] std::vector<std::string_view> resources;
+                               .about = "Resources removed from the index."}]] 
+        std::vector<std::string_view> resources;
 
         [[nodiscard]] int operator()() const noexcept {
             std::println("discovered C: index/remove resources={}", resources.size());
@@ -36,17 +38,15 @@ namespace {
     struct Index {};
 
     struct Search {
-        [[= Sora::CLI::Parameter{.name = "limit",
-                                 .shortName = 'l',
-                                 .valueName = "count",
-                                 .about = "Maximum result count."}]] std::uint32_t limit = 20;
+        [[= Sora::CLI::Parameter{.name = "limit", .shortName = 'l', .valueName = "count", 
+                                 .about = "Maximum result count."}]] 
+        std::uint32_t limit = 20;
 
-        [[= Sora::CLI::Parameter{.name = "format",
-                                 .shortName = 'f',
-                                 .valueName = "format",
-                                 .about = "Output format."}]] std::string_view format = "text";
+        [[= Sora::CLI::Parameter{.name = "format", .shortName = 'f', .valueName = "format", .about = "Output format."}]]
+        std::string_view format = "text";
 
-        [[= Sora::CLI::Operand{.name = "query", .about = "Search expression."}]] std::string_view query;
+        [[= Sora::CLI::Operand{.name = "query", .about = "Search expression."}]] 
+        std::string_view query;
 
         [[nodiscard]] int operator()() const noexcept {
             std::println("discovered C: search limit={} format={} query={}", limit, format, query);
@@ -66,12 +66,13 @@ namespace {
     };
 
     struct Verify {
-        [[= Sora::CLI::Switch{
-            .name = "repair", .shortName = 'r', .about = "Repair recoverable index damage."}]] bool repair = false;
+        [[= Sora::CLI::Switch{.name = "repair", .shortName = 'r', .about = "Repair recoverable index damage."}]] 
+        bool repair = false;
 
         [[= Sora::CLI::Operand{.name = "shard",
                                .cardinality = Sora::CLI::ValueCardinality::ZeroOrMore,
-                               .about = "Specific shards to verify."}]] std::vector<std::string_view> shards;
+                               .about = "Specific shards to verify."}]] 
+        std::vector<std::string_view> shards;
 
         [[nodiscard]] int operator()() const noexcept {
             std::println("discovered C: maintenance/verify repair={} shards={}", repair, shards.size());
@@ -85,7 +86,8 @@ namespace {
         [[= Sora::CLI::Parameter{.name = "namespace",
                                  .shortName = 'N',
                                  .valueName = "name",
-                                 .about = "Logical index namespace."}]] std::string_view nameSpace = "default";
+                                 .about = "Logical index namespace."}]] 
+        std::string_view nameSpace = "default";
     };
 
     struct CSubprogram {

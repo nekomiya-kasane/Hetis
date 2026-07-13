@@ -1,7 +1,7 @@
 #include "Core/CLIModuleDemo/LinkedModules.h"
 
 #include <Sora/Core/CLI.h>
-#include <Sora/PAL/Module.h>
+#include <Sora/Core/PAL/Module.h>
 
 #include <array>
 #include <expected>
@@ -56,7 +56,7 @@ namespace {
             return std::unexpected(std::format("failed to load runtime CLI module '{}'", moduleName));
         }
 
-        Sora::PAL::ModulePtr module = *loaded;
+        const Sora::PAL::ModulePtr& module = *loaded;
         auto* entry = module->TryFindFunction<Sora::CLI::RuntimeModuleEntry>(Sora::CLI::kRuntimeModuleEntryName);
         if (entry == nullptr) {
             return std::unexpected(std::format("runtime CLI module '{}' has no '{}' export", moduleName,

@@ -6,7 +6,7 @@
 #pragma once
 
 #include <Sora/ErrorCode.h>
-#include <Sora/PAL/Module.h>
+#include <Sora/Core/PAL/Module.h>
 #include <Sora/Core/Resources/PakView.h>
 #include <Sora/Core/Resources/ResourceModule.h>
 

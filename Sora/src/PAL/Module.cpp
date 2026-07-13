@@ -5,8 +5,8 @@
  * @ingroup PAL
  */
 
-#include <Sora/PAL/Module.h>
-#include <Sora/PAL/Path.h>
+#include <Sora/Core/PAL/Module.h>
+#include <Sora/Core/PAL/Path.h>
 
 #include <Sora/Core/Wire.h>
 #include <Sora/ErrorCode.h>

@@ -13,7 +13,7 @@
 
 #include "Sora/Core/ABI.h"
 
-#include "Sora/PAL/Module.h"
+#include "Sora/Core/PAL/Module.h"
 
 #include <cstdlib>
 #include <optional>
