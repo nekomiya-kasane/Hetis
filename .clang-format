@@ -25,6 +25,7 @@ BreakConstructorInitializers: BeforeColon
 PackConstructorInitializers: NextLine
 SpaceAfterTemplateKeyword: false
 FixNamespaceComments: true
+IndentCaseLabels: true
 
 # Do NOT reorder includes: this tree relies on deliberate ordering
 # (volk before vulkan.h, stb implementation macros before stb headers, etc.).
