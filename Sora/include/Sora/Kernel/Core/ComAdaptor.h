@@ -122,11 +122,10 @@ namespace Sora::Kernel {
         [[nodiscard]] TypeOfClass GetRole() const noexcept override { return Self::GetRoleStatic(); }
 
         /** @brief Return the wrapped object. */
-        template<typename Self>
-        [[nodiscard]] constexpr auto Object(this Self&& self) noexcept {
-            if constexpr (std::is_rvalue_reference_v<Self&&>) {
+        [[nodiscard]] constexpr auto&& Object(this auto&& self) noexcept {
+            if constexpr (std::is_rvalue_reference_v<decltype(self)>) {
                 return std::move(self.object_);
-            } else if constexpr (std::is_const_v<std::remove_reference_t<Self>>) {
+            } else if constexpr (std::is_const_v<std::remove_reference_t<decltype(self)>>) {
                 return std::as_const(self.object_);
             } else {
                 return self.object_;
@@ -134,21 +133,16 @@ namespace Sora::Kernel {
         }
 
         /** @brief Alias for @ref Object. */
-        template<typename Self>
-        [[nodiscard]] constexpr auto Get(this Self&& self) noexcept {
-            return std::forward<Self>(self).Object();
+        [[nodiscard]] constexpr auto&& Get(this auto&& self) noexcept {
+            return std::forward<decltype(self)>(self).Object();
         }
 
         /** @brief Pointer-like access to the wrapped object. */
-        template<typename Self>
-        [[nodiscard]] constexpr auto operator->(this Self&& self) noexcept {
-            return std::addressof(self.object_);
-        }
+        [[nodiscard]] constexpr auto operator->(this auto&& self) noexcept { return std::addressof(self.object_); }
 
         /** @brief Dereference to the wrapped object. */
-        template<typename Self>
-        [[nodiscard]] constexpr auto operator*(this Self&& self) noexcept {
-            return std::forward<Self>(self).Object();
+        [[nodiscard]] constexpr auto&& operator*(this auto&& self) noexcept {
+            return std::forward<decltype(self)>(self).Object();
         }
 
     private:
