@@ -10,6 +10,7 @@
 #include <Sora/Platform.h>
 
 #include <cerrno>
+#include <format>
 #include <memory>
 #include <string>
 
@@ -83,13 +84,7 @@ namespace Sora::PAL {
         if (!code_) {
             return "Success";
         }
-        std::string result = Message();
-        result += " [";
-        result += CategoryName();
-        result += ':';
-        result += std::to_string(Value());
-        result += ']';
-        return result;
+        return std::format("{}[{}:{}]", Message(), CategoryName(), Value());
     }
 
     NativeError CaptureLastNativeError() noexcept {
