@@ -141,6 +141,47 @@ namespace Sora {
                 return out;
             }
 
+            /**
+             * @brief Convert @p source to upper-snake spelling.
+             * @details Underscore, hyphen, and ASCII whitespace separate words. A lowercase-to-uppercase transition
+             * starts a new word, as does the final uppercase letter of an acronym before a lowercase word.
+             */
+            constexpr std::string ToUpperSnake(std::string_view source) {
+                std::string out;
+                out.reserve(source.size());
+
+                bool pendingSeparator = false;
+                for (size_t index = 0; index < source.size(); ++index) {
+                    const char c = source[index];
+                    if (c == '_' || c == '-' || IsWhitespace(c)) {
+                        pendingSeparator = !out.empty();
+                        continue;
+                    }
+                    if (!IsAlpha(c) && !IsDigit(c)) {
+                        throw "Sora upper-snake source contains an unsupported character.";
+                    }
+
+                    const bool upper = c >= 'A' && c <= 'Z';
+                    const bool previousLowerOrDigit = index != 0 &&
+                                                      ((source[index - 1] >= 'a' && source[index - 1] <= 'z') ||
+                                                       IsDigit(source[index - 1]));
+                    const bool acronymBoundary = upper && index != 0 && index + 1 < source.size() &&
+                                                 source[index - 1] >= 'A' && source[index - 1] <= 'Z' &&
+                                                 source[index + 1] >= 'a' && source[index + 1] <= 'z';
+                    if (!out.empty() && out.back() != '_' && (pendingSeparator || (upper && previousLowerOrDigit) ||
+                                                               acronymBoundary)) {
+                        out.push_back('_');
+                    }
+                    pendingSeparator = false;
+                    out.push_back(ToUpper(c));
+                }
+
+                if (!out.empty() && out.back() == '_') {
+                    out.pop_back();
+                }
+                return out;
+            }
+
         } // namespace String
 
     } // namespace Ascii
