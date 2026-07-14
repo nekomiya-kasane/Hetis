@@ -6,12 +6,33 @@
 #pragma once
 
 #include <algorithm>
+#include <compare>
 #include <cstddef>
 #include <functional>
 #include <string>
 #include <string_view>
+#include <ranges>
 
 namespace Sora {
+
+    namespace Concept {
+
+        template<typename T>
+        concept NarrowStringLike = requires(T&& value) { std::string_view{std::forward<T>(value)}; };
+
+        template<typename T>
+        concept Utf8StringLike = requires(T&& value) { std::u8string_view{std::forward<T>(value)}; };
+
+        template<typename T>
+        concept Utf16StringLike = requires(T&& value) { std::u16string_view{std::forward<T>(value)}; };
+
+        template<typename T>
+        concept Utf32StringLike = requires(T&& value) { std::u32string_view{std::forward<T>(value)}; };
+
+        template<typename T>
+        concept WideStringLike = requires(T&& value) { std::wstring_view{std::forward<T>(value)}; };
+
+    } // namespace Concept
 
     /** @brief ASCII character classification and case-folding helpers. */
     namespace Ascii {
@@ -88,6 +109,17 @@ namespace Sora {
         /** @brief General string algorithms used by compile-time metadata generators and runtime helpers. */
         inline namespace String {
 
+            /** @brief Compare @p lhs and @p rhs lexicographically after ASCII case folding. */
+            [[nodiscard]] constexpr std::strong_ordering CompareIgnoreCase(std::string_view lhs,
+                                                                           std::string_view rhs) noexcept {
+                for (auto [a, b] : std::views::zip(lhs, rhs)) {
+                    if (const auto order = ToLower(a) <=> ToLower(b); order != 0) {
+                        return order;
+                    }
+                }
+                return lhs.size() <=> rhs.size();
+            }
+
             /** @brief Return @p text without leading ASCII whitespace. */
             [[nodiscard]] constexpr std::string_view TrimStart(std::string_view text) noexcept {
                 while (!text.empty() && IsWhitespace(text.front())) {
@@ -162,14 +194,14 @@ namespace Sora {
                     }
 
                     const bool upper = c >= 'A' && c <= 'Z';
-                    const bool previousLowerOrDigit = index != 0 &&
-                                                      ((source[index - 1] >= 'a' && source[index - 1] <= 'z') ||
-                                                       IsDigit(source[index - 1]));
+                    const bool previousLowerOrDigit =
+                        index != 0 &&
+                        ((source[index - 1] >= 'a' && source[index - 1] <= 'z') || IsDigit(source[index - 1]));
                     const bool acronymBoundary = upper && index != 0 && index + 1 < source.size() &&
                                                  source[index - 1] >= 'A' && source[index - 1] <= 'Z' &&
                                                  source[index + 1] >= 'a' && source[index + 1] <= 'z';
-                    if (!out.empty() && out.back() != '_' && (pendingSeparator || (upper && previousLowerOrDigit) ||
-                                                               acronymBoundary)) {
+                    if (!out.empty() && out.back() != '_' &&
+                        (pendingSeparator || (upper && previousLowerOrDigit) || acronymBoundary)) {
                         out.push_back('_');
                     }
                     pendingSeparator = false;
