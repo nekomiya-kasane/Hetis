@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <optional>
 
 namespace Sora {
 
@@ -51,6 +52,26 @@ namespace Sora {
         SectionNotFound = 0x000B,      ///< Requested section does not exist in the module image.
         DataTruncated = 0x000C,        ///< A byte stream ended before the requested data was complete.
         DataCorrupted = 0x000D,        ///< A generic byte stream failed structural or integrity checks.
+        InvalidSyntax = 0x000E,        ///< Text does not conform to the target type's accepted grammar.
+        OutOfRange = 0x000F,           ///< A parsed or computed value cannot be represented by the target type.
+
+        InvalidScalar = 0x0010,           ///< Input code point is not a Unicode scalar value.
+        IsolatedHighSurrogate = 0x0011,   ///< UTF-16 input contains an unpaired high surrogate.
+        IsolatedLowSurrogate = 0x0012,    ///< UTF-16 input contains an unpaired low surrogate.
+        InvalidUtf8LeadingByte = 0x0013,  ///< UTF-8 input starts with an invalid leading byte.
+        InvalidUtf8Continuation = 0x0014, ///< UTF-8 input contains an invalid continuation byte.
+        OverlongUtf8Sequence = 0x0015,    ///< UTF-8 input uses a non-shortest encoding.
+        TruncatedUtf8Sequence = 0x0016,   ///< UTF-8 input ends before the current scalar is complete.
+
+        EmptyConfigurationPath = 0x0017,            ///< A configuration path is empty.
+        EmptyConfigurationPathSegment = 0x0018,     ///< A configuration path contains an empty segment.
+        InvalidConfigurationPathCharacter = 0x0019, ///< A configuration path contains a non-portable character.
+        InvalidEnvironmentName = 0x001A,            ///< An environment-variable name is malformed or not representable.
+        InvalidEnvironmentValue = 0x001B,      ///< An environment-variable value is malformed or not representable.
+        InvalidNativeEnvironmentText = 0x001C, ///< Native environment storage is not valid Unicode text.
+        EnvironmentNativeFailure = 0x001D,     ///< A native process-environment operation failed.
+        DuplicateEnvironmentMutation = 0x001E, ///< A transaction mutates one environment name more than once.
+        EnvironmentRollbackFailure = 0x001F,   ///< A failed environment transaction could not restore prior state.
         /// @}
 
         /// @name Core Rendering (0x1000 – 0x1FFF)
@@ -115,6 +136,8 @@ namespace Sora {
         SwapchainOutOfDate = 0xF002, ///< Swapchain needs recreation (resize / DPI change).
         SurfaceLost = 0xF003,        ///< Window surface is no longer valid.
         /// @}
+
+        Unknown = 0xFFFF, ///< Unknown error code (used for unexpected native failures).
     };
 
     /**
@@ -127,8 +150,14 @@ namespace Sora {
     /** @brief Void result for operations that succeed with no value. */
     using VoidResult = std::expected<void, ErrorCode>;
 
-    /** @brief Reference wrapper result type for operations that return a reference. */
+    /** @brief Converts an std::optional to a Result, returning ErrorCode::Unknown if the optional is empty. */
     template<typename T>
-    using Ref = std::reference_wrapper<T>;
+    [[nodiscard]] constexpr Result<T> NormalizeResult(std::optional<T>&& result) {
+        if (!result) {
+            return std::unexpected(ErrorCode::Unknown);
+        }
+
+        return std::move(*result);
+    }
 
 } // namespace Sora

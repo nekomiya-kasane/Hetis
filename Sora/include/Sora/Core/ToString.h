@@ -1,6 +1,6 @@
 /**
  * @file ToString.h
- * @brief Reflection-driven UTF-8 string conversion and strict inverse parsing.
+ * @brief Reflection-driven UTF-8 string conversion and strict deserialization.
  * @ingroup Core
  *
  * @details @ref ToString materializes a UTF-8 display representation, @ref ToStringView exposes stable text without
@@ -10,9 +10,8 @@
 #pragma once
 
 #include "Sora/Core/FixedString.h"
-#include "Sora/Core/Traits.h"
 #include "Sora/Core/StringUtils.h"
-#include "Sora/Core/Traits/TypeTraits.h"
+#include "Sora/Core/Traits.h"
 #include "Sora/Core/Unicode.h"
 #include "Sora/ErrorCode.h"
 
@@ -46,7 +45,8 @@ namespace Sora {
          * @brief Override the display or serialized field name used for this member.
          * @tparam S Compile-time field name.
          */
-        template<FixedString S>
+        template<auto S>
+            requires Concept::FixedStringLike<decltype(S)>
         struct Rename {
             static constexpr std::string_view name = S.view();
             constexpr bool operator==(const Rename&) const = default;
@@ -74,20 +74,39 @@ namespace Sora {
 
     } // namespace Hook
 
-    /** @brief Convert a string-compatible value to an owning string while preserving an existing string allocation. */
-    template<typename T>
-    [[nodiscard]] constexpr std::string MakeString(T&& value) {
-        if constexpr (std::same_as<std::remove_cvref_t<T>, std::string>) {
-            return std::forward<T>(value);
-        } else {
-            return std::string(std::forward<T>(value));
+    namespace Meta {
+
+        /** @brief Return the display or serialization name of reflected field @p Member. */
+        template<std::meta::info Member>
+        consteval std::string_view SerializationFieldNameOf() {
+            std::string_view name = IdentifierOrDisplayStringOf(Member);
+            template for (constexpr auto annotation : std::define_static_array(std::meta::annotations_of(Member))) {
+                constexpr auto type = std::meta::dealias(std::meta::type_of(annotation));
+                if constexpr (std::meta::has_template_arguments(type) &&
+                              std::meta::template_of(type) == ^^$::Serialization::Rename) {
+                    using Rename = typename [:type:];
+                    name = Rename::name;
+                }
+            }
+            return name;
         }
-    }
+
+    } // namespace Meta
 
     /** @cond INTERNAL */
     namespace Detail {
 
-        inline constexpr auto kReplaceInvalidUnicode = Unicode::InvalidSequencePolicy::Replace;
+        inline constexpr auto kDisplayUnicodePolicy = Unicode::InvalidSequencePolicy::Replace;
+
+        /** @brief Materialize an owning string while preserving an existing string allocation. */
+        template<typename T>
+        [[nodiscard]] constexpr std::string MakeString(T&& value) {
+            if constexpr (std::same_as<std::remove_cvref_t<T>, std::string>) {
+                return std::forward<T>(value);
+            } else {
+                return std::string(std::forward<T>(value));
+            }
+        }
 
         namespace ADL {
 
@@ -161,24 +180,14 @@ namespace Sora {
             { Hook::ToStringHook<T>::ToString(value) } -> std::convertible_to<std::string>;
         };
 
-        /** @brief Complete non-scalar type covered by Sora's generated formatter and stream insertion bridge. */
-        template<typename T>
-        concept AutoDisplayable =
-            !std::is_arithmetic_v<std::remove_cvref_t<T>> &&
-            !std::convertible_to<std::remove_cvref_t<T>, std::string_view> &&
-            !std::convertible_to<std::remove_cvref_t<T>, std::string> &&
-            (std::is_enum_v<std::remove_cvref_t<T>> ||
-             (std::is_class_v<std::remove_cvref_t<T>> && !std::is_union_v<std::remove_cvref_t<T>> &&
-              requires { sizeof(std::remove_cvref_t<T>); }));
-
         template<typename T, typename R>
-        concept FromStringResult =
+        concept StringDeserializationResult =
             std::same_as<std::remove_cvref_t<R>, T> || std::same_as<std::remove_cvref_t<R>, std::optional<T>> ||
             std::same_as<std::remove_cvref_t<R>, Result<T>>;
 
         template<typename T>
         concept HasStaticFromString =
-            requires(std::string_view text) { requires FromStringResult<T, decltype(T::FromString(text))>; };
+            requires(std::string_view text) { requires StringDeserializationResult<T, decltype(T::FromString(text))>; };
 
         template<typename T>
         concept SafeNarrowView =
@@ -189,37 +198,65 @@ namespace Sora {
             (std::is_array_v<std::remove_reference_t<T>> &&
              std::same_as<std::remove_cv_t<std::remove_extent_t<std::remove_reference_t<T>>>, char>);
 
+    } // namespace Detail
+    /** @endcond */
+
+    namespace Traits {
+
+        /** @brief Whether @p T has a built-in strict UTF-8 string deserializer. */
         template<typename T>
-        concept CanonicalStringFormattable =
-            HasHookToString<std::remove_cvref_t<T>> || ADL::FreeToString::Available<T> || HasMemberToString<T> ||
-            Concept::NarrowStringLike<T> || Concept::Utf8StringLike<T> || Concept::Utf16StringLike<T> ||
-            Concept::Utf32StringLike<T> || Concept::WideStringLike<T> ||
+        inline constexpr bool BuiltinStringDeserializable =
+            std::same_as<std::remove_cvref_t<T>, std::string_view> ||
+            std::same_as<std::remove_cvref_t<T>, std::string> || std::same_as<std::remove_cvref_t<T>, std::u8string> ||
+            std::same_as<std::remove_cvref_t<T>, std::u16string> ||
+            std::same_as<std::remove_cvref_t<T>, std::u32string> ||
+            std::same_as<std::remove_cvref_t<T>, std::wstring> ||
             std::same_as<std::remove_cvref_t<T>, std::filesystem::path> ||
             std::is_arithmetic_v<std::remove_cvref_t<T>> || std::is_enum_v<std::remove_cvref_t<T>>;
 
-        template<typename T>
-        inline constexpr bool kBuiltinStringParsable =
-            std::same_as<T, std::string_view> || std::same_as<T, std::string> || std::same_as<T, std::u8string> ||
-            std::same_as<T, std::u16string> || std::same_as<T, std::u32string> || std::same_as<T, std::wstring> ||
-            std::same_as<T, std::filesystem::path> || std::is_arithmetic_v<T> || std::is_enum_v<T>;
+    } // namespace Traits
 
-        template<typename T>
-        concept StringParsable = kBuiltinStringParsable<T> || HasStaticFromString<T> ||
-                                 (std::default_initializable<T> && ADL::FreeFromString::Available<T>);
+    namespace Concept {
 
-        template<typename T, typename R>
-            requires FromStringResult<T, R>
-        [[nodiscard]] constexpr Result<T> NormalizeParsedValue(R&& parsed) {
-            using Parsed = std::remove_cvref_t<R>;
-            if constexpr (std::same_as<Parsed, std::optional<T>>) {
-                if (!parsed) {
-                    return std::unexpected(ErrorCode::InvalidSyntax);
-                }
-                return std::forward<R>(parsed).value();
-            } else {
-                return std::forward<R>(parsed);
-            }
-        }
+        /** @brief Type that explicitly customizes @ref ToString through a hook, ADL, or member function. */
+        template<typename T>
+        concept CustomStringFormattable = Detail::HasHookToString<std::remove_cvref_t<T>> ||
+                                          Detail::ADL::FreeToString::Available<T> || Detail::HasMemberToString<T>;
+
+        /** @brief Type with a canonical, non-reflective @ref ToString representation. */
+        template<typename T>
+        concept StringFormattable =
+            CustomStringFormattable<T> || NarrowStringLike<T> || Utf8StringLike<T> || Utf16StringLike<T> ||
+            Utf32StringLike<T> || WideStringLike<T> || std::same_as<std::remove_cvref_t<T>, std::filesystem::path> ||
+            std::is_arithmetic_v<std::remove_cvref_t<T>> || std::is_enum_v<std::remove_cvref_t<T>>;
+
+        /** @brief Type accepted by strict @ref FromString deserialization. */
+        template<typename T>
+        concept StringDeserializable =
+            Traits::BuiltinStringDeserializable<T> || Detail::HasStaticFromString<std::remove_cvref_t<T>> ||
+            (std::default_initializable<std::remove_cvref_t<T>> &&
+             Detail::ADL::FreeFromString::Available<std::remove_cvref_t<T>>);
+
+        /** @brief Value category from which @ref ToStringView can expose stable storage without allocation. */
+        template<typename T>
+        concept StringViewable = Detail::ADL::FreeToStringView::Available<T> || Detail::HasMemberToStringView<T> ||
+                                 Detail::SafeNarrowView<T> || std::is_null_pointer_v<std::remove_cvref_t<T>> ||
+                                 std::same_as<std::remove_cvref_t<T>, bool> || std::is_enum_v<std::remove_cvref_t<T>>;
+
+        /** @brief Complete non-scalar type covered by Sora's generated formatter and stream insertion bridge. */
+        template<typename T>
+        concept AutoDisplayable =
+            !std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+            !std::convertible_to<std::remove_cvref_t<T>, std::string_view> &&
+            !std::convertible_to<std::remove_cvref_t<T>, std::string> &&
+            (std::is_enum_v<std::remove_cvref_t<T>> ||
+             (std::is_class_v<std::remove_cvref_t<T>> && !std::is_union_v<std::remove_cvref_t<T>> &&
+              requires { sizeof(std::remove_cvref_t<T>); }));
+
+    } // namespace Concept
+
+    /** @cond INTERNAL */
+    namespace Detail {
 
         template<typename T>
             requires std::integral<T> && (!std::same_as<T, bool>) && (!std::same_as<T, char>)
@@ -264,19 +301,6 @@ namespace Sora {
             return std::string(buffer.data(), result.ptr);
         }
 
-        /** @brief Return the display name used for reflected field @p Member. */
-        template<std::meta::info Member>
-        consteval std::string_view FieldNameOf() {
-            std::string_view name = Sora::Meta::IdentifierOrDisplayStringOf(Member);
-            template for (constexpr auto annotation : std::define_static_array(std::meta::annotations_of(Member))) {
-                using Annotation = typename [:std::meta::type_of(annotation):];
-                if constexpr (requires { Annotation::name; }) {
-                    name = Annotation::name;
-                }
-            }
-            return name;
-        }
-
         template<typename T>
         [[nodiscard]] constexpr std::string ToStringImpl(T&& value) {
             using U = std::remove_cvref_t<T>;
@@ -298,14 +322,14 @@ namespace Sora {
             } else if constexpr (Concept::Utf8StringLike<T>) {
                 return Unicode::Utf8BytesToString(std::u8string_view{std::forward<T>(value)});
             } else if constexpr (Concept::Utf16StringLike<T>) {
-                return *Unicode::Utf16ToUtf8<kReplaceInvalidUnicode>(std::u16string_view{std::forward<T>(value)});
+                return *Unicode::Utf16ToUtf8<kDisplayUnicodePolicy>(std::u16string_view{std::forward<T>(value)});
             } else if constexpr (Concept::Utf32StringLike<T>) {
-                return *Unicode::Utf32ToUtf8<kReplaceInvalidUnicode>(std::u32string_view{std::forward<T>(value)});
+                return *Unicode::Utf32ToUtf8<kDisplayUnicodePolicy>(std::u32string_view{std::forward<T>(value)});
             } else if constexpr (Concept::WideStringLike<T>) {
-                return *Unicode::WideToUtf8<kReplaceInvalidUnicode>(std::wstring_view{std::forward<T>(value)});
+                return *Unicode::WideToUtf8<kDisplayUnicodePolicy>(std::wstring_view{std::forward<T>(value)});
             } else if constexpr (std::same_as<U, std::filesystem::path>) {
                 if constexpr (std::same_as<std::filesystem::path::value_type, wchar_t>) {
-                    return *Unicode::WideToUtf8<kReplaceInvalidUnicode>(std::wstring_view{value.native()});
+                    return *Unicode::WideToUtf8<kDisplayUnicodePolicy>(std::wstring_view{value.native()});
                 } else {
                     return value.native();
                 }
@@ -353,7 +377,7 @@ namespace Sora {
                 } else {
                     return std::format("{}*(function)", Traits::TypeName<std::remove_pointer_t<U>>);
                 }
-            } else if constexpr (!AutoDisplayable<U> &&
+            } else if constexpr (!Concept::AutoDisplayable<U> &&
                                  requires(std::ostream& stream, T&& item) { stream << std::forward<T>(item); }) {
                 std::ostringstream stream;
                 stream << std::forward<T>(value);
@@ -366,7 +390,7 @@ namespace Sora {
                             result += ", ";
                         }
                         first = false;
-                        result += FieldNameOf<member>();
+                        result += Meta::SerializationFieldNameOf<member>();
                         result += "=";
                         if constexpr (std::meta::is_bit_field(member)) {
                             result += ToStringImpl(auto(value.[:member:]));
@@ -410,7 +434,7 @@ namespace Sora {
         }
 
         template<typename T>
-            requires StringParsable<T>
+            requires Concept::StringDeserializable<T>
         [[nodiscard]] constexpr Result<T> FromStringImpl(std::string_view text) {
             if constexpr (HasStaticFromString<T>) {
                 auto&& parsed = T::FromString(text);
@@ -494,88 +518,58 @@ namespace Sora {
                     return T{std::string{text}};
                 }
             } else {
-                static_assert(false, "Type is not parsable from a string.");
+                static_assert(false, "Type is not deserializable from a string.");
             }
         }
-
-        struct ToStringFn {
-            template<typename T>
-            [[nodiscard]] constexpr std::string operator()(T&& value) const {
-                return ToStringImpl(std::forward<T>(value));
-            }
-        };
-
-        struct ToStringViewFn {
-            template<typename T>
-            [[nodiscard]] constexpr std::string_view operator()(T&& value) const {
-                return ToStringViewImpl(std::forward<T>(value));
-            }
-        };
-
-        template<typename T>
-        concept PreferStringView =
-            ADL::FreeToStringView::Available<T> || HasMemberToStringView<T> || SafeNarrowView<T> ||
-            std::is_null_pointer_v<std::remove_cvref_t<T>> || std::same_as<std::remove_cvref_t<T>, bool>;
 
     } // namespace Detail
     /** @endcond */
 
-    namespace Concept {
+    namespace CPO {
 
-        /** @brief Type with a canonical, non-reflective @ref ToString representation. */
-        template<typename T>
-        concept StringFormattable = Detail::CanonicalStringFormattable<T>;
+        /** @brief Function object implementing the @ref Sora::ToString customization point. */
+        struct ToStringFn {
+            template<typename T>
+            [[nodiscard]] constexpr std::string operator()(T&& value) const {
+                return Detail::ToStringImpl(std::forward<T>(value));
+            }
+        };
 
-        /** @brief Type accepted by strict @ref FromString parsing. */
-        template<typename T>
-        concept StringParsable = Detail::StringParsable<std::remove_cvref_t<T>>;
+        /** @brief Function object implementing the @ref Sora::ToStringView customization point. */
+        struct ToStringViewFn {
+            template<Concept::StringViewable T>
+            [[nodiscard]] constexpr std::string_view operator()(T&& value) const {
+                return Detail::ToStringViewImpl(std::forward<T>(value));
+            }
+        };
 
-    } // namespace Concept
+        /** @brief Function object implementing the @ref Sora::FromString customization point. */
+        struct FromStringFn {
+            template<Concept::StringDeserializable T>
+            [[nodiscard]] constexpr Result<T> operator()(std::in_place_type_t<T>, std::string_view text) const {
+                return Detail::FromStringImpl<T>(text);
+            }
+        };
+
+    } // namespace CPO
 
     /** @brief Customization-point object that converts a supported value to an owning UTF-8 string. */
-    inline constexpr Detail::ToStringFn ToString{};
+    inline constexpr CPO::ToStringFn ToString{};
 
     /** @brief Customization-point object that exposes a stable string view without allocation. */
-    inline constexpr Detail::ToStringViewFn ToStringView{};
+    inline constexpr CPO::ToStringViewFn ToStringView{};
+
+    /** @brief Customization-point object that strictly deserializes UTF-8 text to an explicitly tagged target type. */
+    inline constexpr CPO::FromStringFn FromString{};
 
     /** @brief Return a stable string view when safe and otherwise materialize an owning string. */
     template<typename T>
     [[nodiscard]] constexpr auto Str(T&& value) {
-        if constexpr (Detail::PreferStringView<T>) {
+        if constexpr (Concept::StringViewable<T>) {
             return ToStringView(std::forward<T>(value));
         } else {
             return ToString(std::forward<T>(value));
         }
-    }
-
-    /**
-     * @brief Strictly parse @p text as @p T.
-     * @tparam T Target value type.
-     * @param[in] text UTF-8 source text.
-     * @return Parsed value or a project-wide syntax, range, or Unicode error code.
-     */
-    template<Concept::StringParsable T>
-    [[nodiscard]] constexpr Result<T> FromString(std::string_view text) {
-        return Detail::FromStringImpl<T>(text);
-    }
-
-    /** @brief Parse an enum from its reflected name or underlying integer representation. */
-    template<typename T>
-        requires std::is_enum_v<T>
-    [[nodiscard]] constexpr T Enum(std::string_view text) {
-        if (auto res = FromString<T>(text); res) {
-            return *res;
-        } else {
-            // Handle error case, e.g., throw an exception or return a default value
-            throw std::runtime_error("Failed to parse enum from string");
-        }
-    }
-
-    /** @brief Parse an enum from its reflected name or underlying integer representation. */
-    template<typename T>
-        requires std::is_enum_v<T>
-    [[nodiscard]] constexpr Result<T> EnumOptional(std::string_view text) {
-        return FromString<T>(text);
     }
 
 } // namespace Sora

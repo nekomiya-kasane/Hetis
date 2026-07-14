@@ -10,11 +10,11 @@
  */
 #pragma once
 
-#include "Sora/Core/ToString.h"
-#include "Sora/Core/Traits.h"
-#include "Sora/Core/Traits/AnnotationTraits.h"
-#include "Sora/Core/Traits/EnumTraits.h"
-#include "Sora/Core/Traits/TypeTraits.h"
+#include <Sora/Core/ToString.h>
+#include <Sora/Core/Traits.h>
+#include <Sora/Core/Traits/AnnotationTraits.h>
+#include <Sora/Core/Traits/EnumTraits.h>
+#include <Sora/Core/Traits/TypeTraits.h>
 
 #include <nlohmann/json.hpp>
 
@@ -203,19 +203,6 @@ namespace Sora {
                 return 0;
             }
 
-            /** @brief Return the JSON field name for reflected member @p M. */
-            template<std::meta::info M>
-            consteval std::string_view FieldNameOf() {
-                std::string_view name = Sora::Meta::IdentifierOrDisplayStringOf(M);
-                template for (constexpr auto a : std::define_static_array(std::meta::annotations_of(M))) {
-                    using A = typename [:std::meta::type_of(a):];
-                    if constexpr (requires { A::name; }) {
-                        name = A::name;
-                    }
-                }
-                return name;
-            }
-
             /** @brief Return JSON-participating data members after ignore/key filtering and order sorting. */
             template<typename T>
             consteval auto JsonMembers() {
@@ -373,7 +360,7 @@ namespace Sora {
                             object[it.key()] = std::move(it.value());
                         }
                     } else {
-                        object[std::string(Detail::FieldNameOf<m>())] = std::move(sub);
+                        object[std::string(Meta::SerializationFieldNameOf<m>())] = std::move(sub);
                     }
                 } else {
                     constexpr bool memberEmitDefault = [] consteval {
@@ -391,12 +378,12 @@ namespace Sora {
                     if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsInt>(m)) {
                         static_assert(!$::Has<$::Serialization::AsString>(m),
                                       "Enum member JSON policy cannot be both AsInt and AsString");
-                        object[std::string(Detail::FieldNameOf<m>())] =
+                        object[std::string(Meta::SerializationFieldNameOf<m>())] =
                             static_cast<std::underlying_type_t<Member>>(field);
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsString>(m)) {
-                        object[std::string(Detail::FieldNameOf<m>())] = EnumToNameJson(field);
+                        object[std::string(Meta::SerializationFieldNameOf<m>())] = EnumToNameJson(field);
                     } else {
-                        object[std::string(Detail::FieldNameOf<m>())] = Detail::ToJsonImpl(field);
+                        object[std::string(Meta::SerializationFieldNameOf<m>())] = Detail::ToJsonImpl(field);
                     }
                 }
             }
@@ -416,7 +403,7 @@ namespace Sora {
                 if constexpr ($::Has<$::Serialization::Flatten>(m)) {
                     Detail::FromJsonImpl(input, field);
                 } else {
-                    auto key = std::string(Detail::FieldNameOf<m>());
+                    auto key = std::string(Meta::SerializationFieldNameOf<m>());
                     auto it = input.find(key);
                     if (it == input.end()) {
                         if constexpr ($::Has<$::Serialization::Required>(m)) {

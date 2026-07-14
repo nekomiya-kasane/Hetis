@@ -295,7 +295,7 @@ namespace Sora {
                 ADL::FreeToStyledString::Invoke(builder, std::forward<T>(value));
             } else if constexpr (HasMemberToStyledString<U>) {
                 std::forward<T>(value).ToStyledString(builder);
-            } else if constexpr (HasHookToString<U> || ADL::FreeToString::Available<U> || HasMemberToString<U>) {
+            } else if constexpr (Concept::CustomStringFormattable<U>) {
                 builder.Text($$::StyledRole::Plain, ToString(std::forward<T>(value)));
             } else if constexpr (std::is_null_pointer_v<U>) {
                 builder.Text($$::StyledRole::Null, "nullptr");
@@ -361,7 +361,7 @@ namespace Sora {
                 builder.Text($$::StyledRole::Number, std::format("{}", value));
             } else if constexpr (requires(T&& v) { std::to_string(std::forward<T>(v)); }) {
                 AppendStdToString(builder, std::forward<T>(value));
-            } else if constexpr (!AutoDisplayable<U> &&
+            } else if constexpr (!Concept::AutoDisplayable<U> &&
                                  requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
                 std::stringstream ss;
                 ss << std::forward<T>(value);
@@ -377,7 +377,7 @@ namespace Sora {
                         }
                         first = false;
 
-                        builder.Text($$::StyledRole::FieldName, FieldNameOf<m>());
+                        builder.Text($$::StyledRole::FieldName, Meta::SerializationFieldNameOf<m>());
                         builder.Raw($$::StyledRole::Punctuation, "=");
 
                         if constexpr (std::meta::is_bit_field(m)) {
@@ -439,7 +439,7 @@ namespace Sora {
  * @c {:p} forces @ref Sora::ToString, and @c {:?} emits a shallow placeholder.
  */
 template<typename T>
-    requires Sora::Detail::AutoDisplayable<T>
+    requires Sora::Concept::AutoDisplayable<T>
 struct std::formatter<T> {
     Sora::RenderMode mode = Sora::kDefaultRenderMode;
 
@@ -487,7 +487,7 @@ struct std::formatter<T> {
  * @brief Insert Sora-displayable values into an output stream using @ref Sora::kDefaultRenderMode.
  */
 template<typename T>
-    requires Sora::Detail::AutoDisplayable<T>
+    requires Sora::Concept::AutoDisplayable<T>
 std::ostream& operator<<(std::ostream& os, const T& value) {
     switch (Sora::kDefaultRenderMode) {
     case Sora::RenderMode::Plain:

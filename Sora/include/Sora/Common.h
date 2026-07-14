@@ -12,6 +12,7 @@
  */
 #pragma once
 
+#include <functional>
 #include <meta>
 #include <ranges>
 
@@ -49,5 +50,9 @@ namespace Sora {
     namespace Traits {}
 
     namespace Detail {}
+
+    /** @brief Reference wrapper result type for operations that return a reference. */
+    template<typename T>
+    using Ref = std::reference_wrapper<T>;
 
 } // namespace Sora
