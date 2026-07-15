@@ -1,4 +1,7 @@
 #include <Sora/Core/StackTrace.h>
+#include <Sora/Core/ToStyledString.h>
+
+#include <print>
 
 auto f = []() {
     [] {

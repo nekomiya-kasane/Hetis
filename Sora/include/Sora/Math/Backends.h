@@ -140,11 +140,11 @@ namespace Sora {
                 }
             };
 
-            namespace Detail {
+            namespace Concept {
 
                 template<typename T, std::size_t N>
                 concept FixedSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                         Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
+                                         Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
                                          std::remove_cvref_t<T>::kSize.value == N;
 
                 template<typename T, std::size_t N>
@@ -155,7 +155,7 @@ namespace Sora {
                 concept FixedSimdSignedValue =
                     FixedSimdValue<T, N> && std::is_signed_v<typename std::remove_cvref_t<T>::ValueType>;
 
-            } // namespace Detail
+            } // namespace Concept
 
             /**
              * @brief CPU backend for arithmetic SIMD vectors with exactly @p N lanes.
@@ -186,45 +186,39 @@ namespace Sora {
 
             public:
                 template<typename V, typename... Vs>
-                    requires Detail::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
+                    requires Concept::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
                 [[nodiscard]] static constexpr V Add(V x, Vs... args) {
                     return (x + ... + args);
                 }
 
                 template<typename V, typename... Vs>
-                    requires Detail::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
+                    requires Concept::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
                 [[nodiscard]] static constexpr V Mul(V x, Vs... args) {
                     return (x * ... * args);
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Sub(V x, V y) {
                     return x - y;
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Div(V x, V y) {
                     return x / y;
                 }
 
-                template<Detail::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Neg(V x) {
-                    return -x;
-                }
+                [[nodiscard]] static constexpr auto Neg(Concept::FixedSimdValue<N> auto x) { return -x; }
 
-                template<Detail::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Inv(V x) {
+                [[nodiscard]] static constexpr auto Inv(Concept::FixedSimdValue<N> auto x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return V(T(1)) / x;
                 }
 
-                template<Detail::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Square(V x) {
-                    return x * x;
-                }
+                [[nodiscard]] static constexpr auto Square(Concept::FixedSimdValue<N> auto x) { return x * x; }
 
-                template<Detail::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Abs(V x) {
+                [[nodiscard]] static constexpr auto Abs(Concept::FixedSimdValue<N> auto x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     if constexpr (std::unsigned_integral<T>) {
                         return x;
@@ -235,84 +229,84 @@ namespace Sora {
                     }
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Sin(const V& x) {
+                [[nodiscard]] static constexpr auto Sin(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::sin(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Cos(const V& x) {
+                [[nodiscard]] static constexpr auto Cos(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::cos(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Exp(const V& x) {
+                [[nodiscard]] static constexpr auto Exp(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::exp(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Log(const V& x) {
+                [[nodiscard]] static constexpr auto Log(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::log(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
+                template<Concept::FixedSimdFloatingValue<N> V>
                 [[nodiscard]] static constexpr V Pow(const V& base, const V& exponent) {
                     using T = typename V::ValueType;
                     return Transform(base, exponent, [](T x, T y) { return std::pow(x, y); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Sqrt(const V& x) {
+                [[nodiscard]] static constexpr auto Sqrt(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::sqrt(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Atan(const V& x) {
+                [[nodiscard]] static constexpr auto Atan(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::atan(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
+                template<Concept::FixedSimdFloatingValue<N> V>
                 [[nodiscard]] static constexpr V Atan2(const V& y, const V& x) {
                     using T = typename V::ValueType;
                     return Transform(y, x, [](T yValue, T xValue) { return std::atan2(yValue, xValue); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Asin(const V& x) {
+                [[nodiscard]] static constexpr auto Asin(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::asin(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Acos(const V& x) {
+                [[nodiscard]] static constexpr auto Acos(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::acos(value); });
                 }
 
-                template<Detail::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Tan(const V& x) {
+                [[nodiscard]] static constexpr auto Tan(const Concept::FixedSimdFloatingValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return Transform(x, [](T value) { return std::tan(value); });
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Clamp(V value, V lower, V upper) {
                     return Simd::Clamp(value, lower, upper);
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Saturate(V value) {
                     using T = typename V::ValueType;
                     return Clamp(value, V(T(0)), V(T(1)));
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Lerp(const V& a, const V& b, const V& t) {
                     using T = typename V::ValueType;
                     if constexpr (std::floating_point<T>) {
@@ -322,7 +316,7 @@ namespace Sora {
                     }
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Mfa(const V& a, const V& b, const V& c) {
                     using T = typename V::ValueType;
                     if constexpr (std::floating_point<T>) {
@@ -332,7 +326,7 @@ namespace Sora {
                     }
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Mfs(const V& a, const V& b, const V& c) {
                     using T = typename V::ValueType;
                     if constexpr (std::floating_point<T>) {
@@ -342,7 +336,7 @@ namespace Sora {
                     }
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Nms(const V& a, const V& b, const V& c) {
                     using T = typename V::ValueType;
                     if constexpr (std::floating_point<T>) {
@@ -352,7 +346,7 @@ namespace Sora {
                     }
                 }
 
-                template<Detail::FixedSimdValue<N> V>
+                template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Nma(const V& a, const V& b, const V& c) {
                     using T = typename V::ValueType;
                     if constexpr (std::floating_point<T>) {
@@ -362,8 +356,8 @@ namespace Sora {
                     }
                 }
 
-                template<Detail::FixedSimdSignedValue<N> V>
-                [[nodiscard]] static constexpr V Sign(const V& x) {
+                [[nodiscard]] static constexpr auto Sign(const Concept::FixedSimdSignedValue<N> auto& x) {
+                    using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     const V zero(T(0));
                     return Simd::Select(x > zero, V(T(1)), Simd::Select(x < zero, V(T(-1)), zero));
@@ -394,7 +388,7 @@ namespace Sora {
             }
 
             static_assert(GetBackend<^^int>() == ^^Backend::ScalarCPU, "GetBackend must return a std::meta::info");
-            static_assert(GetBackend<^^Sora::Simd::F32_2P>() == ^^Backend::FixedSimdCPU<2>,
+            static_assert(GetBackend<^^Sora::Simd::F32<2>>() == ^^Backend::FixedSimdCPU<2>,
                           "GetBackend must return a std::meta::info");
 
         } // namespace Meta
@@ -406,7 +400,7 @@ namespace Sora {
 
             static_assert(std::same_as<BackendTypeOf<int>, Backend::ScalarCPU>,
                           "BackendTypeOf must return a backend type");
-            static_assert(std::same_as<BackendTypeOf<Sora::Simd::F32_2P>, Backend::FixedSimdCPU<2>>,
+            static_assert(std::same_as<BackendTypeOf<Sora::Simd::F32<2>>, Backend::FixedSimdCPU<2>>,
                           "BackendTypeOf must return a backend type");
 
         } // namespace Traits
@@ -432,5 +426,17 @@ namespace Sora {
         } // namespace Math
 
     } // namespace Traits
+
+    namespace Concept {
+
+        inline namespace Math {
+
+            using Sora::Math::Backend::Concept::FixedSimdFloatingValue;
+            using Sora::Math::Backend::Concept::FixedSimdSignedValue;
+            using Sora::Math::Backend::Concept::FixedSimdValue;
+
+        } // namespace Math
+
+    } // namespace Concept
 
 } // namespace Sora

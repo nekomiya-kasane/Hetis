@@ -52,7 +52,7 @@ TEST_CASE("fixed SIMD CPU backend preserves lane-wise arithmetic", "[Sora][Math]
     REQUIRE(Float4Backend::Sub(a, b)[0] == -1.0F);
     REQUIRE(Float4Backend::Div(a, b)[3] == 2.0F);
     REQUIRE(Float4Backend::Inv(b)[0] == 0.5F);
-    REQUIRE(Float4Backend::Sqr(a)[2] == 9.0F);
+    REQUIRE(Float4Backend::Square(a)[2] == 9.0F);
     REQUIRE(Float4Backend::Abs(Float4Backend::Neg(a))[1] == 2.0F);
     REQUIRE(Float4Backend::Clamp(a, Float4(2.0F), Float4(3.0F))[3] == 3.0F);
     REQUIRE(Float4Backend::Saturate(Float4(-0.5F))[0] == 0.0F);

@@ -451,7 +451,6 @@ namespace Sora {
                         output = std::move(alternative);
                         return true;
                     } catch (const nlohmann::json::exception&) {
-                        return false;
                     }
                 }
                 return TryVariantFromJson<I + 1>(input, output);
