@@ -18,8 +18,8 @@ namespace Sora {
 
     /** @brief Semantic class of a failed runtime condition. */
     enum class AssertionKind : uint8_t {
-        Assertion,   /**< Debug-build invariant checked by @c SORA_ASSERT. */
-        Verification /**< Always-evaluated condition checked by @c SORA_VERIFY. */
+        Assertion,   /**< Debug-build invariant checked by @ref Assert. */
+        Verification /**< Always-evaluated condition checked by @ref Verify. */
     };
 
     /** @brief Terminal action performed after an assertion failure has been reported. */
