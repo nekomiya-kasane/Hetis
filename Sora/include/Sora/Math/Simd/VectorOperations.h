@@ -276,8 +276,10 @@ namespace Sora::Math::Simd {
         constexpr bool toF16 = std::is_same_v<Up, _Float16>;
         constexpr bool fromF16 = std::is_same_v<Tp, _Float16>;
         constexpr bool needsF16c = Traits.HaveF16c() && !Traits.HaveAvx512fp16() && (toF16 || fromF16);
-        if (needsF16c && !IsConstKnown(v)) { // Work around PR121688
-            return X86CvtF16c<UV>(v);
+        if constexpr (needsF16c) {
+            if (!IsConstKnown(v)) { // Work around PR121688
+                return X86CvtF16c<UV>(v);
+            }
         }
         if constexpr (std::is_floating_point_v<Tp> && std::is_integral_v<Up> && sizeof(UV) < sizeof(TV) &&
                       sizeof(Up) < sizeof(int)) {

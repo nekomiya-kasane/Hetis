@@ -9,6 +9,7 @@
 #include "Sora/Core/Debugging.h"
 #include "Sora/Core/StackTrace.h"
 #include "Sora/Core/ToString.h"
+#include "Sora/Core/ToStyledString.h"
 
 #include <array>
 #include <atomic>
@@ -126,26 +127,66 @@ namespace Sora {
             std::fflush(stderr);
         }
 
+        [[nodiscard]] std::string FormatStyledFailure(const AssertionFailure& failure) {
+            namespace StyledOutput = Styled;
+            StyledOutput::StyledStringBuilder builder;
+            builder.Raw("\n");
+            builder.Text(StyledOutput::StyledRole::Error, ToString(failure.kind));
+            builder.Raw(StyledOutput::StyledRole::Error, " failed");
+            builder.Raw(StyledOutput::StyledRole::Punctuation, ": ");
+            builder.Text(StyledOutput::StyledRole::Error, failure.condition);
+
+            builder.Raw("\n  ");
+            builder.Text(StyledOutput::StyledRole::FieldName, "Location");
+            builder.Raw(StyledOutput::StyledRole::Punctuation, ": ");
+            builder.Text(StyledOutput::StyledRole::String, failure.source.file_name());
+            builder.Raw(StyledOutput::StyledRole::Punctuation, ":");
+            builder.Text(StyledOutput::StyledRole::Number, std::format("{}", failure.source.line()));
+            builder.Raw(StyledOutput::StyledRole::Plain, " in ");
+            builder.Text(StyledOutput::StyledRole::TypeName, failure.source.function_name());
+
+            builder.Raw("\n  ");
+            builder.Text(StyledOutput::StyledRole::FieldName, "Message");
+            builder.Raw(StyledOutput::StyledRole::Punctuation, ": ");
+            if (failure.message.empty()) {
+                builder.Text(StyledOutput::StyledRole::Null, "<none>");
+            } else {
+                builder.Text(StyledOutput::StyledRole::Plain, failure.message);
+            }
+
+            if (failure.stackTrace != nullptr && !failure.stackTrace->Empty()) {
+                builder.Raw("\n");
+                failure.stackTrace->ToStyledString(builder);
+            }
+
+            std::string output = std::move(builder).Finish();
+            output.push_back('\n');
+            return output;
+        }
+
+        [[nodiscard]] std::string FormatPlainFailure(const AssertionFailure& failure) {
+            const std::string_view message =
+                failure.message.empty() ? std::string_view{"<none>"} : std::string_view{failure.message};
+            std::string output =
+                std::format("\n{} failed: {}\n  Location: {}:{} in {}\n  Message: {}\n", ToString(failure.kind),
+                            failure.condition, failure.source.file_name(), failure.source.line(),
+                            failure.source.function_name(), message);
+            if (failure.stackTrace != nullptr && !failure.stackTrace->Empty()) {
+                output += failure.stackTrace->ToString();
+                output.push_back('\n');
+            }
+            return output;
+        }
+
         void DefaultAssertionReporter(const AssertionFailure& failure) noexcept {
             try {
-                std::string output;
-                output.reserve(512 + failure.message.size());
-                const std::string_view message =
-                    failure.message.empty() ? std::string_view{"<none>"} : std::string_view{failure.message};
-                output += std::format("\n{} failed: {}\n  Location: {}:{} in {}\n  Message: {}\n",
-                                      ToString(failure.kind), failure.condition, failure.source.file_name(),
-                                      failure.source.line(), failure.source.function_name(), message);
-                if (!failure.stackTrace.empty()) {
-                    output += std::format("StackTrace({} frames)", failure.stackTrace.size());
-                    for (size_t i = 0; i < failure.stackTrace.size(); ++i) {
-                        output += "\n  ";
-                        output += StackTrace::FormatFrame(failure.stackTrace[i], i);
-                    }
-                    output.push_back('\n');
-                }
-                WriteStderr(output);
+                WriteStderr(FormatStyledFailure(failure));
             } catch (...) {
-                WriteStderr("\nSora assertion reporting failed while materializing the diagnostic.\n");
+                try {
+                    WriteStderr(FormatPlainFailure(failure));
+                } catch (...) {
+                    WriteStderr("\nSora assertion reporting failed while materializing the diagnostic.\n");
+                }
             }
         }
 
@@ -211,7 +252,7 @@ namespace Sora {
                                      .condition = condition,
                                      .message = std::move(message),
                                      .source = source,
-                                     .stackTrace = stackTrace.Frames()};
+                                     .stackTrace = stackTrace.Empty() ? nullptr : &stackTrace};
             AssertionReporter reporter = GetAssertionReporter();
             (reporter != nullptr ? reporter : DefaultAssertionReporter)(failure);
 

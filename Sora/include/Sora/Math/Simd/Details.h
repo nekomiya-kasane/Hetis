@@ -584,9 +584,10 @@ namespace Sora::Math::Simd {
             return AbiT<16 / adjSizeof, 1>();
         } else if constexpr (Traits.HaveSse() && std::is_floating_point_v<Tp> && sizeof(Tp) == sizeof(float)) {
             return AbiT<16 / adjSizeof, 1>();
+        } else {
+            // no MMX: we can't emit EMMS where it would be necessary
+            return AbiT<1, 1>();
         }
-        // no MMX: we can't emit EMMS where it would be necessary
-        return AbiT<1, 1>();
     }
 
 #else

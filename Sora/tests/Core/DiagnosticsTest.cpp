@@ -16,7 +16,7 @@ namespace {
     void InspectFailure(const Sora::AssertionFailure& failure) noexcept {
         const bool matched = failure.kind == Sora::AssertionKind::Verification &&
                              failure.condition == "++evaluations == 3" && failure.message == "evaluation 2" &&
-                             failure.stackTrace.empty() && failure.source.line() != 0;
+                             failure.stackTrace == nullptr && failure.source.line() != 0;
         gReportMatched.store(matched, std::memory_order_relaxed);
         gReportCount.fetch_add(1, std::memory_order_relaxed);
     }
