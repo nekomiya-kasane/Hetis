@@ -8,14 +8,13 @@
 #include <cstdint>
 #include <format>
 #include <source_location>
-#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace Sora {
 
-    struct StackFrame;
+    class StackTrace;
 
     /** @brief Semantic class of a failed runtime condition. */
     enum class AssertionKind : uint8_t {
@@ -45,7 +44,7 @@ namespace Sora {
         std::string_view condition;                    /**< Stringized source expression. */
         std::string message;                           /**< Optional formatted diagnostic payload. */
         std::source_location source;                   /**< Call site at which the condition was evaluated. */
-        std::span<const StackFrame> stackTrace;        /**< Captured stack, empty when capture is disabled or fails. */
+        const StackTrace* stackTrace = nullptr;         /**< Captured stack, valid only during the reporter call. */
     };
 
     /** @brief Non-owning synchronous reporter invoked on the failing thread. */
