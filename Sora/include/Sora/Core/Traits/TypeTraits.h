@@ -192,11 +192,23 @@ namespace Sora {
          * @tparam Bits Counter width in bits. Must be one of @c {8, 16, 32, 64}; an unsupported value selects @c
          * uint64_t to fail safe.
          */
-        template<std::size_t Bits = 16>
+        template<size_t Bits = 16>
         using BestSizeType =
             std::conditional_t<(Bits <= 8), std::uint8_t,
                                std::conditional_t<(Bits <= 16), std::uint16_t,
                                                   std::conditional_t<(Bits <= 32), std::uint32_t, std::uint64_t>>>;
+
+        /** @brief Unsigned integer type with at least @p Bits bits. */
+        template<size_t Bits>
+        using Unsigned = BestSizeType<Bits>;
+
+        /** @brief Signed integer type with at least @p Bits bits. */
+        template<size_t Bits>
+        using Signed = std::make_signed_t<BestSizeType<Bits>>;
+
+        /** @brief Unsigned integer type with exactly @p Bits bits. */
+        template<size_t Bits>
+        using Float = std::conditional_t<(Bits <= 16), __bfloat16, std::conditional_t<(Bits <= 32), float, double>>;
 
     } // namespace Traits
 
