@@ -76,15 +76,3 @@ namespace Sora::Math::Simd {
     }
 
 } // namespace Sora::Math::Simd
-
-namespace Sora::Math {
-
-    using Simd::Abs;
-    using Simd::Arg;
-    using Simd::Conj;
-    using Simd::Imag;
-    using Simd::Norm;
-    using Simd::Proj;
-    using Simd::Real;
-
-} // namespace Sora::Math

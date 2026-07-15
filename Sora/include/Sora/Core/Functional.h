@@ -10,6 +10,7 @@
  */
 #pragma once
 
+#include "Sora/Platform.h"
 #include "Sora/Core/FixedString.h"
 #include "Sora/Core/Traits.h"
 
@@ -53,7 +54,7 @@ namespace Sora {
     template<typename F>
     struct Adaptor {
         /** @brief Wrapped callable. */
-        F fn;
+        NO_UNIQUE_ADDRESS F fn;
 
         /**
          * @brief Forward all arguments to the wrapped callable.
@@ -64,7 +65,11 @@ namespace Sora {
          * @return Result of invoking @ref fn.
          */
         template<typename Self, typename... Xs>
-        constexpr decltype(auto) operator()(this Self&& self, Xs&&... xs) {
+            requires requires(Self&& self, Xs&&... xs) {
+                std::invoke(std::forward<Self>(self).fn, std::forward<Xs>(xs)...);
+            }
+        [[gnu::always_inline]] constexpr decltype(auto) operator()(this Self&& self, Xs&&... xs)
+            noexcept(noexcept(std::invoke(std::forward<Self>(self).fn, std::forward<Xs>(xs)...))) {
             return std::invoke(std::forward<Self>(self).fn, std::forward<Xs>(xs)...);
         }
     };
@@ -132,6 +137,29 @@ namespace Sora {
 
     /** @cond INTERNAL */
     namespace Detail {
+
+        /** @brief Stateless-layout-preserving composition of an outer and inner callable. */
+        template<typename Outer, typename Inner>
+        struct Composition {
+            NO_UNIQUE_ADDRESS Outer outer;
+            NO_UNIQUE_ADDRESS Inner inner;
+
+            template<typename Self, typename... Xs>
+                requires requires(Self&& self, Xs&&... xs) {
+                    std::invoke(std::forward<Self>(self).outer,
+                                std::invoke(std::forward<Self>(self).inner, std::forward<Xs>(xs)...));
+                }
+            [[gnu::always_inline]] constexpr decltype(auto) operator()(this Self&& self, Xs&&... xs)
+                noexcept(noexcept(std::invoke(
+                    std::forward<Self>(self).outer,
+                    std::invoke(std::forward<Self>(self).inner, std::forward<Xs>(xs)...)))) {
+                return std::invoke(std::forward<Self>(self).outer,
+                                   std::invoke(std::forward<Self>(self).inner, std::forward<Xs>(xs)...));
+            }
+        };
+
+        template<typename Outer, typename Inner>
+        Composition(Outer, Inner) -> Composition<Outer, Inner>;
 
         /** @brief Map a callable over the reflected members of a record and reconstruct the same record type. */
         template<typename F, typename X>
@@ -300,11 +328,9 @@ namespace Sora {
      * @param[in] f Outermost callable.
      * @param[in] fs Inner callables.
      */
-    template<typename F, typename... Fs>
-    [[nodiscard]] constexpr auto Compose(F f, Fs... fs) {
-        return Adaptor{[f = std::move(f), tail = Compose(std::move(fs)...)](auto&&... xs) -> decltype(auto) {
-            return f(tail(std::forward<decltype(xs)>(xs)...));
-        }};
+    template<typename F, typename G, typename... Fs>
+    [[nodiscard]] constexpr auto Compose(F f, G g, Fs... fs) {
+        return Adaptor{Detail::Composition{std::move(f), Compose(std::move(g), std::move(fs)...)}};
     }
 
     /**
@@ -321,11 +347,9 @@ namespace Sora {
      * @param[in] f First callable.
      * @param[in] fs Later callables.
      */
-    template<typename F, typename... Fs>
-    [[nodiscard]] constexpr auto Then(F f, Fs... fs) {
-        return Adaptor{[f = std::move(f), tail = Then(std::move(fs)...)](auto&&... xs) -> decltype(auto) {
-            return tail(f(std::forward<decltype(xs)>(xs)...));
-        }};
+    template<typename F, typename G, typename... Fs>
+    [[nodiscard]] constexpr auto Then(F f, G g, Fs... fs) {
+        return Adaptor{Detail::Composition{Then(std::move(g), std::move(fs)...), std::move(f)}};
     }
 
     /**

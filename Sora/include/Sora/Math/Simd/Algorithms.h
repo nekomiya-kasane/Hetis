@@ -50,12 +50,3 @@ namespace Sora::Math::Simd {
     }
 
 } // namespace Sora::Math::Simd
-
-namespace Sora::Math {
-    
-    using Simd::Clamp;
-    using Simd::Max;
-    using Simd::Min;
-    using Simd::Minmax;
-
-} // namespace Sora::Math

@@ -10,7 +10,8 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
+#include <meta>
+#include <string>
 #include <type_traits>
 
 #include <Sora/Core/Traits/TypeTraits.h>
@@ -20,137 +21,215 @@ namespace Sora {
 
     namespace Math {
 
+        /**
+         * @brief Open specialization points for mapping user-defined numeric carriers to computation backends.
+         *
+         * @details Specialize @ref Backend for a cv-unqualified carrier type and expose the selected backend as
+         * @c Type. The backend may implement any subset of the primary operations; unavailable operations are removed
+         * from the corresponding CPO's overload set.
+         *
+         * @code{.cpp}
+         * struct NumberBackend;
+         *
+         * template<>
+         * struct Sora::Math::Hook::Backend<Number> {
+         *     using Type = NumberBackend;
+         * };
+         * @endcode
+         */
+        namespace Hook {
+
+            /**
+             * @brief Map a numeric carrier to a user-defined backend through a nested @c Type alias.
+             * @tparam Carrier Cv-unqualified carrier type being extended.
+             */
+            template<typename Carrier>
+            struct Backend;
+
+        } // namespace Hook
+
         namespace Backend {
 
+            /**
+             * @brief Stateless CPU backend for built-in arithmetic scalar types.
+             *
+             * @details Scalar operands are passed by value: they are at most register-sized, and a reference-preserving
+             * interface would incorrectly expose argument value categories as mathematical result types.
+             */
             struct ScalarCPU {
-                static constexpr bool IsScalar = true;
-                static constexpr bool IsSimd = false;
+                static constexpr bool kIsScalar = true;  /**< This backend operates on scalar values. */
+                static constexpr bool kIsSimd = false;   /**< This backend does not operate on SIMD carriers. */
 
-                [[nodiscard]] static constexpr auto Add(Concept::NumericScalar auto x,
-                                                        Concept::NumericScalar auto... args) {
+                template<Concept::NumericScalar T, std::same_as<T>... Ts>
+                [[nodiscard]] static constexpr T Add(T x, Ts... args) noexcept {
                     return (x + ... + args);
                 }
 
-                [[nodiscard]] static constexpr auto Mul(Concept::NumericScalar auto x,
-                                                        Concept::NumericScalar auto... args) {
+                template<Concept::NumericScalar T, std::same_as<T>... Ts>
+                [[nodiscard]] static constexpr T Mul(T x, Ts... args) noexcept {
                     return (x * ... * args);
                 }
 
-                [[nodiscard]] static constexpr auto Sub(Concept::NumericScalar auto x, Concept::NumericScalar auto y) {
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Sub(T x, T y) noexcept {
                     return x - y;
                 }
 
-                [[nodiscard]] static constexpr auto Div(Concept::NumericScalar auto x, Concept::NumericScalar auto y) {
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Div(T x, T y) noexcept {
                     return x / y;
                 }
 
-                [[nodiscard]] static constexpr auto Neg(Concept::NumericScalar auto x) { return -x; }
-
-                [[nodiscard]] static constexpr auto Inv(Concept::NumericScalar auto x) { return 1 / x; }
-
-                [[nodiscard]] static constexpr auto Square(Concept::NumericScalar auto x) { return x * x; }
-
-                [[nodiscard]] static constexpr auto Abs(Concept::NumericScalar auto x) { return std::abs(x); }
-
-                [[nodiscard]] static constexpr auto Sin(Concept::NumericScalar auto x) { return std::sin(x); }
-
-                [[nodiscard]] static constexpr auto Cos(Concept::NumericScalar auto x) { return std::cos(x); }
-
-                [[nodiscard]] static constexpr auto Exp(Concept::NumericScalar auto x) { return std::exp(x); }
-
-                [[nodiscard]] static constexpr auto Log(Concept::NumericScalar auto x) { return std::log(x); }
-
-                [[nodiscard]] static constexpr auto Pow(Concept::NumericScalar auto base,
-                                                        Concept::NumericScalar auto exp) {
-                    return std::pow(base, exp);
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Neg(T x) noexcept {
+                    return -x;
                 }
 
-                [[nodiscard]] static constexpr auto Sqrt(Concept::NumericScalar auto x) { return std::sqrt(x); }
-
-                [[nodiscard]] static constexpr auto Atan(Concept::NumericScalar auto x) { return std::atan(x); }
-
-                [[nodiscard]] static constexpr auto Atan2(Concept::NumericScalar auto y,
-                                                          Concept::NumericScalar auto x) {
-                    return std::atan2(y, x);
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Inv(T x) noexcept {
+                    return T{1} / x;
                 }
 
-                [[nodiscard]] static constexpr auto Asin(Concept::NumericScalar auto x) { return std::asin(x); }
-
-                [[nodiscard]] static constexpr auto Acos(Concept::NumericScalar auto x) { return std::acos(x); }
-
-                [[nodiscard]] static constexpr auto Tan(Concept::NumericScalar auto x) { return std::tan(x); }
-
-                [[nodiscard]] static constexpr auto Clamp(Concept::NumericScalar auto v, Concept::NumericScalar auto lo,
-                                                          Concept::NumericScalar auto hi) {
-                    return std::clamp(v, lo, hi);
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Square(T x) noexcept {
+                    return x * x;
                 }
 
-                [[nodiscard]] static constexpr auto Saturate(Concept::NumericScalar auto v) {
-                    return Clamp(v, decltype(v)(0), decltype(v)(1));
-                }
-
-                [[nodiscard]] static constexpr auto Lerp(Concept::NumericScalar auto a, Concept::NumericScalar auto b,
-                                                         Concept::NumericScalar auto t) {
-                    if constexpr (requires { std::lerp(a, b, t); }) {
-                        return std::lerp(a, b, t);
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Abs(T x) noexcept {
+                    if constexpr (std::unsigned_integral<T>) {
+                        return x;
                     } else {
-                        return a + (b - a) * t;
+                        return std::abs(x);
                     }
                 }
 
-                [[nodiscard]] static constexpr auto Mfa(Concept::NumericScalar auto a, Concept::NumericScalar auto b,
-                                                        Concept::NumericScalar auto c) {
-                    if constexpr (requires { std::fma(a, b, c); }) {
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Sin(T x) noexcept {
+                    return std::sin(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Cos(T x) noexcept {
+                    return std::cos(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Exp(T x) noexcept {
+                    return std::exp(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Log(T x) noexcept {
+                    return std::log(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Pow(T base, T exponent) noexcept {
+                    return std::pow(base, exponent);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Sqrt(T x) noexcept {
+                    return std::sqrt(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Atan(T x) noexcept {
+                    return std::atan(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Atan2(T y, T x) noexcept {
+                    return std::atan2(y, x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Asin(T x) noexcept {
+                    return std::asin(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Acos(T x) noexcept {
+                    return std::acos(x);
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Tan(T x) noexcept {
+                    return std::tan(x);
+                }
+
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Clamp(T value, T lower, T upper) noexcept {
+                    return std::clamp(value, lower, upper);
+                }
+
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Saturate(T value) noexcept {
+                    return Clamp(value, T{0}, T{1});
+                }
+
+                template<std::floating_point T>
+                [[nodiscard]] static constexpr T Lerp(T a, T b, T t) noexcept {
+                    return std::lerp(a, b, t);
+                }
+
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Fma(T a, T b, T c) noexcept {
+                    if constexpr (std::floating_point<T>) {
                         return std::fma(a, b, c);
                     } else {
                         return a * b + c;
                     }
                 }
 
-                [[nodiscard]] static constexpr auto Mfs(Concept::NumericScalar auto a, Concept::NumericScalar auto b,
-                                                        Concept::NumericScalar auto c) {
-                    if constexpr (requires { std::fma(a, b, -c); }) {
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Mfs(T a, T b, T c) noexcept {
+                    if constexpr (std::floating_point<T>) {
                         return std::fma(a, b, -c);
                     } else {
                         return a * b - c;
                     }
                 }
 
-                [[nodiscard]] static constexpr auto Nms(Concept::NumericScalar auto a, Concept::NumericScalar auto b,
-                                                        Concept::NumericScalar auto c) {
-                    if constexpr (requires { std::fma(-a, b, -c); }) {
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Nms(T a, T b, T c) noexcept {
+                    if constexpr (std::floating_point<T>) {
                         return std::fma(-a, b, -c);
                     } else {
                         return -a * b - c;
                     }
                 }
 
-                [[nodiscard]] static constexpr auto Nma(Concept::NumericScalar auto a, Concept::NumericScalar auto b,
-                                                        Concept::NumericScalar auto c) {
-                    if constexpr (requires { std::fma(-a, b, c); }) {
+                template<Concept::NumericScalar T>
+                [[nodiscard]] static constexpr T Nma(T a, T b, T c) noexcept {
+                    if constexpr (std::floating_point<T>) {
                         return std::fma(-a, b, c);
                     } else {
                         return -a * b + c;
                     }
                 }
 
-                [[nodiscard]] static constexpr auto Sign(Concept::SignedArithmetic auto x) {
-                    using T = std::remove_cvref_t<decltype(x)>;
+                template<Concept::SignedArithmetic T>
+                [[nodiscard]] static constexpr T Sign(T x) noexcept {
                     return x > T(0) ? T(1) : (x < T(0) ? T(-1) : T(0));
                 }
             };
 
             namespace Concept {
 
+                /** @brief Fixed-width arithmetic SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
                 concept FixedSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                         Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
-                                         std::remove_cvref_t<T>::kSize.value == N;
+                                          Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
+                                          std::remove_cvref_t<T>::kSize.value == N;
 
+                /** @brief Fixed-width floating-point SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
                 concept FixedSimdFloatingValue =
                     FixedSimdValue<T, N> && std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
 
+                /** @brief Fixed-width signed arithmetic SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
                 concept FixedSimdSignedValue =
                     FixedSimdValue<T, N> && std::is_signed_v<typename std::remove_cvref_t<T>::ValueType>;
@@ -165,8 +244,9 @@ namespace Sora {
             struct FixedSimdCPU {
                 static_assert(N > 0, "FixedSimdCPU requires at least one lane");
 
-                static constexpr bool IsScalar = false;
-                static constexpr bool IsSimd = true;
+                static constexpr bool kIsScalar = false;  /**< This backend does not operate on scalar values. */
+                static constexpr bool kIsSimd = true;     /**< This backend operates on SIMD carriers. */
+                static constexpr std::size_t kSize = N;   /**< Number of lanes accepted by this specialization. */
 
             private:
                 template<typename V, typename F>
@@ -185,6 +265,39 @@ namespace Sora {
                 }
 
             public:
+                template<Concept::FixedSimdValue<N> V>
+                [[nodiscard]] static constexpr V Splat(typename V::ValueType value) {
+                    return V(value);
+                }
+
+                template<Concept::FixedSimdValue<N> V>
+                [[nodiscard]] static constexpr V Load(const typename V::ValueType* values) {
+                    return V([&](auto index) { return values[static_cast<std::size_t>(index)]; });
+                }
+
+                template<Concept::FixedSimdValue<N> V, typename M>
+                [[nodiscard]] static constexpr V MaskedLoad(const typename V::ValueType* values, const M& active,
+                                                            V fallback) {
+                    return Simd::Select(active, Load<V>(values), fallback);
+                }
+
+                template<Concept::FixedSimdValue<N> V>
+                static constexpr void Store(typename V::ValueType* values, const V& value) {
+                    for (std::size_t index = 0; index < N; ++index) {
+                        values[index] = value[index];
+                    }
+                }
+
+                template<Concept::FixedSimdValue<N> V, typename M>
+                static constexpr void MaskedStore(typename V::ValueType* values, const V& value, const M& active) {
+                    Store(values, Simd::Select(active, value, Load<V>(values)));
+                }
+
+                template<Concept::FixedSimdValue<N> V, typename M>
+                [[nodiscard]] static constexpr V Select(const M& condition, const V& yes, const V& no) {
+                    return Simd::Select(condition, yes, no);
+                }
+
                 template<typename V, typename... Vs>
                     requires Concept::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
                 [[nodiscard]] static constexpr V Add(V x, Vs... args) {
@@ -317,7 +430,7 @@ namespace Sora {
                 }
 
                 template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Mfa(const V& a, const V& b, const V& c) {
+                [[nodiscard]] static constexpr V Fma(const V& a, const V& b, const V& c) {
                     using T = typename V::ValueType;
                     if constexpr (std::floating_point<T>) {
                         return Transform(a, b, c, [](T x, T y, T addend) { return std::fma(x, y, addend); });
@@ -368,23 +481,35 @@ namespace Sora {
 
         namespace Meta {
 
-            template<std::meta::info P>
+            /**
+             * @brief Select the zero-overhead computation backend for a reflected carrier type.
+             * @tparam CarrierInfo Reflection of a scalar or supported SIMD carrier type.
+             * @return Reflection of the backend type selected for @p CarrierInfo.
+             */
+            template<std::meta::info CarrierInfo>
             consteval std::meta::info GetBackend() {
                 using namespace std::meta;
 
-                constexpr info carrier = dealias(remove_cvref(P));
+                constexpr info carrier = dealias(remove_cvref(CarrierInfo));
+                using Carrier = [:carrier:];
+
+                if constexpr (requires { typename Hook::Backend<Carrier>::Type; }) {
+                    using Selected = typename Hook::Backend<Carrier>::Type;
+                    return ^^Selected;
+                }
+
                 if constexpr (is_arithmetic_type(carrier)) {
                     return ^^Backend::ScalarCPU;
                 }
 
                 if constexpr (has_template_arguments(carrier) &&
                               template_of(carrier) == ^^Sora::Math::Simd::BasicVector) {
-                    using Carrier = [:carrier:];
                     constexpr std::size_t width = static_cast<std::size_t>(Carrier::kSize.value);
                     return substitute(^^Backend::FixedSimdCPU, {reflect_constant(width)});
                 }
 
-                throw std::logic_error("GetBackend: unsupported type");
+                throw std::define_static_string(std::format(
+                    "Sora::Math::Meta::GetBackend: unsupported carrier type '{}'", display_string_of(carrier)));
             }
 
             static_assert(GetBackend<^^int>() == ^^Backend::ScalarCPU, "GetBackend must return a std::meta::info");
@@ -395,6 +520,7 @@ namespace Sora {
 
         namespace Traits {
 
+            /** @brief Backend type selected at compile time for carrier type @p P. */
             template<typename P>
             using BackendTypeOf = [:Meta::GetBackend<^^P>():];
 

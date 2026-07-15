@@ -289,8 +289,8 @@ namespace Sora {
 
         /** @brief Numeric scalar type (either integer-like or floating-point). */
         template<typename T>
-        concept NumericScalar =
-            std::floating_point<T> || (std::integral<T> && !std::same_as<std::remove_cv_t<T>, bool>);
+        concept NumericScalar = std::floating_point<std::decay_t<T>> ||
+                                (std::integral<std::decay_t<T>> && !std::same_as<std::decay_t<T>, bool>);
 
         /** @brief Arithmetic scalar type (either integer-like or floating-point). */
         template<typename T>

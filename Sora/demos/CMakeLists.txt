@@ -246,3 +246,5 @@ add_sora_demo(Kernel BaseObjectDemo)
 add_sora_demo(Kernel CommandRuntimeDemo)
 
 add_sora_demo(Core EventPortDemo)
+
+add_sora_demo(Math PrimaryFunctionsDemo)

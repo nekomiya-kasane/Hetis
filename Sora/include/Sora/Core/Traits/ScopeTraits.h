@@ -297,6 +297,18 @@ namespace Sora {
             return true;
         }();
 
+        /** @brief Class type whose non-static data members have different dealiased declared types. */
+        template<typename T>
+        concept HeterogeneousClass = std::is_class_v<T> && Traits::DataMembersCount<T> > 0 && !HomogeneousClass<T>;
+
+        /** @brief Class type whose non-static data members have different dealiased declared types. */
+        template<typename T>
+        concept StatefulClass = std::is_class_v<T> && Traits::DataMembersCount<T> > 0;
+
+        /** @brief Class type with no non-static data members. */
+        template<typename T>
+        concept StatelessClass = std::is_class_v<T> && Traits::DataMembersCount<T> == 0;
+
     } // namespace Meta
 
 } // namespace Sora
