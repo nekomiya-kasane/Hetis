@@ -468,7 +468,9 @@ struct std::formatter<T> {
             return it;
         }
 
+        bool modeSpecified = false;
         if (*it == 's' || *it == 'p' || *it == '?') {
+            modeSpecified = true;
             switch (*it) {
                 case 's':
                     mode = Sora::RenderMode::Styled;
@@ -502,8 +504,12 @@ struct std::formatter<T> {
             }
             ++it;
         }
-        if (attributes != tapioca::attr::none && mode != Sora::RenderMode::Styled) {
-            throw std::format_error("Sora display attribute flags require styled mode");
+        if (attributes != tapioca::attr::none) {
+            if (!modeSpecified) {
+                mode = Sora::RenderMode::Styled;
+            } else if (mode != Sora::RenderMode::Styled) {
+                throw std::format_error("Sora display attribute flags require styled mode");
+            }
         }
         return it;
     }

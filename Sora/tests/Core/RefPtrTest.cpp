@@ -143,10 +143,10 @@ TEST_CASE("RefPtr integrates with Sora Hash, ToString, and ToJson by address ide
     REQUIRE(text.find('(') != std::string::npos);
     REQUIRE(text.find(')') != std::string::npos);
 
-    const Sora::json emptyJson = Sora::ToJson(empty);
+    const Sora::Json emptyJson = Sora::ToJson(empty);
     REQUIRE(emptyJson.is_null());
 
-    const Sora::json pointerJson = Sora::ToJson(pointer);
+    const Sora::Json pointerJson = Sora::ToJson(pointer);
     REQUIRE(pointerJson.is_string());
     REQUIRE(!pointerJson.get<std::string>().empty());
 }

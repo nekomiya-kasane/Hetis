@@ -13,3 +13,10 @@ TEST_CASE("ASCII trim helpers remove only their designated boundaries", "[Sora.C
     STATIC_REQUIRE(Sora::Ascii::Trim("\t\r\n") == "");
     STATIC_REQUIRE(Sora::Ascii::Trim("unchanged") == "unchanged");
 }
+
+TEST_CASE("ASCII case-insensitive comparison provides a total lexical order", "[Sora.Core.StringUtils]") {
+    STATIC_REQUIRE(Sora::Ascii::CompareIgnoreCase("alpha", "ALPHA") == 0);
+    STATIC_REQUIRE(Sora::Ascii::CompareIgnoreCase("alpha", "BETA") < 0);
+    STATIC_REQUIRE(Sora::Ascii::CompareIgnoreCase("beta", "ALPHA") > 0);
+    STATIC_REQUIRE(Sora::Ascii::CompareIgnoreCase("alpha", "alphabet") < 0);
+}
