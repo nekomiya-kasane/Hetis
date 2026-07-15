@@ -271,6 +271,35 @@ namespace Sora {
         template<typename T>
         concept IntegerLike = std::integral<T> || std::is_enum_v<T>;
 
+        /** @brief Numeric scalar type (either integer-like or floating-point). */
+        template<typename T>
+        concept NumericScalar =
+            std::floating_point<T> || (std::integral<T> && !std::same_as<std::remove_cv_t<T>, bool>);
+
+        /** @brief Arithmetic scalar type (either integer-like or floating-point). */
+        template<typename T>
+        concept ArithmeticScalar = std::is_arithmetic_v<T> && !std::same_as<std::remove_cv_t<T>, bool>;
+
+        /** @brief Type that can be efficiently vectorized (arithmetic scalar of size <= 8 bytes). */
+        template<typename T>
+        concept Vectorizable = std::is_arithmetic_v<T> && !std::same_as<std::remove_cv_t<T>, bool> && sizeof(T) <= 8;
+
+        /** @brief Signed integer-like type. */
+        template<typename T>
+        concept SignedIntegerLike = IntegerLike<T> && std::is_signed_v<T>;
+
+        /** @brief Unsigned integer-like type. */
+        template<typename T>
+        concept UnsignedIntegerLike = IntegerLike<T> && std::is_unsigned_v<T>;
+
+        /** @brief Signed arithmetic type. */
+        template<typename T>
+        concept SignedArithmetic = ArithmeticScalar<T> && std::is_signed_v<T>;
+
+        /** @brief Unsigned arithmetic type. */
+        template<typename T>
+        concept UnsignedArithmetic = ArithmeticScalar<T> && std::is_unsigned_v<T>;
+
         /** @brief One-byte type that can be fed into byte-range hash helpers without reinterpret casts. */
         template<typename T>
         concept ByteLike = std::same_as<std::remove_cv_t<T>, std::byte> ||
