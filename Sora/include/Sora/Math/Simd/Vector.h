@@ -824,7 +824,7 @@ namespace Sora::Math::Simd {
             }
 #endif
             else if (n >= kStorageSize) [[unlikely]] {
-                v.Store(mem);
+                (void)v.Store(mem);
             } else if (n == 0) [[unlikely]] {
                 return;
             } else if constexpr (ConvertsTrivially<ValueType, Up>) {
@@ -1633,6 +1633,10 @@ namespace Sora::Math::Simd {
         static constexpr const BasicVector& Concat(const BasicVector& x0) noexcept {
             return x0;
         }
+
+        // By Nekomiya to suppress warnings
+        static constexpr const BasicVector& Concat(const BasicVector&& x0) noexcept = delete;
+        static constexpr const BasicVector& Concat(BasicVector&& x0) noexcept = delete;
 
         template<typename... As>
             requires(sizeof...(As) >= 2)

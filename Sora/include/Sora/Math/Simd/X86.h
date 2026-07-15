@@ -89,6 +89,7 @@ namespace Sora::Math::Simd {
                 return __builtin_ia32_pext_si(__builtin_bit_cast(unsigned int, x), 0x80808080u);
             }
 #endif
+            (void)1; // suppress warning
             return X86Movmsk(VecZeroPadTo16(x));
         } else if constexpr (sizeof(x) == 2) {
             auto bits = __builtin_bit_cast(unsigned short, x);
@@ -236,7 +237,7 @@ namespace Sora::Math::Simd {
         }
     }
 
-    enum class X86Cmp {
+    enum class X86Cmp : uint8_t {
         kEq = 0,
         kLt = 1,
         kLe = 2,

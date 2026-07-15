@@ -114,9 +114,7 @@ namespace Sora::Math::Simd {
                 !allowOutOfBounds || (staticSize != std::dynamic_extent && staticSize >= std::size_t(RV::kSize.value));
             if constexpr (RV::kSize() == 1) {
                 return mask[0] && (noSizeCheck || rgSize > 0) ? RV(LoadCtorTag(), ptr) : RV();
-            } else if constexpr (noSizeCheck) {
-                return RV::MaskedLoad(ptr, mask);
-            } else if (rgSize >= std::size_t(RV::kSize())) {
+            } else if constexpr (noSizeCheck || rgSize >= std::size_t(RV::kSize())) {
                 return RV::MaskedLoad(ptr, mask);
             } else if (rgSize > 0) {
                 return RV::MaskedLoad(ptr, mask && RV::MaskType::PartialMaskOfN(int(rgSize)));

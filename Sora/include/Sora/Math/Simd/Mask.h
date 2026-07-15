@@ -634,6 +634,10 @@ namespace Sora::Math::Simd {
             return x0;
         }
 
+        // By Nekomiya to suppress warnings
+        static constexpr const BasicMask& Concat(BasicMask&& x0) noexcept = delete;
+        static constexpr const BasicMask& Concat(const BasicMask&& x0) noexcept = delete;
+
         template<typename... As>
             requires(sizeof...(As) > 1)
         [[gnu::always_inline]]
@@ -1505,9 +1509,7 @@ namespace Sora::Math::Simd {
         [[gnu::always_inline]]
         constexpr ValueType operator[](SimdSizeType i) const {
             SORA_SIMD_PRECONDITION(i >= 0 && i < kStorageSize, "subscript is out of bounds");
-            if (IsConstKnown(i)) {
-                return i < kN0 ? data0[i] : data1[i - kN0];
-            } else if constexpr (data1.kHasBoolMember) {
+            if constexpr (data1.kHasBoolMember || IsConstKnown(i)) {
                 // in some cases the last element can be 'bool' instead of bit-/vector-Mask;
                 // e.g. Mask<short, 17> is {Mask<short, 16>, Mask<short, 1>}, where the latter uses
                 // Abi<1, 1>, which is stored as 'bool'
@@ -1755,9 +1757,8 @@ namespace Sora::Math::Simd {
                 return __builtin_popcount(ToUint());
             } else if constexpr (kStorageSize <= std::numeric_limits<unsigned long long>::digits) {
                 return __builtin_popcountll(ToUllong());
-            } else {
-                return data0.ReduceCount() + data1.ReduceCount();
             }
+            return data0.ReduceCount() + data1.ReduceCount();
         }
 
         [[gnu::always_inline]]

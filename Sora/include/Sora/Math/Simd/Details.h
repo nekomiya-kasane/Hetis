@@ -76,6 +76,7 @@ namespace Sora::Math::Simd {
         kCxCtgus = 0x20,      // ... or Store std::complex components contiguously (rrrr iiii)
                               // Mask elements are Store for one component    (0123)
         kCxVariants = kCxIleav | kCxCtgus,
+        _ = std::numeric_limits<uint64_t>::max()
     };
 
     /** @internal
@@ -585,9 +586,7 @@ namespace Sora::Math::Simd {
             return AbiT<16 / adjSizeof, 1>();
         }
         // no MMX: we can't emit EMMS where it would be necessary
-        else {
-            return AbiT<1, 1>();
-        }
+        return AbiT<1, 1>();
     }
 
 #else
