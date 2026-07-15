@@ -71,4 +71,22 @@ Constraint: `G:\Teaching\Vulkan\thirdparty\CMakeLists.txt` is read-only and must
 - [x] Every CMake-referenced directory and required sentinel file exists.
 - [x] `x64-asan` CMake regeneration succeeds without missing dependency/layout errors.
 - [x] Sora library and `Test.Sora.Core.DiagnosticsTest` build; 11 assertions in 3 cases pass under x64-asan.
-- [ ] Full project build succeeds.
+- [x] CMake File API identifies 45 compilable third-party library targets; one aggregate Ninja invocation builds all 45
+  successfully under `x64-asan`.
+- [x] All 67 artifacts declared by those targets exist and are non-empty.
+- [x] All 50 representative public-header and imported-SDK sentinel files exist and are non-empty.
+- [x] `thirdparty/CMakeLists.txt` remains byte-for-byte unchanged relative to the worktree baseline.
+- [-] Full project build is outside the final requested scope; only third-party completeness is required.
+
+## Final aggregate target set
+
+`assimp`, `astcenc-avx2-static`, `basisu_encoder`, `Catch2`, `Catch2WithMain`, `dfdutils`, `efsw`, `fastgltf`,
+`gklib`, `glad`, `glfw`, `icetea`, `imgui`, `imguizmo`, `implot`, `Jolt`, `ktx`, `ktx_read`, `meshoptimizer`,
+`metis`, `mikktspace`, `miniaudio`, `msdfgen-core`, `obj_basisu_cbind`, `objUtil`, `perfetto`, `spdlog`,
+`spirv-cross-c`, `spirv-cross-core`, `spirv-cross-cpp`, `spirv-cross-glsl`, `spirv-cross-hlsl`, `spirv-cross-msl`,
+`spirv-cross-reflect`, `spirv-cross-util`, `spirv-reflect`, `tapioca`, `tbb`, `tbbmalloc`, `tinyexr`,
+`tinyfiledialogs`, `tinyobjloader`, `vk-bootstrap`, `volk`, `zlibstatic`.
+
+Header-only targets and imported SDKs were validated separately because they intentionally have no compiler artifact.
+`VK_TP_BUILD_TRACY=OFF` is the declared default and exposes the intended `TracyClient` interface shim; Slang is an imported
+prebuilt SDK, while PhysX is intentionally exposed as headers only.
