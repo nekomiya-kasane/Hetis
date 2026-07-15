@@ -46,7 +46,8 @@ namespace Sora::PAL {
             }
             const std::unique_ptr<wchar_t, LocalMemoryDeleter> storage{buffer};
             std::wstring_view wide{storage.get(), size};
-            std::string message = Unicode::WideToUtf8(wide);
+            auto converted = Unicode::WideToUtf8<Unicode::InvalidSequencePolicy::Replace>(wide);
+            std::string message = std::move(*converted);
             message.resize(Ascii::TrimEnd(message).size());
             return message;
         }

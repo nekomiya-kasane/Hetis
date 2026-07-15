@@ -13,13 +13,11 @@
 
 #include "Sora/Core/ToString.h"
 #include "Sora/Core/Traits.h"
-#include "Sora/Core/Traits/AnnotationTraits.h"
-#include "Sora/Core/Traits/EnumTraits.h"
-#include "Sora/Core/Traits/TypeTraits.h"
 
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <meta>
@@ -82,30 +80,30 @@ namespace Sora {
             [[nodiscard]] constexpr tapioca::style operator[](StyledRole role) const noexcept {
                 using namespace tapioca;
                 switch (role) {
-                case StyledRole::Plain:
-                    return {};
-                case StyledRole::TypeName:
-                    return {.fg = colors::bright_cyan, .attrs = attr::bold};
-                case StyledRole::FieldName:
-                    return {.fg = colors::bright_blue};
-                case StyledRole::EnumName:
-                    return {.fg = colors::bright_magenta, .attrs = attr::bold};
-                case StyledRole::Number:
-                    return {.fg = colors::yellow};
-                case StyledRole::String:
-                    return {.fg = colors::green};
-                case StyledRole::Boolean:
-                    return {.fg = colors::magenta, .attrs = attr::bold};
-                case StyledRole::Null:
-                    return {.fg = colors::bright_black, .attrs = attr::dim | attr::italic};
-                case StyledRole::Punctuation:
-                    return {.fg = colors::bright_yellow};
-                case StyledRole::Address:
-                    return {.fg = colors::bright_black, .attrs = attr::dim};
-                case StyledRole::Escape:
-                    return {.fg = colors::bright_yellow, .attrs = attr::dim};
-                case StyledRole::Error:
-                    return {.fg = colors::bright_red, .attrs = attr::bold};
+                    case StyledRole::Plain:
+                        return {};
+                    case StyledRole::TypeName:
+                        return {.fg = colors::bright_cyan, .attrs = attr::bold};
+                    case StyledRole::FieldName:
+                        return {.fg = colors::bright_blue};
+                    case StyledRole::EnumName:
+                        return {.fg = colors::bright_magenta, .attrs = attr::bold};
+                    case StyledRole::Number:
+                        return {.fg = colors::yellow};
+                    case StyledRole::String:
+                        return {.fg = colors::green};
+                    case StyledRole::Boolean:
+                        return {.fg = colors::magenta, .attrs = attr::bold};
+                    case StyledRole::Null:
+                        return {.fg = colors::bright_black, .attrs = attr::dim | attr::italic};
+                    case StyledRole::Punctuation:
+                        return {.fg = colors::bright_yellow};
+                    case StyledRole::Address:
+                        return {.fg = colors::bright_black, .attrs = attr::dim};
+                    case StyledRole::Escape:
+                        return {.fg = colors::bright_yellow, .attrs = attr::dim};
+                    case StyledRole::Error:
+                        return {.fg = colors::bright_red, .attrs = attr::bold};
                 }
                 return {};
             }
@@ -124,6 +122,9 @@ namespace Sora {
 
             /** @brief Theme mapping semantic roles to tapioca styles. */
             StyledStringTheme theme{};
+
+            /** @brief Text attributes composited over every semantic style emitted by the builder. */
+            tapioca::attr attributes = tapioca::attr::none;
         };
 
         /** @brief Stateful builder for ANSI-rich strings generated through tapioca. */
@@ -147,29 +148,29 @@ namespace Sora {
                 }
                 for (unsigned char ch : text) {
                     switch (ch) {
-                    case '\\':
-                        AppendStyled(StyledRole::Escape, "\\\\");
-                        break;
-                    case '\n':
-                        AppendStyled(StyledRole::Escape, "\\n");
-                        break;
-                    case '\r':
-                        AppendStyled(StyledRole::Escape, "\\r");
-                        break;
-                    case '\t':
-                        AppendStyled(StyledRole::Escape, "\\t");
-                        break;
-                    case '\033':
-                        AppendHexEscape(ch);
-                        break;
-                    default:
-                        if (ch < 0x20 || ch == 0x7F) {
+                        case '\\':
+                            AppendStyled(StyledRole::Escape, "\\\\");
+                            break;
+                        case '\n':
+                            AppendStyled(StyledRole::Escape, "\\n");
+                            break;
+                        case '\r':
+                            AppendStyled(StyledRole::Escape, "\\r");
+                            break;
+                        case '\t':
+                            AppendStyled(StyledRole::Escape, "\\t");
+                            break;
+                        case '\033':
                             AppendHexEscape(ch);
-                        } else {
-                            char c = static_cast<char>(ch);
-                            AppendStyled(role, std::string_view{&c, 1});
-                        }
-                        break;
+                            break;
+                        default:
+                            if (ch < 0x20 || ch == 0x7F) {
+                                AppendHexEscape(ch);
+                            } else {
+                                char c = static_cast<char>(ch);
+                                AppendStyled(role, std::string_view{&c, 1});
+                            }
+                            break;
                     }
                 }
             }
@@ -196,7 +197,9 @@ namespace Sora {
         private:
             void AppendStyled(StyledRole role, std::string_view text) {
                 if (options_.color) {
-                    emitter_.transition(options_.theme[role], out_);
+                    auto style = options_.theme[role];
+                    style.attrs |= options_.attributes;
+                    emitter_.transition(style, out_);
                 }
                 out_.append(text);
             }
@@ -239,9 +242,6 @@ namespace Sora {
     /** @cond INTERNAL */
     namespace Detail {
 
-        template<typename T>
-        void ToStyledStringImpl(Styled::StyledStringBuilder& builder, T&& value);
-
         /** @name ADL hook detection @{ */
         namespace ADL {
 
@@ -277,11 +277,21 @@ namespace Sora {
             { Hook::ToStyledStringHook<T>::Render(builder, value) } -> std::same_as<void>;
         };
 
-        /** @brief Append @p value through @c std::to_string under numeric styling. */
+    } // namespace Detail
+    /** @endcond */
+
+    namespace Concept {
+
+        /** @brief Type explicitly customizing styled conversion through a hook, ADL, or member function. */
         template<typename T>
-        void AppendStdToString(Styled::StyledStringBuilder& builder, T&& value) {
-            builder.Text(Styled::StyledRole::Number, std::to_string(std::forward<T>(value)));
-        }
+        concept CustomStyledStringFormattable =
+            Detail::HasHookToStyledString<std::remove_cvref_t<T>> || Detail::ADL::FreeToStyledString::Available<T> ||
+            Detail::HasMemberToStyledString<T>;
+
+    } // namespace Concept
+
+    /** @cond INTERNAL */
+    namespace Detail {
 
         /** @brief Core dispatch from a value to styled terminal text. */
         template<typename T>
@@ -291,9 +301,9 @@ namespace Sora {
 
             if constexpr (HasHookToStyledString<U>) {
                 Hook::ToStyledStringHook<U>::Render(builder, value);
-            } else if constexpr (ADL::FreeToStyledString::Available<U>) {
+            } else if constexpr (ADL::FreeToStyledString::Available<T>) {
                 ADL::FreeToStyledString::Invoke(builder, std::forward<T>(value));
-            } else if constexpr (HasMemberToStyledString<U>) {
+            } else if constexpr (HasMemberToStyledString<T>) {
                 std::forward<T>(value).ToStyledString(builder);
             } else if constexpr (Concept::CustomStringFormattable<U>) {
                 builder.Text($$::StyledRole::Plain, ToString(std::forward<T>(value)));
@@ -304,10 +314,10 @@ namespace Sora {
             } else if constexpr (std::same_as<U, char>) {
                 char text[] = {value, '\0'};
                 builder.QuotedString(std::string_view{text, 1});
-            } else if constexpr (std::is_convertible_v<U, std::string_view>) {
-                builder.QuotedString(std::string_view{std::forward<T>(value)});
-            } else if constexpr (std::is_convertible_v<U, std::string>) {
-                builder.QuotedString(std::string{std::forward<T>(value)});
+            } else if constexpr (Concept::NarrowStringLike<T> || Concept::Utf8StringLike<T> ||
+                                 Concept::Utf16StringLike<T> || Concept::Utf32StringLike<T> ||
+                                 Concept::WideStringLike<T> || std::same_as<U, std::filesystem::path>) {
+                builder.QuotedString(ToString(std::forward<T>(value)));
             } else if constexpr (std::is_enum_v<U>) {
                 builder.Text($$::StyledRole::EnumName, Traits::EnumToString(value));
             } else if constexpr (std::ranges::range<U>) {
@@ -351,16 +361,17 @@ namespace Sora {
                     builder.Raw($$::StyledRole::Punctuation, "*(");
                     builder.Text($$::StyledRole::Null, "nullptr");
                     builder.Raw($$::StyledRole::Punctuation, ")");
-                } else {
+                } else if constexpr (std::is_object_v<std::remove_pointer_t<U>>) {
                     builder.Text($$::StyledRole::TypeName, Traits::TypeName<std::remove_pointer_t<U>>);
                     builder.Raw($$::StyledRole::Punctuation, "*(");
                     builder.Text($$::StyledRole::Address, std::format("{:p}", static_cast<const void*>(value)));
                     builder.Raw($$::StyledRole::Punctuation, ")");
+                } else {
+                    builder.Text($$::StyledRole::TypeName, Traits::TypeName<std::remove_pointer_t<U>>);
+                    builder.Raw($$::StyledRole::Punctuation, "*(function)");
                 }
             } else if constexpr (std::is_arithmetic_v<U>) {
                 builder.Text($$::StyledRole::Number, std::format("{}", value));
-            } else if constexpr (requires(T&& v) { std::to_string(std::forward<T>(v)); }) {
-                AppendStdToString(builder, std::forward<T>(value));
             } else if constexpr (!Concept::AutoDisplayable<U> &&
                                  requires(std::ostream& os, T&& v) { os << std::forward<T>(v); }) {
                 std::stringstream ss;
@@ -397,17 +408,24 @@ namespace Sora {
                 }
 
                 builder.Raw($$::StyledRole::Punctuation, "}");
-            } else {
+            } else if constexpr (std::is_object_v<U>) {
                 builder.Raw($$::StyledRole::Punctuation, "<");
                 builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
                 builder.Raw($$::StyledRole::Plain, " at ");
                 builder.Text($$::StyledRole::Address,
                              std::format("{:p}", static_cast<const void*>(std::addressof(value))));
                 builder.Raw($$::StyledRole::Punctuation, ">");
+            } else {
+                builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
             }
         }
 
-        /** @brief CPO functor that implements @c ToStyledString(value). */
+    } // namespace Detail
+    /** @endcond */
+
+    namespace CPO {
+
+        /** @brief Function object implementing the @ref Sora::ToStyledString customization point. */
         struct ToStyledStringFn {
             /** @brief Convert @p value to a styled string with default options. */
             template<typename T>
@@ -419,16 +437,15 @@ namespace Sora {
             template<typename T>
             [[nodiscard]] std::string operator()(T&& value, Styled::StyledStringOptions options) const {
                 Styled::StyledStringBuilder builder{options};
-                ToStyledStringImpl(builder, std::forward<T>(value));
+                Detail::ToStyledStringImpl(builder, std::forward<T>(value));
                 return std::move(builder).Finish();
             }
         };
 
-    } // namespace Detail
-    /** @endcond */
+    } // namespace CPO
 
     /** @brief Customisation-point object that converts a supported value to tapioca-styled terminal text. */
-    inline constexpr Detail::ToStyledStringFn ToStyledString{};
+    inline constexpr CPO::ToStyledStringFn ToStyledString{};
 
 } // namespace Sora
 
@@ -436,47 +453,70 @@ namespace Sora {
  * @brief Auto-specialise @c std::formatter for Sora-displayable types.
  *
  * @details Empty format specifiers use @ref Sora::kDefaultRenderMode. @c {:s} forces @ref Sora::ToStyledString,
- * @c {:p} forces @ref Sora::ToString, and @c {:?} emits a shallow placeholder.
+ * @c {:p} forces @ref Sora::ToString, and @c {:?} emits a shallow placeholder. Styled mode additionally accepts the
+ * composable flags @c h (highlight/bold), @c i (italic), @c u (underline), and @c r (reverse), for example @c {:shiu}.
  */
 template<typename T>
     requires Sora::Concept::AutoDisplayable<T>
 struct std::formatter<T> {
     Sora::RenderMode mode = Sora::kDefaultRenderMode;
+    tapioca::attr attributes = tapioca::attr::none;
 
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it == ctx.end() || *it == '}') {
             return it;
         }
-        switch (*it) {
-        case 's':
-            mode = Sora::RenderMode::Styled;
-            break;
-        case 'p':
-            mode = Sora::RenderMode::Plain;
-            break;
-        case '?':
-            mode = Sora::RenderMode::Placeholder;
-            break;
-        default:
-            throw std::format_error("invalid Sora display format specifier");
+
+        if (*it == 's' || *it == 'p' || *it == '?') {
+            switch (*it) {
+                case 's':
+                    mode = Sora::RenderMode::Styled;
+                    break;
+                case 'p':
+                    mode = Sora::RenderMode::Plain;
+                    break;
+                case '?':
+                    mode = Sora::RenderMode::Placeholder;
+                    break;
+            }
+            ++it;
         }
-        ++it;
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid Sora display format specifier");
+
+        while (it != ctx.end() && *it != '}') {
+            switch (*it) {
+                case 'h':
+                    attributes |= tapioca::attr::bold;
+                    break;
+                case 'i':
+                    attributes |= tapioca::attr::italic;
+                    break;
+                case 'u':
+                    attributes |= tapioca::attr::underline;
+                    break;
+                case 'r':
+                    attributes |= tapioca::attr::reverse;
+                    break;
+                default:
+                    throw std::format_error("invalid Sora display attribute flag");
+            }
+            ++it;
+        }
+        if (attributes != tapioca::attr::none && mode != Sora::RenderMode::Styled) {
+            throw std::format_error("Sora display attribute flags require styled mode");
         }
         return it;
     }
 
     auto format(const T& value, std::format_context& ctx) const {
         switch (mode) {
-        case Sora::RenderMode::Plain:
-            return std::format_to(ctx.out(), "{}", Sora::ToString(value));
-        case Sora::RenderMode::Styled:
-            return std::format_to(ctx.out(), "{}", Sora::ToStyledString(value));
-        case Sora::RenderMode::Placeholder:
-            return std::format_to(ctx.out(), "<{} at {:p}>", Sora::Traits::TypeName<T>,
-                                  static_cast<const void*>(std::addressof(value)));
+            case Sora::RenderMode::Plain:
+                return std::format_to(ctx.out(), "{}", Sora::ToString(value));
+            case Sora::RenderMode::Styled:
+                return std::format_to(ctx.out(), "{}", Sora::ToStyledString(value, {.attributes = attributes}));
+            case Sora::RenderMode::Placeholder:
+                return std::format_to(ctx.out(), "<{} at {:p}>", Sora::Traits::TypeName<T>,
+                                      static_cast<const void*>(std::addressof(value)));
         }
         return std::format_to(ctx.out(), "<{} at {:p}>", Sora::Traits::TypeName<T>,
                               static_cast<const void*>(std::addressof(value)));
@@ -490,12 +530,12 @@ template<typename T>
     requires Sora::Concept::AutoDisplayable<T>
 std::ostream& operator<<(std::ostream& os, const T& value) {
     switch (Sora::kDefaultRenderMode) {
-    case Sora::RenderMode::Plain:
-        return os << Sora::ToString(value);
-    case Sora::RenderMode::Styled:
-        return os << Sora::ToStyledString(value);
-    default:
-        return os << std::format("<{} at {:p}>", Sora::Traits::TypeName<T>,
-                                 static_cast<const void*>(std::addressof(value)));
+        case Sora::RenderMode::Plain:
+            return os << Sora::ToString(value);
+        case Sora::RenderMode::Styled:
+            return os << Sora::ToStyledString(value);
+        default:
+            return os << std::format("<{} at {:p}>", Sora::Traits::TypeName<T>,
+                                     static_cast<const void*>(std::addressof(value)));
     }
 }

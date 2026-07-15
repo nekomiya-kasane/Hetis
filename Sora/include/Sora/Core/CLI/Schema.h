@@ -7,7 +7,6 @@
  */
 
 #include <array>
-#include <charconv>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +22,7 @@
 #include <Sora/Core/ADT/FixedCapacityVector.h>
 #include <Sora/Core/CLI/Descriptions.h>
 #include <Sora/Core/StringUtils.h>
+#include <Sora/Core/ToString.h>
 #include <Sora/Core/Traits/AnnotationTraits.h>
 #include <Sora/Core/Traits/EnumTraits.h>
 #include <Sora/Core/Traits/ScopeTraits.h>
@@ -122,13 +122,7 @@ namespace Sora::CLI {
         concept StringField = std::same_as<T, std::string_view> || std::same_as<T, std::string>;
 
         template<typename T>
-        concept CustomField = requires(T& value, std::string_view text) {
-            { ParseValue(value, text) } noexcept -> std::same_as<bool>;
-        };
-
-        template<typename T>
-        concept ScalarField = CustomField<T> || StringField<T> || (std::integral<T> && !std::same_as<T, bool>) ||
-                              std::floating_point<T> || std::is_enum_v<T> || std::same_as<T, bool>;
+        concept ScalarField = Concept::StringDeserializable<T>;
 
         template<typename T>
         concept VectorField = requires(T value, typename T::value_type item) {
@@ -137,7 +131,7 @@ namespace Sora::CLI {
         } && ScalarField<typename T::value_type>;
 
         template<typename T>
-        concept ParseableField = ScalarField<T> || VectorField<T>;
+        concept DeserializableField = ScalarField<T> || VectorField<T>;
 
         template<typename T>
         concept SwitchField = std::same_as<T, bool> || (std::integral<T> && !std::same_as<T, bool>);
@@ -203,64 +197,15 @@ namespace Sora::CLI {
 
         template<typename T>
         [[nodiscard]] constexpr bool ParseScalar(T& out, std::string_view text) noexcept {
-            if constexpr (CustomField<T>) {
-                return ParseValue(out, text);
-            } else if constexpr (std::same_as<T, std::string_view>) {
-                out = text;
-                return true;
-            } else if constexpr (std::same_as<T, std::string>) {
-                try {
-                    out.assign(text);
-                    return true;
-                } catch (...) {
+            try {
+                auto decoded = Sora::FromString(std::in_place_type<T>, text);
+                if (!decoded) {
                     return false;
                 }
-            } else if constexpr (std::same_as<T, bool>) {
-                if (text == "1" || Sora::Ascii::EqualsIgnoreCase(text, "true") ||
-                    Sora::Ascii::EqualsIgnoreCase(text, "yes") || Sora::Ascii::EqualsIgnoreCase(text, "on")) {
-                    out = true;
-                    return true;
-                }
-                if (text == "0" || Sora::Ascii::EqualsIgnoreCase(text, "false") ||
-                    Sora::Ascii::EqualsIgnoreCase(text, "no") || Sora::Ascii::EqualsIgnoreCase(text, "off")) {
-                    out = false;
-                    return true;
-                }
+                out = std::move(*decoded);
+                return true;
+            } catch (...) {
                 return false;
-            } else if constexpr (std::integral<T>) {
-                T value{};
-                const char* first = text.data();
-                const char* last = text.data() + text.size();
-                const auto [ptr, ec] = std::from_chars(first, last, value);
-                if (ec != std::errc{} || ptr != last) {
-                    return false;
-                }
-                out = value;
-                return true;
-            } else if constexpr (std::floating_point<T>) {
-                T value{};
-                const char* first = text.data();
-                const char* last = text.data() + text.size();
-                const auto [ptr, ec] = std::from_chars(first, last, value);
-                if (ec != std::errc{} || ptr != last) {
-                    return false;
-                }
-                out = value;
-                return true;
-            } else if constexpr (std::is_enum_v<T>) {
-                if (auto value = Sora::Meta::EnumCast<T>(text); value.has_value()) {
-                    out = *value;
-                    return true;
-                }
-                using Raw = std::underlying_type_t<T>;
-                Raw raw{};
-                if (!ParseScalar(raw, text)) {
-                    return false;
-                }
-                out = static_cast<T>(raw);
-                return true;
-            } else {
-                static_assert(Sora::kDependentFalse<T>, "Unsupported Sora CLI scalar field type.");
             }
         }
 
@@ -416,8 +361,8 @@ namespace Sora::CLI {
         consteval void ValidateOptionField(OptionKind kind) {
             using RawFieldType = typename [:std::meta::type_of(Member):];
             using FieldType = std::remove_cvref_t<RawFieldType>;
-            if constexpr (!ParseableField<FieldType>) {
-                throw "Sora CLI option field type is not parseable.";
+            if constexpr (!DeserializableField<FieldType>) {
+                throw "Sora CLI option field type is not string-deserializable.";
             }
             if (kind == OptionKind::Switch) {
                 if constexpr (!SwitchField<FieldType>) {
@@ -521,8 +466,8 @@ namespace Sora::CLI {
                     }
                     using RawFieldType = typename [:std::meta::type_of(member):];
                     using FieldType = std::remove_cvref_t<RawFieldType>;
-                    if constexpr (!ParseableField<FieldType>) {
-                        throw "Sora CLI operand field type is not parseable.";
+                    if constexpr (!DeserializableField<FieldType>) {
+                        throw "Sora CLI operand field type is not string-deserializable.";
                     }
                     if constexpr (!VectorField<FieldType>) {
                         if (annotation.cardinality == ValueCardinality::ZeroOrMore ||

@@ -12,23 +12,16 @@
 
 #include <Sora/Core/ToString.h>
 #include <Sora/Core/Traits.h>
-#include <Sora/Core/Traits/AnnotationTraits.h>
-#include <Sora/Core/Traits/EnumTraits.h>
-#include <Sora/Core/Traits/TypeTraits.h>
 
 #include <nlohmann/json.hpp>
 
-#include <algorithm>
-#include <bit>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <meta>
-#include <optional>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -40,10 +33,10 @@
 namespace Sora {
 
     /** @brief The JSON value type used by Sora. */
-    using json = nlohmann::json;
+    using Json = nlohmann::json;
 
     /** @brief Insertion-order-preserving JSON value type used for golden-file output. */
-    using ordered_json = nlohmann::ordered_json;
+    using OrderedJson = nlohmann::ordered_json;
 
     namespace $::Serialization {
 
@@ -52,12 +45,7 @@ namespace Sora {
             constexpr bool operator==(const Key&) const = default;
         };
 
-        /** @brief JSON parse policy: a missing key keeps the member's current or value-initialized value. */
-        struct Optional {
-            constexpr bool operator==(const Optional&) const = default;
-        };
-
-        /** @brief JSON parse policy: a missing key is an error. */
+        /** @brief JSON deserialization policy: a missing key is an error instead of preserving the current value. */
         struct Required {
             constexpr bool operator==(const Required&) const = default;
         };
@@ -97,8 +85,8 @@ namespace Sora {
          * @brief Open customisation point for @ref ToJson and @ref FromJson.
          *
          * @details Specialise this hook when a type needs a JSON representation that cannot be derived structurally.
-         * A specialisation provides @c static @c json @c ToJson(const @c T&) and may also provide
-         * @c static @c void @c FromJson(const @c json&, @c T&). The primary template is intentionally undefined.
+         * A specialisation provides @c static @c Json @c ToJson(const @c T&) and may also provide
+         * @c static @c void @c FromJson(const @c Json&, @c T&). The primary template is intentionally undefined.
          *
          * @tparam T Cv-unqualified type to customise.
          */
@@ -107,179 +95,212 @@ namespace Sora {
 
     } // namespace Hook
 
-    namespace Json {
+    namespace Meta {
 
-        namespace Detail {
+        /** @brief Return whether reflected @p type is a @c std::chrono::duration specialization. */
+        consteval bool IsChronoDuration(std::meta::info type) {
+            type = std::meta::dealias(std::meta::remove_cvref(type));
+            return std::meta::is_class_type(type) && std::meta::has_template_arguments(type) &&
+                   std::meta::template_of(type) == ^^std::chrono::duration;
+        }
+
+        /** @brief Return whether reflected @p type is a @c std::chrono::time_point specialization. */
+        consteval bool IsChronoTimePoint(std::meta::info type) {
+            type = std::meta::dealias(std::meta::remove_cvref(type));
+            return std::meta::is_class_type(type) && std::meta::has_template_arguments(type) &&
+                   std::meta::template_of(type) == ^^std::chrono::time_point;
+        }
+
+        /** @brief Return JSON field order for reflected @p member. */
+        consteval int JsonMemberOrderOf(std::meta::info member) {
+            if ($::Has<$::Serialization::Order>(member)) {
+                return $::GetSingle<$::Serialization::Order>(member).priority;
+            }
+            return 0;
+        }
+
+        /** @brief Return JSON-participating data members after ignore/key filtering and order sorting. */
+        template<typename T>
+        consteval auto JsonSerializableMembersOf() {
+            std::vector<std::meta::info> selected;
+            bool whitelist = false;
+            template for (constexpr auto member : Sora::Traits::DataMembers<T>) {
+                if constexpr ($::Has<$::Serialization::Key>(member)) {
+                    whitelist = true;
+                }
+            }
+            template for (constexpr auto member : Sora::Traits::DataMembers<T>) {
+                if constexpr (!$::Has<$::Serialization::Ignore>(member)) {
+                    if (!whitelist || $::Has<$::Serialization::Key>(member)) {
+                        selected.push_back(member);
+                    }
+                }
+            }
+            for (std::size_t i = 1; i < selected.size(); ++i) {
+                auto current = selected[i];
+                std::size_t j = i;
+                while (j > 0 && JsonMemberOrderOf(selected[j - 1]) > JsonMemberOrderOf(current)) {
+                    selected[j] = selected[j - 1];
+                    --j;
+                }
+                selected[j] = current;
+            }
+            return std::define_static_array(selected);
+        }
+
+        /** @brief Return whether type @p T emits default-valued fields unless a member overrides it. */
+        template<typename T>
+        consteval bool JsonTypeEmitsDefaults() {
+            return $::Has<$::Serialization::EmitDefault>(^^T) ? $::GetSingle<$::Serialization::EmitDefault>(^^T).emit
+                                                              : true;
+        }
+
+    } // namespace Meta
+
+    /** @cond INTERNAL */
+    namespace Detail::Json {
+
+        template<typename T>
+        [[nodiscard]] Sora::Json ToJsonImpl(T&& value);
+
+        template<typename T>
+        void FromJsonImpl(const Sora::Json& input, T& output);
+
+        namespace ADL {
+
+            /** @brief Poison pill for unqualified JSON emission lookup. */
+            void ToJson() = delete;
+
+            /** @brief Poison pill for unqualified JSON parse lookup. */
+            void FromJson() = delete;
 
             template<typename T>
-            [[nodiscard]] json ToJsonImpl(T&& value);
-
-            template<typename T>
-            void FromJsonImpl(const json& input, T& output);
-
-            template<typename T>
-            inline constexpr bool IsChronoDuration = false;
-
-            template<typename Rep, typename Period>
-            inline constexpr bool IsChronoDuration<std::chrono::duration<Rep, Period>> = true;
-
-            template<typename T>
-            concept ChronoDuration = IsChronoDuration<std::remove_cvref_t<T>>;
-
-            template<typename T>
-            inline constexpr bool IsChronoTimePoint = false;
-
-            template<typename Clock, typename Duration>
-            inline constexpr bool IsChronoTimePoint<std::chrono::time_point<Clock, Duration>> = true;
-
-            template<typename T>
-            concept ChronoTimePoint = IsChronoTimePoint<std::remove_cvref_t<T>>;
-
-            template<typename T>
-            concept StringKeyedAssociative =
-                std::ranges::range<T> && requires(std::ranges::range_reference_t<T> entry) {
-                    entry.first;
-                    entry.second;
-                    std::string_view(entry.first);
-                };
-
-            template<typename T>
-            concept ReflectableClass =
-                std::is_class_v<std::remove_cvref_t<T>> && !std::is_union_v<std::remove_cvref_t<T>> &&
-                !std::same_as<std::remove_cvref_t<T>, std::filesystem::path> && !Sora::Concept::StringLike<T> &&
-                !ChronoDuration<T> && !ChronoTimePoint<T> && !Sora::Concept::OptionalLike<T> &&
-                !Concept::VariantLikeClass<std::remove_cvref_t<T>> &&
-                !Concept::TupleLikeClass<std::remove_cvref_t<T>> && !std::ranges::range<T>;
-
-            namespace ADL {
-
-                /** @brief Poison pill for unqualified JSON emission lookup. */
-                void ToJson() = delete;
-
-                /** @brief Poison pill for unqualified JSON parse lookup. */
-                void FromJson() = delete;
-
-                template<typename T>
-                concept HasFreeToJson = requires(T&& value) {
-                    { ToJson(std::forward<T>(value)) } -> std::convertible_to<json>;
-                };
-
-                template<typename T>
-                concept HasFreeFromJson = requires(const json& input, T& output) { FromJson(input, output); };
-
-            } // namespace ADL
-
-            template<typename T>
-            concept HasMemberToJson = requires(const T& value) {
-                { value.ToJson() } -> std::convertible_to<json>;
+            concept HasFreeToJson = requires(T&& value) {
+                { ToJson(std::forward<T>(value)) } -> std::convertible_to<Sora::Json>;
             };
 
             template<typename T>
-            concept HasMemberFromJson = requires(const json& input) {
-                { T::FromJson(input) } -> std::convertible_to<T>;
+            concept HasFreeFromJson = requires(const Sora::Json& input, T& output) {
+                { FromJson(input, output) } -> std::same_as<void>;
             };
 
-            template<typename T>
-            concept HasHookToJson = requires(const T& value) {
-                { Hook::ToJsonHook<T>::ToJson(value) } -> std::convertible_to<json>;
+        } // namespace ADL
+
+        template<typename T>
+        concept HasMemberToJson = requires(const T& value) {
+            { value.ToJson() } -> std::convertible_to<Sora::Json>;
+        };
+
+        template<typename T>
+        concept HasMemberFromJson = requires(const Sora::Json& input) {
+            { T::FromJson(input) } -> std::convertible_to<T>;
+        };
+
+        template<typename T>
+        concept HasHookToJson = requires(const T& value) {
+            { Hook::ToJsonHook<T>::ToJson(value) } -> std::convertible_to<Sora::Json>;
+        };
+
+        template<typename T>
+        concept HasHookFromJson = requires(const Sora::Json& input, T& output) {
+            { Hook::ToJsonHook<T>::FromJson(input, output) } -> std::same_as<void>;
+        };
+
+    } // namespace Detail::Json
+    /** @endcond */
+
+    namespace Concept {
+
+        /** @brief Type representing a duration through @c std::chrono::duration. */
+        template<typename T>
+        concept ChronoDuration = Meta::IsChronoDuration(^^std::remove_cvref_t<T>);
+
+        /** @brief Type representing a time point through @c std::chrono::time_point. */
+        template<typename T>
+        concept ChronoTimePoint = Meta::IsChronoTimePoint(^^std::remove_cvref_t<T>);
+
+        /** @brief Range of JSON key-value entries whose keys are convertible to @c std::string_view. */
+        template<typename T>
+        concept JsonStringKeyedAssociative =
+            std::ranges::range<T> && requires(std::ranges::range_reference_t<T> entry) {
+                entry.first;
+                entry.second;
+                std::string_view(entry.first);
             };
 
-            template<typename T>
-            concept HasHookFromJson =
-                requires(const json& input, T& output) { Hook::ToJsonHook<T>::FromJson(input, output); };
+        /** @brief Complete class represented structurally as a JSON object by C++26 reflection. */
+        template<typename T>
+        concept JsonReflectableClass =
+            std::is_class_v<std::remove_cvref_t<T>> && !std::is_union_v<std::remove_cvref_t<T>> &&
+            !std::same_as<std::remove_cvref_t<T>, std::filesystem::path> && !StringLike<T> && !ChronoDuration<T> &&
+            !ChronoTimePoint<T> && !OptionalLike<T> && !VariantLikeClass<std::remove_cvref_t<T>> &&
+            !TupleLikeClass<std::remove_cvref_t<T>> && !std::ranges::range<T>;
 
-            template<typename T>
-            concept HasNlohmannToJson = requires(json& output, const T& value) { ::nlohmann::to_json(output, value); };
+        /** @brief Type with a directly callable nlohmann @c to_json customization. */
+        template<typename T>
+        concept NlohmannJsonSerializable = requires(const std::remove_cvref_t<T>& value) { Sora::Json(value); };
 
-            template<typename T>
-            concept HasNlohmannFromJson =
-                requires(const json& input, T& output) { ::nlohmann::from_json(input, output); };
+        /** @brief Type with a directly callable nlohmann @c from_json customization. */
+        template<typename T>
+        concept NlohmannJsonDeserializable = requires(const Sora::Json& input, std::remove_cvref_t<T>& output) {
+            { input.get_to(output) } -> std::same_as<std::remove_cvref_t<T>&>;
+        };
 
-            /** @brief Return JSON field order for reflected @p member. */
-            consteval int OrderOf(std::meta::info member) {
-                if ($::Has<$::Serialization::Order>(member)) {
-                    return $::GetSingle<$::Serialization::Order>(member).priority;
-                }
-                return 0;
-            }
+        /** @brief Type explicitly customizing JSON serialization through a hook, ADL, or member function. */
+        template<typename T>
+        concept JsonCustomSerializable =
+            Detail::Json::HasHookToJson<std::remove_cvref_t<T>> || Detail::Json::ADL::HasFreeToJson<T> ||
+            Detail::Json::HasMemberToJson<std::remove_cvref_t<T>>;
 
-            /** @brief Return JSON-participating data members after ignore/key filtering and order sorting. */
-            template<typename T>
-            consteval auto JsonMembers() {
-                std::vector<std::meta::info> selected;
-                bool whitelist = false;
-                template for (constexpr auto m : Traits::DataMembers<T>) {
-                    if constexpr ($::Has<$::Serialization::Key>(m)) {
-                        whitelist = true;
-                    }
-                }
-                template for (constexpr auto m : Traits::DataMembers<T>) {
-                    if constexpr (!$::Has<$::Serialization::Ignore>(m)) {
-                        if (!whitelist || $::Has<$::Serialization::Key>(m)) {
-                            selected.push_back(m);
-                        }
-                    }
-                }
-                for (std::size_t i = 1; i < selected.size(); ++i) {
-                    auto current = selected[i];
-                    std::size_t j = i;
-                    while (j > 0 && OrderOf(selected[j - 1]) > OrderOf(current)) {
-                        selected[j] = selected[j - 1];
-                        --j;
-                    }
-                    selected[j] = current;
-                }
-                return std::define_static_array(selected);
-            }
+        /** @brief Type explicitly customizing JSON deserialization through a hook, ADL, or static member. */
+        template<typename T>
+        concept JsonCustomDeserializable = Detail::Json::HasHookFromJson<std::remove_cvref_t<T>> ||
+                                           Detail::Json::ADL::HasFreeFromJson<std::remove_cvref_t<T>> ||
+                                           Detail::Json::HasMemberFromJson<std::remove_cvref_t<T>>;
 
-            /** @brief Return whether type @p T emits default-valued fields unless a member overrides it. */
-            template<typename T>
-            consteval bool TypeEmitsDefaults() {
-                return $::Has<$::Serialization::EmitDefault>(^^T)
-                           ? $::GetSingle<$::Serialization::EmitDefault>(^^T).emit
-                           : true;
-            }
+    } // namespace Concept
 
-        } // namespace Detail
+    /** @cond INTERNAL */
+    namespace Detail::Json {
 
         /** @brief Convert enum @p value to reflected-name JSON without consulting integer policy annotations. */
         template<typename E>
-        [[nodiscard]] json EnumToNameJson(E value) {
+        [[nodiscard]] Sora::Json EnumToNameJson(E value) {
             using U = std::underlying_type_t<E>;
-            if constexpr (Concept::BitfieldEnum<E>) {
+            if constexpr (Sora::Concept::BitfieldEnum<E>) {
                 auto remaining = static_cast<U>(value);
                 std::string out;
-                template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
+                template for (constexpr auto e : Sora::Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
                     constexpr auto flag = static_cast<U>([:e:]);
                     if constexpr (flag != U{0}) {
                         if ((remaining & flag) == flag) {
                             if (!out.empty()) {
                                 out += '|';
                             }
-                            out += Meta::IdentifierOf(e);
+                            out += Sora::Meta::IdentifierOf(e);
                             remaining &= static_cast<U>(~flag);
                         }
                     }
                 }
-                return json(out.empty() ? "0" : out);
+                return Sora::Json(out.empty() ? "0" : out);
             } else {
-                template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
+                template for (constexpr auto e : Sora::Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
                     if ([:e:] == value) {
-                        return json(std::string(Meta::IdentifierOf(e)));
+                        return Sora::Json(std::string(Sora::Meta::IdentifierOf(e)));
                     }
                 }
-                return json(static_cast<U>(value));
+                return Sora::Json(static_cast<U>(value));
             }
         }
 
         /** @brief Convert enum @p value to JSON according to enum annotations. */
         template<typename E>
-        [[nodiscard]] json EnumToJson(E value) {
+        [[nodiscard]] Sora::Json EnumToJson(E value) {
             static_assert(!($::Has<$::Serialization::AsInt>(^^E) && $::Has<$::Serialization::AsString>(^^E)),
                           "Enum JSON policy cannot be both AsInt and AsString");
             using U = std::underlying_type_t<E>;
             if constexpr ($::Has<$::Serialization::AsInt>(^^E)) {
-                return json(static_cast<U>(value));
+                return Sora::Json(static_cast<U>(value));
             } else {
                 return EnumToNameJson(value);
             }
@@ -287,7 +308,7 @@ namespace Sora {
 
         /** @brief Parse enum @p output from a JSON string or integer. */
         template<typename E>
-        void EnumFromJson(const json& input, E& output) {
+        void EnumFromJson(const Sora::Json& input, E& output) {
             using U = std::underlying_type_t<E>;
             if (input.is_number_integer()) {
                 output = static_cast<E>(input.template get<U>());
@@ -299,7 +320,7 @@ namespace Sora {
 
             std::string text = input.template get<std::string>();
             std::string_view sv{text};
-            if constexpr (Concept::BitfieldEnum<E>) {
+            if constexpr (Sora::Concept::BitfieldEnum<E>) {
                 U acc{};
                 std::size_t pos = 0;
                 while (pos <= sv.size()) {
@@ -307,17 +328,11 @@ namespace Sora {
                     if (bar == std::string_view::npos) {
                         bar = sv.size();
                     }
-                    auto token = sv.substr(pos, bar - pos);
-                    while (!token.empty() && token.front() == ' ') {
-                        token.remove_prefix(1);
-                    }
-                    while (!token.empty() && token.back() == ' ') {
-                        token.remove_suffix(1);
-                    }
+                    auto token = Ascii::Trim(sv.substr(pos, bar - pos));
                     if (!token.empty() && token != "0") {
                         bool matched = false;
-                        template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
-                            if (!matched && token == Meta::IdentifierOf(e)) {
+                        template for (constexpr auto e : Sora::Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
+                            if (!matched && token == Sora::Meta::IdentifierOf(e)) {
                                 acc |= static_cast<U>([:e:]);
                                 matched = true;
                             }
@@ -332,8 +347,8 @@ namespace Sora {
                 output = static_cast<E>(acc);
             } else {
                 bool matched = false;
-                template for (constexpr auto e : Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
-                    if (!matched && sv == Meta::IdentifierOf(e)) {
+                template for (constexpr auto e : Sora::Meta::EnumeratorsOf(std::meta::dealias(^^E))) {
+                    if (!matched && sv == Sora::Meta::IdentifierOf(e)) {
                         output = [:e:];
                         matched = true;
                     }
@@ -347,27 +362,27 @@ namespace Sora {
 
         /** @brief Convert reflectable class @p value to a JSON object. */
         template<typename T>
-        [[nodiscard]] json ClassToJson(const T& value) {
-            json object = json::object();
-            template for (constexpr auto m : Detail::JsonMembers<T>()) {
+        [[nodiscard]] Sora::Json ClassToJson(const T& value) {
+            Sora::Json object = Sora::Json::object();
+            template for (constexpr auto m : Meta::JsonSerializableMembersOf<T>()) {
                 using Member = typename [:std::meta::type_of(m):];
                 const auto& field = value.[:m:];
 
                 if constexpr ($::Has<$::Serialization::Flatten>(m)) {
-                    json sub = Detail::ToJsonImpl(field);
+                    Sora::Json sub = ToJsonImpl(field);
                     if (sub.is_object()) {
                         for (auto it = sub.begin(); it != sub.end(); ++it) {
                             object[it.key()] = std::move(it.value());
                         }
                     } else {
-                        object[std::string(Meta::SerializationFieldNameOf<m>())] = std::move(sub);
+                        object[std::string(Sora::Meta::SerializationFieldNameOf<m>())] = std::move(sub);
                     }
                 } else {
                     constexpr bool memberEmitDefault = [] consteval {
                         if constexpr ($::Has<$::Serialization::EmitDefault>(m)) {
                             return $::GetSingle<$::Serialization::EmitDefault>(m).emit;
                         } else {
-                            return Detail::TypeEmitsDefaults<T>();
+                            return Meta::JsonTypeEmitsDefaults<T>();
                         }
                     }();
                     if constexpr (!memberEmitDefault && std::equality_comparable<Member>) {
@@ -378,12 +393,12 @@ namespace Sora {
                     if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsInt>(m)) {
                         static_assert(!$::Has<$::Serialization::AsString>(m),
                                       "Enum member JSON policy cannot be both AsInt and AsString");
-                        object[std::string(Meta::SerializationFieldNameOf<m>())] =
+                        object[std::string(Sora::Meta::SerializationFieldNameOf<m>())] =
                             static_cast<std::underlying_type_t<Member>>(field);
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsString>(m)) {
-                        object[std::string(Meta::SerializationFieldNameOf<m>())] = EnumToNameJson(field);
+                        object[std::string(Sora::Meta::SerializationFieldNameOf<m>())] = EnumToNameJson(field);
                     } else {
-                        object[std::string(Meta::SerializationFieldNameOf<m>())] = Detail::ToJsonImpl(field);
+                        object[std::string(Sora::Meta::SerializationFieldNameOf<m>())] = ToJsonImpl(field);
                     }
                 }
             }
@@ -392,18 +407,18 @@ namespace Sora {
 
         /** @brief Parse reflectable class @p output from JSON object @p input. */
         template<typename T>
-        void ClassFromJson(const json& input, T& output) {
+        void ClassFromJson(const Sora::Json& input, T& output) {
             if (!input.is_object()) {
                 throw nlohmann::json::type_error::create(302, "expected JSON object", &input);
             }
-            template for (constexpr auto m : Detail::JsonMembers<T>()) {
+            template for (constexpr auto m : Meta::JsonSerializableMembersOf<T>()) {
                 using Member = typename [:std::meta::type_of(m):];
                 Member& field = output.[:m:];
 
                 if constexpr ($::Has<$::Serialization::Flatten>(m)) {
-                    Detail::FromJsonImpl(input, field);
+                    FromJsonImpl(input, field);
                 } else {
-                    auto key = std::string(Meta::SerializationFieldNameOf<m>());
+                    auto key = std::string(Sora::Meta::SerializationFieldNameOf<m>());
                     auto it = input.find(key);
                     if (it == input.end()) {
                         if constexpr ($::Has<$::Serialization::Required>(m)) {
@@ -417,215 +432,221 @@ namespace Sora {
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsString>(m)) {
                         EnumFromJson(*it, field);
                     } else {
-                        Detail::FromJsonImpl(*it, field);
+                        FromJsonImpl(*it, field);
                     }
                 }
             }
         }
 
-        namespace Detail {
+        template<std::size_t I = 0, typename Variant>
+        [[nodiscard]] bool TryVariantFromJson(const Sora::Json& input, Variant& output) {
+            if constexpr (I == std::variant_size_v<Variant>) {
+                return false;
+            } else {
+                using Alternative = std::variant_alternative_t<I, Variant>;
+                if constexpr (std::default_initializable<Alternative>) {
+                    try {
+                        Alternative alternative{};
+                        FromJsonImpl(input, alternative);
+                        output = std::move(alternative);
+                        return true;
+                    } catch (const nlohmann::json::exception&) {
+                    }
+                }
+                return TryVariantFromJson<I + 1>(input, output);
+            }
+        }
+
+        template<typename T>
+        [[nodiscard]] Sora::Json ToJsonImpl(T&& value) {
+            using U = std::remove_cvref_t<T>;
+            if constexpr (HasHookToJson<U>) {
+                return Hook::ToJsonHook<U>::ToJson(value);
+            } else if constexpr (ADL::HasFreeToJson<T>) {
+                return ToJson(std::forward<T>(value));
+            } else if constexpr (HasMemberToJson<U>) {
+                return value.ToJson();
+            } else if constexpr (std::is_null_pointer_v<U>) {
+                return Sora::Json(nullptr);
+            } else if constexpr (std::same_as<U, bool> || std::is_arithmetic_v<U>) {
+                return Sora::Json(value);
+            } else if constexpr (std::is_enum_v<U>) {
+                return EnumToJson(value);
+            } else if constexpr (std::same_as<U, std::filesystem::path>) {
+                return Sora::Json(Sora::ToString(value));
+            } else if constexpr (Sora::Concept::NarrowStringLike<T> || Sora::Concept::Utf8StringLike<T> ||
+                                 Sora::Concept::Utf16StringLike<T> || Sora::Concept::Utf32StringLike<T> ||
+                                 Sora::Concept::WideStringLike<T>) {
+                return Sora::Json(Sora::ToString(std::forward<T>(value)));
+            } else if constexpr (Concept::ChronoDuration<U>) {
+                return Sora::Json(std::chrono::duration_cast<std::chrono::nanoseconds>(value).count());
+            } else if constexpr (Concept::ChronoTimePoint<U>) {
+                return Sora::Json(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(value.time_since_epoch()).count());
+            } else if constexpr (Sora::Concept::OptionalLike<U>) {
+                return value.has_value() ? ToJsonImpl(*value) : Sora::Json(nullptr);
+            } else if constexpr (Sora::Concept::VariantLikeClass<U>) {
+                return std::visit([](const auto& alternative) -> Sora::Json { return ToJsonImpl(alternative); }, value);
+            } else if constexpr (Sora::Concept::ByteRange<U>) {
+                Sora::Json array = Sora::Json::array();
+                for (auto byte : value) {
+                    array.push_back(static_cast<std::uint8_t>(byte));
+                }
+                return array;
+            } else if constexpr (Concept::JsonStringKeyedAssociative<U>) {
+                Sora::Json object = Sora::Json::object();
+                for (const auto& [key, mapped] : value) {
+                    object[std::string(std::string_view(key))] = ToJsonImpl(mapped);
+                }
+                return object;
+            } else if constexpr (Sora::Concept::TupleLikeClass<U> && !std::ranges::range<U>) {
+                Sora::Json array = Sora::Json::array();
+                std::apply([&](const auto&... elems) { (array.push_back(ToJsonImpl(elems)), ...); }, value);
+                return array;
+            } else if constexpr (std::ranges::range<U>) {
+                Sora::Json array = Sora::Json::array();
+                for (const auto& element : value) {
+                    array.push_back(ToJsonImpl(element));
+                }
+                return array;
+            } else if constexpr (Concept::JsonReflectableClass<U> || Concept::NlohmannJsonSerializable<U>) {
+                if constexpr (Concept::NlohmannJsonSerializable<U>) {
+                    return Sora::Json(value);
+                } else {
+                    return ClassToJson(value);
+                }
+            } else {
+                static_assert(false, "Type cannot be serialized to JSON");
+            }
+        }
+
+        template<typename T>
+        void FromJsonImpl(const Sora::Json& input, T& output) {
+            using U = std::remove_cvref_t<T>;
+            if constexpr (HasHookFromJson<U>) {
+                Hook::ToJsonHook<U>::FromJson(input, output);
+            } else if constexpr (ADL::HasFreeFromJson<U>) {
+                FromJson(input, output);
+            } else if constexpr (HasMemberFromJson<U>) {
+                output = U::FromJson(input);
+            } else if constexpr (std::is_null_pointer_v<U>) {
+                if (!input.is_null()) {
+                    throw nlohmann::json::type_error::create(302, "expected null", &input);
+                }
+            } else if constexpr (std::same_as<U, bool>) {
+                output = input.template get<bool>();
+            } else if constexpr (std::is_arithmetic_v<U>) {
+                output = input.template get<U>();
+            } else if constexpr (std::is_enum_v<U>) {
+                EnumFromJson(input, output);
+            } else if constexpr (std::same_as<U, std::string>) {
+                output = input.template get<std::string>();
+            } else if constexpr (std::same_as<U, std::u8string> || std::same_as<U, std::u16string> ||
+                                 std::same_as<U, std::u32string> || std::same_as<U, std::wstring> ||
+                                 std::same_as<U, std::filesystem::path>) {
+                const auto& text = input.template get_ref<const std::string&>();
+                auto decoded = Sora::FromString(std::in_place_type<U>, text);
+                if (!decoded) {
+                    throw nlohmann::json::type_error::create(302, "invalid UTF-8 JSON string", &input);
+                }
+                output = std::move(*decoded);
+            } else if constexpr (Concept::ChronoDuration<U>) {
+                output = std::chrono::duration_cast<U>(std::chrono::nanoseconds(input.template get<std::int64_t>()));
+            } else if constexpr (Concept::ChronoTimePoint<U>) {
+                output = U(std::chrono::duration_cast<typename U::duration>(
+                    std::chrono::nanoseconds(input.template get<std::int64_t>())));
+            } else if constexpr (Sora::Concept::OptionalLike<U>) {
+                if (input.is_null()) {
+                    output.reset();
+                } else {
+                    typename U::value_type temp{};
+                    FromJsonImpl(input, temp);
+                    output = std::move(temp);
+                }
+            } else if constexpr (Sora::Concept::VariantLikeClass<U>) {
+                if (!TryVariantFromJson(input, output)) {
+                    throw nlohmann::json::type_error::create(302, "no variant alternative matched", &input);
+                }
+            } else if constexpr (Sora::Concept::ByteRange<U>) {
+                if (!input.is_array()) {
+                    throw nlohmann::json::type_error::create(302, "expected JSON array for byte range", &input);
+                }
+                output.clear();
+                for (const auto& element : input) {
+                    output.push_back(static_cast<std::ranges::range_value_t<U>>(element.template get<std::uint8_t>()));
+                }
+            } else if constexpr (Concept::JsonStringKeyedAssociative<U>) {
+                if (!input.is_object()) {
+                    throw nlohmann::json::type_error::create(302, "expected JSON object for string-keyed map", &input);
+                }
+                output.clear();
+                for (auto it = input.begin(); it != input.end(); ++it) {
+                    typename U::mapped_type mapped{};
+                    FromJsonImpl(it.value(), mapped);
+                    output.emplace(typename U::key_type(it.key()), std::move(mapped));
+                }
+            } else if constexpr (Sora::Concept::TupleLikeClass<U> && !std::ranges::range<U>) {
+                if (!input.is_array() || input.size() != std::tuple_size_v<U>) {
+                    throw nlohmann::json::type_error::create(302, "expected fixed-size JSON array for tuple", &input);
+                }
+                [&]<std::size_t... I>(std::index_sequence<I...>) {
+                    (FromJsonImpl(input[I], std::get<I>(output)), ...);
+                }(std::make_index_sequence<std::tuple_size_v<U>>{});
+            } else if constexpr (std::ranges::range<U>) {
+                if (!input.is_array()) {
+                    throw nlohmann::json::type_error::create(302, "expected JSON array for range", &input);
+                }
+                output.clear();
+                for (const auto& element : input) {
+                    typename U::value_type temp{};
+                    FromJsonImpl(element, temp);
+                    output.push_back(std::move(temp));
+                }
+            } else if constexpr (Concept::JsonReflectableClass<U> || Concept::NlohmannJsonDeserializable<U>) {
+                if constexpr (Concept::NlohmannJsonDeserializable<U>) {
+                    input.get_to(output);
+                } else {
+                    ClassFromJson(input, output);
+                }
+            } else {
+                static_assert(false, "Type cannot be deserialized from JSON");
+            }
+        }
+
+    } // namespace Detail::Json
+    /** @endcond */
+
+    namespace CPO {
+
+        /** @brief Function object implementing the @ref Sora::ToJson customization point. */
+        struct ToJsonFn {
+            template<typename T>
+            [[nodiscard]] Json operator()(T&& value) const {
+                return Detail::Json::ToJsonImpl(std::forward<T>(value));
+            }
+        };
+
+        /** @brief Function object implementing the @ref Sora::FromJson customization point. */
+        struct FromJsonFn {
+            template<std::default_initializable T>
+            [[nodiscard]] T operator()(std::in_place_type_t<T>, const Json& input) const {
+                T output{};
+                Detail::Json::FromJsonImpl(input, output);
+                return output;
+            }
 
             template<typename T>
-            [[nodiscard]] json ToJsonImpl(T&& value) {
-                using U = std::remove_cvref_t<T>;
-                if constexpr (HasHookToJson<U>) {
-                    return Hook::ToJsonHook<U>::ToJson(value);
-                } else if constexpr (ADL::HasFreeToJson<U>) {
-                    return ToJson(std::forward<T>(value));
-                } else if constexpr (HasMemberToJson<U>) {
-                    return value.ToJson();
-                } else if constexpr (std::is_null_pointer_v<U>) {
-                    return json(nullptr);
-                } else if constexpr (std::same_as<U, bool> || std::is_arithmetic_v<U>) {
-                    return json(value);
-                } else if constexpr (std::is_enum_v<U>) {
-                    return EnumToJson(value);
-                } else if constexpr (std::same_as<U, std::filesystem::path>) {
-                    return json(value.generic_string());
-                } else if constexpr (Sora::Concept::StringLike<T>) {
-                    return json(std::string(std::string_view(value)));
-                } else if constexpr (ChronoDuration<U>) {
-                    return json(std::chrono::duration_cast<std::chrono::nanoseconds>(value).count());
-                } else if constexpr (ChronoTimePoint<U>) {
-                    return json(std::chrono::duration_cast<std::chrono::nanoseconds>(value.time_since_epoch()).count());
-                } else if constexpr (Sora::Concept::OptionalLike<U>) {
-                    return value.has_value() ? ToJsonImpl(*value) : json(nullptr);
-                } else if constexpr (Concept::VariantLikeClass<U>) {
-                    return std::visit([](const auto& alternative) -> json { return ToJsonImpl(alternative); }, value);
-                } else if constexpr (Sora::Concept::ByteRange<U>) {
-                    json array = json::array();
-                    for (auto byte : value) {
-                        array.push_back(static_cast<std::uint8_t>(byte));
-                    }
-                    return array;
-                } else if constexpr (StringKeyedAssociative<U>) {
-                    json object = json::object();
-                    for (const auto& [key, mapped] : value) {
-                        object[std::string(std::string_view(key))] = ToJsonImpl(mapped);
-                    }
-                    return object;
-                } else if constexpr (Concept::TupleLikeClass<U> && !std::ranges::range<U>) {
-                    json array = json::array();
-                    std::apply([&](const auto&... elems) { (array.push_back(ToJsonImpl(elems)), ...); }, value);
-                    return array;
-                } else if constexpr (std::ranges::range<U>) {
-                    json array = json::array();
-                    for (const auto& element : value) {
-                        array.push_back(ToJsonImpl(element));
-                    }
-                    return array;
-                } else if constexpr (ReflectableClass<U> || HasNlohmannToJson<U>) {
-                    if constexpr (HasNlohmannToJson<U>) {
-                        return json(value);
-                    } else {
-                        return ClassToJson(value);
-                    }
-                } else {
-                    static_assert(false, "Type cannot be serialized to JSON");
-                }
+            void operator()(const Json& input, T& output) const {
+                Detail::Json::FromJsonImpl(input, output);
             }
+        };
 
-            template<typename T>
-            void FromJsonImpl(const json& input, T& output) {
-                using U = std::remove_cvref_t<T>;
-                if constexpr (HasHookFromJson<U>) {
-                    Hook::ToJsonHook<U>::FromJson(input, output);
-                } else if constexpr (ADL::HasFreeFromJson<U>) {
-                    FromJson(input, output);
-                } else if constexpr (HasMemberFromJson<U>) {
-                    output = U::FromJson(input);
-                } else if constexpr (std::is_null_pointer_v<U>) {
-                    if (!input.is_null()) {
-                        throw nlohmann::json::type_error::create(302, "expected null", &input);
-                    }
-                } else if constexpr (std::same_as<U, bool>) {
-                    output = input.template get<bool>();
-                } else if constexpr (std::is_arithmetic_v<U>) {
-                    output = input.template get<U>();
-                } else if constexpr (std::is_enum_v<U>) {
-                    EnumFromJson(input, output);
-                } else if constexpr (std::same_as<U, std::string>) {
-                    output = input.template get<std::string>();
-                } else if constexpr (std::same_as<U, std::filesystem::path>) {
-                    output = std::filesystem::path(input.template get<std::string>());
-                } else if constexpr (ChronoDuration<U>) {
-                    output =
-                        std::chrono::duration_cast<U>(std::chrono::nanoseconds(input.template get<std::int64_t>()));
-                } else if constexpr (ChronoTimePoint<U>) {
-                    output = U(std::chrono::duration_cast<typename U::duration>(
-                        std::chrono::nanoseconds(input.template get<std::int64_t>())));
-                } else if constexpr (Sora::Concept::OptionalLike<U>) {
-                    if (input.is_null()) {
-                        output.reset();
-                    } else {
-                        typename U::value_type temp{};
-                        FromJsonImpl(input, temp);
-                        output = std::move(temp);
-                    }
-                } else if constexpr (Concept::VariantLikeClass<U>) {
-                    bool matched = false;
-                    [&]<std::size_t... I>(std::index_sequence<I...>) {
-                        (
-                            [&] {
-                                if (matched) {
-                                    return;
-                                }
-                                std::variant_alternative_t<I, U> alternative{};
-                                FromJsonImpl(input, alternative);
-                                output = std::move(alternative);
-                                matched = true;
-                            }(),
-                            ...);
-                    }(std::make_index_sequence<std::variant_size_v<U>>{});
-                    if (!matched) {
-                        throw nlohmann::json::type_error::create(302, "no variant alternative matched", &input);
-                    }
-                } else if constexpr (Sora::Concept::ByteRange<U>) {
-                    output.clear();
-                    for (const auto& element : input) {
-                        output.push_back(
-                            static_cast<std::ranges::range_value_t<U>>(element.template get<std::uint8_t>()));
-                    }
-                } else if constexpr (StringKeyedAssociative<U>) {
-                    output.clear();
-                    for (auto it = input.begin(); it != input.end(); ++it) {
-                        typename U::mapped_type mapped{};
-                        FromJsonImpl(it.value(), mapped);
-                        output.emplace(typename U::key_type(it.key()), std::move(mapped));
-                    }
-                } else if constexpr (Concept::TupleLikeClass<U> && !std::ranges::range<U>) {
-                    if (!input.is_array() || input.size() != std::tuple_size_v<U>) {
-                        throw nlohmann::json::type_error::create(302, "expected fixed-size JSON array for tuple",
-                                                                 &input);
-                    }
-                    [&]<std::size_t... I>(std::index_sequence<I...>) {
-                        (FromJsonImpl(input[I], std::get<I>(output)), ...);
-                    }(std::make_index_sequence<std::tuple_size_v<U>>{});
-                } else if constexpr (std::ranges::range<U>) {
-                    output.clear();
-                    for (const auto& element : input) {
-                        typename U::value_type temp{};
-                        FromJsonImpl(element, temp);
-                        output.push_back(std::move(temp));
-                    }
-                } else if constexpr (ReflectableClass<U> || HasNlohmannFromJson<U>) {
-                    if constexpr (HasNlohmannFromJson<U>) {
-                        output = input.template get<U>();
-                    } else {
-                        ClassFromJson(input, output);
-                    }
-                } else {
-                    static_assert(false, "Type cannot be deserialized from JSON");
-                }
-            }
+    } // namespace CPO
 
-            /** @brief CPO functor that implements @c ToJson(value). */
-            struct ToJsonFn {
-                template<typename T>
-                [[nodiscard]] json operator()(T&& value) const {
-                    return ToJsonImpl(std::forward<T>(value));
-                }
-            };
+    /** @brief Customisation-point object that converts supported values to @c Sora::Json. */
+    inline constexpr CPO::ToJsonFn ToJson{};
 
-        } // namespace Detail
-
-    } // namespace Json
-
-    namespace Json {
-
-        /** @brief Customisation-point object that converts supported values to @c Sora::json. */
-        inline constexpr Json::Detail::ToJsonFn ToJson{};
-
-        /** @brief Parse JSON into @p T and return the parsed value. */
-        template<typename T>
-        [[nodiscard]] T FromJson(const json& input) {
-            T output{};
-            Json::Detail::FromJsonImpl(input, output);
-            return output;
-        }
-
-        /** @brief Parse JSON into existing object @p output. */
-        template<typename T>
-        void FromJson(const json& input, T& output) {
-            Json::Detail::FromJsonImpl(input, output);
-        }
-
-    } // namespace Json
-
-    using Json::FromJson;
-    using Json::ToJson;
+    /** @brief Customisation-point object that deserializes JSON into an explicitly tagged or existing value. */
+    inline constexpr CPO::FromJsonFn FromJson{};
 
 } // namespace Sora
-
-namespace nlohmann {
-
-    /** @brief Bridge nlohmann/json ADL serialization to Sora reflection-driven JSON conversion. */
-    template<typename T>
-        requires(Sora::Json::Detail::ReflectableClass<T> || std::is_enum_v<T>) &&
-                (!Sora::Json::Detail::HasNlohmannToJson<T>)
-    struct adl_serializer<T> {
-        static void to_json(Sora::json& output, const T& value) { output = Sora::ToJson(value); }
-        static void from_json(const Sora::json& input, T& output) { Sora::FromJson(input, output); }
-    };
-
-} // namespace nlohmann

@@ -5,6 +5,8 @@
  */
 #pragma once
 
+#include "Sora/Common.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -70,9 +72,9 @@ namespace Sora::PAL {
 
     /** @brief One failed native module-load attempt. */
     struct ModuleLoadAttempt {
-        std::string candidate;  /**< Candidate path or module spelling passed to the native loader. */
+        std::string candidate;   /**< Candidate path or module spelling passed to the native loader. */
         NativeError nativeError; /**< Category-bearing OS error when the loader reports one. */
-        std::string diagnostic; /**< Loader-specific diagnostic when no native error code represents the failure. */
+        std::string diagnostic;  /**< Loader-specific diagnostic when no native error code represents the failure. */
 
         /** @brief Materialize the most specific diagnostic available for this attempt. */
         [[nodiscard]] std::string Message() const;

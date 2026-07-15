@@ -30,11 +30,11 @@ namespace Sora::Hook {
     template<typename T>
     struct ToJsonHook<RefPtr<T>> {
         /** @brief Emit @c null or a display-only address string. Never dereferences @p pointer. */
-        [[nodiscard]] static json ToJson(RefPtr<T> pointer) {
+        [[nodiscard]] static Json ToJson(RefPtr<T> pointer) {
             if (!pointer) {
-                return json(nullptr);
+                return Json(nullptr);
             }
-            return json(std::format("{}", Detail::AddressForDisplay(pointer.Get())));
+            return Json(std::format("{}", Detail::AddressForDisplay(pointer.Get())));
         }
     };
 

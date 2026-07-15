@@ -72,6 +72,11 @@ namespace Sora {
         EnvironmentNativeFailure = 0x001D,     ///< A native process-environment operation failed.
         DuplicateEnvironmentMutation = 0x001E, ///< A transaction mutates one environment name more than once.
         EnvironmentRollbackFailure = 0x001F,   ///< A failed environment transaction could not restore prior state.
+
+        ClipboardBusy = 0x0020,              ///< Another process retained exclusive clipboard access.
+        InvalidClipboardData = 0x0021,       ///< Native clipboard text violates its storage or encoding invariants.
+        ClipboardTextTooLarge = 0x0022,      ///< Clipboard text cannot fit the platform-native representation.
+        ClipboardNativeFailure = 0x0023,     ///< A native clipboard or global-memory operation failed.
         /// @}
 
         /// @name Core Rendering (0x1000 – 0x1FFF)
