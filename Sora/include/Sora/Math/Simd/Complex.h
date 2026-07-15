@@ -9,10 +9,6 @@
 
 #include <complex>
 
-// psabi warnings are bogus because the ABI of the internal types never leaks into user code
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpsabi"
-
 namespace Sora::Math::Simd {
 
     /** @internal
@@ -372,6 +368,10 @@ namespace Sora::Math::Simd {
         static constexpr const BasicMask& Concat(const BasicMask& x0) noexcept {
             return x0;
         }
+
+        // By Nekomiya to suppress bugprone-return-const-ref-from-parameter
+        static constexpr const BasicMask& Concat(BasicMask&&) noexcept = delete;
+        static constexpr const BasicMask& Concat(const BasicMask&&) noexcept = delete;
 
         template<typename... As>
             requires(sizeof...(As) > 1)
@@ -762,6 +762,10 @@ namespace Sora::Math::Simd {
         static constexpr const BasicVector& Concat(const BasicVector& x0) noexcept {
             return x0;
         }
+
+        // By Nekomiya to suppress bugprone-return-const-ref-from-parameter
+        static constexpr const BasicVector& Concat(BasicVector&&) noexcept = delete;
+        static constexpr const BasicVector& Concat(const BasicVector&&) noexcept = delete;
 
         template<typename... As>
             requires(sizeof...(As) > 1)
@@ -1256,6 +1260,10 @@ namespace Sora::Math::Simd {
         static constexpr const BasicMask& Concat(const BasicMask& x0) noexcept {
             return x0;
         }
+
+        // By Nekomiya to suppress bugprone-return-const-ref-from-parameter
+        static constexpr const BasicMask& Concat(BasicMask&&) noexcept = delete;
+        static constexpr const BasicMask& Concat(const BasicMask&&) noexcept = delete;
 
         /** @internal
          * @brief Adjust the Mask type to match RealSimd.
@@ -2013,5 +2021,3 @@ namespace Sora::Math::Simd {
         });
 
 } // namespace Sora::Math::Simd
-
-#pragma GCC diagnostic pop

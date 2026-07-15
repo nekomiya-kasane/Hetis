@@ -23,10 +23,6 @@
 #    error "<simd> is not supported for CHAR_BIT != 8"
 #endif
 
-// psabi warnings are bogus because the ABI of the internal types never leaks into user code
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpsabi"
-
 #ifndef SORA_SIMD_NOEXCEPT
 /** @internal
  * For unit-testing preconditions, use this macro to remove noexcept.
@@ -1180,5 +1176,3 @@ namespace Sora::Math::Simd {
     }
 
 } // namespace Sora::Math::Simd
-
-#pragma GCC diagnostic pop

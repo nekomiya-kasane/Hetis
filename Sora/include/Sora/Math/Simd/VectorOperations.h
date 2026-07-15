@@ -10,10 +10,6 @@
 #include <bit>
 #include <utility>
 
-// psabi warnings are bogus because the ABI of the internal types never leaks into user code
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpsabi"
-
 namespace Sora::Math::Simd {
 
     template<std::signed_integral Tp>
@@ -552,5 +548,3 @@ namespace Sora::Math::Simd {
     };
 
 } // namespace Sora::Math::Simd
-
-#pragma GCC diagnostic pop

@@ -16,10 +16,6 @@
 #pragma GCC target("avx2,bmi,bmi2,avx512vl,avx512bw,avx512dq,avx10.2")
 #pragma GCC pop_options
 
-// psabi warnings are bogus because the ABI of the internal types never leaks into user code
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpsabi"
-
 namespace Sora::Math::Simd {
 
     static constexpr std::size_t kX86MaxGeneralRegisterSize
@@ -1276,5 +1272,3 @@ namespace Sora::Math::Simd {
     }
 
 } // namespace Sora::Math::Simd
-
-#pragma GCC diagnostic pop

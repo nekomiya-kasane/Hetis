@@ -7,10 +7,6 @@
 
 #include "Vector.h"
 
-// psabi warnings are bogus because the ABI of the internal types never leaks into user code
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpsabi"
-
 // [simd.math] ----------------------------------------------------------------
 namespace Sora::Math::Simd {
 
@@ -82,7 +78,7 @@ namespace Sora::Math::Simd {
 } // namespace Sora::Math::Simd
 
 namespace Sora::Math {
-    
+
     using Simd::Abs;
     using Simd::Arg;
     using Simd::Conj;
@@ -92,5 +88,3 @@ namespace Sora::Math {
     using Simd::Real;
 
 } // namespace Sora::Math
-
-#pragma GCC diagnostic pop

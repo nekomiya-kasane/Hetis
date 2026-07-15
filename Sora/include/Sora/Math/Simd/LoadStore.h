@@ -7,10 +7,6 @@
 
 #include "Vector.h"
 
-// psabi warnings are bogus because the ABI of the internal types never leaks into user code
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpsabi"
-
 // [simd.reductions] ----------------------------------------------------------
 namespace Sora::Math::Simd {
 
@@ -350,7 +346,5 @@ namespace Sora::Math::Simd {
                                 const typename BasicVector<Tp, Ap>::MaskType& mask, Flags<FlagTypes...> f = {}) {
         PartialStore(v, std::span(first, last), mask, f);
     }
-    
-} // namespace Sora::Math::Simd
 
-#pragma GCC diagnostic pop
+} // namespace Sora::Math::Simd
