@@ -267,7 +267,9 @@
       "Bash(ttx --version)",
       "Read(//c/Program Files \\(x86\\)/FontForgeBuilds/**)",
       "Bash(where fontforge *)",
-      "Read(//c/Program Files/FontForgeBuilds//**)"
+      "Read(//c/Program Files/FontForgeBuilds//**)",
+      "Bash(tasklist //FI \"IMAGENAME eq codex.exe\")",
+      "Bash(tasklist //FI \"IMAGENAME eq Codex.exe\")"
     ]
   }
 }
