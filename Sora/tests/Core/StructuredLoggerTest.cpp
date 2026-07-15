@@ -36,7 +36,7 @@ TEST_CASE("JsonLogSink emits parseable NDJSON through ToJson", "[Sora.Core.Struc
 
     std::string line;
     REQUIRE(static_cast<bool>(std::getline(input, line)));
-    const Sora::json parsed = Sora::json::parse(line);
+    const Sora::Json parsed = Sora::Json::parse(line);
 
     CHECK(parsed.at("ts") == 123);
     CHECK(parsed.at("level") == "Warn");

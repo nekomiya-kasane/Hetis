@@ -14,7 +14,7 @@ namespace {
         Aggressive,
     };
 
-    [[nodiscard]] bool ParseValue(ExecutionMode& output, std::string_view text) noexcept {
+    [[nodiscard]] bool FromString(ExecutionMode& output, std::string_view text) noexcept {
         if (text == "safe") {
             output = ExecutionMode::Safe;
         } else if (text == "normal") {

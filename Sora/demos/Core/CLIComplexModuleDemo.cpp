@@ -29,7 +29,7 @@ namespace {
         Never,
     };
 
-    [[nodiscard]] bool ParseValue(ColorMode& output, std::string_view text) noexcept {
+    [[nodiscard]] bool FromString(ColorMode& output, std::string_view text) noexcept {
         if (text == "auto") {
             output = ColorMode::Auto;
         } else if (text == "always") {

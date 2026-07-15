@@ -13,7 +13,7 @@ namespace {
         int value = 0;
     };
 
-    [[nodiscard]] bool ParseValue(Port& port, std::string_view text) noexcept {
+    [[nodiscard]] bool FromString(Port& port, std::string_view text) noexcept {
         if (!text.starts_with("tcp:")) {
             return false;
         }
