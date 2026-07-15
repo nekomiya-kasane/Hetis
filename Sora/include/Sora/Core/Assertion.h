@@ -69,6 +69,17 @@ namespace Sora {
     /** @cond INTERNAL */
     namespace Detail {
 
+        /** @brief Boolean condition paired with the source location at which its implicit conversion occurs. */
+        struct LocatedCondition {
+            bool value = false;            /**< Evaluated condition value. */
+            std::source_location source{}; /**< User call site. */
+
+            /** @brief Capture @p condition and its caller location. */
+            constexpr LocatedCondition(bool condition,
+                                       std::source_location location = std::source_location::current()) noexcept
+                : value(condition), source(location) {}
+        };
+
         /** @brief Materialize, report, and apply policy to one failed condition. */
         void ReportAssertionFailure(AssertionKind kind, std::string_view condition, std::string message,
                                     std::source_location source) noexcept;
@@ -103,17 +114,19 @@ namespace Sora {
     /** @endcond */
 
     /**
-     * @brief Check a debug-build invariant without evaluating @p condition in release builds.
-     * @param condition Contextually boolean expression evaluated exactly once in assertion-enabled builds.
+     * @brief Report a failed invariant only in assertion-enabled builds.
+     * @param condition Contextually boolean expression evaluated exactly once in every build.
+     * @note This function API always evaluates @p condition before entry; only failure reporting is compiled out.
      */
     template<typename... Args>
-    inline void Assert(bool condition, std::format_string<Args...> format = "", Args&&... args) noexcept {
+    inline void Assert(Detail::LocatedCondition condition, std::format_string<Args...> format = "",
+                       Args&&... args) noexcept {
 #if !defined(NDEBUG) || defined(SORA_ENABLE_ASSERTIONS)
-        static_cast<void>(::Sora::Detail::EvaluateCondition(condition, ::Sora::AssertionKind::Assertion, "",
-                                                            std::source_location::current(), format,
+        static_cast<void>(::Sora::Detail::EvaluateCondition(condition.value, ::Sora::AssertionKind::Assertion, "",
+                                                            condition.source, format,
                                                             std::forward<Args>(args)...));
 #else
-        static_cast<void>(sizeof(condition));
+        static_cast<void>(condition);
 #endif
     }
 
@@ -122,9 +135,10 @@ namespace Sora {
      * @param condition Contextually boolean expression evaluated exactly once.
      */
     template<typename... Args>
-    [[nodiscard]] inline bool Verify(bool condition, std::format_string<Args...> format = "", Args&&... args) noexcept {
-        return ::Sora::Detail::EvaluateCondition(condition, ::Sora::AssertionKind::Verification, "",
-                                                 std::source_location::current(), format, std::forward<Args>(args)...);
+    [[nodiscard]] inline bool Verify(Detail::LocatedCondition condition, std::format_string<Args...> format = "",
+                                     Args&&... args) noexcept {
+        return ::Sora::Detail::EvaluateCondition(condition.value, ::Sora::AssertionKind::Verification, "",
+                                                 condition.source, format, std::forward<Args>(args)...);
     }
 
 } // namespace Sora

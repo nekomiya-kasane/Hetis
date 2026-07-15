@@ -481,8 +481,6 @@ struct std::formatter<T> {
                 case '?':
                     mode = Sora::RenderMode::Placeholder;
                     break;
-                default:
-                    [[passthrough]];
             }
             ++it;
         }

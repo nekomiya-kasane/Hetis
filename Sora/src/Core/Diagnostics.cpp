@@ -133,8 +133,10 @@ namespace Sora {
             builder.Raw("\n");
             builder.Text(StyledOutput::StyledRole::Error, ToString(failure.kind));
             builder.Raw(StyledOutput::StyledRole::Error, " failed");
-            builder.Raw(StyledOutput::StyledRole::Punctuation, ": ");
-            builder.Text(StyledOutput::StyledRole::Error, failure.condition);
+            if (!failure.condition.empty()) {
+                builder.Raw(StyledOutput::StyledRole::Punctuation, ": ");
+                builder.Text(StyledOutput::StyledRole::Error, failure.condition);
+            }
 
             builder.Raw("\n  ");
             builder.Text(StyledOutput::StyledRole::FieldName, "Location");
@@ -167,10 +169,12 @@ namespace Sora {
         [[nodiscard]] std::string FormatPlainFailure(const AssertionFailure& failure) {
             const std::string_view message =
                 failure.message.empty() ? std::string_view{"<none>"} : std::string_view{failure.message};
-            std::string output =
-                std::format("\n{} failed: {}\n  Location: {}:{} in {}\n  Message: {}\n", ToString(failure.kind),
-                            failure.condition, failure.source.file_name(), failure.source.line(),
-                            failure.source.function_name(), message);
+            std::string output = std::format("\n{} failed", ToString(failure.kind));
+            if (!failure.condition.empty()) {
+                output += std::format(": {}", failure.condition);
+            }
+            output += std::format("\n  Location: {}:{} in {}\n  Message: {}\n", failure.source.file_name(),
+                                  failure.source.line(), failure.source.function_name(), message);
             if (failure.stackTrace != nullptr && !failure.stackTrace->Empty()) {
                 output += failure.stackTrace->ToString();
                 output.push_back('\n');

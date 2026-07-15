@@ -12,7 +12,6 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
-#include <format>
 #include <string_view>
 #include <utility>
 
@@ -180,7 +179,7 @@ namespace Sora {
             state = std::make_unique<State>();
         } catch (...) {
             gCrashHandlerInstalled.store(false, std::memory_order_release);
-            return std::unexpected(ErrorCode::InvalidState);
+            return std::unexpected(ErrorCode::OutOfMemory);
         }
 
 #if defined(PLATFORM_WINDOWS)
@@ -201,10 +200,8 @@ namespace Sora {
         for (int signalNumber : fatalSignals) {
             const size_t index = state->installedCount;
             if (::sigaction(signalNumber, &action, &state->previousActions[index]) != 0) {
-                const PAL::NativeError error = PAL::NativeError::FromErrno(errno);
                 state.reset();
-                return std::unexpected(
-                    CrashHandlerError{.code = ErrorCode::CrashHandlerInstallFailed, .nativeError = error});
+                return std::unexpected(ErrorCode::CrashHandlerInstallFailed);
             }
             state->signals[index] = signalNumber;
             ++state->installedCount;

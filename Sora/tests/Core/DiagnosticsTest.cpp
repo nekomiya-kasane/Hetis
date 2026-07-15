@@ -14,9 +14,10 @@ namespace {
     std::atomic<bool> gReportMatched{false};
 
     void InspectFailure(const Sora::AssertionFailure& failure) noexcept {
-        const bool matched = failure.kind == Sora::AssertionKind::Verification &&
-                             failure.condition == "++evaluations == 3" && failure.message == "evaluation 2" &&
-                             failure.stackTrace == nullptr && failure.source.line() != 0;
+        const bool matched = failure.kind == Sora::AssertionKind::Verification && failure.condition.empty() &&
+                             failure.message == "evaluation 2" && failure.stackTrace == nullptr &&
+                             failure.source.line() != 0 &&
+                             std::string_view{failure.source.file_name()}.ends_with("DiagnosticsTest.cpp");
         gReportMatched.store(matched, std::memory_order_relaxed);
         gReportCount.fetch_add(1, std::memory_order_relaxed);
     }
@@ -48,8 +49,8 @@ TEST_CASE("Sora verification evaluates once and materializes diagnostics only on
     gReportMatched.store(false, std::memory_order_relaxed);
 
     int evaluations = 0;
-    REQUIRE(SORA_VERIFY(++evaluations == 1, "this message is never formatted {}", evaluations));
-    REQUIRE_FALSE(SORA_VERIFY(++evaluations == 3, "evaluation {}", evaluations));
+    REQUIRE(Verify(++evaluations == 1, "this message is never formatted {}", evaluations));
+    REQUIRE_FALSE(Verify(++evaluations == 3, "evaluation {}", evaluations));
 
     REQUIRE(evaluations == 2);
     REQUIRE(gReportCount.load(std::memory_order_relaxed) == 1);
@@ -64,7 +65,7 @@ TEST_CASE("Sora crash-handler registration has exclusive RAII ownership", "[Sora
 
         auto duplicate = Sora::CrashHandler::Install();
         REQUIRE_FALSE(duplicate.has_value());
-        REQUIRE(duplicate.error().code == Sora::ErrorCode::InvalidState);
+        REQUIRE(duplicate.error() == Sora::ErrorCode::InvalidState);
     }
 
     auto reinstalled = Sora::CrashHandler::Install();
