@@ -5,17 +5,21 @@
  */
 #pragma once
 
-#include "Sora/Core/Functional.h"
-#include "Sora/Core/ToStyledString.h"
-
+#include <cstddef>
 #include <cstdint>
+#include <inplace_vector>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <inplace_vector>
 
 namespace Sora {
+
+    namespace Styled {
+
+        class StyledStringBuilder;
+
+    } // namespace Styled
 
     /** @brief One resolved native stack frame. */
     struct StackFrame {
@@ -39,7 +43,7 @@ namespace Sora {
      */
     class StackTrace {
     public:
-        using ContainerType = std::inplace_vector<StackFrame, 32>;
+        using ContainerType = std::inplace_vector<StackFrame, 64>;
 
         /** @brief Capture the current thread's call stack. */
         [[nodiscard]] static StackTrace Capture(uint32_t skipFrames = 0, uint32_t maxFrames = 64);
@@ -47,8 +51,8 @@ namespace Sora {
         /** @brief Construct an empty stack trace. */
         StackTrace() = default;
 
-        /** @brief Construct from a resolved frame vector. */
-        explicit StackTrace(const ContainerType& frames) noexcept : frames_(std::move(frames)) {}
+        /** @brief Construct from resolved frames. */
+        explicit StackTrace(ContainerType frames) noexcept : frames_(std::move(frames)) {}
 
         /** @brief Return resolved frames in innermost-to-outermost order. */
         [[nodiscard]] std::span<const StackFrame> Frames() const noexcept { return frames_; }
@@ -68,20 +72,8 @@ namespace Sora {
         /** @brief Styled terminal representation used by @ref Sora::ToStyledString. */
         void ToStyledString(Sora::Styled::StyledStringBuilder& builder) const;
 
-        friend auto&& Traits::AdaptorAppliedTarget<StackTrace>(StackTrace&& self);
-
     private:
         ContainerType frames_{};
     };
-
-    namespace Traits {
-
-        /** @brief Expose a moved stack trace as its frame container for functional adaptors. */
-        template<>
-        inline auto&& AdaptorAppliedTarget<StackTrace>(StackTrace&& self) {
-            return std::move(std::forward<StackTrace>(self).frames_);
-        }
-
-    } // namespace Traits
 
 } // namespace Sora

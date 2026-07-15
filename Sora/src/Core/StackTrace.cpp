@@ -8,6 +8,7 @@
 
 #include "Sora/Core/ABI.h"
 #include "Sora/Core/PAL/Module.h"
+#include "Sora/Core/ToStyledString.h"
 
 #include <algorithm>
 #include <array>
@@ -133,14 +134,14 @@ namespace Sora {
         std::array<void*, 128> rawFrames{};
         const USHORT captured = CaptureStackBackTrace(static_cast<DWORD>(skipFrames + 1), static_cast<DWORD>(maxFrames),
                                                       rawFrames.data(), nullptr);
-        std::inplace_vector<StackFrame, 32> frames;
+        StackTrace::ContainerType frames;
         frames.reserve(captured);
 
         if (!EnsureDbgHelpInitialized()) {
             for (USHORT i = 0; i < captured; ++i) {
                 frames.push_back({.address = reinterpret_cast<uintptr_t>(rawFrames[i])});
             }
-            return StackTrace{frames};
+            return StackTrace{std::move(frames)};
         }
 
         std::lock_guard lock(DbgHelpMutex());
@@ -185,7 +186,7 @@ namespace Sora {
         const int captured = backtrace(rawFrames.data(), requested);
         const int start = std::min<int>(captured, static_cast<int>(skipFrames + 1));
 
-        std::vector<StackFrame> frames;
+        StackTrace::ContainerType frames;
         frames.reserve(static_cast<size_t>(captured - start));
         for (int i = start; i < captured; ++i) {
             StackFrame frame{.address = reinterpret_cast<uintptr_t>(rawFrames[static_cast<size_t>(i)])};
