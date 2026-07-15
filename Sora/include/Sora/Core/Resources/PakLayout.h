@@ -91,7 +91,7 @@ namespace Sora::Resources::Detail {
             return std::nullopt;
         }
         dataSize = *end;
-        return *offset;
+        return offset;
     }
 
     /** @brief Compute canonical `.lpak` section offsets from precomputed string and payload section sizes. */
