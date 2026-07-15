@@ -15,27 +15,54 @@
 #include "Simd/Complex.h"
 #include "Simd/Math.h"
 
+#include <Sora/Core/Traits/TypeTraits.h>
+
 namespace Sora::Simd {
 
-    template<size_t N>
-    using F16 = Sora::Math::Simd::Vector<_Float16, N>;
+    namespace Detail {
+
+        template<size_t L, size_t N>
+        using F = Sora::Math::Simd::Vector<Sora::Traits::Float<L>, N>;
+
+        template<size_t L, size_t N>
+        using I = Sora::Math::Simd::Vector<Sora::Traits::Signed<L>, N>;
+
+        template<size_t L, size_t N>
+        using U = Sora::Math::Simd::Vector<Sora::Traits::Unsigned<L>, N>;
+
+    } // namespace Detail
 
     template<size_t N>
-    using F32 = Sora::Math::Simd::Vector<float, N>;
+    using F16 = Detail::F<16, N>;
 
     template<size_t N>
-    using F64 = Sora::Math::Simd::Vector<double, N>;
+    using F32 = Detail::F<32, N>;
 
     template<size_t N>
-    using I8 = Sora::Math::Simd::Vector<std::int8_t, N>;
+    using F64 = Detail::F<64, N>;
 
     template<size_t N>
-    using I16 = Sora::Math::Simd::Vector<std::int16_t, N>;
+    using I8 = Detail::I<8, N>;
 
     template<size_t N>
-    using I32 = Sora::Math::Simd::Vector<std::int32_t, N>;
+    using I16 = Detail::I<16, N>;
 
     template<size_t N>
-    using I64 = Sora::Math::Simd::Vector<std::int64_t, N>;
+    using I32 = Detail::I<32, N>;
+
+    template<size_t N>
+    using I64 = Detail::I<64, N>;
+
+    template<size_t N>
+    using U8 = Detail::U<8, N>;
+
+    template<size_t N>
+    using U16 = Detail::U<16, N>;
+
+    template<size_t N>
+    using U32 = Detail::U<32, N>;
+
+    template<size_t N>
+    using U64 = Detail::U<64, N>;
 
 } // namespace Sora::Simd
