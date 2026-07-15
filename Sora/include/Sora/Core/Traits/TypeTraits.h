@@ -10,6 +10,7 @@
 #pragma once
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <meta>
@@ -200,14 +201,17 @@ namespace Sora {
 
         /** @brief Unsigned integer type with at least @p Bits bits. */
         template<size_t Bits>
+            requires(std::has_single_bit(Bits) && Bits <= 64)
         using Unsigned = BestSizeType<Bits>;
 
         /** @brief Signed integer type with at least @p Bits bits. */
         template<size_t Bits>
+            requires(std::has_single_bit(Bits) && Bits <= 64)
         using Signed = std::make_signed_t<BestSizeType<Bits>>;
 
         /** @brief Unsigned integer type with exactly @p Bits bits. */
         template<size_t Bits>
+            requires(std::has_single_bit(Bits) && Bits <= 64)
         using Float = std::conditional_t<(Bits <= 16), __bfloat16, std::conditional_t<(Bits <= 32), float, double>>;
 
     } // namespace Traits
