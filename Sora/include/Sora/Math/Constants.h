@@ -127,9 +127,9 @@ namespace Sora::Math::Const {
         template<std::floating_point T>
         [[nodiscard]] consteval T HalfPiHigh() noexcept {
             if constexpr (std::same_as<T, float>) {
-                return 1.5707963109016418F;
+                return 1.57079625129699707031F;
             } else if constexpr (std::same_as<T, double>) {
-                return 1.5707963267948966;
+                return 1.57079632673412561417;
             } else {
                 return std::numbers::pi_v<T> / T{2};
             }
@@ -138,10 +138,9 @@ namespace Sora::Math::Const {
         template<std::floating_point T>
         [[nodiscard]] consteval T HalfPiLow() noexcept {
             if constexpr (std::same_as<T, float>) {
-                return static_cast<float>(std::numbers::pi_v<double> / 2.0 - static_cast<double>(HalfPiHigh<float>()));
+                return 7.54978941586159635335e-08F;
             } else if constexpr (std::same_as<T, double>) {
-                return static_cast<double>(std::numbers::pi_v<long double> / 2.0L -
-                                           static_cast<long double>(HalfPiHigh<double>()));
+                return 6.07710050650619224932e-11;
             } else {
                 return T{0};
             }

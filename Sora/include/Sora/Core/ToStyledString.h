@@ -61,8 +61,10 @@ namespace Sora {
         /** @brief Semantic style role used by the default styled string theme. */
         enum class StyledRole : uint8_t {
             Plain,
+            Keyword,
             TypeName,
             FieldName,
+            VariableName,
             EnumName,
             Number,
             String,
@@ -82,10 +84,14 @@ namespace Sora {
                 switch (role) {
                     case StyledRole::Plain:
                         return {};
+                    case StyledRole::Keyword:
+                        return {.fg = colors::bright_magenta, .attrs = attr::bold};
                     case StyledRole::TypeName:
                         return {.fg = colors::bright_cyan, .attrs = attr::bold};
                     case StyledRole::FieldName:
                         return {.fg = colors::bright_blue};
+                    case StyledRole::VariableName:
+                        return {.fg = colors::bright_green, .attrs = attr::bold};
                     case StyledRole::EnumName:
                         return {.fg = colors::bright_magenta, .attrs = attr::bold};
                     case StyledRole::Number:
@@ -446,6 +452,37 @@ namespace Sora {
 
     /** @brief Customisation-point object that converts a supported value to tapioca-styled terminal text. */
     inline constexpr CPO::ToStyledStringFn ToStyledString{};
+
+    namespace Meta {
+
+        /**
+         * @brief Render a reflected named variable and its current value as a styled diagnostic binding.
+         * @details The reflection supplies the source name and declared type while @p value supplies the current
+         * runtime value. Structural tokens, the variable name, its declared type, and the value receive distinct
+         * semantic styles.
+         * @tparam Variable Reflection of the variable declaration.
+         * @tparam T Declared runtime value type, including cv-qualification.
+         * @param[in] value Current value of the reflected variable.
+         * @param[in] options Styled rendering options.
+         * @return Styled diagnostic text in the form @c variable[name @c : @c type @c = @c value].
+         */
+        template<std::meta::info Variable, typename T, typename AbiToken = ReflectedVariableToken<Variable>>
+            requires Concept::ReflectedVariableValue<Variable, T> &&
+                     std::same_as<AbiToken, ReflectedVariableToken<Variable>>
+        [[nodiscard]] std::string ToStyledString(T& value, Styled::StyledStringOptions options = {}) {
+            Styled::StyledStringBuilder builder{options};
+            builder.Text(Styled::StyledRole::Keyword, "variable");
+            builder.Raw(Styled::StyledRole::Punctuation, "[");
+            builder.Text(Styled::StyledRole::VariableName, IdentifierOf(Variable));
+            builder.Raw(Styled::StyledRole::Punctuation, " : ");
+            builder.Text(Styled::StyledRole::TypeName, DisplayStringOf(TypeOf(Variable)));
+            builder.Raw(Styled::StyledRole::Punctuation, " = ");
+            Sora::Detail::ToStyledStringImpl(builder, value);
+            builder.Raw(Styled::StyledRole::Punctuation, "]");
+            return std::move(builder).Finish();
+        }
+
+    } // namespace Meta
 
 } // namespace Sora
 

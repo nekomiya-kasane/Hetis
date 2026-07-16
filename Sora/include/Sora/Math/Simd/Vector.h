@@ -1809,7 +1809,7 @@ namespace Sora::Math::Simd {
         [[gnu::always_inline]]
         constexpr explicit(!ValuePreservingConvertibleTo<Up, ValueType> || HigherRankThan<Up, ValueType>)
             BasicVector(const BasicVector<Up, UAbi>& x) noexcept
-            : data0(Get<0>(Chunk<kN0>(x))), data1(Get<1>(Chunk<kN0>(x))) {}
+            : data0(std::get<0>(Chunk<kN0>(x))), data1(std::get<1>(Chunk<kN0>(x))) {}
 
         using VecBase<Tp, Ap>::VecBase;
 

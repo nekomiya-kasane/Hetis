@@ -866,7 +866,7 @@ namespace Sora::Math::Simd {
         constexpr BasicVector(Up&& x) noexcept
             : data([&](int i) {
                   if constexpr (ComplexLike<Up>) {
-                      return (i & 1) == 0 ? x.Real() : x.Imag();
+                      return (i & 1) == 0 ? x.real() : x.imag();
                   } else {
                       return (i & 1) == 0 ? x : T0();
                   }
@@ -1032,12 +1032,36 @@ namespace Sora::Math::Simd {
             return x;
         }
 
-        template<int RemoveMe = 0>
         [[gnu::always_inline]]
         friend constexpr BasicVector& operator/=(BasicVector& x, const BasicVector& y) noexcept
             requires requires(ValueType a) { a / a; }
         {
-            static_assert(false, "TODO");
+            const RealSimd xReal = x.Real();
+            const RealSimd xImag = x.Imag();
+            const RealSimd yReal = y.Real();
+            const RealSimd yImag = y.Imag();
+            const auto useReal = yReal.Fabs() >= yImag.Fabs();
+            const RealSimd realRatio = yImag / yReal;
+            const RealSimd imagRatio = yReal / yImag;
+            const RealSimd realDenominator = yReal + yImag * realRatio;
+            const RealSimd imagDenominator = yImag + yReal * imagRatio;
+            const RealSimd resultReal = SelectImpl(useReal, (xReal + xImag * realRatio) / realDenominator,
+                                                   (xReal * imagRatio + xImag) / imagDenominator);
+            const RealSimd resultImag = SelectImpl(useReal, (xImag - xReal * realRatio) / realDenominator,
+                                                   (xImag * imagRatio - xReal) / imagDenominator);
+            const BasicVector finiteResult(resultReal, resultImag);
+
+            const auto special = xReal.Isinf() || xImag.Isinf() || yReal.Isinf() || yImag.Isinf() || xReal.Isnan() ||
+                                 xImag.Isnan() || yReal.Isnan() || yImag.Isnan() ||
+                                 (yReal == RealSimd(T0()) && yImag == RealSimd(T0()));
+            if (special.AnyOf()) {
+                const BasicVector standardResult(
+                    [&](int i) { return std::complex<T0>(xReal[i], xImag[i]) / std::complex<T0>(yReal[i], yImag[i]); });
+                x = SelectImpl(MaskType(special), standardResult, finiteResult);
+            } else {
+                x = finiteResult;
+            }
+            return x;
         }
 
         // [simd.comparison] compare operators ----------------------------------
@@ -1082,8 +1106,6 @@ namespace Sora::Math::Simd {
 
         // [simd.std::complex.math] internals ---------------------------------------
         [[gnu::always_inline]]
-        constexpr RealSimd Abs() const; // TODO: depends on [simd.math]
-
         // associated functions
         [[gnu::always_inline]]
         constexpr RealSimd Norm() const {
@@ -1947,10 +1969,27 @@ namespace Sora::Math::Simd {
         friend constexpr BasicVector& operator/=(BasicVector& x, const BasicVector& y) noexcept
             requires requires(ValueType a) { a / a; }
         {
-            const RealSimd r = x.realData * y.realData + x.imagData * y.imagData;
-            const RealSimd n = y.Norm();
-            x.imagData = (x.imagData * y.realData - x.realData * y.imagData) / n;
-            x.realData = r / n;
+            const RealSimd xReal = x.realData;
+            const RealSimd xImag = x.imagData;
+            const auto useReal = y.realData.Fabs() >= y.imagData.Fabs();
+            const RealSimd realRatio = y.imagData / y.realData;
+            const RealSimd imagRatio = y.realData / y.imagData;
+            const RealSimd realDenominator = y.realData + y.imagData * realRatio;
+            const RealSimd imagDenominator = y.imagData + y.realData * imagRatio;
+            x.realData = SelectImpl(useReal, (xReal + xImag * realRatio) / realDenominator,
+                                    (xReal * imagRatio + xImag) / imagDenominator);
+            x.imagData = SelectImpl(useReal, (xImag - xReal * realRatio) / realDenominator,
+                                    (xImag * imagRatio - xReal) / imagDenominator);
+
+            const auto special = xReal.Isinf() || xImag.Isinf() || y.realData.Isinf() || y.imagData.Isinf() ||
+                                 xReal.Isnan() || xImag.Isnan() || y.realData.Isnan() || y.imagData.Isnan() ||
+                                 (y.realData == RealSimd(T0()) && y.imagData == RealSimd(T0()));
+            if (special.AnyOf()) {
+                const BasicVector standardResult([&](int i) {
+                    return std::complex<T0>(xReal[i], xImag[i]) / std::complex<T0>(y.realData[i], y.imagData[i]);
+                });
+                x = SelectImpl(MaskType(special), standardResult, x);
+            }
             return x;
         }
 
@@ -1997,8 +2036,6 @@ namespace Sora::Math::Simd {
 
         // [simd.std::complex.math] internals ---------------------------------------
         [[gnu::always_inline]]
-        constexpr RealSimd Abs() const; // TODO: depends on [simd.math]
-
         // associated functions
         [[gnu::always_inline]]
         constexpr RealSimd Norm() const {

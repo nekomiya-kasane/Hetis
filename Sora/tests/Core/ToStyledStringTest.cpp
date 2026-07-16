@@ -52,6 +52,20 @@ TEST_CASE("Styled string conversion handles function pointers without object-poi
     REQUIRE(Sora::ToStyledString(&FunctionTarget, PlainOptions()).find("function") != std::string::npos);
 }
 
+TEST_CASE("Meta ToStyledString renders reflected named variables with structural separation",
+          "[Sora.Core.ToStyledString]") {
+    std::string status = "ready\nnext";
+    int completed = 7;
+    int pending = 2;
+
+    REQUIRE(Sora::Meta::ToStyledString<^^status>(status, {.color = false}) ==
+            std::format("variable[status : {} = \"ready\\nnext\"]",
+                        Sora::Meta::DisplayStringOf(Sora::Meta::TypeOf(^^status))));
+    REQUIRE(Sora::Meta::ToStyledString<^^completed>(completed, PlainOptions()) ==
+            "variable[completed : int = 7]");
+    REQUIRE(Sora::Meta::ToStyledString<^^pending>(pending, PlainOptions()) == "variable[pending : int = 2]");
+}
+
 TEST_CASE("Styled formatter composes compact text-attribute flags", "[Sora.Core.ToStyledString]") {
     constexpr auto attributes =
         tapioca::attr::bold | tapioca::attr::italic | tapioca::attr::underline | tapioca::attr::reverse;

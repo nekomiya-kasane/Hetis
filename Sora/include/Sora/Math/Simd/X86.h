@@ -11,11 +11,6 @@
 #    error "wrong include for this target"
 #endif
 
-#pragma GCC push_options
-// ensure GCC knows about the __builtin_ia32_* calls
-#pragma GCC target("avx2,bmi,bmi2,avx512vl,avx512bw,avx512dq,avx10.2")
-#pragma GCC pop_options
-
 namespace Sora::Math::Simd {
 
     static constexpr std::size_t kX86MaxGeneralRegisterSize

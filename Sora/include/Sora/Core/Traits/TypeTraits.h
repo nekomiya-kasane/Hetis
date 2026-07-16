@@ -61,6 +61,60 @@ namespace Sora {
             return std::meta::has_identifier(iMeta) ? IdentifierOf(iMeta) : DisplayStringOf(iMeta);
         }
 
+        /** @cond INTERNAL */
+        namespace Detail {
+
+            /** @brief Minimal FNV-1a state for reflection-only ABI discriminators without depending on Hash.h. */
+            struct ReflectionDiscriminatorState {
+                std::uint64_t value = 14695981039346656037ULL;
+
+                /** @brief Fold @p byte into the discriminator state. */
+                constexpr void Feed(std::byte byte) noexcept {
+                    value ^= static_cast<std::uint64_t>(byte);
+                    value *= 1099511628211ULL;
+                }
+            };
+
+        } // namespace Detail
+        /** @endcond */
+
+        /**
+         * @brief Return an ABI-visible discriminator for reflected named variable @p Variable.
+         * @todo This is a hack to work around the fact that distinct reflection NTTP specializations share one symbol.
+         * When the bug is fixed, this can be removed and the ABI token can be replaced with a simple pointer to the
+         * variable reflection.
+         */
+        template<std::meta::info Variable>
+        consteval std::uint64_t ReflectedVariableDiscriminator() {
+            static_assert(std::meta::is_variable(Variable), "Variable must reflect a variable declaration.");
+            constexpr auto location = std::meta::source_location_of(Variable);
+            Detail::ReflectionDiscriminatorState state{};
+
+            auto feedText = [&state](std::string_view text) {
+                for (unsigned char character : text) {
+                    state.Feed(static_cast<std::byte>(character));
+                }
+                state.Feed(std::byte{});
+            };
+            auto feedInteger = [&state](std::uint_least32_t value) {
+                for (unsigned shift = 0; shift < 32; shift += 8) {
+                    state.Feed(static_cast<std::byte>((value >> shift) & 0xFFU));
+                }
+            };
+
+            feedText(location.file_name());
+            feedText(location.function_name());
+            feedText(IdentifierOrDisplayStringOf(Variable));
+            feedInteger(location.line());
+            feedInteger(location.column());
+            return state.value;
+        }
+
+        /** @brief ABI token preventing distinct reflection NTTP specializations from sharing one symbol. */
+        template<std::meta::info Variable>
+        using ReflectedVariableToken =
+            std::integral_constant<std::uint64_t, ReflectedVariableDiscriminator<Variable>()>;
+
         /**
          * @brief Return the parameter list for a reflected function.
          * @param[in] iMeta Reflected function whose parameters are requested.

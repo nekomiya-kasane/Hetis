@@ -34,7 +34,7 @@ namespace Sora::Math::Simd {
     constexpr BasicVector<Tp, Ap> Clamp(const BasicVector<Tp, Ap>& v, const BasicVector<Tp, Ap>& lo,
                                         const BasicVector<Tp, Ap>& hi) {
         SORA_SIMD_PRECONDITION(NoneOf(lo > hi), "lower bound is larger than upper bound");
-        return Max(lo, Min(hi, v));
+        return SelectImpl(v < lo, lo, SelectImpl(hi < v, hi, v));
     }
 
     template<typename Tp, typename Up>

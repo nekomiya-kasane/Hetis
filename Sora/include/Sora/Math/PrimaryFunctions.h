@@ -3,14 +3,15 @@
  * @brief Extensible backend-dispatched arithmetic and transcendental customization-point objects.
  * @ingroup Math
  *
- * @details Each CPO directly selects a backend from the first operand's carrier type at compile time and calls the
- * corresponding static backend operation. Built-in arithmetic values use @ref Backend::ScalarCPU, fixed-width SIMD
- * vectors use @ref Backend::FixedSimdCPU, and user-defined carriers opt in through @ref Hook::Backend. The CPOs are
- * stateless regular callables, so @ref Sora::Compose and @ref Sora::Then build fully inlinable compound functions
- * without allocation, virtual dispatch, type erasure, or runtime backend selection.
+ * @details Each CPO joins the compile-time backends of all operands and calls the corresponding static operation.
+ * Built-in arithmetic values use @ref Backend::ScalarCPU, fixed-width SIMD vectors use @ref Backend::FixedSimdCPU,
+ * and user-defined carriers opt in through @ref Hook::Backend. The CPOs are stateless regular callables, so
+ * @ref Sora::Compose and @ref Sora::Then build fully inlinable compound functions without allocation, virtual
+ * dispatch, type erasure, or runtime backend selection.
  */
 #pragma once
 
+#include <meta>
 #include <type_traits>
 #include <utility>
 
@@ -22,19 +23,53 @@ namespace Sora::Math {
     namespace CPO {
 
         /** @cond INTERNAL */
-        template<typename Carrier>
-        using BackendFor = Traits::BackendTypeOf<std::remove_cvref_t<Carrier>>;
+        template<typename Left, typename Right>
+        [[nodiscard]] consteval std::meta::info JoinBackend() {
+            if constexpr (std::same_as<Left, Right>) {
+                return ^^Left;
+            } else if constexpr (requires {
+                                     Left::kPriority;
+                                     Right::kPriority;
+                                 } && Left::kPriority != Right::kPriority) {
+                if constexpr (Left::kPriority > Right::kPriority) {
+                    return ^^Left;
+                } else {
+                    return ^^Right;
+                }
+            } else {
+                throw "Sora::Math: no unambiguous backend join exists for these carriers";
+            }
+        }
+
+        template<typename Current>
+        [[nodiscard]] consteval std::meta::info JoinBackends() {
+            return ^^Current;
+        }
+
+        template<typename Current, typename Next, typename... Rest>
+        [[nodiscard]] consteval std::meta::info JoinBackends() {
+            using Joined = [: JoinBackend<Current, Next>() :];
+            if constexpr (sizeof...(Rest) == 0) {
+                return ^^Joined;
+            } else {
+                return JoinBackends<Joined, Rest...>();
+            }
+        }
+
+        template<typename... Carriers>
+        using BackendFor = [: JoinBackends<Traits::BackendTypeOf<std::remove_cvref_t<Carriers>>...>() :];
         /** @endcond */
 
         /** @brief CPO implementing backend-dispatched addition. */
         struct AddFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
-                    BackendFor<First>::Add(std::forward<First>(first), std::forward<Rest>(rest)...);
+                    BackendFor<First, Rest...>::Add(std::forward<First>(first), std::forward<Rest>(rest)...);
                 }
             [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Rest&&... rest) const
-                noexcept(noexcept(BackendFor<First>::Add(std::forward<First>(first), std::forward<Rest>(rest)...))) {
-                return BackendFor<First>::Add(std::forward<First>(first), std::forward<Rest>(rest)...);
+                noexcept(noexcept(BackendFor<First, Rest...>::Add(std::forward<First>(first),
+                                                                  std::forward<Rest>(rest)...))) {
+                return BackendFor<First, Rest...>::Add(std::forward<First>(first), std::forward<Rest>(rest)...);
             }
         };
 
@@ -42,11 +77,12 @@ namespace Sora::Math {
         struct SubFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
-                    BackendFor<First>::Sub(std::forward<First>(first), std::forward<Rest>(rest)...);
+                    BackendFor<First, Rest...>::Sub(std::forward<First>(first), std::forward<Rest>(rest)...);
                 }
             [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Rest&&... rest) const
-                noexcept(noexcept(BackendFor<First>::Sub(std::forward<First>(first), std::forward<Rest>(rest)...))) {
-                return BackendFor<First>::Sub(std::forward<First>(first), std::forward<Rest>(rest)...);
+                noexcept(noexcept(BackendFor<First, Rest...>::Sub(std::forward<First>(first),
+                                                                  std::forward<Rest>(rest)...))) {
+                return BackendFor<First, Rest...>::Sub(std::forward<First>(first), std::forward<Rest>(rest)...);
             }
         };
 
@@ -54,11 +90,12 @@ namespace Sora::Math {
         struct MulFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
-                    BackendFor<First>::Mul(std::forward<First>(first), std::forward<Rest>(rest)...);
+                    BackendFor<First, Rest...>::Mul(std::forward<First>(first), std::forward<Rest>(rest)...);
                 }
             [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Rest&&... rest) const
-                noexcept(noexcept(BackendFor<First>::Mul(std::forward<First>(first), std::forward<Rest>(rest)...))) {
-                return BackendFor<First>::Mul(std::forward<First>(first), std::forward<Rest>(rest)...);
+                noexcept(noexcept(BackendFor<First, Rest...>::Mul(std::forward<First>(first),
+                                                                  std::forward<Rest>(rest)...))) {
+                return BackendFor<First, Rest...>::Mul(std::forward<First>(first), std::forward<Rest>(rest)...);
             }
         };
 
@@ -66,11 +103,12 @@ namespace Sora::Math {
         struct DivFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
-                    BackendFor<First>::Div(std::forward<First>(first), std::forward<Rest>(rest)...);
+                    BackendFor<First, Rest...>::Div(std::forward<First>(first), std::forward<Rest>(rest)...);
                 }
             [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Rest&&... rest) const
-                noexcept(noexcept(BackendFor<First>::Div(std::forward<First>(first), std::forward<Rest>(rest)...))) {
-                return BackendFor<First>::Div(std::forward<First>(first), std::forward<Rest>(rest)...);
+                noexcept(noexcept(BackendFor<First, Rest...>::Div(std::forward<First>(first),
+                                                                  std::forward<Rest>(rest)...))) {
+                return BackendFor<First, Rest...>::Div(std::forward<First>(first), std::forward<Rest>(rest)...);
             }
         };
 
@@ -178,12 +216,12 @@ namespace Sora::Math {
         struct Atan2Fn {
             template<typename First, typename Second>
                 requires requires(First&& first, Second&& second) {
-                    BackendFor<First>::Atan2(std::forward<First>(first), std::forward<Second>(second));
+                    BackendFor<First, Second>::Atan2(std::forward<First>(first), std::forward<Second>(second));
                 }
             [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second) const
-                noexcept(noexcept(BackendFor<First>::Atan2(std::forward<First>(first),
-                                                            std::forward<Second>(second)))) {
-                return BackendFor<First>::Atan2(std::forward<First>(first), std::forward<Second>(second));
+                noexcept(noexcept(BackendFor<First, Second>::Atan2(std::forward<First>(first),
+                                                                   std::forward<Second>(second)))) {
+                return BackendFor<First, Second>::Atan2(std::forward<First>(first), std::forward<Second>(second));
             }
         };
 
@@ -221,11 +259,12 @@ namespace Sora::Math {
         struct PowFn {
             template<typename First, typename Second>
                 requires requires(First&& first, Second&& second) {
-                    BackendFor<First>::Pow(std::forward<First>(first), std::forward<Second>(second));
+                    BackendFor<First, Second>::Pow(std::forward<First>(first), std::forward<Second>(second));
                 }
             [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second) const
-                noexcept(noexcept(BackendFor<First>::Pow(std::forward<First>(first), std::forward<Second>(second)))) {
-                return BackendFor<First>::Pow(std::forward<First>(first), std::forward<Second>(second));
+                noexcept(noexcept(BackendFor<First, Second>::Pow(std::forward<First>(first),
+                                                                 std::forward<Second>(second)))) {
+                return BackendFor<First, Second>::Pow(std::forward<First>(first), std::forward<Second>(second));
             }
         };
 
@@ -233,15 +272,16 @@ namespace Sora::Math {
         struct FmaFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
-                    BackendFor<First>::Fma(std::forward<First>(first), std::forward<Second>(second),
-                                           std::forward<Third>(third));
+                    BackendFor<First, Second, Third>::Fma(std::forward<First>(first), std::forward<Second>(second),
+                                                          std::forward<Third>(third));
                 }
-            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
-            operator()(First&& first, Second&& second, Third&& third) const
-                noexcept(noexcept(BackendFor<First>::Fma(std::forward<First>(first), std::forward<Second>(second),
-                                                         std::forward<Third>(third)))) {
-                return BackendFor<First>::Fma(std::forward<First>(first), std::forward<Second>(second),
-                                               std::forward<Third>(third));
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second,
+                                                                                  Third&& third) const
+                noexcept(noexcept(BackendFor<First, Second, Third>::Fma(std::forward<First>(first),
+                                                                        std::forward<Second>(second),
+                                                                        std::forward<Third>(third)))) {
+                return BackendFor<First, Second, Third>::Fma(std::forward<First>(first), std::forward<Second>(second),
+                                                             std::forward<Third>(third));
             }
         };
 
@@ -249,15 +289,16 @@ namespace Sora::Math {
         struct MfsFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
-                    BackendFor<First>::Mfs(std::forward<First>(first), std::forward<Second>(second),
-                                           std::forward<Third>(third));
+                    BackendFor<First, Second, Third>::Mfs(std::forward<First>(first), std::forward<Second>(second),
+                                                          std::forward<Third>(third));
                 }
-            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
-            operator()(First&& first, Second&& second, Third&& third) const
-                noexcept(noexcept(BackendFor<First>::Mfs(std::forward<First>(first), std::forward<Second>(second),
-                                                         std::forward<Third>(third)))) {
-                return BackendFor<First>::Mfs(std::forward<First>(first), std::forward<Second>(second),
-                                               std::forward<Third>(third));
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second,
+                                                                                  Third&& third) const
+                noexcept(noexcept(BackendFor<First, Second, Third>::Mfs(std::forward<First>(first),
+                                                                        std::forward<Second>(second),
+                                                                        std::forward<Third>(third)))) {
+                return BackendFor<First, Second, Third>::Mfs(std::forward<First>(first), std::forward<Second>(second),
+                                                             std::forward<Third>(third));
             }
         };
 
@@ -265,15 +306,16 @@ namespace Sora::Math {
         struct NmsFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
-                    BackendFor<First>::Nms(std::forward<First>(first), std::forward<Second>(second),
-                                           std::forward<Third>(third));
+                    BackendFor<First, Second, Third>::Nms(std::forward<First>(first), std::forward<Second>(second),
+                                                          std::forward<Third>(third));
                 }
-            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
-            operator()(First&& first, Second&& second, Third&& third) const
-                noexcept(noexcept(BackendFor<First>::Nms(std::forward<First>(first), std::forward<Second>(second),
-                                                         std::forward<Third>(third)))) {
-                return BackendFor<First>::Nms(std::forward<First>(first), std::forward<Second>(second),
-                                               std::forward<Third>(third));
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second,
+                                                                                  Third&& third) const
+                noexcept(noexcept(BackendFor<First, Second, Third>::Nms(std::forward<First>(first),
+                                                                        std::forward<Second>(second),
+                                                                        std::forward<Third>(third)))) {
+                return BackendFor<First, Second, Third>::Nms(std::forward<First>(first), std::forward<Second>(second),
+                                                             std::forward<Third>(third));
             }
         };
 
@@ -281,15 +323,16 @@ namespace Sora::Math {
         struct NmaFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
-                    BackendFor<First>::Nma(std::forward<First>(first), std::forward<Second>(second),
-                                           std::forward<Third>(third));
+                    BackendFor<First, Second, Third>::Nma(std::forward<First>(first), std::forward<Second>(second),
+                                                          std::forward<Third>(third));
                 }
-            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
-            operator()(First&& first, Second&& second, Third&& third) const
-                noexcept(noexcept(BackendFor<First>::Nma(std::forward<First>(first), std::forward<Second>(second),
-                                                         std::forward<Third>(third)))) {
-                return BackendFor<First>::Nma(std::forward<First>(first), std::forward<Second>(second),
-                                               std::forward<Third>(third));
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second,
+                                                                                  Third&& third) const
+                noexcept(noexcept(BackendFor<First, Second, Third>::Nma(std::forward<First>(first),
+                                                                        std::forward<Second>(second),
+                                                                        std::forward<Third>(third)))) {
+                return BackendFor<First, Second, Third>::Nma(std::forward<First>(first), std::forward<Second>(second),
+                                                             std::forward<Third>(third));
             }
         };
 
@@ -297,15 +340,16 @@ namespace Sora::Math {
         struct LerpFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
-                    BackendFor<First>::Lerp(std::forward<First>(first), std::forward<Second>(second),
-                                            std::forward<Third>(third));
+                    BackendFor<First, Second, Third>::Lerp(std::forward<First>(first), std::forward<Second>(second),
+                                                           std::forward<Third>(third));
                 }
-            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
-            operator()(First&& first, Second&& second, Third&& third) const
-                noexcept(noexcept(BackendFor<First>::Lerp(std::forward<First>(first), std::forward<Second>(second),
-                                                          std::forward<Third>(third)))) {
-                return BackendFor<First>::Lerp(std::forward<First>(first), std::forward<Second>(second),
-                                                std::forward<Third>(third));
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second,
+                                                                                  Third&& third) const
+                noexcept(noexcept(BackendFor<First, Second, Third>::Lerp(std::forward<First>(first),
+                                                                         std::forward<Second>(second),
+                                                                         std::forward<Third>(third)))) {
+                return BackendFor<First, Second, Third>::Lerp(std::forward<First>(first), std::forward<Second>(second),
+                                                              std::forward<Third>(third));
             }
         };
 
@@ -313,15 +357,16 @@ namespace Sora::Math {
         struct ClampFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
-                    BackendFor<First>::Clamp(std::forward<First>(first), std::forward<Second>(second),
-                                             std::forward<Third>(third));
+                    BackendFor<First, Second, Third>::Clamp(std::forward<First>(first), std::forward<Second>(second),
+                                                            std::forward<Third>(third));
                 }
-            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
-            operator()(First&& first, Second&& second, Third&& third) const
-                noexcept(noexcept(BackendFor<First>::Clamp(std::forward<First>(first), std::forward<Second>(second),
-                                                           std::forward<Third>(third)))) {
-                return BackendFor<First>::Clamp(std::forward<First>(first), std::forward<Second>(second),
-                                                 std::forward<Third>(third));
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) operator()(First&& first, Second&& second,
+                                                                                  Third&& third) const
+                noexcept(noexcept(BackendFor<First, Second, Third>::Clamp(std::forward<First>(first),
+                                                                          std::forward<Second>(second),
+                                                                          std::forward<Third>(third)))) {
+                return BackendFor<First, Second, Third>::Clamp(std::forward<First>(first), std::forward<Second>(second),
+                                                               std::forward<Third>(third));
             }
         };
 
@@ -347,7 +392,7 @@ namespace Sora::Math {
 
     } // namespace CPO
 
-    /** @brief Add one or more values using the backend selected from the first operand. */
+    /** @brief Add one or more values using the compile-time join of all operand backends. */
     inline constexpr CPO::AddFn Add{};
 
     /** @brief Subtract the second operand from the first. */

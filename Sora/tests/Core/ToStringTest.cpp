@@ -106,6 +106,17 @@ TEST_CASE("ToString is the single canonical formatting protocol", "[Sora.Core.To
     REQUIRE(reflected.find("value=42") == std::string::npos);
 }
 
+TEST_CASE("Meta ToString renders reflected named variables as diagnostic bindings", "[Sora.Core.ToString]") {
+    int answer = 42;
+    int retries = 3;
+    const std::string label = "ready";
+
+    REQUIRE(Sora::Meta::ToString<^^answer>(answer) == "variable[answer : int = 42]");
+    REQUIRE(Sora::Meta::ToString<^^retries>(retries) == "variable[retries : int = 3]");
+    REQUIRE(Sora::Meta::ToString<^^label>(label) ==
+            std::format("variable[label : {} = ready]", Sora::Meta::DisplayStringOf(Sora::Meta::TypeOf(^^label))));
+}
+
 TEST_CASE("ToString transcodes Unicode strings and native paths as UTF-8", "[Sora.Core.ToString]") {
     constexpr std::string_view utf8 = "A\xF0\x9F\x98\x80";
     REQUIRE(Sora::ToString(std::u16string_view{u"A\U0001F600"}) == utf8);

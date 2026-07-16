@@ -230,6 +230,16 @@ namespace Sora {
             Utf32StringLike<T> || WideStringLike<T> || std::same_as<std::remove_cvref_t<T>, std::filesystem::path> ||
             std::is_arithmetic_v<std::remove_cvref_t<T>> || std::is_enum_v<std::remove_cvref_t<T>>;
 
+        /**
+         * @brief A runtime lvalue compatible with the declared type of a reflected named variable.
+         * @tparam Variable Reflection of the variable declaration.
+         * @tparam T Runtime lvalue type supplied for rendering.
+         */
+        template<std::meta::info Variable, typename T>
+        concept ReflectedVariableValue =
+            std::meta::is_variable(Variable) && std::meta::has_identifier(Variable) &&
+            std::meta::remove_reference(std::meta::type_of(Variable)) == std::meta::remove_reference(^^T);
+
         /** @brief Type accepted by strict @ref FromString deserialization. */
         template<typename T>
         concept StringDeserializable =
@@ -561,6 +571,27 @@ namespace Sora {
 
     /** @brief Customization-point object that strictly deserializes UTF-8 text to an explicitly tagged target type. */
     inline constexpr CPO::FromStringFn FromString{};
+
+    namespace Meta {
+
+        /**
+         * @brief Render a reflected named variable and its current value as an unambiguous diagnostic binding.
+         * @details The reflection supplies the source name and declared type while @p value supplies the current
+         * runtime value. C++ reflection does not carry an automatic variable's address, so both inputs are necessary.
+         * @tparam Variable Reflection of the variable declaration.
+         * @tparam T Declared runtime value type, including cv-qualification.
+         * @param[in] value Current value of the reflected variable.
+         * @return Diagnostic text in the form @c variable[name @c : @c type @c = @c value].
+         */
+        template<std::meta::info Variable, typename T, typename AbiToken = ReflectedVariableToken<Variable>>
+            requires Concept::ReflectedVariableValue<Variable, T> &&
+                     std::same_as<AbiToken, ReflectedVariableToken<Variable>>
+        [[nodiscard]] std::string ToString(T& value) {
+            return std::format("variable[{} : {} = {}]", IdentifierOf(Variable), DisplayStringOf(TypeOf(Variable)),
+                               Sora::ToString(value));
+        }
+
+    } // namespace Meta
 
     /** @brief Return a stable string view when safe and otherwise materialize an owning string. */
     template<typename T>

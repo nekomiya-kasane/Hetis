@@ -975,7 +975,7 @@ namespace Sora::Math::Simd {
                 constexpr int n = IV::kSize();
                 if constexpr (Bytes * __CHAR_BIT__ >= n) // '1 << kIota' cannot overflow
                 {                                        // Reduce(Select(k, powers_of_2, 0))
-                    constexpr IV pow2 = IV(Detail::kConstant<1>) << kIota<IV>;
+                    constexpr IV pow2([](int index) { return typename IV::ValueType{1} << index; });
                     return Ur(U0(SelectImpl(k, pow2, IV()).Reduce(std::bit_or<>()))) << Offset;
                 } else if constexpr (n % __CHAR_BIT__ != 0) { // recurse after splitting in two
                     constexpr int nLo = n - n % __CHAR_BIT__;
@@ -983,7 +983,7 @@ namespace Sora::Math::Simd {
                     Ur bits = hi.template ToUint<Offset + nLo, Use2For1>();
                     return bits | lo.template ToUint<Offset, Use2For1>();
                 } else { // limit powers_of_2 to 1, 2, 4, ..., 128
-                    constexpr IV pow2 = IV(Detail::kConstant<1>) << (kIota<IV> % IV(Detail::kConstant<__CHAR_BIT__>));
+                    constexpr IV pow2([](int index) { return typename IV::ValueType{1} << (index % __CHAR_BIT__); });
                     IV x = SelectImpl(k, pow2, IV());
                     // partial reductions of 8 neighboring elements
                     x |= IV::StaticPermute(x, SwapNeighbors<4>());
@@ -1468,7 +1468,7 @@ namespace Sora::Math::Simd {
                   } else if constexpr (kN0 == 1) {
                       return Mask0(x[0]);
                   } else {
-                      return Get<0>(Chunk<kN0>(x));
+                      return std::get<0>(Chunk<kN0>(x));
                   }
               }()),
               data1([&] {
@@ -1481,7 +1481,7 @@ namespace Sora::Math::Simd {
                   } else if constexpr (kN1 == 1) {
                       return Mask1(x[kN0]);
                   } else {
-                      return Get<1>(Chunk<kN0>(x));
+                      return std::get<1>(Chunk<kN0>(x));
                   }
               }()) {}
 

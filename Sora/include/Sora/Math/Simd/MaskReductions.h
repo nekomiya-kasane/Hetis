@@ -68,11 +68,11 @@ namespace Sora::Math::Simd {
         return x;
     }
 
-    constexpr SimdSizeType ReduceMinIndex(std::same_as<bool> auto x) {
+    constexpr SimdSizeType ReduceMinIndex(std::same_as<bool> auto) {
         return 0;
     }
 
-    constexpr SimdSizeType ReduceMaxIndex(std::same_as<bool> auto x) {
+    constexpr SimdSizeType ReduceMaxIndex(std::same_as<bool> auto) {
         return 0;
     }
 

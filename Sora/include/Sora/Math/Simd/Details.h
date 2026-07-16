@@ -629,15 +629,24 @@ namespace Sora::Math::Simd {
     template<typename Tp>
     using NativeAbiT = decltype(Sora::Math::Simd::NativeAbi<Tp>());
 
-    template<typename Tp, int Np, TargetTraits Target = {}>
+    /**
+     * @brief Deduce a target-independent fixed-width ABI for @p Np values.
+     * @details The public @c Vector<T, N> identity is based on 128-bit canonical chunks, so it remains identical
+     * across translation units compiled with different ISA feature flags. Native-width internal loops use
+     * @ref NativeAbiT explicitly.
+     */
+    template<typename Tp, int Np, TargetTraits = {}>
     consteval auto DeduceAbi() {
-        constexpr auto native = Sora::Math::Simd::NativeAbi<Tp>();
-        if constexpr (0 == native.kStorageSize || Np <= 0) {
+        if constexpr (!Vectorizable<Tp> || Np <= 0) {
             return InvalidAbi();
-        } else if constexpr (Np == native.kStorageSize) {
-            return native;
+        } else if constexpr (ComplexLike<Tp>) {
+            using Scalar = typename Tp::value_type;
+            constexpr int scalarLanes = sizeof(Scalar) < 16 ? 16 / sizeof(Scalar) : 1;
+            constexpr int complexLanes = scalarLanes > 1 ? scalarLanes / 2 : 1;
+            return AbiT<complexLanes, 1, AbiVariant::kCxIleav>().template Resize<Np>();
         } else {
-            return native.template Resize<Np>();
+            constexpr int lanes = sizeof(Tp) < 16 ? 16 / sizeof(Tp) : 1;
+            return AbiT<lanes, 1>().template Resize<Np>();
         }
     }
 

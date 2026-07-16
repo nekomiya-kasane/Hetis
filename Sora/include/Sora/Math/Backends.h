@@ -10,16 +10,31 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <meta>
 #include <string>
 #include <type_traits>
 
 #include <Sora/Core/Traits/TypeTraits.h>
+#include <Sora/Math/ConstexprMath.h>
 #include <Sora/Math/Simd.h>
 
 namespace Sora {
 
     namespace Math {
+
+        namespace Concept {
+
+            /** @brief SIMD carrier whose element type belongs to a floating-point domain. */
+            template<typename T>
+            concept FloatingSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
+                                        std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
+
+            /** @brief Scalar or SIMD carrier over which real-valued automatic differentiation is defined. */
+            template<typename T>
+            concept DifferentiableValue = std::floating_point<std::remove_cvref_t<T>> || FloatingSimdValue<T>;
+
+        } // namespace Concept
 
         /**
          * @brief Open specialization points for mapping user-defined numeric carriers to computation backends.
@@ -57,27 +72,32 @@ namespace Sora {
              * interface would incorrectly expose argument value categories as mathematical result types.
              */
             struct ScalarCPU {
-                static constexpr bool kIsScalar = true;  /**< This backend operates on scalar values. */
-                static constexpr bool kIsSimd = false;   /**< This backend does not operate on SIMD carriers. */
+                static constexpr bool kIsScalar = true; /**< This backend operates on scalar values. */
+                static constexpr bool kIsSimd = false;  /**< This backend does not operate on SIMD carriers. */
+                static constexpr int kPriority = 0;     /**< Priority used when joining heterogeneous backends. */
 
-                template<Concept::NumericScalar T, std::same_as<T>... Ts>
-                [[nodiscard]] static constexpr T Add(T x, Ts... args) noexcept {
-                    return (x + ... + args);
+                template<Concept::NumericScalar T, Concept::NumericScalar... Ts>
+                [[nodiscard]] static constexpr auto Add(T x, Ts... args) noexcept {
+                    using R = std::common_type_t<T, Ts...>;
+                    return (static_cast<R>(x) + ... + static_cast<R>(args));
                 }
 
-                template<Concept::NumericScalar T, std::same_as<T>... Ts>
-                [[nodiscard]] static constexpr T Mul(T x, Ts... args) noexcept {
-                    return (x * ... * args);
+                template<Concept::NumericScalar T, Concept::NumericScalar... Ts>
+                [[nodiscard]] static constexpr auto Mul(T x, Ts... args) noexcept {
+                    using R = std::common_type_t<T, Ts...>;
+                    return (static_cast<R>(x) * ... * static_cast<R>(args));
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Sub(T x, T y) noexcept {
-                    return x - y;
+                template<Concept::NumericScalar T, Concept::NumericScalar U>
+                [[nodiscard]] static constexpr auto Sub(T x, U y) noexcept {
+                    using R = std::common_type_t<T, U>;
+                    return static_cast<R>(x) - static_cast<R>(y);
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Div(T x, T y) noexcept {
-                    return x / y;
+                template<Concept::NumericScalar T, Concept::NumericScalar U>
+                [[nodiscard]] static constexpr auto Div(T x, U y) noexcept {
+                    using R = std::common_type_t<T, U>;
+                    return static_cast<R>(x) / static_cast<R>(y);
                 }
 
                 template<Concept::NumericScalar T>
@@ -85,7 +105,7 @@ namespace Sora {
                     return -x;
                 }
 
-                template<Concept::NumericScalar T>
+                template<std::floating_point T>
                 [[nodiscard]] static constexpr T Inv(T x) noexcept {
                     return T{1} / x;
                 }
@@ -96,9 +116,13 @@ namespace Sora {
                 }
 
                 template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Abs(T x) noexcept {
+                [[nodiscard]] static constexpr auto Abs(T x) noexcept {
                     if constexpr (std::unsigned_integral<T>) {
                         return x;
+                    } else if constexpr (std::signed_integral<T>) {
+                        using U = std::make_unsigned_t<T>;
+                        const U bits = static_cast<U>(x);
+                        return x < 0 ? U{0} - bits : bits;
                     } else {
                         return std::abs(x);
                     }
@@ -106,62 +130,116 @@ namespace Sora {
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Sin(T x) noexcept {
-                    return std::sin(x);
+                    if consteval {
+                        return Detail::CtSinCos(x).sin;
+                    } else {
+                        return std::sin(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Cos(T x) noexcept {
-                    return std::cos(x);
+                    if consteval {
+                        return Detail::CtSinCos(x).cos;
+                    } else {
+                        return std::cos(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Exp(T x) noexcept {
-                    return std::exp(x);
+                    if consteval {
+                        return Detail::CtExp(x);
+                    } else {
+                        return std::exp(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Log(T x) noexcept {
-                    return std::log(x);
+                    if consteval {
+                        return Detail::CtLog(x);
+                    } else {
+                        return std::log(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Pow(T base, T exponent) noexcept {
-                    return std::pow(base, exponent);
+                    if consteval {
+                        return Detail::CtPow(base, exponent);
+                    } else {
+                        return std::pow(base, exponent);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Sqrt(T x) noexcept {
-                    return std::sqrt(x);
+                    if consteval {
+                        return Detail::CtSqrt(x);
+                    } else {
+                        return std::sqrt(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Atan(T x) noexcept {
-                    return std::atan(x);
+                    if consteval {
+                        return Detail::CtAtan(x);
+                    } else {
+                        return std::atan(x);
+                    }
                 }
 
-                template<std::floating_point T>
-                [[nodiscard]] static constexpr T Atan2(T y, T x) noexcept {
-                    return std::atan2(y, x);
+                template<Concept::NumericScalar T, Concept::NumericScalar U>
+                    requires std::floating_point<std::common_type_t<T, U>>
+                [[nodiscard]] static constexpr auto Atan2(T y, U x) noexcept {
+                    using R = std::common_type_t<T, U>;
+                    if consteval {
+                        return Detail::CtAtan2(static_cast<R>(y), static_cast<R>(x));
+                    } else {
+                        return std::atan2(static_cast<R>(y), static_cast<R>(x));
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Asin(T x) noexcept {
-                    return std::asin(x);
+                    if consteval {
+                        if (x < T{-1} || x > T{1}) {
+                            return std::numeric_limits<T>::quiet_NaN();
+                        }
+                        return Detail::CtAtan2(x, Detail::CtSqrt(T{1} - x * x));
+                    } else {
+                        return std::asin(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Acos(T x) noexcept {
-                    return std::acos(x);
+                    if consteval {
+                        if (x < T{-1} || x > T{1}) {
+                            return std::numeric_limits<T>::quiet_NaN();
+                        }
+                        return Detail::CtAtan2(Detail::CtSqrt(T{1} - x * x), x);
+                    } else {
+                        return std::acos(x);
+                    }
                 }
 
                 template<std::floating_point T>
                 [[nodiscard]] static constexpr T Tan(T x) noexcept {
-                    return std::tan(x);
+                    if consteval {
+                        const auto result = Detail::CtSinCos(x);
+                        return result.sin / result.cos;
+                    } else {
+                        return std::tan(x);
+                    }
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Clamp(T value, T lower, T upper) noexcept {
-                    return std::clamp(value, lower, upper);
+                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                [[nodiscard]] static constexpr auto Clamp(T value, U lower, V upper) noexcept {
+                    using R = std::common_type_t<T, U, V>;
+                    return std::clamp(static_cast<R>(value), static_cast<R>(lower), static_cast<R>(upper));
                 }
 
                 template<Concept::NumericScalar T>
@@ -169,44 +247,50 @@ namespace Sora {
                     return Clamp(value, T{0}, T{1});
                 }
 
-                template<std::floating_point T>
-                [[nodiscard]] static constexpr T Lerp(T a, T b, T t) noexcept {
-                    return std::lerp(a, b, t);
+                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                    requires std::floating_point<std::common_type_t<T, U, V>>
+                [[nodiscard]] static constexpr auto Lerp(T a, U b, V t) noexcept {
+                    using R = std::common_type_t<T, U, V>;
+                    return std::lerp(static_cast<R>(a), static_cast<R>(b), static_cast<R>(t));
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Fma(T a, T b, T c) noexcept {
-                    if constexpr (std::floating_point<T>) {
-                        return std::fma(a, b, c);
+                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                [[nodiscard]] static constexpr auto Fma(T a, U b, V c) noexcept {
+                    using R = std::common_type_t<T, U, V>;
+                    if constexpr (std::floating_point<R>) {
+                        return std::fma(static_cast<R>(a), static_cast<R>(b), static_cast<R>(c));
                     } else {
-                        return a * b + c;
+                        return static_cast<R>(a) * static_cast<R>(b) + static_cast<R>(c);
                     }
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Mfs(T a, T b, T c) noexcept {
-                    if constexpr (std::floating_point<T>) {
-                        return std::fma(a, b, -c);
+                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                [[nodiscard]] static constexpr auto Mfs(T a, U b, V c) noexcept {
+                    using R = std::common_type_t<T, U, V>;
+                    if constexpr (std::floating_point<R>) {
+                        return std::fma(static_cast<R>(a), static_cast<R>(b), -static_cast<R>(c));
                     } else {
-                        return a * b - c;
+                        return static_cast<R>(a) * static_cast<R>(b) - static_cast<R>(c);
                     }
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Nms(T a, T b, T c) noexcept {
-                    if constexpr (std::floating_point<T>) {
-                        return std::fma(-a, b, -c);
+                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                [[nodiscard]] static constexpr auto Nms(T a, U b, V c) noexcept {
+                    using R = std::common_type_t<T, U, V>;
+                    if constexpr (std::floating_point<R>) {
+                        return std::fma(-static_cast<R>(a), static_cast<R>(b), -static_cast<R>(c));
                     } else {
-                        return -a * b - c;
+                        return -static_cast<R>(a) * static_cast<R>(b) - static_cast<R>(c);
                     }
                 }
 
-                template<Concept::NumericScalar T>
-                [[nodiscard]] static constexpr T Nma(T a, T b, T c) noexcept {
-                    if constexpr (std::floating_point<T>) {
-                        return std::fma(-a, b, c);
+                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                [[nodiscard]] static constexpr auto Nma(T a, U b, V c) noexcept {
+                    using R = std::common_type_t<T, U, V>;
+                    if constexpr (std::floating_point<R>) {
+                        return std::fma(-static_cast<R>(a), static_cast<R>(b), static_cast<R>(c));
                     } else {
-                        return -a * b + c;
+                        return -static_cast<R>(a) * static_cast<R>(b) + static_cast<R>(c);
                     }
                 }
 
@@ -221,8 +305,8 @@ namespace Sora {
                 /** @brief Fixed-width arithmetic SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
                 concept FixedSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                          Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
-                                          std::remove_cvref_t<T>::kSize.value == N;
+                                         Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
+                                         std::remove_cvref_t<T>::kSize.value == N;
 
                 /** @brief Fixed-width floating-point SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
@@ -244,232 +328,310 @@ namespace Sora {
             struct FixedSimdCPU {
                 static_assert(N > 0, "FixedSimdCPU requires at least one lane");
 
-                static constexpr bool kIsScalar = false;  /**< This backend does not operate on scalar values. */
-                static constexpr bool kIsSimd = true;     /**< This backend operates on SIMD carriers. */
-                static constexpr std::size_t kSize = N;   /**< Number of lanes accepted by this specialization. */
+                static constexpr bool kIsScalar = false; /**< This backend does not operate on scalar values. */
+                static constexpr bool kIsSimd = true;    /**< This backend operates on SIMD carriers. */
+                static constexpr std::size_t kSize = N;  /**< Number of lanes accepted by this specialization. */
+                static constexpr int kPriority = 1;      /**< Priority used when joining heterogeneous backends. */
 
             private:
+                template<typename T>
+                static constexpr bool kCompatibleOperand =
+                    Concept::FixedSimdValue<T, N> || Sora::Concept::NumericScalar<std::remove_cvref_t<T>>;
+
+                template<typename T>
+                [[nodiscard]] static consteval auto ElementType() {
+                    if constexpr (Concept::FixedSimdValue<T, N>) {
+                        return std::type_identity<typename std::remove_cvref_t<T>::ValueType>{};
+                    } else {
+                        return std::type_identity<std::remove_cvref_t<T>>{};
+                    }
+                }
+
+                template<typename T>
+                using ElementTypeOf = typename decltype(ElementType<T>())::type;
+
+                template<typename First, typename... Rest>
+                [[nodiscard]] static consteval auto VectorCarrier() {
+                    if constexpr (Concept::FixedSimdValue<First, N>) {
+                        return std::type_identity<std::remove_cvref_t<First>>{};
+                    } else {
+                        return VectorCarrier<Rest...>();
+                    }
+                }
+
+                template<typename... Args>
+                using ResultVector = Simd::Rebind<std::common_type_t<ElementTypeOf<Args>...>,
+                                                  typename decltype(VectorCarrier<Args...>())::type>;
+
+                template<typename R, typename T>
+                [[nodiscard]] static constexpr R Convert(T&& value) noexcept {
+                    if constexpr (Concept::FixedSimdValue<T, N>) {
+                        return R(std::forward<T>(value));
+                    } else {
+                        return R(static_cast<typename R::ValueType>(value));
+                    }
+                }
+
                 template<typename V, typename F>
-                [[nodiscard]] static constexpr V Transform(const V& x, F fn) {
+                [[nodiscard]] static constexpr V Transform(const V& x, F fn) noexcept {
                     return V([&](auto index) { return fn(x[index]); });
                 }
 
                 template<typename V, typename F>
-                [[nodiscard]] static constexpr V Transform(const V& x, const V& y, F fn) {
+                [[nodiscard]] static constexpr V Transform(const V& x, const V& y, F fn) noexcept {
                     return V([&](auto index) { return fn(x[index], y[index]); });
                 }
 
                 template<typename V, typename F>
-                [[nodiscard]] static constexpr V Transform(const V& x, const V& y, const V& z, F fn) {
+                [[nodiscard]] static constexpr V Transform(const V& x, const V& y, const V& z, F fn) noexcept {
                     return V([&](auto index) { return fn(x[index], y[index], z[index]); });
                 }
 
             public:
                 template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Splat(typename V::ValueType value) {
+                [[nodiscard]] static constexpr V Splat(typename V::ValueType value) noexcept {
                     return V(value);
                 }
 
                 template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Load(const typename V::ValueType* values) {
+                [[nodiscard]] static constexpr V Load(const typename V::ValueType* values) noexcept {
                     return V([&](auto index) { return values[static_cast<std::size_t>(index)]; });
                 }
 
-                template<Concept::FixedSimdValue<N> V, typename M>
-                [[nodiscard]] static constexpr V MaskedLoad(const typename V::ValueType* values, const M& active,
-                                                            V fallback) {
-                    return Simd::Select(active, Load<V>(values), fallback);
+                template<Concept::FixedSimdValue<N> V>
+                [[nodiscard]] static constexpr V MaskedLoad(const typename V::ValueType* values,
+                                                            const typename V::MaskType& active, V fallback) noexcept {
+                    return Simd::Select(active, V::MaskedLoad(values, active), fallback);
                 }
 
                 template<Concept::FixedSimdValue<N> V>
-                static constexpr void Store(typename V::ValueType* values, const V& value) {
+                static constexpr void Store(typename V::ValueType* values, const V& value) noexcept {
                     for (std::size_t index = 0; index < N; ++index) {
                         values[index] = value[index];
                     }
                 }
 
-                template<Concept::FixedSimdValue<N> V, typename M>
-                static constexpr void MaskedStore(typename V::ValueType* values, const V& value, const M& active) {
-                    Store(values, Simd::Select(active, value, Load<V>(values)));
+                template<Concept::FixedSimdValue<N> V>
+                static constexpr void MaskedStore(typename V::ValueType* values, const V& value,
+                                                  const typename V::MaskType& active) noexcept {
+                    V::MaskedStore(value, values, active);
                 }
 
                 template<Concept::FixedSimdValue<N> V, typename M>
-                [[nodiscard]] static constexpr V Select(const M& condition, const V& yes, const V& no) {
+                [[nodiscard]] static constexpr V Select(const M& condition, const V& yes, const V& no) noexcept {
                     return Simd::Select(condition, yes, no);
                 }
 
-                template<typename V, typename... Vs>
-                    requires Concept::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
-                [[nodiscard]] static constexpr V Add(V x, Vs... args) {
-                    return (x + ... + args);
+                template<typename First, typename... Rest>
+                    requires(kCompatibleOperand<First> && (kCompatibleOperand<Rest> && ...) &&
+                             (Concept::FixedSimdValue<First, N> || ... || Concept::FixedSimdValue<Rest, N>))
+                [[nodiscard]] static constexpr auto Add(First&& first, Rest&&... rest) noexcept {
+                    using R = ResultVector<First, Rest...>;
+                    return (Convert<R>(std::forward<First>(first)) + ... + Convert<R>(std::forward<Rest>(rest)));
                 }
 
-                template<typename V, typename... Vs>
-                    requires Concept::FixedSimdValue<V, N> && (std::same_as<V, Vs> && ...)
-                [[nodiscard]] static constexpr V Mul(V x, Vs... args) {
-                    return (x * ... * args);
+                template<typename First, typename... Rest>
+                    requires(kCompatibleOperand<First> && (kCompatibleOperand<Rest> && ...) &&
+                             (Concept::FixedSimdValue<First, N> || ... || Concept::FixedSimdValue<Rest, N>))
+                [[nodiscard]] static constexpr auto Mul(First&& first, Rest&&... rest) noexcept {
+                    using R = ResultVector<First, Rest...>;
+                    return (Convert<R>(std::forward<First>(first)) * ... * Convert<R>(std::forward<Rest>(rest)));
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Sub(V x, V y) {
-                    return x - y;
+                template<typename First, typename Second>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N>))
+                [[nodiscard]] static constexpr auto Sub(First&& first, Second&& second) noexcept {
+                    using R = ResultVector<First, Second>;
+                    return Convert<R>(std::forward<First>(first)) - Convert<R>(std::forward<Second>(second));
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Div(V x, V y) {
-                    return x / y;
+                template<typename First, typename Second>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N>))
+                [[nodiscard]] static constexpr auto Div(First&& first, Second&& second) noexcept {
+                    using R = ResultVector<First, Second>;
+                    return Convert<R>(std::forward<First>(first)) / Convert<R>(std::forward<Second>(second));
                 }
 
-                [[nodiscard]] static constexpr auto Neg(Concept::FixedSimdValue<N> auto x) { return -x; }
+                [[nodiscard]] static constexpr auto Neg(Concept::FixedSimdValue<N> auto x) noexcept { return -x; }
 
-                [[nodiscard]] static constexpr auto Inv(Concept::FixedSimdValue<N> auto x) {
+                [[nodiscard]] static constexpr auto Inv(Concept::FixedSimdFloatingValue<N> auto x) noexcept {
                     using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     return V(T(1)) / x;
                 }
 
-                [[nodiscard]] static constexpr auto Square(Concept::FixedSimdValue<N> auto x) { return x * x; }
+                [[nodiscard]] static constexpr auto Square(Concept::FixedSimdValue<N> auto x) noexcept { return x * x; }
 
-                [[nodiscard]] static constexpr auto Abs(Concept::FixedSimdValue<N> auto x) {
+                [[nodiscard]] static constexpr auto Abs(Concept::FixedSimdValue<N> auto x) noexcept {
                     using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     if constexpr (std::unsigned_integral<T>) {
                         return x;
                     } else if constexpr (std::signed_integral<T>) {
-                        return Simd::Abs(x);
+                        using R = Simd::Rebind<std::make_unsigned_t<T>, V>;
+                        const R bits(x);
+                        return Simd::Select(x < V(T(0)), R(typename R::ValueType{0}) - bits, bits);
                     } else {
-                        return Transform(x, [](T value) { return std::abs(value); });
+                        return x.Fabs();
                     }
                 }
 
-                [[nodiscard]] static constexpr auto Sin(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::sin(value); });
+                [[nodiscard]] static constexpr auto Sin(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Sin(x);
                 }
 
-                [[nodiscard]] static constexpr auto Cos(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::cos(value); });
+                [[nodiscard]] static constexpr auto Cos(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Cos(x);
                 }
 
-                [[nodiscard]] static constexpr auto Exp(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::exp(value); });
+                [[nodiscard]] static constexpr auto Exp(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Exp(x);
                 }
 
-                [[nodiscard]] static constexpr auto Log(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::log(value); });
+                [[nodiscard]] static constexpr auto Log(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Log(x);
                 }
 
-                template<Concept::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Pow(const V& base, const V& exponent) {
-                    using T = typename V::ValueType;
-                    return Transform(base, exponent, [](T x, T y) { return std::pow(x, y); });
+                template<typename First, typename Second>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N>) &&
+                             std::floating_point<typename ResultVector<First, Second>::ValueType>)
+                [[nodiscard]] static constexpr auto Pow(First&& base, Second&& exponent) noexcept {
+                    using R = ResultVector<First, Second>;
+                    return Simd::Pow(Convert<R>(std::forward<First>(base)), Convert<R>(std::forward<Second>(exponent)));
                 }
 
-                [[nodiscard]] static constexpr auto Sqrt(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::sqrt(value); });
+                [[nodiscard]] static constexpr auto Sqrt(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Sqrt(x);
                 }
 
-                [[nodiscard]] static constexpr auto Atan(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::atan(value); });
+                [[nodiscard]] static constexpr auto Atan(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Atan(x);
                 }
 
-                template<Concept::FixedSimdFloatingValue<N> V>
-                [[nodiscard]] static constexpr V Atan2(const V& y, const V& x) {
-                    using T = typename V::ValueType;
-                    return Transform(y, x, [](T yValue, T xValue) { return std::atan2(yValue, xValue); });
+                template<typename First, typename Second>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N>) &&
+                             std::floating_point<typename ResultVector<First, Second>::ValueType>)
+                [[nodiscard]] static constexpr auto Atan2(First&& y, Second&& x) noexcept {
+                    using R = ResultVector<First, Second>;
+                    return Simd::Atan2(Convert<R>(std::forward<First>(y)), Convert<R>(std::forward<Second>(x)));
                 }
 
-                [[nodiscard]] static constexpr auto Asin(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::asin(value); });
+                [[nodiscard]] static constexpr auto Asin(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Asin(x);
                 }
 
-                [[nodiscard]] static constexpr auto Acos(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::acos(value); });
+                [[nodiscard]] static constexpr auto Acos(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Acos(x);
                 }
 
-                [[nodiscard]] static constexpr auto Tan(const Concept::FixedSimdFloatingValue<N> auto& x) {
-                    using V = std::remove_cvref_t<decltype(x)>;
-                    using T = typename V::ValueType;
-                    return Transform(x, [](T value) { return std::tan(value); });
+                [[nodiscard]] static constexpr auto Tan(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
+                    return Simd::Tan(x);
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Clamp(V value, V lower, V upper) {
-                    return Simd::Clamp(value, lower, upper);
+                template<typename Value, typename Lower, typename Upper>
+                    requires(kCompatibleOperand<Value> && kCompatibleOperand<Lower> && kCompatibleOperand<Upper> &&
+                             (Concept::FixedSimdValue<Value, N> || Concept::FixedSimdValue<Lower, N> ||
+                              Concept::FixedSimdValue<Upper, N>))
+                [[nodiscard]] static constexpr auto Clamp(Value&& value, Lower&& lower, Upper&& upper) noexcept {
+                    using R = ResultVector<Value, Lower, Upper>;
+                    return Simd::Clamp(Convert<R>(std::forward<Value>(value)), Convert<R>(std::forward<Lower>(lower)),
+                                       Convert<R>(std::forward<Upper>(upper)));
                 }
 
                 template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Saturate(V value) {
+                [[nodiscard]] static constexpr V Saturate(V value) noexcept {
                     using T = typename V::ValueType;
                     return Clamp(value, V(T(0)), V(T(1)));
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Lerp(const V& a, const V& b, const V& t) {
+                template<typename First, typename Second, typename Third>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> && kCompatibleOperand<Third> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N> ||
+                              Concept::FixedSimdValue<Third, N>) &&
+                             std::floating_point<typename ResultVector<First, Second, Third>::ValueType>)
+                [[nodiscard]] static constexpr auto Lerp(First&& a, Second&& b, Third&& t) noexcept {
+                    using V = ResultVector<First, Second, Third>;
                     using T = typename V::ValueType;
+                    const V left = Convert<V>(std::forward<First>(a));
+                    const V right = Convert<V>(std::forward<Second>(b));
+                    const V weight = Convert<V>(std::forward<Third>(t));
+                    return Transform(left, right, weight,
+                                     [](T x, T y, T interpolation) { return std::lerp(x, y, interpolation); });
+                }
+
+                template<typename First, typename Second, typename Third>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> && kCompatibleOperand<Third> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N> ||
+                              Concept::FixedSimdValue<Third, N>))
+                [[nodiscard]] static constexpr auto Fma(First&& a, Second&& b, Third&& c) noexcept {
+                    using V = ResultVector<First, Second, Third>;
+                    using T = typename V::ValueType;
+                    const V left = Convert<V>(std::forward<First>(a));
+                    const V right = Convert<V>(std::forward<Second>(b));
+                    const V addend = Convert<V>(std::forward<Third>(c));
                     if constexpr (std::floating_point<T>) {
-                        return Transform(a, b, t, [](T x, T y, T weight) { return std::lerp(x, y, weight); });
+                        return Simd::Fma(left, right, addend);
                     } else {
-                        return a + (b - a) * t;
+                        return left * right + addend;
                     }
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Fma(const V& a, const V& b, const V& c) {
+                template<typename First, typename Second, typename Third>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> && kCompatibleOperand<Third> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N> ||
+                              Concept::FixedSimdValue<Third, N>))
+                [[nodiscard]] static constexpr auto Mfs(First&& a, Second&& b, Third&& c) noexcept {
+                    using V = ResultVector<First, Second, Third>;
                     using T = typename V::ValueType;
+                    const V left = Convert<V>(std::forward<First>(a));
+                    const V right = Convert<V>(std::forward<Second>(b));
+                    const V subtrahend = Convert<V>(std::forward<Third>(c));
                     if constexpr (std::floating_point<T>) {
-                        return Transform(a, b, c, [](T x, T y, T addend) { return std::fma(x, y, addend); });
+                        return Simd::Fma(left, right, -subtrahend);
                     } else {
-                        return a * b + c;
+                        return left * right - subtrahend;
                     }
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Mfs(const V& a, const V& b, const V& c) {
+                template<typename First, typename Second, typename Third>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> && kCompatibleOperand<Third> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N> ||
+                              Concept::FixedSimdValue<Third, N>))
+                [[nodiscard]] static constexpr auto Nms(First&& a, Second&& b, Third&& c) noexcept {
+                    using V = ResultVector<First, Second, Third>;
                     using T = typename V::ValueType;
+                    const V left = Convert<V>(std::forward<First>(a));
+                    const V right = Convert<V>(std::forward<Second>(b));
+                    const V subtrahend = Convert<V>(std::forward<Third>(c));
                     if constexpr (std::floating_point<T>) {
-                        return Transform(a, b, c, [](T x, T y, T subtrahend) { return std::fma(x, y, -subtrahend); });
+                        return Simd::Fma(-left, right, -subtrahend);
                     } else {
-                        return a * b - c;
+                        return -left * right - subtrahend;
                     }
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Nms(const V& a, const V& b, const V& c) {
+                template<typename First, typename Second, typename Third>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> && kCompatibleOperand<Third> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N> ||
+                              Concept::FixedSimdValue<Third, N>))
+                [[nodiscard]] static constexpr auto Nma(First&& a, Second&& b, Third&& c) noexcept {
+                    using V = ResultVector<First, Second, Third>;
                     using T = typename V::ValueType;
+                    const V left = Convert<V>(std::forward<First>(a));
+                    const V right = Convert<V>(std::forward<Second>(b));
+                    const V addend = Convert<V>(std::forward<Third>(c));
                     if constexpr (std::floating_point<T>) {
-                        return Transform(a, b, c, [](T x, T y, T subtrahend) { return std::fma(-x, y, -subtrahend); });
+                        return Simd::Fma(-left, right, addend);
                     } else {
-                        return -a * b - c;
+                        return -left * right + addend;
                     }
                 }
 
-                template<Concept::FixedSimdValue<N> V>
-                [[nodiscard]] static constexpr V Nma(const V& a, const V& b, const V& c) {
-                    using T = typename V::ValueType;
-                    if constexpr (std::floating_point<T>) {
-                        return Transform(a, b, c, [](T x, T y, T addend) { return std::fma(-x, y, addend); });
-                    } else {
-                        return -a * b + c;
-                    }
-                }
-
-                [[nodiscard]] static constexpr auto Sign(const Concept::FixedSimdSignedValue<N> auto& x) {
+                [[nodiscard]] static constexpr auto Sign(const Concept::FixedSimdSignedValue<N> auto& x) noexcept {
                     using V = std::remove_cvref_t<decltype(x)>;
                     using T = typename V::ValueType;
                     const V zero(T(0));
@@ -494,7 +656,7 @@ namespace Sora {
                 using Carrier = [:carrier:];
 
                 if constexpr (requires { typename Hook::Backend<Carrier>::Type; }) {
-                    using Selected = typename Hook::Backend<Carrier>::Type;
+                    using Selected [[maybe_unused]] = typename Hook::Backend<Carrier>::Type;
                     return ^^Selected;
                 }
 
@@ -536,6 +698,12 @@ namespace Sora {
     namespace Meta {
 
         inline namespace Math {
+
+            template<typename T>
+            concept FloatingSimdValue = Sora::Math::Concept::FloatingSimdValue<T>;
+            
+            template<typename T>
+            concept DifferentiableValue = Sora::Math::Concept::DifferentiableValue<T
 
             using Sora::Math::Meta::GetBackend;
 
