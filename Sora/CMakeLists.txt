@@ -16,7 +16,17 @@ target_include_directories(Sora PUBLIC
     "$<INSTALL_INTERFACE:include>"
 )
 target_link_libraries(Sora PUBLIC tapioca)
-target_link_libraries(Sora PUBLIC nlohmann_json::nlohmann_json stdexec)
+target_link_libraries(Sora PUBLIC eigen nlohmann_json::nlohmann_json stdexec)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND DEFINED COCA_TOOLCHAIN_ROOT)
+    set(SORA_SVML_LIBRARY "${COCA_TOOLCHAIN_ROOT}/tools/ifort/lib/svml_dispmt.lib")
+    if(EXISTS "${SORA_SVML_LIBRARY}")
+        target_compile_options(Sora PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fveclib=SVML>")
+        target_link_libraries(Sora PUBLIC "${SORA_SVML_LIBRARY}")
+        message(STATUS "Sora SIMD transcendental backend: Intel SVML")
+    endif()
+endif()
+
 if(WIN32)
     target_link_libraries(Sora PRIVATE advapi32 dwmapi imm32 ole32 shell32 user32)
 endif()

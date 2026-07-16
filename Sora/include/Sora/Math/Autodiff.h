@@ -115,7 +115,7 @@ namespace Sora::Math {
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto MulTwo(First&& first, Second&& second) noexcept {
                 auto primal = Math::Mul(Primal(first), Primal(second));
-                auto tangent = Math::Add(Math::Mul(Tangent(first, primal), Primal(second)),
+                auto tangent = Math::Fma(Tangent(first, primal), Primal(second),
                                          Math::Mul(Primal(first), Tangent(second, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
@@ -158,7 +158,7 @@ namespace Sora::Math {
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto Div(First&& first, Second&& second) noexcept {
                 auto primal = Math::Div(Primal(first), Primal(second));
-                auto numerator = Math::Sub(Math::Mul(Tangent(first, primal), Primal(second)),
+                auto numerator = Math::Mfs(Tangent(first, primal), Primal(second),
                                            Math::Mul(Primal(first), Tangent(second, primal)));
                 auto tangent = Math::Div(numerator, Math::Square(Primal(second)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
@@ -237,7 +237,7 @@ namespace Sora::Math {
             [[nodiscard]] static constexpr auto Atan2(First&& y, Second&& x) noexcept {
                 auto primal = Math::Atan2(Primal(y), Primal(x));
                 auto numerator =
-                    Math::Sub(Math::Mul(Primal(x), Tangent(y, primal)), Math::Mul(Primal(y), Tangent(x, primal)));
+                    Math::Mfs(Primal(x), Tangent(y, primal), Math::Mul(Primal(y), Tangent(x, primal)));
                 auto denominator = Math::Add(Math::Square(Primal(x)), Math::Square(Primal(y)));
                 auto tangent = Math::Div(numerator, denominator);
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
@@ -282,42 +282,41 @@ namespace Sora::Math {
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Fma(First&& a, Second&& b, Third&& c) noexcept {
                 auto primal = Math::Fma(Primal(a), Primal(b), Primal(c));
-                auto tangent = Math::Add(Math::Mul(Tangent(a, primal), Primal(b)),
-                                         Math::Mul(Primal(a), Tangent(b, primal)), Tangent(c, primal));
+                auto tangent = Math::Fma(Tangent(a, primal), Primal(b),
+                                         Math::Fma(Primal(a), Tangent(b, primal), Tangent(c, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Mfs(First&& a, Second&& b, Third&& c) noexcept {
                 auto primal = Math::Mfs(Primal(a), Primal(b), Primal(c));
-                auto tangent = Math::Sub(
-                    Math::Add(Math::Mul(Tangent(a, primal), Primal(b)), Math::Mul(Primal(a), Tangent(b, primal))),
-                    Tangent(c, primal));
+                auto tangent = Math::Fma(Tangent(a, primal), Primal(b),
+                                         Math::Mfs(Primal(a), Tangent(b, primal), Tangent(c, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Nms(First&& a, Second&& b, Third&& c) noexcept {
                 auto primal = Math::Nms(Primal(a), Primal(b), Primal(c));
-                auto tangent = Math::Neg(Math::Add(Math::Mul(Tangent(a, primal), Primal(b)),
-                                                   Math::Mul(Primal(a), Tangent(b, primal)), Tangent(c, primal)));
+                auto tangent = Math::Nms(Tangent(a, primal), Primal(b),
+                                         Math::Fma(Primal(a), Tangent(b, primal), Tangent(c, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Nma(First&& a, Second&& b, Third&& c) noexcept {
                 auto primal = Math::Nma(Primal(a), Primal(b), Primal(c));
-                auto tangent = Math::Sub(Tangent(c, primal), Math::Add(Math::Mul(Tangent(a, primal), Primal(b)),
-                                                                       Math::Mul(Primal(a), Tangent(b, primal))));
+                auto tangent = Math::Nma(Tangent(a, primal), Primal(b),
+                                         Math::Nma(Primal(a), Tangent(b, primal), Tangent(c, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Lerp(First&& a, Second&& b, Third&& t) noexcept {
                 auto primal = Math::Lerp(Primal(a), Primal(b), Primal(t));
-                auto tangent = Math::Add(Tangent(a, primal),
-                                         Math::Mul(Primal(t), Math::Sub(Tangent(b, primal), Tangent(a, primal))),
-                                         Math::Mul(Math::Sub(Primal(b), Primal(a)), Tangent(t, primal)));
+                auto tangent = Math::Fma(
+                    Primal(t), Math::Sub(Tangent(b, primal), Tangent(a, primal)),
+                    Math::Fma(Math::Sub(Primal(b), Primal(a)), Tangent(t, primal), Tangent(a, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
 

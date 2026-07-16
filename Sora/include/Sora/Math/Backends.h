@@ -292,7 +292,7 @@ namespace Sora {
                 /** @brief Fixed-width arithmetic SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
                 concept FixedSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                         Sora::Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
+                                         Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
                                          std::remove_cvref_t<T>::kSize.value == N;
 
                 /** @brief Fixed-width floating-point SIMD carrier containing exactly @p N lanes. */
@@ -323,7 +323,7 @@ namespace Sora {
             private:
                 template<typename T>
                 static constexpr bool kCompatibleOperand =
-                    Concept::FixedSimdValue<T, N> || Sora::Sora::Concept::NumericScalar<std::remove_cvref_t<T>>;
+                    Concept::FixedSimdValue<T, N> || Sora::Concept::NumericScalar<std::remove_cvref_t<T>>;
 
                 template<typename T>
                 [[nodiscard]] static consteval auto ElementType() {
@@ -682,18 +682,25 @@ namespace Sora {
 
     } // namespace Math
 
+    namespace Math {
+
+        /** @brief SIMD carrier whose element type belongs to a floating-point domain. */
+        template<typename T>
+        concept FloatingSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
+                                    std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
+
+        /** @brief Scalar or SIMD carrier over which real-valued automatic differentiation is defined. */
+        template<typename T>
+        concept DifferentiableValue = std::floating_point<std::remove_cvref_t<T>> || FloatingSimdValue<T>;
+
+    } // namespace Math
+
     namespace Meta {
 
         inline namespace Math {
 
-            /** @brief SIMD carrier whose element type belongs to a floating-point domain. */
-            template<typename T>
-            concept FloatingSimdValue = Sora::Math::Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                        std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
-
-            /** @brief Scalar or SIMD carrier over which real-valued automatic differentiation is defined. */
-            template<typename T>
-            concept DifferentiableValue = std::floating_point<std::remove_cvref_t<T>> || FloatingSimdValue<T>;
+            using Sora::Math::DifferentiableValue;
+            using Sora::Math::FloatingSimdValue;
 
             using Sora::Math::Meta::GetBackend;
 

@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
@@ -19,18 +20,56 @@ namespace Sora::Math {
     template<DifferentiableValue P, std::size_t Capacity>
     class ReverseTape;
 
+    namespace Detail {
+
+        template<std::size_t Capacity>
+        using ReverseIndex = std::conditional_t<(Capacity <= std::numeric_limits<std::uint32_t>::max()), std::uint32_t,
+                                                std::uint64_t>;
+
+        template<DifferentiableValue P, std::size_t Capacity, bool CompactScalar = (alignof(P) <= alignof(void*))>
+        struct ReverseStorage;
+
+        template<DifferentiableValue P, std::size_t Capacity>
+        struct ReverseStorage<P, Capacity, true> {
+            using IndexType = ReverseIndex<Capacity>;
+            using TapeType = ReverseTape<P, Capacity>;
+
+            TapeType* tape;
+            P primal;
+            IndexType node;
+
+            constexpr ReverseStorage(P value, TapeType* owner, IndexType index) noexcept
+                : tape(owner), primal(std::move(value)), node(index) {}
+        };
+
+        template<DifferentiableValue P, std::size_t Capacity>
+        struct ReverseStorage<P, Capacity, false> {
+            using IndexType = ReverseIndex<Capacity>;
+            using TapeType = ReverseTape<P, Capacity>;
+
+            P primal;
+            TapeType* tape;
+            IndexType node;
+
+            constexpr ReverseStorage(P value, TapeType* owner, IndexType index) noexcept
+                : primal(std::move(value)), tape(owner), node(index) {}
+        };
+
+    } // namespace Detail
+
     /** @brief A primal value and node reference into a fixed-capacity reverse tape. */
     template<DifferentiableValue P, std::size_t Capacity>
-    struct Reverse {
+    struct Reverse : Detail::ReverseStorage<P, Capacity> {
+        using Storage = Detail::ReverseStorage<P, Capacity>;
         using PrimalType = P;
         using TapeType = ReverseTape<P, Capacity>;
+        using IndexType = Detail::ReverseIndex<Capacity>;
 
         static constexpr bool kIsReverse = true;
         static constexpr std::size_t kCapacity = Capacity;
 
-        P primal;
-        TapeType* tape;
-        std::size_t node;
+        constexpr Reverse(P primal, TapeType* tape, IndexType node) noexcept
+            : Storage(std::move(primal), tape, node) {}
     };
 
     template<typename T>
@@ -45,19 +84,23 @@ namespace Sora::Math {
     class ReverseTape {
     public:
         using ValueType = Reverse<P, Capacity>;
-        static constexpr std::size_t kNoNode = std::numeric_limits<std::size_t>::max();
+        using IndexType = typename ValueType::IndexType;
+        static constexpr IndexType kNoNode = std::numeric_limits<IndexType>::max();
+
+        static_assert(Capacity <= std::numeric_limits<IndexType>::max(),
+                      "ReverseTape capacity must leave one index value for the no-node sentinel");
 
     private:
         struct Node {
-            std::size_t left;
-            std::size_t right;
+            IndexType left;
+            IndexType right;
             P leftWeight;
             P rightWeight;
         };
 
         std::array<Node, Capacity> nodes_;
         std::array<P, Capacity> adjoints_;
-        std::size_t size_ = 0;
+        IndexType size_ = 0;
         bool hasAdjoints_ = false;
 
         [[nodiscard]] static constexpr P Zero() {
@@ -76,7 +119,7 @@ namespace Sora::Math {
             }
         }
 
-        [[nodiscard]] constexpr std::size_t Append(Node node) {
+        [[nodiscard]] constexpr IndexType Append(Node node) {
             if (size_ == Capacity) {
                 throw std::length_error("ReverseTape capacity exceeded");
             }
@@ -93,7 +136,7 @@ namespace Sora::Math {
         ReverseTape& operator=(ReverseTape&&) = delete;
 
         [[nodiscard]] constexpr ValueType Variable(P primal) {
-            const std::size_t node = Append({kNoNode, kNoNode, Zero(), Zero()});
+            const IndexType node = Append({kNoNode, kNoNode, Zero(), Zero()});
             return {std::move(primal), this, node};
         }
 
@@ -157,10 +200,10 @@ namespace Sora::Math {
             for (std::size_t i = size_; i-- > 0;) {
                 const Node& node = nodes_[i];
                 if (node.left != kNoNode) {
-                    adjoints_[node.left] = Math::Add(adjoints_[node.left], Math::Mul(adjoints_[i], node.leftWeight));
+                    adjoints_[node.left] = Math::Fma(adjoints_[i], node.leftWeight, adjoints_[node.left]);
                 }
                 if (node.right != kNoNode) {
-                    adjoints_[node.right] = Math::Add(adjoints_[node.right], Math::Mul(adjoints_[i], node.rightWeight));
+                    adjoints_[node.right] = Math::Fma(adjoints_[i], node.rightWeight, adjoints_[node.right]);
                 }
             }
             hasAdjoints_ = true;
@@ -176,7 +219,7 @@ namespace Sora::Math {
             return adjoints_[variable.node];
         }
 
-        [[nodiscard]] constexpr std::size_t Size() const noexcept { return size_; }
+        [[nodiscard]] constexpr std::size_t Size() const noexcept { return static_cast<std::size_t>(size_); }
     };
 
     namespace Backend {

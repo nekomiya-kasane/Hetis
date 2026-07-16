@@ -7,8 +7,22 @@
  * access is resolved from compile-time string keys, and element reconstruction is generated from C++26 reflection and
  * expansion statements with no runtime schema lookup.
  *
+ * Static @ref SoAType values also lift closed operations defined on their source aggregate. A closed operation returns
+ * the source type and receives one or more source values plus optional broadcast parameters. @ref Adapt accepts a
+ * compile-time function, structural function object, non-capturing lambda, or member pointer; @ref Transform also
+ * accepts runtime callables. Arithmetic operators preserve source-type unary, same-type, and scalar-broadcast
+ * semantics. The implementation reconstructs source values only in the abstract machine. Once the operation body is
+ * visible, scalar replacement and loop vectorization operate directly on the generated field arrays without
+ * materializing AoS temporaries.
+ *
+ * @ref AdaptedOperation::Simd and the default call operator request loop vectorization from Clang;
+ * @ref AdaptedOperation::Scalar disables loop vectorization for reference execution and benchmarking. SIMD lifting
+ * requires a visible, lane-independent operation body without cross-element side effects. Reflection adapts the type
+ * and storage model, while LLVM transforms the operation body; an opaque separately compiled function cannot be
+ * vectorized from reflection metadata alone.
+ *
  * Source aggregate members can be annotated with @c [[=Sora::SoA::Skip{}]] to exclude a member from the SoA layout, or
- * @c [[=Sora::SoA::Align{N}]] to override the per-field array alignment.
+ * @c [[=Sora::SoA::Align{N}]] to override a runtime @ref Array field allocation's alignment.
  *
  * @code{.cpp}
  * struct Particle {
@@ -24,6 +38,21 @@
  * for (auto& position : particles.Field<Sora::FixedString{"position"}>()) {
  *     position.y += 1.0f;
  * }
+ *
+ * struct Kinematic {
+ *     float position;
+ *     float velocity;
+ *     Kinematic Step(float deltaTime) const;
+ * };
+ * Kinematic Integrate(Kinematic state, Kinematic acceleration, float deltaTime);
+ *
+ * consteval { Sora::SoA::Define<Kinematic, 1024>(); }
+ * using KinematicSoA = Sora::SoA::SoAType<Kinematic, 1024>;
+ * inline constexpr auto IntegrateSoA = Sora::SoA::Adapt<&Integrate>;
+ * KinematicSoA scalar = IntegrateSoA.Scalar(current, acceleration, deltaTime);
+ * KinematicSoA simd = IntegrateSoA.Simd(current, acceleration, deltaTime);
+ * KinematicSoA stepped = Sora::SoA::Adapt<&Kinematic::Step>.Simd(current, deltaTime);
+ * KinematicSoA combined = current + acceleration;
  * @endcode
  *
  * @ingroup Core
@@ -32,9 +61,12 @@
 
 #include "Sora/Core/FixedString.h"
 #include "Sora/Core/Traits/AnnotationTraits.h"
+#include "Sora/Core/Traits/InheritanceTraits.h"
 #include "Sora/Core/Traits/TypeTraits.h"
 
 #include <array>
+#include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -57,7 +89,7 @@ namespace Sora {
 
             /** @brief Type that can be used as a source aggregate for SoA generation. */
             template<typename T>
-            concept SoATransformable = std::is_aggregate_v<T>;
+            concept SoATransformable = std::is_class_v<T> && std::is_aggregate_v<T> && Sora::Concept::RootClass<T>;
 
         } // namespace Concept
 
@@ -75,6 +107,12 @@ namespace Sora {
             };
 
         } // namespace $
+
+        /** @brief Compile-time loop-vectorization policy for lifted source operations. */
+        enum class Vectorization : std::uint8_t {
+            Scalar,
+            Simd,
+        };
 
         namespace Traits {
 
@@ -99,9 +137,49 @@ namespace Sora {
             template<typename T>
             inline constexpr auto FieldsOf = std::define_static_array(SoaMembers<T>());
 
+            /** @brief Whether every reflected field supports the assignments used by gather and scatter. */
+            template<typename T>
+            consteval bool FieldsReconstructible() {
+                bool result = true;
+                template for (constexpr auto member : FieldsOf<T>) {
+                    using Field = typename [:std::meta::type_of(member):];
+                    result =
+                        result && std::is_assignable_v<Field&, const Field&> && std::is_assignable_v<Field&, Field&&>;
+                }
+                return result;
+            }
+
         } // namespace Traits
 
+        namespace Concept {
+
+            /**
+             * @brief Lossless source aggregate whose complete value can be reconstructed from its generated SoA.
+             * @details Operations cannot be lifted automatically when @ref Skip removes state observed by @p T.
+             */
+            template<typename T>
+            concept OperationLiftable =
+                SoATransformable<T> && std::default_initializable<T> && Traits::FieldsReconstructible<T>() &&
+                Traits::FieldCountOf<T> ==
+                    std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()).size();
+
+        } // namespace Concept
+
         namespace Meta {
+
+            /** @brief Resolve and validate the allocation alignment for one runtime SoA field. */
+            consteval std::size_t AllocationAlignment(std::meta::info member) {
+                const std::size_t naturalAlignment = std::meta::alignment_of(std::meta::type_of(member));
+                const std::size_t minimumAlignment =
+                    naturalAlignment > alignof(void*) ? naturalAlignment : alignof(void*);
+                const std::size_t defaultAlignment = minimumAlignment > 64 ? minimumAlignment : 64;
+                const std::size_t alignment =
+                    Sora::$::Has<$::Align>(member) ? Sora::$::GetSingle<$::Align>(member).value : defaultAlignment;
+                if (!std::has_single_bit(alignment) || alignment < minimumAlignment) {
+                    throw "SoA::Align must be a power of two preserving field and allocator alignment";
+                }
+                return alignment;
+            }
 
             /** @brief Build @c data_member_spec reflections for the generated SoA aggregate. */
             template<typename T, std::size_t N>
@@ -160,7 +238,7 @@ namespace Sora {
          * @tparam N Number of elements per generated field array.
          */
         template<typename T, std::size_t N>
-            requires std::is_aggregate_v<T>
+            requires Concept::SoATransformable<T>
         struct SoAType;
 
         /**
@@ -175,6 +253,261 @@ namespace Sora {
         template<typename T, std::size_t N>
         consteval void Define() {
             std::meta::define_aggregate(^^SoAType<T, N>, Sora::SoA::Meta::BuildSoASpecs<T, N>());
+        }
+
+        namespace Meta {
+
+            /** @brief Find the generated SoA field corresponding to one reflected source member. */
+            template<typename T, std::size_t N, std::meta::info SourceMember>
+            consteval std::meta::info StorageMember() {
+                auto members =
+                    std::meta::nonstatic_data_members_of(^^SoAType<T, N>, std::meta::access_context::unchecked());
+                for (auto member : members) {
+                    if (std::meta::identifier_of(member) == std::meta::identifier_of(SourceMember)) {
+                        return member;
+                    }
+                }
+                throw "SoA::StorageMember: generated field not found";
+            }
+
+        } // namespace Meta
+
+        /** @brief Reconstruct source element @p index from a generated static SoA value. */
+        template<Concept::OperationLiftable T, std::size_t N>
+        [[nodiscard, gnu::always_inline]] constexpr T Gather(const SoAType<T, N>& source, std::size_t index) {
+            assert(index < N);
+            T result{};
+            template for (constexpr auto member : Sora::SoA::Traits::FieldsOf<T>) {
+                constexpr auto storageMember = Sora::SoA::Meta::StorageMember<T, N, member>();
+                result.[:member:] = source.[:storageMember:][index];
+            }
+            return result;
+        }
+
+        /** @brief Scatter source element @p value into element @p index of a generated static SoA value. */
+        template<Concept::OperationLiftable T, std::size_t N>
+        [[gnu::always_inline]] constexpr void Scatter(SoAType<T, N>& destination, std::size_t index, T value) {
+            assert(index < N);
+            template for (constexpr auto member : Sora::SoA::Traits::FieldsOf<T>) {
+                constexpr auto storageMember = Sora::SoA::Meta::StorageMember<T, N, member>();
+                destination.[:storageMember:][index] = std::move(value.[:member:]);
+            }
+        }
+
+        namespace Detail {
+
+            template<typename T, std::size_t N, typename Argument>
+            inline constexpr bool kGeneratedSoAArgument = std::same_as<std::remove_cvref_t<Argument>, SoAType<T, N>>;
+
+            template<typename T, std::size_t N, typename Argument>
+            using LiftedArgument = std::conditional_t<kGeneratedSoAArgument<T, N, Argument>, T, const Argument&>;
+
+            /** @brief Source operation whose exact result is @p T after element and broadcast argument lifting. */
+            template<typename Operation, typename T, std::size_t N, typename... Rest>
+            concept ClosedOperation = requires(Operation& operation) {
+                {
+                    std::invoke(operation, std::declval<T>(), std::declval<LiftedArgument<T, N, Rest>>()...)
+                } -> std::same_as<T>;
+            };
+
+            template<Concept::OperationLiftable T, std::size_t N, typename Argument>
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto) ElementArgument(const Argument& argument,
+                                                                                       std::size_t index) {
+                if constexpr (kGeneratedSoAArgument<T, N, Argument>) {
+                    return Gather(argument, index);
+                } else {
+                    return argument;
+                }
+            }
+
+            template<Concept::OperationLiftable T, std::size_t N, typename Operation, typename... Rest>
+                requires ClosedOperation<Operation, T, N, Rest...>
+            [[gnu::always_inline]] constexpr void TransformElement(SoAType<T, N>& output, Operation& operation,
+                                                                   const SoAType<T, N>& first, std::size_t index,
+                                                                   const Rest&... rest) {
+                Scatter(output, index,
+                        std::invoke(operation, Gather(first, index), ElementArgument<T, N>(rest, index)...));
+            }
+
+            /** @brief Apply a binary function with its source and broadcast argument order reversed. */
+            template<typename Operation>
+            struct ReverseBinary {
+                template<typename Right, typename Left>
+                constexpr decltype(auto) operator()(Right&& right, Left&& left) const
+                    noexcept(std::is_nothrow_invocable_v<const Operation&, Left, Right>) {
+                    return std::invoke(Operation{}, std::forward<Left>(left), std::forward<Right>(right));
+                }
+            };
+
+            /** @brief Preserve the source aggregate's unary-plus semantics. */
+            struct UnaryPlus {
+                template<typename Value>
+                constexpr auto operator()(Value&& value) const noexcept(noexcept(+std::forward<Value>(value)))
+                    -> decltype(+std::forward<Value>(value)) {
+                    return +std::forward<Value>(value);
+                }
+            };
+
+        } // namespace Detail
+
+        /**
+         * @brief Apply an n-ary source operation elementwise and write directly into an existing generated SoA.
+         * @tparam Policy Selects scalar reference execution or compiler-backed SIMD execution.
+         * @details For reliable SIMD execution, the operation definition must be visible in the translation unit or
+         * supplied through LTO, and each element invocation must be independent. Generated-SoA arguments are gathered
+         * per index; ordinary arguments are broadcast.
+         */
+        template<Vectorization Policy = Vectorization::Simd, Concept::OperationLiftable T, std::size_t N,
+                 typename Operation, typename... Rest>
+            requires Detail::ClosedOperation<Operation, T, N, Rest...>
+        constexpr void TransformTo(SoAType<T, N>& output, Operation&& operation, const SoAType<T, N>& first,
+                                   const Rest&... rest) {
+            if constexpr (Policy == Vectorization::Scalar) {
+#pragma clang loop vectorize(disable) interleave(disable)
+                for (std::size_t index = 0; index < N; ++index) {
+                    Detail::TransformElement(output, operation, first, index, rest...);
+                }
+            } else {
+#pragma clang loop vectorize(enable) interleave(enable)
+                for (std::size_t index = 0; index < N; ++index) {
+                    Detail::TransformElement(output, operation, first, index, rest...);
+                }
+            }
+        }
+
+        /** @brief Return the generated SoA result of an n-ary elementwise source operation. */
+        template<Vectorization Policy = Vectorization::Simd, Concept::OperationLiftable T, std::size_t N,
+                 typename Operation, typename... Rest>
+            requires Detail::ClosedOperation<Operation, T, N, Rest...>
+        [[nodiscard]] constexpr auto Transform(Operation&& operation, const SoAType<T, N>& first, const Rest&... rest)
+            -> SoAType<T, N> {
+            SoAType<T, N> output{};
+            TransformTo<Policy>(output, std::forward<Operation>(operation), first, rest...);
+            return output;
+        }
+
+        /** @brief Compile-time source-operation adaptor inferred from generated SoA arguments. */
+        template<auto Operation>
+        struct AdaptedOperation {
+            template<Concept::OperationLiftable T, std::size_t N, typename... Rest>
+                requires Detail::ClosedOperation<decltype(Operation), T, N, Rest...>
+            [[nodiscard]] constexpr auto operator()(const SoAType<T, N>& first, const Rest&... rest) const
+                -> SoAType<T, N> {
+                return Transform<Vectorization::Simd>(Operation, first, rest...);
+            }
+
+            /** @brief Evaluate with loop vectorization disabled. */
+            template<Concept::OperationLiftable T, std::size_t N, typename... Rest>
+                requires Detail::ClosedOperation<decltype(Operation), T, N, Rest...>
+            [[nodiscard]] constexpr auto Scalar(const SoAType<T, N>& first, const Rest&... rest) const
+                -> SoAType<T, N> {
+                return Transform<Vectorization::Scalar>(Operation, first, rest...);
+            }
+
+            /** @brief Evaluate with loop vectorization requested from the compiler backend. */
+            template<Concept::OperationLiftable T, std::size_t N, typename... Rest>
+                requires Detail::ClosedOperation<decltype(Operation), T, N, Rest...>
+            [[nodiscard]] constexpr auto Simd(const SoAType<T, N>& first, const Rest&... rest) const -> SoAType<T, N> {
+                return Transform<Vectorization::Simd>(Operation, first, rest...);
+            }
+
+            template<Concept::OperationLiftable T, std::size_t N, typename... Rest>
+                requires Detail::ClosedOperation<decltype(Operation), T, N, Rest...>
+            constexpr void To(SoAType<T, N>& output, const SoAType<T, N>& first, const Rest&... rest) const {
+                TransformTo<Vectorization::Simd>(output, Operation, first, rest...);
+            }
+
+            /** @brief Evaluate into @p output with loop vectorization disabled. */
+            template<Concept::OperationLiftable T, std::size_t N, typename... Rest>
+                requires Detail::ClosedOperation<decltype(Operation), T, N, Rest...>
+            constexpr void ScalarTo(SoAType<T, N>& output, const SoAType<T, N>& first, const Rest&... rest) const {
+                TransformTo<Vectorization::Scalar>(output, Operation, first, rest...);
+            }
+
+            /** @brief Evaluate into @p output with loop vectorization requested from the compiler backend. */
+            template<Concept::OperationLiftable T, std::size_t N, typename... Rest>
+                requires Detail::ClosedOperation<decltype(Operation), T, N, Rest...>
+            constexpr void SimdTo(SoAType<T, N>& output, const SoAType<T, N>& first, const Rest&... rest) const {
+                TransformTo<Vectorization::Simd>(output, Operation, first, rest...);
+            }
+        };
+
+        /** @brief Adapt a compile-time function, function object, lambda, or member pointer to generated SoA values. */
+        template<auto Operation>
+        inline constexpr AdaptedOperation<Operation> Adapt{};
+
+        /** @brief Elementwise lifted unary plus using the original aggregate's @c operator+. */
+        template<Concept::OperationLiftable T, std::size_t N>
+            requires Detail::ClosedOperation<Detail::UnaryPlus, T, N>
+        [[nodiscard]] constexpr auto operator+(const SoAType<T, N>& value) -> SoAType<T, N> {
+            return Transform(Detail::UnaryPlus{}, value);
+        }
+
+        /** @brief Elementwise lifted unary minus using the original aggregate's @c operator-. */
+        template<Concept::OperationLiftable T, std::size_t N>
+            requires Detail::ClosedOperation<std::negate<>, T, N>
+        [[nodiscard]] constexpr auto operator-(const SoAType<T, N>& value) -> SoAType<T, N> {
+            return Transform(std::negate<>{}, value);
+        }
+
+        /** @brief Lift source addition with generated-SoA or broadcast right operands. */
+        template<Concept::OperationLiftable T, std::size_t N, typename Right>
+            requires Detail::ClosedOperation<std::plus<>, T, N, Right>
+        [[nodiscard]] constexpr auto operator+(const SoAType<T, N>& left, const Right& right) -> SoAType<T, N> {
+            return Transform(std::plus<>{}, left, right);
+        }
+
+        /** @brief Lift source addition with a broadcast left operand. */
+        template<typename Left, Concept::OperationLiftable T, std::size_t N>
+            requires(!Detail::kGeneratedSoAArgument<T, N, Left>) &&
+                    Detail::ClosedOperation<Detail::ReverseBinary<std::plus<>>, T, N, Left>
+        [[nodiscard]] constexpr auto operator+(const Left& left, const SoAType<T, N>& right) -> SoAType<T, N> {
+            return Transform(Detail::ReverseBinary<std::plus<>>{}, right, left);
+        }
+
+        /** @brief Lift source subtraction with generated-SoA or broadcast right operands. */
+        template<Concept::OperationLiftable T, std::size_t N, typename Right>
+            requires Detail::ClosedOperation<std::minus<>, T, N, Right>
+        [[nodiscard]] constexpr auto operator-(const SoAType<T, N>& left, const Right& right) -> SoAType<T, N> {
+            return Transform(std::minus<>{}, left, right);
+        }
+
+        /** @brief Lift source subtraction with a broadcast left operand. */
+        template<typename Left, Concept::OperationLiftable T, std::size_t N>
+            requires(!Detail::kGeneratedSoAArgument<T, N, Left>) &&
+                    Detail::ClosedOperation<Detail::ReverseBinary<std::minus<>>, T, N, Left>
+        [[nodiscard]] constexpr auto operator-(const Left& left, const SoAType<T, N>& right) -> SoAType<T, N> {
+            return Transform(Detail::ReverseBinary<std::minus<>>{}, right, left);
+        }
+
+        /** @brief Lift source multiplication with generated-SoA or broadcast right operands. */
+        template<Concept::OperationLiftable T, std::size_t N, typename Right>
+            requires Detail::ClosedOperation<std::multiplies<>, T, N, Right>
+        [[nodiscard]] constexpr auto operator*(const SoAType<T, N>& left, const Right& right) -> SoAType<T, N> {
+            return Transform(std::multiplies<>{}, left, right);
+        }
+
+        /** @brief Lift source multiplication with a broadcast left operand. */
+        template<typename Left, Concept::OperationLiftable T, std::size_t N>
+            requires(!Detail::kGeneratedSoAArgument<T, N, Left>) &&
+                    Detail::ClosedOperation<Detail::ReverseBinary<std::multiplies<>>, T, N, Left>
+        [[nodiscard]] constexpr auto operator*(const Left& left, const SoAType<T, N>& right) -> SoAType<T, N> {
+            return Transform(Detail::ReverseBinary<std::multiplies<>>{}, right, left);
+        }
+
+        /** @brief Lift source division with generated-SoA or broadcast right operands. */
+        template<Concept::OperationLiftable T, std::size_t N, typename Right>
+            requires Detail::ClosedOperation<std::divides<>, T, N, Right>
+        [[nodiscard]] constexpr auto operator/(const SoAType<T, N>& left, const Right& right) -> SoAType<T, N> {
+            return Transform(std::divides<>{}, left, right);
+        }
+
+        /** @brief Lift source division with a broadcast left operand. */
+        template<typename Left, Concept::OperationLiftable T, std::size_t N>
+            requires(!Detail::kGeneratedSoAArgument<T, N, Left>) &&
+                    Detail::ClosedOperation<Detail::ReverseBinary<std::divides<>>, T, N, Left>
+        [[nodiscard]] constexpr auto operator/(const Left& left, const SoAType<T, N>& right) -> SoAType<T, N> {
+            return Transform(Detail::ReverseBinary<std::divides<>>{}, right, left);
         }
 
         /**
@@ -418,9 +751,7 @@ namespace Sora {
                     constexpr std::size_t fieldIndex = FieldIndexOfMember<member>();
                     using FieldType = typename [:std::meta::type_of(member):];
 
-                    constexpr std::size_t alignment = Sora::$::Has<Sora::SoA::$::Align>(member)
-                                                          ? Sora::$::GetSingle<Sora::SoA::$::Align>(member).value
-                                                          : 64;
+                    constexpr std::size_t alignment = Sora::SoA::Meta::AllocationAlignment(member);
 
                     auto* newArray =
                         static_cast<FieldType*>(Detail::AllocAligned(newCapacity * sizeof(FieldType), alignment));
@@ -500,7 +831,9 @@ namespace Sora {
 
     namespace Meta::SoA {
 
+        using Sora::SoA::Meta::AllocationAlignment;
         using Sora::SoA::Meta::BuildSoASpecs;
+        using Sora::SoA::Meta::StorageMember;
 
     } // namespace Meta::SoA
 
@@ -508,6 +841,7 @@ namespace Sora {
 
         using Sora::SoA::Traits::FieldCountOf;
         using Sora::SoA::Traits::FieldsOf;
+        using Sora::SoA::Traits::FieldsReconstructible;
 
     } // namespace Traits::SoA
 
@@ -515,6 +849,7 @@ namespace Sora {
 
         inline namespace SoA {
 
+            using Sora::SoA::Concept::OperationLiftable;
             using Sora::SoA::Concept::SoATransformable;
 
         } // namespace SoA

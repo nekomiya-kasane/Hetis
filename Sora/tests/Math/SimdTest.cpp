@@ -1,5 +1,6 @@
 #include <Sora/Math/Autodiff.h>
 #include <Sora/Math/Batch.h>
+#include <Sora/Math/Compile.h>
 #include <Sora/Math/PrimaryFunctions.h>
 #include <Sora/Math/ScalarMath.h>
 #include <Sora/Math/Simd.h>
@@ -89,6 +90,9 @@ namespace {
     static_assert(!Sora::Math::DifferentiableValue<int>);
     static_assert(!std::copy_constructible<Sora::Math::ReverseTape<float, 4>>);
     static_assert(!std::movable<Sora::Math::ReverseTape<float, 4>>);
+    static_assert(sizeof(Sora::Math::Reverse<float, 128>) == 16);
+    static_assert(sizeof(Sora::Math::ReverseTape<float, 128>) == 2568);
+    static_assert(std::is_trivially_copyable_v<Sora::Math::Reverse<float, 128>>);
     static_assert(std::same_as<decltype(Sora::Math::Abs(std::numeric_limits<int>::min())), unsigned int>);
     static_assert(Sora::Math::Abs(std::numeric_limits<int>::min()) == 1U + unsigned(std::numeric_limits<int>::max()));
     static_assert(!std::invocable<decltype(Sora::Math::Inv), int>);
@@ -122,6 +126,16 @@ namespace {
     static_assert(std::is_trivially_copyable_v<decltype(kSquaredSum)>);
     static_assert(noexcept(kSquaredSum(2, 3)));
     static_assert(!std::invocable<decltype(Sora::Math::Sin), PrimaryFunctionTest::Number>);
+
+    constexpr auto kCompiledSquareAdd = Sora::Math::Compile<1>([](auto x) {
+        return Sora::Math::Add(Sora::Math::Square(x), 1.0F);
+    });
+    constexpr auto kCompiledSquare = Sora::Math::Compile<1>([](auto x) { return Sora::Math::Square(x); });
+    static_assert(std::invocable<decltype(kCompiledSquareAdd), float>);
+    static_assert(std::is_trivially_copyable_v<decltype(kCompiledSquareAdd)>);
+    static_assert(noexcept(kCompiledSquareAdd(2.0F)));
+    static_assert(sizeof(kCompiledSquare) == 1);
+    static_assert(sizeof(kCompiledSquareAdd) == sizeof(float));
 
 } // namespace
 
@@ -197,6 +211,13 @@ TEST_CASE("automatic differentiation preserves fused primitive semantics", "[Sor
     REQUIRE(forward.primal == fusedPrimal);
     REQUIRE(forward.tangent == bValue);
 
+    constexpr double aTangent = 0.25;
+    constexpr double bTangent = -0.5;
+    constexpr double cTangent = 0.75;
+    const auto fullyActive = Fma(Dual{aValue, aTangent}, Dual{bValue, bTangent}, Dual{cValue, cTangent});
+    const double fusedTangent = std::fma(aTangent, bValue, std::fma(aValue, bTangent, cTangent));
+    REQUIRE(fullyActive.tangent == fusedTangent);
+
     ReverseTape<double, 5> tape;
     const auto a = tape.Variable(aValue);
     const auto b = tape.Variable(bValue);
@@ -226,6 +247,32 @@ TEST_CASE("batch executor vectorizes multiple inputs and masks the tail", "[Sora
         std::span<const float>(left), std::span<const float>(right));
 
     REQUIRE(output == std::array<float, 7>{3.0F, 5.0F, 7.0F, 9.0F, 11.0F, 13.0F, 15.0F});
+
+    constexpr std::size_t count = 39;
+    std::array<float, count> largeLeft{};
+    std::array<float, count> largeRight{};
+    std::array<float, count> unroll1{};
+    std::array<float, count> unroll2{};
+    std::array<float, count> unroll4{};
+    for (std::size_t i = 0; i < count; ++i) {
+        largeLeft[i] = static_cast<float>(i) * 0.25F;
+        largeRight[i] = 2.0F + static_cast<float>(i % 3);
+    }
+
+    const auto run = [&]<std::size_t Unroll>(std::array<float, count>& destination) {
+        Sora::Math::TransformBatch<Float4, Unroll>(
+            std::span<float>(destination), [](auto x, auto y) noexcept { return Sora::Math::Fma(x, y, 1.0F); },
+            std::span<const float>(largeLeft), std::span<const float>(largeRight));
+    };
+    run.template operator()<1>(unroll1);
+    run.template operator()<2>(unroll2);
+    run.template operator()<4>(unroll4);
+
+    REQUIRE(unroll1 == unroll2);
+    REQUIRE(unroll1 == unroll4);
+    for (std::size_t i = 0; i < count; ++i) {
+        REQUIRE(unroll4[i] == std::fma(largeLeft[i], largeRight[i], 1.0F));
+    }
 }
 
 TEST_CASE("batched JVP combines automatic differentiation with SIMD tail handling", "[Sora][Math][Batch][Autodiff]") {
@@ -248,6 +295,101 @@ TEST_CASE("batched JVP combines automatic differentiation with SIMD tail handlin
         REQUIRE(std::abs(primal[i] - (x[i] * y[i] + std::sin(x[i]))) < 1e-6F);
         REQUIRE(std::abs(tangent[i] - (dx[i] * y[i] + x[i] * dy[i] + std::cos(x[i]) * dx[i])) < 1e-6F);
     }
+
+    constexpr std::size_t largeCount = 39;
+    std::array<float, largeCount> largeX{};
+    std::array<float, largeCount> largeDx{};
+    std::array<float, largeCount> referencePrimal{};
+    std::array<float, largeCount> referenceTangent{};
+    std::array<float, largeCount> candidatePrimal{};
+    std::array<float, largeCount> candidateTangent{};
+    for (std::size_t i = 0; i < largeCount; ++i) {
+        largeX[i] = 0.01F * static_cast<float>(i + 1);
+        largeDx[i] = 0.5F + 0.01F * static_cast<float>(i);
+    }
+
+    const auto run = [&]<std::size_t Unroll>(std::array<float, largeCount>& primalDestination,
+                                             std::array<float, largeCount>& tangentDestination) {
+        Sora::Math::TransformBatchJvp<Float4, Unroll>(
+            std::span<float>(primalDestination), std::span<float>(tangentDestination),
+            [](auto value) noexcept { return Sora::Math::Add(Sora::Math::Exp(value), Sora::Math::Square(value)); },
+            Sora::Math::JvpInput<float>{largeX, largeDx});
+    };
+    run.template operator()<1>(referencePrimal, referenceTangent);
+    run.template operator()<2>(candidatePrimal, candidateTangent);
+    REQUIRE(candidatePrimal == referencePrimal);
+    REQUIRE(candidateTangent == referenceTangent);
+    run.template operator()<4>(candidatePrimal, candidateTangent);
+    REQUIRE(candidatePrimal == referencePrimal);
+    REQUIRE(candidateTangent == referenceTangent);
+}
+
+TEST_CASE("compiled kernels fuse expressions across scalar SIMD JVP and VJP", "[Sora][Math][Compile]") {
+    using namespace Sora::Math;
+
+    constexpr auto kernel = Compile<1>([](auto x) { return Add(Exp(x), Square(x)); });
+    constexpr auto binary = Compile<2>([](auto x, auto y) { return Sub(Mul(x, y), Sin(x)); });
+
+    const double xValue = 0.75;
+    const double scalar = kernel(xValue);
+    REQUIRE(scalar == std::fma(xValue, xValue, std::exp(xValue)));
+    REQUIRE(binary(1.25, -0.5) == std::fma(1.25, -0.5, -std::sin(1.25)));
+
+    const Float4 simdInput([](int index) { return 0.25F * static_cast<float>(index + 1); });
+    const Float4 simdOutput = kernel(simdInput);
+    for (int index = 0; index < 4; ++index) {
+        REQUIRE(std::abs(simdOutput[index] - std::fma(simdInput[index], simdInput[index],
+                                                      std::exp(simdInput[index]))) < 1e-6F);
+    }
+
+    const auto jvp = kernel(Dual{xValue, 1.0});
+    REQUIRE(jvp.primal == scalar);
+    REQUIRE(std::abs(jvp.tangent - (2.0 * xValue + std::exp(xValue))) < 1e-12);
+
+    ReverseTape<double, 8> tape;
+    const auto variable = tape.Variable(xValue);
+    const auto output = kernel(variable);
+    tape.Backward(output);
+    REQUIRE(output.primal == scalar);
+    REQUIRE(std::abs(tape.Gradient(variable) - (2.0 * xValue + std::exp(xValue))) < 1e-12);
+}
+
+TEST_CASE("compiled multiply-add has explicit fused rounding semantics", "[Sora][Math][Compile][Fma]") {
+    using namespace Sora::Math;
+
+    constexpr auto kernel = Compile<3>([](auto a, auto b, auto c) { return Add(Mul(a, b), c); });
+    const double epsilon = std::numeric_limits<double>::epsilon();
+    const double a = 1.0 + epsilon;
+    const double b = 1.0 - epsilon;
+    constexpr double c = -1.0;
+
+    REQUIRE(kernel(a, b, c) == std::fma(a, b, c));
+    REQUIRE(kernel(a, b, c) != a * b + c);
+}
+
+TEST_CASE("compiled backend stages every public primitive", "[Sora][Math][Compile][Surface]") {
+    using namespace Sora::Math;
+
+    constexpr auto kernel = Compile<1>([](auto x) {
+        const auto shifted = Add(x, 2.0);
+        const auto half = Div(x, 2.0);
+        return Add(Neg(x), Inv(shifted), Square(x), Abs(x), Sin(x), Cos(x), Tan(half), Asin(half), Acos(half),
+                   Atan(x), Atan2(x, shifted), Exp(half), Log(shifted), Sqrt(shifted), Pow(shifted, x),
+                   Fma(x, x, 1.0), Mfs(x, shifted, 0.5), Nms(x, shifted, 0.5), Nma(x, shifted, 0.5),
+                   Lerp(x, 2.0, 0.3), Clamp(x, -1.0, 1.0), Saturate(x), Sign(x), Sub(shifted, x), Mul(x, half));
+    });
+
+    const auto eager = [](double x) {
+        const auto shifted = Add(x, 2.0);
+        const auto half = Div(x, 2.0);
+        return Add(Neg(x), Inv(shifted), Square(x), Abs(x), Sin(x), Cos(x), Tan(half), Asin(half), Acos(half),
+                   Atan(x), Atan2(x, shifted), Exp(half), Log(shifted), Sqrt(shifted), Pow(shifted, x),
+                   Fma(x, x, 1.0), Mfs(x, shifted, 0.5), Nms(x, shifted, 0.5), Nma(x, shifted, 0.5),
+                   Lerp(x, 2.0, 0.3), Clamp(x, -1.0, 1.0), Saturate(x), Sign(x), Sub(shifted, x), Mul(x, half));
+    };
+
+    constexpr double value = 0.25;
+    REQUIRE(std::abs(kernel(value) - eager(value)) < 1e-12);
 }
 
 TEST_CASE("masked backend memory operations never touch inactive lanes", "[Sora][Math][Backend][Mask]") {
