@@ -5,10 +5,9 @@
  * Provides a unified hash infrastructure with:
  * - @c StatelessAlgo algorithms (one-shot, zero state, suitable for consteval).
  * - @c StatefulAlgo hashers (incremental feed/finalize, cache-friendly streaming).
- * - @c $ annotations (@c [[=$::With<Algo>{}]], @c [[=$::Ignore{}]],
- * @c [[=$::Key{}]], @c [[=$::Order{N}]]) for per-type / per-member control.
- * - CPO @c Hashing::Hash(value) that auto-dispatches via ADL -> annotation ->
- * reflection -> trivial byte-hash fallback.
+ * - @c $ annotations (@c [[=$::With<Algo>{}]], @c [[=$::Ignore{}]], @c [[=$::Key{}]], @c [[=$::Order{N}]]) for per-type
+ * / per-member control.
+ * - CPO @c Hashing::Hash(value) that auto-dispatches via ADL -> annotation -> reflection -> trivial byte-hash fallback.
  * - Automatic @c std::hash<T> injection for all Hashable types.
  *
  * All paths are fully @c constexpr. Compile-time folding is guaranteed when inputs are constant expressions.
@@ -865,9 +864,9 @@ namespace Sora::Hashing {
     // CPO: Hashing::Hash
     // =========================================================================
 
-    namespace HashCPOFn {
+    namespace CPO {
 
-        struct HashCPO {
+        struct HashFn {
 
             /**
              * @brief Hash a value using algorithm @p algo (default: Fnv1a64).
@@ -945,12 +944,12 @@ namespace Sora::Hashing {
             }
         };
 
-    } // namespace HashCPOFn
+    } // namespace CPO
 
     /**
      * @brief Customisation-point object for hashing any Hashable value.
      */
-    inline constexpr HashCPOFn::HashCPO Hash;
+    inline constexpr CPO::HashFn Hash;
 
     // =========================================================================
     // Streaming Hasher
@@ -1126,6 +1125,6 @@ struct std::formatter<Sora::Uuid> {
 
     auto format(const Sora::Uuid& id, std::format_context& ctx) const {
         auto chars = id.ToChars();
-        return std::copy(chars.begin(), chars.end(), ctx.out());
+        return std::ranges::copy(chars, ctx.out());
     }
 };
