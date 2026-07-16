@@ -536,6 +536,7 @@ TEST_CASE("complex SIMD operations expose a complete mathematical surface", "[So
 
     for (int index = 0; index < 2; ++index) {
         const std::complex<float> expected = numerator[index] / denominator[index];
+        CAPTURE(index, quotient[index], expected);
         REQUIRE(std::abs(quotient[index] - expected) < 1e-6F);
         REQUIRE(std::abs(magnitude[index] - std::abs(numerator[index])) < 1e-6F);
         REQUIRE(std::abs(argument[index] - std::arg(numerator[index])) < 1e-6F);

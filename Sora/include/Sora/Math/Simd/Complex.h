@@ -938,10 +938,8 @@ namespace Sora::Math::Simd {
         // [simd.ctor] std::complex Init ---------------------------------------------
         // This uses RealSimd as proposed in LWG4230
         [[gnu::always_inline]]
-        constexpr BasicVector(const RealSimd& re, const RealSimd& im = {}) noexcept : data{} {
-            Cxileav::SetReal(data, re);
-            Cxileav::SetImag(data, im);
-        }
+        constexpr BasicVector(const RealSimd& re, const RealSimd& im = {}) noexcept
+            : data([&](int i) { return (i & 1) == 0 ? re[i / 2] : im[i / 2]; }) {}
 
         // [simd.subscr] --------------------------------------------------------
         [[gnu::always_inline]]

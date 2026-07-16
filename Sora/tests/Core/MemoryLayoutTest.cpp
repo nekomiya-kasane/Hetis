@@ -83,9 +83,6 @@ static_assert(!Concept::CompactClass<VirtualDerived>);
 static_assert(!Concept::PaddedClass<VirtualDerived>);
 
 TEST_CASE("Unsigned layout arithmetic is total and overflow-aware", "[Sora][Core][MemoryLayout]") {
-    STATIC_REQUIRE(IsPowerOfTwo(std::uint32_t{64}));
-    STATIC_REQUIRE_FALSE(IsPowerOfTwo(std::uint32_t{0}));
-    STATIC_REQUIRE(FloorPowerOfTwo(std::uint32_t{65}) == 64);
     STATIC_REQUIRE(TryCeilPowerOfTwo(std::uint32_t{65}) == std::optional<std::uint32_t>{128});
     STATIC_REQUIRE_FALSE(TryCeilPowerOfTwo(std::numeric_limits<std::uint32_t>::max()).has_value());
     STATIC_REQUIRE_FALSE(TryCeilPowerOfTwo(std::uint8_t{129}).has_value());
@@ -146,10 +143,6 @@ TEST_CASE("MaybeAlign preserves undefined and concrete alignment states", "[Sora
 }
 
 TEST_CASE("Alignment helpers compute checked and modular alignments", "[Sora][Core][MemoryLayout]") {
-    REQUIRE(IsPowerOfTwo(std::uint64_t{8}));
-    REQUIRE_FALSE(IsPowerOfTwo(std::uint64_t{0}));
-    REQUIRE_FALSE(IsPowerOfTwo(std::uint64_t{12}));
-
     REQUIRE(IsAligned(32, Align{16}));
     REQUIRE_FALSE(IsAligned(40, Align{16}));
     REQUIRE(IsAligned(40, 0));

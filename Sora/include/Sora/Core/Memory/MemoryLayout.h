@@ -7,21 +7,108 @@
 
 #include <bit>
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <type_traits>
 
 namespace Sora {
 
-    /** @brief Return whether @p value is a non-zero power of two. */
-    [[nodiscard]] constexpr bool IsPowerOfTwo(uint64_t value) noexcept {
-        return std::has_single_bit(value);
+    /** @brief Return the largest power of two not greater than @p value, or zero when @p value is zero. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr T FloorPowerOfTwo(T value) noexcept {
+        return std::bit_floor(value);
+    }
+
+    /**
+     * @brief Return the smallest representable power of two not less than @p value.
+     * @details Zero and one map to one. Values above the largest representable power of two return @c std::nullopt
+     * instead of invoking the undefined overflow case of @c std::bit_ceil.
+     */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr std::optional<T> TryCeilPowerOfTwo(T value) noexcept {
+        if (value <= T{1}) {
+            return T{1};
+        }
+        if (value > std::bit_floor(std::numeric_limits<T>::max())) {
+            return std::nullopt;
+        }
+        return std::bit_ceil(value);
+    }
+
+    /** @brief Return floor(log2(@p value)), or @c std::nullopt when @p value is zero. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr std::optional<unsigned> TryFloorLog2(T value) noexcept {
+        if (value == 0) {
+            return std::nullopt;
+        }
+        return static_cast<unsigned>(std::bit_width(value) - 1);
+    }
+
+    /** @brief Return ceil(log2(@p value)), or @c std::nullopt when @p value is zero. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr std::optional<unsigned> TryCeilLog2(T value) noexcept {
+        if (value == 0) {
+            return std::nullopt;
+        }
+        return static_cast<unsigned>(std::bit_width(static_cast<T>(value - 1)));
+    }
+
+    /** @brief Return the minimum number of bits needed to represent @p value. Zero requires zero bits. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr unsigned BitWidth(T value) noexcept {
+        return static_cast<unsigned>(std::bit_width(value));
+    }
+
+    /** @brief Return the minimum number of bytes needed to represent @p value. Zero requires zero bytes. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr unsigned ByteWidth(T value) noexcept {
+        return (BitWidth(value) + 7u) / 8u;
+    }
+
+    /** @brief Return ceil(@p numerator / @p denominator), or @c std::nullopt for a zero denominator. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr std::optional<T> TryCeilDivide(T numerator, T denominator) noexcept {
+        if (denominator == 0) {
+            return std::nullopt;
+        }
+        return static_cast<T>(numerator / denominator + (numerator % denominator != 0 ? T{1} : T{0}));
+    }
+
+    /**
+     * @brief Round @p value upward to a multiple of @p step.
+     * @return Rounded value, or @c std::nullopt when @p step is zero or the result is not representable.
+     */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr std::optional<T> TryRoundUp(T value, T step) noexcept {
+        if (step == 0) {
+            return std::nullopt;
+        }
+        const T remainder = value % step;
+        if (remainder == 0) {
+            return value;
+        }
+        const T adjustment = step - remainder;
+        if (value > std::numeric_limits<T>::max() - adjustment) {
+            return std::nullopt;
+        }
+        return static_cast<T>(value + adjustment);
+    }
+
+    /** @brief Round @p value downward to a multiple of @p step, or return @c std::nullopt when @p step is zero. */
+    template<std::unsigned_integral T>
+    [[nodiscard]] constexpr std::optional<T> TryRoundDown(T value, T step) noexcept {
+        if (step == 0) {
+            return std::nullopt;
+        }
+        return static_cast<T>(value - value % step);
     }
 
     /** @brief Return whether @p value can represent a concrete byte alignment. */
     [[nodiscard]] constexpr bool IsValidAlignment(uint64_t value) noexcept {
-        return IsPowerOfTwo(value);
+        return std::has_single_bit(value);
     }
 
     /** @brief Return log2(@p value), where @p value must be a non-zero power of two. */
@@ -219,6 +306,11 @@ namespace Sora {
     [[nodiscard]] constexpr uint64_t AlignUpModulo(uint64_t value, Align alignment) noexcept {
         const uint64_t mask = alignment.Value() - 1u;
         return (value + mask) & ~mask;
+    }
+
+    /** @brief Align @p value downward to the nearest multiple of @p alignment. */
+    [[nodiscard]] constexpr uint64_t AlignDown(uint64_t value, Align alignment) noexcept {
+        return value & ~(alignment.Value() - 1u);
     }
 
     /** @brief Align @p value upward without overflow; return @c std::nullopt when the result is not representable. */
