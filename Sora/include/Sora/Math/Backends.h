@@ -23,19 +23,6 @@ namespace Sora {
 
     namespace Math {
 
-        namespace Concept {
-
-            /** @brief SIMD carrier whose element type belongs to a floating-point domain. */
-            template<typename T>
-            concept FloatingSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                        std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
-
-            /** @brief Scalar or SIMD carrier over which real-valued automatic differentiation is defined. */
-            template<typename T>
-            concept DifferentiableValue = std::floating_point<std::remove_cvref_t<T>> || FloatingSimdValue<T>;
-
-        } // namespace Concept
-
         /**
          * @brief Open specialization points for mapping user-defined numeric carriers to computation backends.
          *
@@ -76,31 +63,31 @@ namespace Sora {
                 static constexpr bool kIsSimd = false;  /**< This backend does not operate on SIMD carriers. */
                 static constexpr int kPriority = 0;     /**< Priority used when joining heterogeneous backends. */
 
-                template<Concept::NumericScalar T, Concept::NumericScalar... Ts>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar... Ts>
                 [[nodiscard]] static constexpr auto Add(T x, Ts... args) noexcept {
                     using R = std::common_type_t<T, Ts...>;
                     return (static_cast<R>(x) + ... + static_cast<R>(args));
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar... Ts>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar... Ts>
                 [[nodiscard]] static constexpr auto Mul(T x, Ts... args) noexcept {
                     using R = std::common_type_t<T, Ts...>;
                     return (static_cast<R>(x) * ... * static_cast<R>(args));
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U>
                 [[nodiscard]] static constexpr auto Sub(T x, U y) noexcept {
                     using R = std::common_type_t<T, U>;
                     return static_cast<R>(x) - static_cast<R>(y);
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U>
                 [[nodiscard]] static constexpr auto Div(T x, U y) noexcept {
                     using R = std::common_type_t<T, U>;
                     return static_cast<R>(x) / static_cast<R>(y);
                 }
 
-                template<Concept::NumericScalar T>
+                template<Sora::Concept::NumericScalar T>
                 [[nodiscard]] static constexpr T Neg(T x) noexcept {
                     return -x;
                 }
@@ -110,12 +97,12 @@ namespace Sora {
                     return T{1} / x;
                 }
 
-                template<Concept::NumericScalar T>
+                template<Sora::Concept::NumericScalar T>
                 [[nodiscard]] static constexpr T Square(T x) noexcept {
                     return x * x;
                 }
 
-                template<Concept::NumericScalar T>
+                template<Sora::Concept::NumericScalar T>
                 [[nodiscard]] static constexpr auto Abs(T x) noexcept {
                     if constexpr (std::unsigned_integral<T>) {
                         return x;
@@ -191,7 +178,7 @@ namespace Sora {
                     }
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U>
                     requires std::floating_point<std::common_type_t<T, U>>
                 [[nodiscard]] static constexpr auto Atan2(T y, U x) noexcept {
                     using R = std::common_type_t<T, U>;
@@ -236,25 +223,25 @@ namespace Sora {
                     }
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                 [[nodiscard]] static constexpr auto Clamp(T value, U lower, V upper) noexcept {
                     using R = std::common_type_t<T, U, V>;
                     return std::clamp(static_cast<R>(value), static_cast<R>(lower), static_cast<R>(upper));
                 }
 
-                template<Concept::NumericScalar T>
+                template<Sora::Concept::NumericScalar T>
                 [[nodiscard]] static constexpr T Saturate(T value) noexcept {
                     return Clamp(value, T{0}, T{1});
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                     requires std::floating_point<std::common_type_t<T, U, V>>
                 [[nodiscard]] static constexpr auto Lerp(T a, U b, V t) noexcept {
                     using R = std::common_type_t<T, U, V>;
                     return std::lerp(static_cast<R>(a), static_cast<R>(b), static_cast<R>(t));
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                 [[nodiscard]] static constexpr auto Fma(T a, U b, V c) noexcept {
                     using R = std::common_type_t<T, U, V>;
                     if constexpr (std::floating_point<R>) {
@@ -264,7 +251,7 @@ namespace Sora {
                     }
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                 [[nodiscard]] static constexpr auto Mfs(T a, U b, V c) noexcept {
                     using R = std::common_type_t<T, U, V>;
                     if constexpr (std::floating_point<R>) {
@@ -274,7 +261,7 @@ namespace Sora {
                     }
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                 [[nodiscard]] static constexpr auto Nms(T a, U b, V c) noexcept {
                     using R = std::common_type_t<T, U, V>;
                     if constexpr (std::floating_point<R>) {
@@ -284,7 +271,7 @@ namespace Sora {
                     }
                 }
 
-                template<Concept::NumericScalar T, Concept::NumericScalar U, Concept::NumericScalar V>
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                 [[nodiscard]] static constexpr auto Nma(T a, U b, V c) noexcept {
                     using R = std::common_type_t<T, U, V>;
                     if constexpr (std::floating_point<R>) {
@@ -305,7 +292,7 @@ namespace Sora {
                 /** @brief Fixed-width arithmetic SIMD carrier containing exactly @p N lanes. */
                 template<typename T, std::size_t N>
                 concept FixedSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
-                                         Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
+                                         Sora::Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
                                          std::remove_cvref_t<T>::kSize.value == N;
 
                 /** @brief Fixed-width floating-point SIMD carrier containing exactly @p N lanes. */
@@ -336,7 +323,7 @@ namespace Sora {
             private:
                 template<typename T>
                 static constexpr bool kCompatibleOperand =
-                    Concept::FixedSimdValue<T, N> || Sora::Concept::NumericScalar<std::remove_cvref_t<T>>;
+                    Concept::FixedSimdValue<T, N> || Sora::Sora::Concept::NumericScalar<std::remove_cvref_t<T>>;
 
                 template<typename T>
                 [[nodiscard]] static consteval auto ElementType() {
@@ -699,11 +686,14 @@ namespace Sora {
 
         inline namespace Math {
 
+            /** @brief SIMD carrier whose element type belongs to a floating-point domain. */
             template<typename T>
-            concept FloatingSimdValue = Sora::Math::Concept::FloatingSimdValue<T>;
-            
+            concept FloatingSimdValue = Sora::Math::Simd::SimdVecType<std::remove_cvref_t<T>> &&
+                                        std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
+
+            /** @brief Scalar or SIMD carrier over which real-valued automatic differentiation is defined. */
             template<typename T>
-            concept DifferentiableValue = Sora::Math::Concept::DifferentiableValue<T
+            concept DifferentiableValue = std::floating_point<std::remove_cvref_t<T>> || FloatingSimdValue<T>;
 
             using Sora::Math::Meta::GetBackend;
 
