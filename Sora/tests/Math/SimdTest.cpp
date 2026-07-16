@@ -14,6 +14,7 @@
 #include <cmath>
 #include <limits>
 #include <type_traits>
+#include <utility>
 
 namespace PrimaryFunctionTest {
 
@@ -136,6 +137,56 @@ namespace {
     static_assert(noexcept(kCompiledSquareAdd(2.0F)));
     static_assert(sizeof(kCompiledSquare) == 1);
     static_assert(sizeof(kCompiledSquareAdd) == sizeof(float));
+
+    struct ThrowingCopy {
+        constexpr ThrowingCopy() = default;
+        ThrowingCopy(const ThrowingCopy&) noexcept(false) {}
+    };
+
+    struct RvalueOnlyCompiler {
+        template<typename T>
+        [[nodiscard]] constexpr auto operator()(T value) && {
+            return Sora::Math::Square(value);
+        }
+    };
+
+    constexpr auto kCompiledIdentity = Sora::Math::Compile<1>([](auto x) { return x; });
+    constexpr auto kCompiledRvalueOnly = Sora::Math::Compile<1>(RvalueOnlyCompiler{});
+    static_assert(!noexcept(kCompiledIdentity(std::declval<ThrowingCopy&>())));
+    static_assert(std::invocable<decltype(kCompiledRvalueOnly), float>);
+
+    using Staged0 = Sora::Math::Detail::StagedInput<0>;
+    using Staged1 = Sora::Math::Detail::StagedInput<1>;
+    using Staged2 = Sora::Math::Detail::StagedInput<2>;
+    using StagedProduct = Sora::Math::Detail::StagedBinary<Sora::Math::Mul, Staged0, Staged1>;
+    using StagedFma = Sora::Math::Detail::StagedTernary<Sora::Math::Fma, Staged0, Staged1, Staged2>;
+    using StagedNms = Sora::Math::Detail::StagedTernary<Sora::Math::Nms, Staged0, Staged1, Staged2>;
+    using StagedNegatedFma = Sora::Math::Detail::StagedUnary<Sora::Math::Neg, StagedFma>;
+
+    constexpr StagedProduct kStagedProduct{Staged0{}, Staged1{}};
+    constexpr Sora::Math::Detail::StagedBinary<Sora::Math::Add, StagedProduct, Staged2> kStagedMultiplyAdd{
+        kStagedProduct, Staged2{}};
+    constexpr auto kNormalizedFma = Sora::Math::Detail::Normalize(kStagedMultiplyAdd);
+    constexpr auto kNormalizedNms =
+        Sora::Math::Detail::Normalize(Sora::Math::Detail::MakeUnary<Sora::Math::Neg>(kStagedMultiplyAdd));
+    constexpr auto kNormalizedExplicitNegation =
+        Sora::Math::Detail::Normalize(Sora::Math::Detail::MakeUnary<Sora::Math::Neg>(kNormalizedFma));
+    static_assert(std::same_as<std::remove_cv_t<decltype(kNormalizedFma)>, StagedFma>);
+    static_assert(std::same_as<std::remove_cv_t<decltype(kNormalizedNms)>, StagedNms>);
+    static_assert(std::same_as<std::remove_cv_t<decltype(kNormalizedExplicitNegation)>, StagedNegatedFma>);
+
+    constexpr auto kCompiledProductSum = Sora::Math::Compile<4>([](auto a, auto b, auto c, auto d) {
+        return Sora::Math::Add(Sora::Math::Mul(a, b), Sora::Math::Mul(c, d));
+    });
+    constexpr auto kCompiledSquareSum = Sora::Math::Compile<2>([](auto a, auto b) {
+        return Sora::Math::Add(Sora::Math::Square(a), Sora::Math::Square(b));
+    });
+    constexpr auto kCompiledNegatedProductSum = Sora::Math::Compile<4>([](auto a, auto b, auto c, auto d) {
+        return Sora::Math::Neg(Sora::Math::Add(Sora::Math::Mul(a, b), Sora::Math::Mul(c, d)));
+    });
+    static_assert(std::invocable<decltype(kCompiledProductSum), float, float, float, float>);
+    static_assert(std::invocable<decltype(kCompiledSquareSum), float, float>);
+    static_assert(std::invocable<decltype(kCompiledNegatedProductSum), float, float, float, float>);
 
 } // namespace
 
@@ -352,6 +403,12 @@ TEST_CASE("compiled kernels fuse expressions across scalar SIMD JVP and VJP", "[
     tape.Backward(output);
     REQUIRE(output.primal == scalar);
     REQUIRE(std::abs(tape.Gradient(variable) - (2.0 * xValue + std::exp(xValue))) < 1e-12);
+
+    constexpr auto fusedSquare = Compile<1>([](auto x) { return Add(Square(Exp(x)), 1.0); });
+    ReverseTape<double, 8> squareTape;
+    const auto squareVariable = squareTape.Variable(xValue);
+    (void)fusedSquare(squareVariable);
+    REQUIRE(squareTape.Size() == 3);
 }
 
 TEST_CASE("compiled multiply-add has explicit fused rounding semantics", "[Sora][Math][Compile][Fma]") {

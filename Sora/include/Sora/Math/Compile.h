@@ -7,9 +7,8 @@
 
 #include <Sora/Math/PrimaryFunctions.h>
 
+#include <concepts>
 #include <cstddef>
-#include <cstdint>
-#include <functional>
 #include <meta>
 #include <tuple>
 #include <type_traits>
@@ -19,36 +18,6 @@
 namespace Sora::Math {
 
     namespace Detail {
-
-        enum class StagedOperation : std::uint8_t {
-            AddOp,
-            SubOp,
-            MulOp,
-            DivOp,
-            NegOp,
-            InvOp,
-            SquareOp,
-            AbsOp,
-            SinOp,
-            CosOp,
-            TanOp,
-            ASinOp,
-            ACosOp,
-            ATanOp,
-            ATan2Op,
-            ExpOp,
-            LogOp,
-            SqrtOp,
-            PowOp,
-            FmaOp,
-            MfsOp,
-            NmsOp,
-            NmaOp,
-            LerpOp,
-            ClampOp,
-            SaturateOp,
-            SignOp,
-        };
 
         template<typename T>
         concept StagedExpression = requires { requires std::remove_cvref_t<T>::kIsStagedExpression; };
@@ -145,13 +114,13 @@ namespace Sora::Math {
             [[nodiscard]] static constexpr Right RightOperand() noexcept { return {}; }
         };
 
-        template<StagedOperation Operation, StagedExpression E>
+        template<auto Operation, StagedExpression E>
         struct StagedUnary : private StagedOperand<0, E> {
             using OperandStorage = StagedOperand<0, E>;
 
             static constexpr bool kIsStagedExpression = true;
             static constexpr bool kStoresState = E::kStoresState;
-            static constexpr StagedOperation kOperation = Operation;
+            static constexpr auto kOperation = Operation;
 
             constexpr StagedUnary()
                 requires(!kStoresState)
@@ -163,13 +132,13 @@ namespace Sora::Math {
             [[nodiscard]] constexpr decltype(auto) Operand() const noexcept { return OperandStorage::Get(); }
         };
 
-        template<StagedOperation Operation, StagedExpression First, StagedExpression Second>
+        template<auto Operation, StagedExpression First, StagedExpression Second>
         struct StagedBinary : private StagedPair<First, Second> {
             using Storage = StagedPair<First, Second>;
 
             static constexpr bool kIsStagedExpression = true;
             static constexpr bool kStoresState = First::kStoresState || Second::kStoresState;
-            static constexpr StagedOperation kOperation = Operation;
+            static constexpr auto kOperation = Operation;
 
             constexpr StagedBinary()
                 requires(!kStoresState)
@@ -183,22 +152,23 @@ namespace Sora::Math {
             [[nodiscard]] constexpr decltype(auto) SecondOperand() const noexcept { return Storage::RightOperand(); }
         };
 
-        template<StagedOperation Operation, StagedExpression First, StagedExpression Second, StagedExpression Third>
+        template<auto Operation, StagedExpression First, StagedExpression Second, StagedExpression Third>
         struct StagedTernary : private StagedPair<StagedPair<First, Second>, Third> {
             using FirstPair = StagedPair<First, Second>;
             using Storage = StagedPair<FirstPair, Third>;
 
             static constexpr bool kIsStagedExpression = true;
             static constexpr bool kStoresState = First::kStoresState || Second::kStoresState || Third::kStoresState;
-            static constexpr StagedOperation kOperation = Operation;
+            static constexpr auto kOperation = Operation;
 
             constexpr StagedTernary()
                 requires(!kStoresState)
             = default;
 
-            constexpr StagedTernary(First first, Second second, Third third) noexcept(
-                std::is_nothrow_move_constructible_v<First> && std::is_nothrow_move_constructible_v<Second> &&
-                std::is_nothrow_move_constructible_v<Third>)
+            constexpr StagedTernary(First first, Second second,
+                                    Third third) noexcept(std::is_nothrow_move_constructible_v<First> &&
+                                                          std::is_nothrow_move_constructible_v<Second> &&
+                                                          std::is_nothrow_move_constructible_v<Third>)
                 : Storage(FirstPair(std::move(first), std::move(second)), std::move(third)) {}
 
             [[nodiscard]] constexpr decltype(auto) FirstOperand() const noexcept {
@@ -220,6 +190,27 @@ namespace Sora::Math {
             [[nodiscard]] constexpr decltype(auto) ThirdOperand() const noexcept { return Storage::RightOperand(); }
         };
 
+        /** @brief Normalized @c Operation(x,x,c) node that evaluates @c x exactly once. */
+        template<auto Operation, StagedExpression X, StagedExpression C>
+        struct StagedFusedSquare : private StagedPair<X, C> {
+            using Storage = StagedPair<X, C>;
+
+            static constexpr bool kIsStagedExpression = true;
+            static constexpr bool kStoresState = X::kStoresState || C::kStoresState;
+            static constexpr auto kOperation = Operation;
+
+            constexpr StagedFusedSquare()
+                requires(!kStoresState)
+            = default;
+
+            constexpr StagedFusedSquare(X value, C addend) noexcept(std::is_nothrow_move_constructible_v<X> &&
+                                                                    std::is_nothrow_move_constructible_v<C>)
+                : Storage(std::move(value), std::move(addend)) {}
+
+            [[nodiscard]] constexpr decltype(auto) ValueOperand() const noexcept { return Storage::LeftOperand(); }
+            [[nodiscard]] constexpr decltype(auto) AddendOperand() const noexcept { return Storage::RightOperand(); }
+        };
+
         template<typename T>
         [[nodiscard]] constexpr auto Stage(T&& value) {
             if constexpr (StagedExpression<T>) {
@@ -229,14 +220,14 @@ namespace Sora::Math {
             }
         }
 
-        template<StagedOperation Operation, typename T>
+        template<auto Operation, typename T>
         [[nodiscard]] constexpr auto MakeUnary(T&& value) {
             auto operand = Stage(std::forward<T>(value));
             using E = decltype(operand);
             return StagedUnary<Operation, E>{std::move(operand)};
         }
 
-        template<StagedOperation Operation, typename First, typename Second>
+        template<auto Operation, typename First, typename Second>
         [[nodiscard]] constexpr auto MakeBinary(First&& first, Second&& second) {
             auto left = Stage(std::forward<First>(first));
             auto right = Stage(std::forward<Second>(second));
@@ -245,7 +236,7 @@ namespace Sora::Math {
             return StagedBinary<Operation, L, R>{std::move(left), std::move(right)};
         }
 
-        template<StagedOperation Operation, typename First, typename Second, typename Third>
+        template<auto Operation, typename First, typename Second, typename Third>
         [[nodiscard]] constexpr auto MakeTernary(First&& first, Second&& second, Third&& third) {
             auto left = Stage(std::forward<First>(first));
             auto middle = Stage(std::forward<Second>(second));
@@ -256,7 +247,7 @@ namespace Sora::Math {
             return StagedTernary<Operation, L, M, R>{std::move(left), std::move(middle), std::move(right)};
         }
 
-        template<StagedOperation Operation, typename First, typename Second, typename... Rest>
+        template<auto Operation, typename First, typename Second, typename... Rest>
         [[nodiscard]] constexpr auto FoldBinary(First&& first, Second&& second, Rest&&... rest) {
             auto accumulated = MakeBinary<Operation>(std::forward<First>(first), std::forward<Second>(second));
             if constexpr (sizeof...(Rest) == 0) {
@@ -266,70 +257,169 @@ namespace Sora::Math {
             }
         }
 
-        template<StagedOperation Operation>
-        inline constexpr auto kOperationFunction = [] { static_assert(Operation != Operation, "invalid operation"); };
+        template<auto Operation>
+        struct OperationTag {};
 
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::AddOp> = Math::Add;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::SubOp> = Math::Sub;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::MulOp> = Math::Mul;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::DivOp> = Math::Div;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::NegOp> = Math::Neg;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::InvOp> = Math::Inv;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::SquareOp> = Math::Square;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::AbsOp> = Math::Abs;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::SinOp> = Math::Sin;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::CosOp> = Math::Cos;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::TanOp> = Math::Tan;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::ASinOp> = Math::Asin;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::ACosOp> = Math::Acos;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::ATanOp> = Math::Atan;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::ATan2Op> = Math::Atan2;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::ExpOp> = Math::Exp;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::LogOp> = Math::Log;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::SqrtOp> = Math::Sqrt;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::PowOp> = Math::Pow;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::FmaOp> = Math::Fma;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::MfsOp> = Math::Mfs;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::NmsOp> = Math::Nms;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::NmaOp> = Math::Nma;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::LerpOp> = Math::Lerp;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::ClampOp> = Math::Clamp;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::SaturateOp> = Math::Saturate;
-        template<>
-        inline constexpr auto kOperationFunction<StagedOperation::SignOp> = Math::Sign;
+        template<auto Operation, StagedExpression E>
+        [[nodiscard]] constexpr auto RewriteUnary(OperationTag<Operation>, E operand) {
+            return StagedUnary<Operation, E>{std::move(operand)};
+        }
+
+        template<auto Operation, StagedExpression Left, StagedExpression Right>
+        [[nodiscard]] constexpr auto RewriteBinary(OperationTag<Operation>, Left left, Right right) {
+            return StagedBinary<Operation, Left, Right>{std::move(left), std::move(right)};
+        }
+
+        template<typename E>
+        concept StagedMultiplication = StagedExpression<E> && requires(const std::remove_cvref_t<E>& expression) {
+            requires std::same_as<std::remove_cv_t<decltype(std::remove_cvref_t<E>::kOperation)>,
+                                  std::remove_cv_t<decltype(Math::Mul)>>;
+            expression.FirstOperand();
+            expression.SecondOperand();
+        };
+
+        template<typename E>
+        concept StagedSquare = StagedExpression<E> && requires(const std::remove_cvref_t<E>& expression) {
+            requires std::same_as<std::remove_cv_t<decltype(std::remove_cvref_t<E>::kOperation)>,
+                                  std::remove_cv_t<decltype(Math::Square)>>;
+            expression.Operand();
+        };
+
+        template<auto Operation, StagedMultiplication Product, StagedExpression C>
+        [[nodiscard]] constexpr auto FuseProduct(const Product& product, C addend) {
+            auto first = Stage(product.FirstOperand());
+            auto second = Stage(product.SecondOperand());
+            return StagedTernary<Operation, decltype(first), decltype(second), C>{std::move(first), std::move(second),
+                                                                                  std::move(addend)};
+        }
+
+        template<auto Operation, StagedSquare Square, StagedExpression C>
+        [[nodiscard]] constexpr auto FuseSquare(const Square& square, C addend) {
+            auto value = Stage(square.Operand());
+            return StagedFusedSquare<Operation, decltype(value), C>{std::move(value), std::move(addend)};
+        }
+
+        template<StagedExpression Left, StagedExpression Right>
+        [[nodiscard]] constexpr auto RewriteBinary(OperationTag<Math::Add>, Left left, Right right) {
+            if constexpr (StagedMultiplication<Left>) {
+                return FuseProduct<Math::Fma>(left, std::move(right));
+            } else if constexpr (StagedSquare<Left>) {
+                return FuseSquare<Math::Fma>(left, std::move(right));
+            } else if constexpr (StagedMultiplication<Right>) {
+                return FuseProduct<Math::Fma>(right, std::move(left));
+            } else if constexpr (StagedSquare<Right>) {
+                return FuseSquare<Math::Fma>(right, std::move(left));
+            } else {
+                return StagedBinary<Math::Add, Left, Right>{std::move(left), std::move(right)};
+            }
+        }
+
+        template<StagedExpression Left, StagedExpression Right>
+        [[nodiscard]] constexpr auto RewriteBinary(OperationTag<Math::Sub>, Left left, Right right) {
+            if constexpr (StagedMultiplication<Left>) {
+                return FuseProduct<Math::Mfs>(left, std::move(right));
+            } else if constexpr (StagedSquare<Left>) {
+                return FuseSquare<Math::Mfs>(left, std::move(right));
+            } else if constexpr (StagedMultiplication<Right>) {
+                return FuseProduct<Math::Nma>(right, std::move(left));
+            } else if constexpr (StagedSquare<Right>) {
+                return FuseSquare<Math::Nma>(right, std::move(left));
+            } else {
+                return StagedBinary<Math::Sub, Left, Right>{std::move(left), std::move(right)};
+            }
+        }
+
+        template<auto Operation, StagedExpression First, StagedExpression Second, StagedExpression Third>
+        [[nodiscard]] constexpr auto RewriteTernary(OperationTag<Operation>, First first, Second second, Third third) {
+            return StagedTernary<Operation, First, Second, Third>{std::move(first), std::move(second),
+                                                                  std::move(third)};
+        }
+
+        template<StagedExpression E>
+        struct StagedNormalizer;
+
+        template<StagedExpression E>
+        [[nodiscard]] constexpr auto Normalize(const E& expression) {
+            return StagedNormalizer<E>::Apply(expression);
+        }
+
+        template<std::size_t Index>
+        struct StagedNormalizer<StagedInput<Index>> {
+            [[nodiscard]] static constexpr StagedInput<Index> Apply(StagedInput<Index> expression) noexcept {
+                return expression;
+            }
+        };
+
+        template<typename T>
+        struct StagedNormalizer<StagedConstant<T>> {
+            [[nodiscard]] static constexpr StagedConstant<T>
+            Apply(const StagedConstant<T>& expression) noexcept(std::is_nothrow_copy_constructible_v<T>) {
+                return expression;
+            }
+        };
+
+        template<auto Operation, StagedExpression E>
+        struct StagedNormalizer<StagedUnary<Operation, E>> {
+            [[nodiscard]] static constexpr auto Apply(const StagedUnary<Operation, E>& expression) {
+                return RewriteUnary(OperationTag<Operation>{}, Normalize(expression.Operand()));
+            }
+        };
+
+        template<StagedExpression Left, StagedExpression Right>
+        struct StagedNormalizer<StagedUnary<Math::Neg, StagedBinary<Math::Add, Left, Right>>> {
+            using Sum = StagedBinary<Math::Add, Left, Right>;
+            using Expression = StagedUnary<Math::Neg, Sum>;
+
+            [[nodiscard]] static constexpr auto Apply(const Expression& expression) {
+                const auto& sum = expression.Operand();
+                if constexpr (StagedMultiplication<Left>) {
+                    const auto& product = sum.FirstOperand();
+                    return RewriteTernary(OperationTag<Math::Nms>{}, Normalize(product.FirstOperand()),
+                                          Normalize(product.SecondOperand()), Normalize(sum.SecondOperand()));
+                } else if constexpr (StagedMultiplication<Right>) {
+                    const auto& product = sum.SecondOperand();
+                    return RewriteTernary(OperationTag<Math::Nms>{}, Normalize(product.FirstOperand()),
+                                          Normalize(product.SecondOperand()), Normalize(sum.FirstOperand()));
+                } else {
+                    return RewriteUnary(OperationTag<Math::Neg>{}, Normalize(sum));
+                }
+            }
+        };
+
+        template<auto Operation, StagedExpression First, StagedExpression Second>
+        struct StagedNormalizer<StagedBinary<Operation, First, Second>> {
+            [[nodiscard]] static constexpr auto Apply(const StagedBinary<Operation, First, Second>& expression) {
+                return RewriteBinary(OperationTag<Operation>{}, Normalize(expression.FirstOperand()),
+                                     Normalize(expression.SecondOperand()));
+            }
+        };
+
+        template<auto Operation, StagedExpression First, StagedExpression Second, StagedExpression Third>
+        struct StagedNormalizer<StagedTernary<Operation, First, Second, Third>> {
+            [[nodiscard]] static constexpr auto
+            Apply(const StagedTernary<Operation, First, Second, Third>& expression) {
+                return RewriteTernary(OperationTag<Operation>{}, Normalize(expression.FirstOperand()),
+                                      Normalize(expression.SecondOperand()), Normalize(expression.ThirdOperand()));
+            }
+        };
+
+        template<auto Operation, StagedExpression X, StagedExpression C>
+        struct StagedNormalizer<StagedFusedSquare<Operation, X, C>> {
+            [[nodiscard]] static constexpr auto Apply(const StagedFusedSquare<Operation, X, C>& expression) {
+                auto value = Normalize(expression.ValueOperand());
+                auto addend = Normalize(expression.AddendOperand());
+                return StagedFusedSquare<Operation, decltype(value), decltype(addend)>{std::move(value),
+                                                                                       std::move(addend)};
+            }
+        };
 
         template<StagedExpression E>
         struct StagedEvaluator;
 
         template<StagedExpression E, typename... Args>
-        [[nodiscard, gnu::always_inline]] constexpr decltype(auto) Evaluate(const E& expression, Args&... args)
-            noexcept(noexcept(StagedEvaluator<E>::Evaluate(expression, args...))) {
+        [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
+        Evaluate(const E& expression,
+                 Args&... args) noexcept(noexcept(StagedEvaluator<E>::Evaluate(expression, args...))) {
             return StagedEvaluator<E>::Evaluate(expression, args...);
         }
 
@@ -337,7 +427,9 @@ namespace Sora::Math {
         struct StagedEvaluator<StagedInput<Index>> {
             template<typename... Args>
                 requires(Index < sizeof...(Args))
-            [[nodiscard]] static constexpr auto Evaluate(const StagedInput<Index>&, Args&... args) noexcept {
+            [[nodiscard]] static constexpr auto
+            Evaluate(const StagedInput<Index>&,
+                     Args&... args) noexcept(noexcept(std::remove_cvref_t<decltype(args...[Index])>(args...[Index]))) {
                 using T = std::remove_cvref_t<decltype(args...[Index])>;
                 return T(args...[Index]);
             }
@@ -346,218 +438,58 @@ namespace Sora::Math {
         template<typename T>
         struct StagedEvaluator<StagedConstant<T>> {
             template<typename... Args>
-            [[nodiscard]] static constexpr T Evaluate(const StagedConstant<T>& expression, Args&...) noexcept(
-                std::is_nothrow_copy_constructible_v<T>) {
+            [[nodiscard]] static constexpr T Evaluate(const StagedConstant<T>& expression,
+                                                      Args&...) noexcept(std::is_nothrow_copy_constructible_v<T>) {
                 return expression.value;
             }
         };
 
-        template<StagedOperation Operation, StagedExpression E>
+        template<auto Operation, StagedExpression E>
         struct StagedEvaluator<StagedUnary<Operation, E>> {
             template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const StagedUnary<Operation, E>& expression,
-                                                                   Args&... args) noexcept(noexcept(std::invoke(
-                kOperationFunction<Operation>, Detail::Evaluate(expression.Operand(), args...)))) {
-                return std::invoke(kOperationFunction<Operation>, Detail::Evaluate(expression.Operand(), args...));
+            [[nodiscard]] static constexpr decltype(auto)
+            Evaluate(const StagedUnary<Operation, E>& expression,
+                     Args&... args) noexcept(noexcept(Operation(Detail::Evaluate(expression.Operand(), args...)))) {
+                return Operation(Detail::Evaluate(expression.Operand(), args...));
             }
         };
 
-        template<StagedOperation Operation, StagedExpression First, StagedExpression Second>
+        template<auto Operation, StagedExpression First, StagedExpression Second>
         struct StagedEvaluator<StagedBinary<Operation, First, Second>> {
             template<typename... Args>
             [[nodiscard]] static constexpr decltype(auto) Evaluate(
-                const StagedBinary<Operation, First, Second>& expression, Args&... args) noexcept(noexcept(std::invoke(
-                kOperationFunction<Operation>, Detail::Evaluate(expression.FirstOperand(), args...),
-                Detail::Evaluate(expression.SecondOperand(), args...)))) {
-                return std::invoke(kOperationFunction<Operation>, Detail::Evaluate(expression.FirstOperand(), args...),
-                                   Detail::Evaluate(expression.SecondOperand(), args...));
+                const StagedBinary<Operation, First, Second>& expression,
+                Args&... args) noexcept(noexcept(Operation(Detail::Evaluate(expression.FirstOperand(), args...),
+                                                           Detail::Evaluate(expression.SecondOperand(), args...)))) {
+                return Operation(Detail::Evaluate(expression.FirstOperand(), args...),
+                                 Detail::Evaluate(expression.SecondOperand(), args...));
             }
         };
 
-        template<StagedOperation Operation, StagedExpression First, StagedExpression Second, StagedExpression Third>
+        template<auto Operation, StagedExpression First, StagedExpression Second, StagedExpression Third>
         struct StagedEvaluator<StagedTernary<Operation, First, Second, Third>> {
             template<typename... Args>
             [[nodiscard]] static constexpr decltype(auto) Evaluate(
                 const StagedTernary<Operation, First, Second, Third>& expression,
-                Args&... args) noexcept(noexcept(std::invoke(
-                kOperationFunction<Operation>, Detail::Evaluate(expression.FirstOperand(), args...),
-                Detail::Evaluate(expression.SecondOperand(), args...),
-                Detail::Evaluate(expression.ThirdOperand(), args...)))) {
-                return std::invoke(kOperationFunction<Operation>, Detail::Evaluate(expression.FirstOperand(), args...),
-                                   Detail::Evaluate(expression.SecondOperand(), args...),
-                                   Detail::Evaluate(expression.ThirdOperand(), args...));
+                Args&... args) noexcept(noexcept(Operation(Detail::Evaluate(expression.FirstOperand(), args...),
+                                                           Detail::Evaluate(expression.SecondOperand(), args...),
+                                                           Detail::Evaluate(expression.ThirdOperand(), args...)))) {
+                return Operation(Detail::Evaluate(expression.FirstOperand(), args...),
+                                 Detail::Evaluate(expression.SecondOperand(), args...),
+                                 Detail::Evaluate(expression.ThirdOperand(), args...));
             }
         };
 
-        template<StagedExpression A, StagedExpression B, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::AddOp, StagedBinary<StagedOperation::MulOp, A, B>, C>> {
-            using Product = StagedBinary<StagedOperation::MulOp, A, B>;
-            using Expression = StagedBinary<StagedOperation::AddOp, Product, C>;
-
+        template<auto Operation, StagedExpression X, StagedExpression C>
+        struct StagedEvaluator<StagedFusedSquare<Operation, X, C>> {
             template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Fma(Detail::Evaluate(expression.FirstOperand().FirstOperand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand().SecondOperand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand(), args...)))) {
-                const auto& product = expression.FirstOperand();
-                return Math::Fma(Detail::Evaluate(product.FirstOperand(), args...),
-                                 Detail::Evaluate(product.SecondOperand(), args...),
-                                 Detail::Evaluate(expression.SecondOperand(), args...));
-            }
-        };
-
-        template<StagedExpression A, StagedExpression B, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::AddOp, C, StagedBinary<StagedOperation::MulOp, A, B>>> {
-            using Product = StagedBinary<StagedOperation::MulOp, A, B>;
-            using Expression = StagedBinary<StagedOperation::AddOp, C, Product>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Fma(Detail::Evaluate(expression.SecondOperand().FirstOperand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand().SecondOperand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand(), args...)))) {
-                const auto& product = expression.SecondOperand();
-                return Math::Fma(Detail::Evaluate(product.FirstOperand(), args...),
-                                 Detail::Evaluate(product.SecondOperand(), args...),
-                                 Detail::Evaluate(expression.FirstOperand(), args...));
-            }
-        };
-
-        template<StagedExpression X, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::AddOp, StagedUnary<StagedOperation::SquareOp, X>, C>> {
-            using Square = StagedUnary<StagedOperation::SquareOp, X>;
-            using Expression = StagedBinary<StagedOperation::AddOp, Square, C>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Fma(Detail::Evaluate(expression.FirstOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand(), args...)))) {
-                auto value = Detail::Evaluate(expression.FirstOperand().Operand(), args...);
-                return Math::Fma(value, value, Detail::Evaluate(expression.SecondOperand(), args...));
-            }
-        };
-
-        template<StagedExpression X, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::AddOp, C, StagedUnary<StagedOperation::SquareOp, X>>> {
-            using Square = StagedUnary<StagedOperation::SquareOp, X>;
-            using Expression = StagedBinary<StagedOperation::AddOp, C, Square>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Fma(Detail::Evaluate(expression.SecondOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand(), args...)))) {
-                auto value = Detail::Evaluate(expression.SecondOperand().Operand(), args...);
-                return Math::Fma(value, value, Detail::Evaluate(expression.FirstOperand(), args...));
-            }
-        };
-
-        template<StagedExpression A, StagedExpression B, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::SubOp, StagedBinary<StagedOperation::MulOp, A, B>, C>> {
-            using Product = StagedBinary<StagedOperation::MulOp, A, B>;
-            using Expression = StagedBinary<StagedOperation::SubOp, Product, C>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Mfs(Detail::Evaluate(expression.FirstOperand().FirstOperand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand().SecondOperand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand(), args...)))) {
-                const auto& product = expression.FirstOperand();
-                return Math::Mfs(Detail::Evaluate(product.FirstOperand(), args...),
-                                 Detail::Evaluate(product.SecondOperand(), args...),
-                                 Detail::Evaluate(expression.SecondOperand(), args...));
-            }
-        };
-
-        template<StagedExpression A, StagedExpression B, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::SubOp, C, StagedBinary<StagedOperation::MulOp, A, B>>> {
-            using Product = StagedBinary<StagedOperation::MulOp, A, B>;
-            using Expression = StagedBinary<StagedOperation::SubOp, C, Product>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Nma(Detail::Evaluate(expression.SecondOperand().FirstOperand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand().SecondOperand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand(), args...)))) {
-                const auto& product = expression.SecondOperand();
-                return Math::Nma(Detail::Evaluate(product.FirstOperand(), args...),
-                                 Detail::Evaluate(product.SecondOperand(), args...),
-                                 Detail::Evaluate(expression.FirstOperand(), args...));
-            }
-        };
-
-        template<StagedExpression X, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::SubOp, StagedUnary<StagedOperation::SquareOp, X>, C>> {
-            using Square = StagedUnary<StagedOperation::SquareOp, X>;
-            using Expression = StagedBinary<StagedOperation::SubOp, Square, C>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Mfs(Detail::Evaluate(expression.FirstOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand(), args...)))) {
-                auto value = Detail::Evaluate(expression.FirstOperand().Operand(), args...);
-                return Math::Mfs(value, value, Detail::Evaluate(expression.SecondOperand(), args...));
-            }
-        };
-
-        template<StagedExpression X, StagedExpression C>
-        struct StagedEvaluator<StagedBinary<StagedOperation::SubOp, C, StagedUnary<StagedOperation::SquareOp, X>>> {
-            using Square = StagedUnary<StagedOperation::SquareOp, X>;
-            using Expression = StagedBinary<StagedOperation::SubOp, C, Square>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Nma(Detail::Evaluate(expression.SecondOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.SecondOperand().Operand(), args...),
-                                            Detail::Evaluate(expression.FirstOperand(), args...)))) {
-                auto value = Detail::Evaluate(expression.SecondOperand().Operand(), args...);
-                return Math::Nma(value, value, Detail::Evaluate(expression.FirstOperand(), args...));
-            }
-        };
-
-        template<StagedExpression A, StagedExpression B, StagedExpression C>
-        struct StagedEvaluator<StagedUnary<
-            StagedOperation::NegOp,
-            StagedBinary<StagedOperation::AddOp, StagedBinary<StagedOperation::MulOp, A, B>, C>>> {
-            using Product = StagedBinary<StagedOperation::MulOp, A, B>;
-            using Sum = StagedBinary<StagedOperation::AddOp, Product, C>;
-            using Expression = StagedUnary<StagedOperation::NegOp, Sum>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Nms(
-                    Detail::Evaluate(expression.Operand().FirstOperand().FirstOperand(), args...),
-                    Detail::Evaluate(expression.Operand().FirstOperand().SecondOperand(), args...),
-                    Detail::Evaluate(expression.Operand().SecondOperand(), args...)))) {
-                const auto& sum = expression.Operand();
-                const auto& product = sum.FirstOperand();
-                return Math::Nms(Detail::Evaluate(product.FirstOperand(), args...),
-                                 Detail::Evaluate(product.SecondOperand(), args...),
-                                 Detail::Evaluate(sum.SecondOperand(), args...));
-            }
-        };
-
-        template<StagedExpression A, StagedExpression B, StagedExpression C>
-        struct StagedEvaluator<StagedUnary<
-            StagedOperation::NegOp,
-            StagedBinary<StagedOperation::AddOp, C, StagedBinary<StagedOperation::MulOp, A, B>>>> {
-            using Product = StagedBinary<StagedOperation::MulOp, A, B>;
-            using Sum = StagedBinary<StagedOperation::AddOp, C, Product>;
-            using Expression = StagedUnary<StagedOperation::NegOp, Sum>;
-
-            template<typename... Args>
-            [[nodiscard]] static constexpr decltype(auto) Evaluate(const Expression& expression, Args&... args)
-                noexcept(noexcept(Math::Nms(
-                    Detail::Evaluate(expression.Operand().SecondOperand().FirstOperand(), args...),
-                    Detail::Evaluate(expression.Operand().SecondOperand().SecondOperand(), args...),
-                    Detail::Evaluate(expression.Operand().FirstOperand(), args...)))) {
-                const auto& sum = expression.Operand();
-                const auto& product = sum.SecondOperand();
-                return Math::Nms(Detail::Evaluate(product.FirstOperand(), args...),
-                                 Detail::Evaluate(product.SecondOperand(), args...),
-                                 Detail::Evaluate(sum.FirstOperand(), args...));
+            [[nodiscard]] static constexpr decltype(auto) Evaluate(
+                const StagedFusedSquare<Operation, X, C>& expression,
+                Args&... args) noexcept(noexcept(Operation(Detail::Evaluate(expression.ValueOperand(), args...),
+                                                           Detail::Evaluate(expression.ValueOperand(), args...),
+                                                           Detail::Evaluate(expression.AddendOperand(), args...)))) {
+                auto value = Detail::Evaluate(expression.ValueOperand(), args...);
+                return Operation(value, value, Detail::Evaluate(expression.AddendOperand(), args...));
             }
         };
 
@@ -588,15 +520,13 @@ namespace Sora::Math {
                 if constexpr (sizeof...(Rest) == 0) {
                     return Detail::Stage(std::forward<First>(first));
                 } else {
-                    return Detail::FoldBinary<Detail::StagedOperation::AddOp>(std::forward<First>(first),
-                                                                           std::forward<Rest>(rest)...);
+                    return Detail::FoldBinary<Math::Add>(std::forward<First>(first), std::forward<Rest>(rest)...);
                 }
             }
 
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto Sub(First&& first, Second&& second) {
-                return Detail::MakeBinary<Detail::StagedOperation::SubOp>(std::forward<First>(first),
-                                                                        std::forward<Second>(second));
+                return Detail::MakeBinary<Math::Sub>(std::forward<First>(first), std::forward<Second>(second));
             }
 
             template<typename First, typename... Rest>
@@ -604,138 +534,134 @@ namespace Sora::Math {
                 if constexpr (sizeof...(Rest) == 0) {
                     return Detail::Stage(std::forward<First>(first));
                 } else {
-                    return Detail::FoldBinary<Detail::StagedOperation::MulOp>(std::forward<First>(first),
-                                                                           std::forward<Rest>(rest)...);
+                    return Detail::FoldBinary<Math::Mul>(std::forward<First>(first), std::forward<Rest>(rest)...);
                 }
             }
 
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto Div(First&& first, Second&& second) {
-                return Detail::MakeBinary<Detail::StagedOperation::DivOp>(std::forward<First>(first),
-                                                                        std::forward<Second>(second));
+                return Detail::MakeBinary<Math::Div>(std::forward<First>(first), std::forward<Second>(second));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Neg(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::NegOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Neg>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Inv(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::InvOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Inv>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Square(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::SquareOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Square>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Abs(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::AbsOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Abs>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Sin(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::SinOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Sin>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Cos(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::CosOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Cos>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Tan(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::TanOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Tan>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Asin(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::ASinOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Asin>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Acos(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::ACosOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Acos>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Atan(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::ATanOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Atan>(std::forward<T>(value));
             }
 
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto Atan2(First&& first, Second&& second) {
-                return Detail::MakeBinary<Detail::StagedOperation::ATan2Op>(std::forward<First>(first),
-                                                                          std::forward<Second>(second));
+                return Detail::MakeBinary<Math::Atan2>(std::forward<First>(first), std::forward<Second>(second));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Exp(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::ExpOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Exp>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Log(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::LogOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Log>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Sqrt(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::SqrtOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Sqrt>(std::forward<T>(value));
             }
 
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto Pow(First&& first, Second&& second) {
-                return Detail::MakeBinary<Detail::StagedOperation::PowOp>(std::forward<First>(first),
-                                                                        std::forward<Second>(second));
+                return Detail::MakeBinary<Math::Pow>(std::forward<First>(first), std::forward<Second>(second));
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Fma(First&& first, Second&& second, Third&& third) {
-                return Detail::MakeTernary<Detail::StagedOperation::FmaOp>(
-                    std::forward<First>(first), std::forward<Second>(second), std::forward<Third>(third));
+                return Detail::MakeTernary<Math::Fma>(std::forward<First>(first), std::forward<Second>(second),
+                                                      std::forward<Third>(third));
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Mfs(First&& first, Second&& second, Third&& third) {
-                return Detail::MakeTernary<Detail::StagedOperation::MfsOp>(
-                    std::forward<First>(first), std::forward<Second>(second), std::forward<Third>(third));
+                return Detail::MakeTernary<Math::Mfs>(std::forward<First>(first), std::forward<Second>(second),
+                                                      std::forward<Third>(third));
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Nms(First&& first, Second&& second, Third&& third) {
-                return Detail::MakeTernary<Detail::StagedOperation::NmsOp>(
-                    std::forward<First>(first), std::forward<Second>(second), std::forward<Third>(third));
+                return Detail::MakeTernary<Math::Nms>(std::forward<First>(first), std::forward<Second>(second),
+                                                      std::forward<Third>(third));
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Nma(First&& first, Second&& second, Third&& third) {
-                return Detail::MakeTernary<Detail::StagedOperation::NmaOp>(
-                    std::forward<First>(first), std::forward<Second>(second), std::forward<Third>(third));
+                return Detail::MakeTernary<Math::Nma>(std::forward<First>(first), std::forward<Second>(second),
+                                                      std::forward<Third>(third));
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Lerp(First&& first, Second&& second, Third&& third) {
-                return Detail::MakeTernary<Detail::StagedOperation::LerpOp>(
-                    std::forward<First>(first), std::forward<Second>(second), std::forward<Third>(third));
+                return Detail::MakeTernary<Math::Lerp>(std::forward<First>(first), std::forward<Second>(second),
+                                                       std::forward<Third>(third));
             }
 
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Clamp(First&& first, Second&& second, Third&& third) {
-                return Detail::MakeTernary<Detail::StagedOperation::ClampOp>(
-                    std::forward<First>(first), std::forward<Second>(second), std::forward<Third>(third));
+                return Detail::MakeTernary<Math::Clamp>(std::forward<First>(first), std::forward<Second>(second),
+                                                        std::forward<Third>(third));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Saturate(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::SaturateOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Saturate>(std::forward<T>(value));
             }
 
             template<typename T>
             [[nodiscard]] static constexpr auto Sign(T&& value) {
-                return Detail::MakeUnary<Detail::StagedOperation::SignOp>(std::forward<T>(value));
+                return Detail::MakeUnary<Math::Sign>(std::forward<T>(value));
             }
         };
 
@@ -776,9 +702,9 @@ namespace Sora::Math {
      * replace local multiply-add/subtract patterns with explicitly fused primitives, changing intermediate rounding.
      */
     template<std::size_t Arity, typename Function>
-    [[nodiscard]] consteval auto Compile(Function function) {
+    [[nodiscard]] consteval auto Compile(Function&& function) {
         using Inputs = [:Detail::StagedInputTuple<Arity>():];
-        auto expression = Detail::Stage(std::apply(function, Inputs{}));
+        auto expression = Detail::Normalize(Detail::Stage(std::apply(std::forward<Function>(function), Inputs{})));
         return CompiledKernel<decltype(expression), Arity>{std::move(expression)};
     }
 
