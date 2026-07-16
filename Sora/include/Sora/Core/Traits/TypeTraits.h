@@ -293,10 +293,8 @@ namespace Sora {
         concept PolymorphicType = std::is_polymorphic_v<T>;
 
         /**
-         * @brief A type whose value representation has no padding bits, so any two
-         *        equal values share the same object representation.
-         *
-         * Such types are safe to hash or compare over their raw bytes (`memcmp`).
+         * @brief A type whose value representation has no padding bits, so any two equal values share the same object
+         * representation. Such types are safe to hash or compare over their raw bytes (`memcmp`).
          */
         template<typename T>
         concept UniquelyRepresented = std::has_unique_object_representations_v<T>;

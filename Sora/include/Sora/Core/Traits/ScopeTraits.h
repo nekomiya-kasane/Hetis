@@ -9,6 +9,8 @@
  */
 #pragma once
 
+#include <algorithm>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <meta>
@@ -160,6 +162,17 @@ namespace Sora {
             return found == std::ranges::end(members) ? std::meta::info{} : std::meta::dealias(*found);
         }
 
+        /** @brief Return whether reflection exposes every storage-bearing part of @p type's direct object layout. */
+        consteval bool IsClassLayoutObservable(std::meta::info type) {
+            type = std::meta::dealias(std::meta::remove_cvref(type));
+            if (!std::meta::is_class_type(type) || std::meta::is_union_type(type) ||
+                std::meta::is_polymorphic_type(type)) {
+                return false;
+            }
+            return std::ranges::none_of(std::meta::bases_of(type, std::meta::access_context::unchecked()),
+                                        std::meta::is_virtual);
+        }
+
     } // namespace Meta
 
     namespace Traits {
@@ -262,28 +275,79 @@ namespace Sora {
             requires std::is_class_v<T>
         using DataMemberType = typename [:std::meta::type_of(DataMembers<T>[I]):];
 
-        /** @brief Total padding bytes in @p T, computed from object size minus member object sizes. */
+        /**
+         * @brief Return the number of uncovered bits in @p type's direct complete-object layout.
+         * @details Direct base subobjects and non-static data members contribute bit intervals obtained from
+         * @c offset_of and @c bit_size_of. Merging intervals correctly handles overlapping EBO and
+         * @c [[no_unique_address]] storage, while bit-field widths expose sub-byte padding. Padding internal to a
+         * direct subobject remains that subobject's responsibility and can be queried by applying this function
+         * recursively.
+         * @param[in] type Reflected non-polymorphic class type without direct virtual bases.
+         * @return Number of object-representation bits not covered by a reflected direct subobject.
+         */
         template<typename T>
-            requires std::is_class_v<T>
-        inline constexpr size_t PaddingBytes = sizeof(T) - [] consteval {
-            size_t total = 0;
-            for (auto m : DataMembers<T>) {
-                total += std::meta::size_of(std::meta::type_of(m));
+            requires(std::is_class_v<T> && Meta::IsClassLayoutObservable(^^T))
+        inline constexpr size_t PaddingBits = [] consteval {
+            auto type = ^^T;
+            type = std::meta::dealias(std::meta::remove_cvref(type));
+            if (!IsClassLayoutObservable(type)) {
+                throw std::define_static_string("Meta::PaddingBitsOf requires a non-polymorphic class without direct "
+                                                "virtual bases.");
             }
-            return total;
+
+            struct BitInterval {
+                size_t begin{};
+                size_t end{};
+            };
+
+            const size_t objectBits = std::meta::size_of(type) * CHAR_BIT;
+            std::vector<BitInterval> intervals;
+            auto append = [&intervals, objectBits](std::meta::info subobject, size_t width) {
+                const auto offset = std::meta::offset_of(subobject).total_bits();
+                if (offset < 0 || static_cast<size_t>(offset) > objectBits ||
+                    width > objectBits - static_cast<size_t>(offset)) {
+                    throw std::define_static_string(
+                        "Meta::PaddingBitsOf received an invalid reflected subobject range.");
+                }
+                if (width != 0) {
+                    intervals.push_back({static_cast<size_t>(offset), static_cast<size_t>(offset) + width});
+                }
+            };
+
+            for (auto base : std::meta::bases_of(type, std::meta::access_context::unchecked())) {
+                append(base, std::meta::size_of(std::meta::type_of(base)) * CHAR_BIT);
+            }
+            for (auto member : std::meta::nonstatic_data_members_of(type, std::meta::access_context::unchecked())) {
+                append(member, std::meta::bit_size_of(member));
+            }
+
+            std::ranges::sort(intervals, {}, &BitInterval::begin);
+            size_t paddingBits = 0;
+            size_t coveredUntil = 0;
+            for (const auto interval : intervals) {
+                if (interval.begin > coveredUntil) {
+                    paddingBits += interval.begin - coveredUntil;
+                }
+                coveredUntil = std::max(coveredUntil, interval.end);
+            }
+            return paddingBits + objectBits - coveredUntil;
         }();
 
     } // namespace Traits
 
-    namespace Meta {
+    namespace Concept {
 
-        /** @brief Class type with at least one non-static data member and no detected padding bytes. */
+        /** @brief Class type whose observable direct complete-object layout can be reflected. */
         template<typename T>
-        concept CompactClass = std::is_class_v<T> && Traits::DataMembersCount<T> > 0 && Traits::PaddingBytes<T> == 0;
+        concept ClassWithObservableLayout = std::is_class_v<T> && Meta::IsClassLayoutObservable(^^T);
 
-        /** @brief Class type with padding bytes detected by @ref Traits::PaddingBytes. */
+        /** @brief Class whose observable direct complete-object layout has no uncovered storage bits. */
         template<typename T>
-        concept PaddedClass = std::is_class_v<T> && Traits::PaddingBytes<T> > 0;
+        concept CompactClass = ClassWithObservableLayout<T> && Traits::PaddingBits<T> == 0;
+
+        /** @brief Class whose observable direct complete-object layout contains uncovered storage bits. */
+        template<typename T>
+        concept PaddedClass = ClassWithObservableLayout<T> && Traits::PaddingBits<T> > 0;
 
         /** @brief Class type whose non-static data members all have the same dealiased declared type. */
         template<typename T>
@@ -309,6 +373,6 @@ namespace Sora {
         template<typename T>
         concept StatelessClass = std::is_class_v<T> && Traits::DataMembersCount<T> == 0;
 
-    } // namespace Meta
+    } // namespace Concept
 
 } // namespace Sora
