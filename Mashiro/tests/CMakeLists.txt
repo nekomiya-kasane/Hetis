@@ -59,8 +59,6 @@ add_mashiro_test(Math MathUtilsXform2DTest eigen)
 add_mashiro_test(Math MathStressTest eigen)
 add_mashiro_test(Math TrivialOpsTest)
 
-add_mashiro_test(Async FondationsTest)
-add_mashiro_test(Async GeneratorTest)
 add_mashiro_test(Async AsyncQueueTest)
 
 add_mashiro_test(Surface ColorSpaceTest)

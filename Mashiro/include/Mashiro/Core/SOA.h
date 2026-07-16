@@ -288,14 +288,14 @@ namespace Mashiro::SoA {
         // -----------------------------------------------------------------
 
         /// @brief Access field `Name` of element `index`.
-        template <FixedString Name>
+        template <FixedString<256> Name>
         [[nodiscard]] decltype(auto) Get(size_t index) {
             constexpr size_t fi = FieldIndex<Name>();
             using FT = FieldTypeAt<fi>;
             return static_cast<FT*>(arrays_[fi])[index];
         }
 
-        template <FixedString Name>
+        template <FixedString<256> Name>
         [[nodiscard]] decltype(auto) Get(size_t index) const {
             constexpr size_t fi = FieldIndex<Name>();
             using FT = FieldTypeAt<fi>;
@@ -303,14 +303,14 @@ namespace Mashiro::SoA {
         }
 
         /// @brief Get a span over the entire field array (dense, cache-linear).
-        template <FixedString Name>
+        template <FixedString<256> Name>
         [[nodiscard]] auto Field() {
             constexpr size_t fi = FieldIndex<Name>();
             using FT = FieldTypeAt<fi>;
             return std::span<FT>{static_cast<FT*>(arrays_[fi]), size_};
         }
 
-        template <FixedString Name>
+        template <FixedString<256> Name>
         [[nodiscard]] auto Field() const {
             constexpr size_t fi = FieldIndex<Name>();
             using FT = FieldTypeAt<fi>;
@@ -408,7 +408,7 @@ namespace Mashiro::SoA {
         static constexpr size_t FieldCount = kN;
 
     private:
-        template <FixedString Name>
+        template <FixedString<256> Name>
         static consteval size_t FieldIndex() {
             for (size_t i = 0; i < Detail::kFields<T>.size(); ++i) {
                 if (std::meta::identifier_of(Detail::kFields<T>[i]) ==

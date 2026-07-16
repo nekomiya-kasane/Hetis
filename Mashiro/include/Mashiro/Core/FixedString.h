@@ -51,9 +51,11 @@ namespace Mashiro {
         /** @brief Default: empty string. */
         constexpr FixedString() = default;
 
-        /** @brief From a string literal (CTAD deduces N from array size minus 1). */
-        consteval FixedString(const char (&s)[N + 1]) : len_(N) {
-            for (size_t i = 0; i <= N; ++i) {
+        /** @brief From a string literal no larger than this string's capacity. */
+        template<size_t M>
+        consteval FixedString(const char (&s)[M]) : len_(M - 1) {
+            static_assert(M - 1 <= N, "FixedString literal exceeds its capacity");
+            for (size_t i = 0; i < M; ++i) {
                 buf_[i] = s[i];
             }
         }
@@ -562,7 +564,7 @@ namespace Mashiro {
     namespace Literals {
 
         /** @brief `"hello"_fs` → `FixedString<5>{"hello"}`. */
-        template<FixedString S>
+        template<FixedString<256> S>
         [[nodiscard]] consteval auto operator""_fs() {
             return S;
         }

@@ -1182,6 +1182,17 @@ namespace Mashiro {
         template<typename T>
         concept TriviallyCopyableType = std::is_trivially_copyable_v<T>;
 
+        /**
+         * @brief Payload type whose lifetime can cross a reservation-based concurrent queue without unwinding.
+         *
+         * @details Sequence-cell queues publish a reserved slot only after constructing its payload and release a slot
+         * only after moving and destroying that payload. These lifetime transitions therefore cannot recover from an
+         * exception without introducing a permanently inaccessible ticket.
+         */
+        template<typename T>
+        concept ConcurrentQueueElement = std::move_constructible<T> && std::is_nothrow_move_constructible_v<T> &&
+                                         std::is_nothrow_destructible_v<T>;
+
         /// @brief An empty class type (no non-static data members, e.g. a tag).
         template<typename T>
         concept EmptyType = std::is_empty_v<T>;

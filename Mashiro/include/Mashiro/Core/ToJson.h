@@ -175,7 +175,7 @@ namespace Mashiro {
         /// @code
         /// [[=Json::Anno::Rename<"display">{}]] std::string label;
         /// @endcode
-        template <FixedString S>
+        template <FixedString<256> S>
         struct Rename {
             static constexpr std::string_view name = S.view();
             constexpr bool operator==(const Rename&) const = default;
@@ -194,7 +194,7 @@ namespace Mashiro {
 
 namespace Mashiro::Traits::Anno {
 
-    template <FixedString S>
+    template <FixedString<256> S>
     struct PayloadTrait<Json::Anno::Rename<S>> {
         static constexpr bool             value = true;
         static constexpr std::string_view payload = S.view();
@@ -705,4 +705,3 @@ namespace nlohmann {
 } // namespace nlohmann
 
 // clang-format on
-

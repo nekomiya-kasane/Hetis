@@ -1,13 +1,13 @@
 /**
  * @file IntrusiveWaitQueue.h
- * @brief Allocation-free FIFO wait queues for experimental asynchronous queue operation states.
+ * @brief Allocation-free FIFO wait queues for asynchronous queue operation states.
  * @ingroup Concurrency
  */
 #pragma once
 
 #include <utility>
 
-namespace Mashiro::Experimental::Concurrency::Detail {
+namespace Mashiro::Concurrency::Detail {
 
     /** @brief Intrusive node embedded into every queue operation state. */
     struct WaitNode {
@@ -71,4 +71,4 @@ namespace Mashiro::Experimental::Concurrency::Detail {
         WaitNode* tail_{nullptr};
     };
 
-} // namespace Mashiro::Experimental::Concurrency::Detail
+} // namespace Mashiro::Concurrency::Detail

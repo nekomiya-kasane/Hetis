@@ -340,7 +340,7 @@ namespace Mashiro {
     template<typename K, typename V>
     Rule(K, V) -> Rule<K, V>;
 
-    template<FixedString K, typename V>
+    template<FixedString<256> K, typename V>
     struct Field; // forward
 
     /**
@@ -350,7 +350,7 @@ namespace Mashiro {
      * index lookup.
      * @tparam K The key string.
      */
-    template<FixedString K>
+    template<FixedString<256> K>
     struct KeyTag {
         static constexpr auto key = K; ///< The carried key.
 
@@ -362,7 +362,7 @@ namespace Mashiro {
     };
 
     /// @brief String literal operator: `"name"_k` → `KeyTag<"name">`.
-    template<FixedString S>
+    template<FixedString<256> S>
     [[nodiscard]] constexpr KeyTag<S> operator""_k() {
         return {};
     }
@@ -372,7 +372,7 @@ namespace Mashiro {
      * @tparam K Compile-time key.
      * @tparam V Value type.
      */
-    template<FixedString K, typename V>
+    template<FixedString<256> K, typename V>
     struct Field {
         static constexpr auto key = K; ///< Compile-time key.
         V value;                       ///< Stored value.
@@ -393,7 +393,7 @@ namespace Mashiro {
         constexpr explicit Assoc(Fs... fs) : fields{fs...} {}
 
         /// @brief Index of key @p K within the field pack, or `size_t(-1)`.
-        template<FixedString K>
+        template<FixedString<256> K>
         static consteval size_t IndexOfKey() {
             if constexpr (sizeof...(Fs) == 0) {
                 return size_t(-1);
@@ -409,7 +409,7 @@ namespace Mashiro {
         }
 
         /// @brief Compile-time keyed access.
-        template<FixedString K>
+        template<FixedString<256> K>
         [[nodiscard]] constexpr decltype(auto) Get(this auto&& self) {
             constexpr size_t i = IndexOfKey<K>();
             static_assert(i != size_t(-1), "Assoc: key not found");
@@ -417,13 +417,13 @@ namespace Mashiro {
         }
 
         /// @brief `a["k"_k]` sugar for `Get<"k">()`.
-        template<FixedString K>
+        template<FixedString<256> K>
         [[nodiscard]] constexpr decltype(auto) operator[](this auto&& self, KeyTag<K>) {
             return std::forward<decltype(self)>(self).template Get<K>();
         }
 
         /// @brief Whether the association contains key @p K.
-        template<FixedString K>
+        template<FixedString<256> K>
         static constexpr bool Contains() {
             return IndexOfKey<K>() != size_t(-1);
         }
