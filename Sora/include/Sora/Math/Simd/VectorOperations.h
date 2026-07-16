@@ -527,7 +527,9 @@ namespace Sora::Math::Simd {
         [[gnu::always_inline]] static constexpr bool AreElementsConstKnownZero(TV x) {
             if constexpr (std::floating_point<Tp> && Traits.SignedZeros()) {
                 using Up = UInt<sizeof(Tp)>;
-                return (IsConstKnownEqualTo(__builtin_bit_cast(Up, x[Is]), Up()) && ...);
+                using UV = VecBuiltinTypeBytes<Up, sizeof(TV)>;
+                const UV bits = __builtin_bit_cast(UV, x);
+                return (IsConstKnownEqualTo(bits[Is], Up()) && ...);
             } else {
                 return AreElementsConstKnownEqualTo(x, Tp());
             }

@@ -589,6 +589,7 @@ namespace Sora::Math::Simd {
             return AbiT<16 / adjSizeof, 1>();
         } else {
             // no MMX: we can't emit EMMS where it would be necessary
+            (void)1; // Nekomiya: suppress warning
             return AbiT<1, 1>();
         }
     }
