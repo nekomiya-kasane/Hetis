@@ -698,9 +698,8 @@ namespace Sora::Math::Simd {
         /** @internal
          * Implementation of @ref PartialLoad.
          *
-         * @param mem  A pointer to an std::array of @p n values. Can be std::complex or Real.
-         * @param n    Read no more than @p n values from memory. However, depending on @p mem
-         *               Alignment, out of bounds reads are benign.
+         * @param mem A pointer to an std::array of @p n values. Can be std::complex or Real.
+         * @param n Read no more than @p n values from memory; inactive lanes are zero-initialized.
          */
         template<typename Up, ArchTraits Traits = {}>
         static inline BasicVector PartialLoad(const Up* mem, std::size_t n) {
@@ -720,12 +719,6 @@ namespace Sora::Math::Simd {
                 if (n >= std::size_t(kStorageSize)) [[unlikely]] {
                     return BasicVector(LoadCtorTag(), mem);
                 }
-#if SORA_SIMD_X86 // TODO: where else is this "safe"?
-                // allow out-of-bounds read when it cannot lead to a #GP
-                else if (IsConstKnownEqualTo(Detail::IsSufficientlyAligned<sizeof(Up) * kFullSize>(mem), true)) {
-                    return SelectImpl(MaskType::PartialMaskOfN(int(n)), BasicVector(LoadCtorTag(), mem), BasicVector());
-                }
-#endif
                 else if constexpr (kStorageSize > 4) {
                     alignas(DataType) std::byte dst[sizeof(DataType)] = {};
                     const std::byte* src = reinterpret_cast<const std::byte*>(mem);
@@ -1497,7 +1490,7 @@ namespace Sora::Math::Simd {
             } else {
                 constexpr bool usesSimdRegister = sizeof(data) >= 8;
                 using VO = VecOps<DataType>;
-                if (VO::AreElementsConstKnownEqualTo(f.data, 0)) {
+                if (VO::template AreElementsConstKnownZero<Traits>(f.data)) {
                     if (std::is_integral_v<ValueType> && usesSimdRegister &&
                         VO::AreElementsConstKnownEqualTo(t.data, 1)) {
                         // This is equivalent to converting the Mask into a Vector of 0s and 1s. So +k.
@@ -1508,7 +1501,7 @@ namespace Sora::Math::Simd {
                     } else {
                         return VecAnd(reinterpret_cast<DataType>(k.data), t.data);
                     }
-                } else if (VecOps<DataType>::AreElementsConstKnownEqualTo(t.data, 0)) {
+                } else if (VO::template AreElementsConstKnownZero<Traits>(t.data)) {
                     if (std::is_integral_v<ValueType> && usesSimdRegister &&
                         VO::AreElementsConstKnownEqualTo(f.data, 1)) {
                         return ValueType(1) + BasicVector(-k);

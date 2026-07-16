@@ -522,6 +522,17 @@ namespace Sora::Math::Simd {
             return (IsConstKnownEqualTo(x[Is], ref) && ...);
         }
 
+        /** @brief Return whether every element is a compile-time-known semantic zero. */
+        template<TargetTraits Traits = {}>
+        [[gnu::always_inline]] static constexpr bool AreElementsConstKnownZero(TV x) {
+            if constexpr (std::floating_point<Tp> && Traits.SignedZeros()) {
+                using Up = UInt<sizeof(Tp)>;
+                return (IsConstKnownEqualTo(__builtin_bit_cast(Up, x[Is]), Up()) && ...);
+            } else {
+                return AreElementsConstKnownEqualTo(x, Tp());
+            }
+        }
+
         // True iff all elements at even indexes are zero. This includes signed zeros only when
         // -fno-signed-zeros is in effect.
         template<OptTraits Traits = {}>

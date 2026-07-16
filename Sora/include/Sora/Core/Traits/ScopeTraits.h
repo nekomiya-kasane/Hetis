@@ -290,10 +290,6 @@ namespace Sora {
         inline constexpr size_t PaddingBits = [] consteval {
             auto type = ^^T;
             type = std::meta::dealias(std::meta::remove_cvref(type));
-            if (!IsClassLayoutObservable(type)) {
-                throw std::define_static_string("Meta::PaddingBitsOf requires a non-polymorphic class without direct "
-                                                "virtual bases.");
-            }
 
             struct BitInterval {
                 size_t begin{};

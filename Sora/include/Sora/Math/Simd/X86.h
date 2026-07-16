@@ -997,8 +997,9 @@ namespace Sora::Math::Simd {
                 static_assert(false);
             }
         } else if constexpr (sizeof(TV) == 32) {
-            const auto* src = reinterpret_cast<const X86IntrinType<Up>*>(mem);
-            const VecBuiltinTypeBytes<X86IntrinType<Up>, 32> z = {};
+            using MemVector = VecBuiltinTypeBytes<X86IntrinType<Up>, 32>;
+            const auto* src = reinterpret_cast<const MemVector*>(mem);
+            const MemVector z = {};
             if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 4) {
                 return __builtin_ia32_loadups256_mask(src, z, k);
             } else if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 8) {
@@ -1015,8 +1016,9 @@ namespace Sora::Math::Simd {
                 static_assert(false);
             }
         } else if constexpr (sizeof(TV) == 16) {
-            const auto* src = reinterpret_cast<const X86IntrinType<Up>*>(mem);
-            const VecBuiltinTypeBytes<X86IntrinType<Up>, 16> z = {};
+            using MemVector = VecBuiltinTypeBytes<X86IntrinType<Up>, 16>;
+            const auto* src = reinterpret_cast<const MemVector*>(mem);
+            const MemVector z = {};
             if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 4) {
                 return __builtin_ia32_loadups128_mask(src, z, k);
             } else if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 8) {
@@ -1159,7 +1161,8 @@ namespace Sora::Math::Simd {
                     static_assert(false);
                 }
             } else if constexpr (ConvertsTrivially<Tp, Up>) {
-                auto* dst = reinterpret_cast<X86IntrinType<Up>*>(mem);
+                using MemVector = VecBuiltinTypeBytes<X86IntrinType<Up>, 32>;
+                auto* dst = reinterpret_cast<MemVector*>(mem);
                 if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 4) {
                     __builtin_ia32_storeups256_mask(dst, w, k);
                 } else if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 8) {
@@ -1200,7 +1203,8 @@ namespace Sora::Math::Simd {
                     static_assert(false);
                 }
             } else if constexpr (ConvertsTrivially<Tp, Up>) {
-                auto* dst = reinterpret_cast<X86IntrinType<Up>*>(mem);
+                using MemVector = VecBuiltinTypeBytes<X86IntrinType<Up>, 16>;
+                auto* dst = reinterpret_cast<MemVector*>(mem);
                 if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 4) {
                     __builtin_ia32_storeups128_mask(dst, w, k);
                 } else if constexpr (std::is_floating_point_v<Tp> && sizeof(Tp) == 8) {

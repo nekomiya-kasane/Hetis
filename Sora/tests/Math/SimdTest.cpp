@@ -49,6 +49,20 @@ namespace {
     using UInt4 = Simd::Vector<std::uint32_t, 4>;
     using Float4Backend = Sora::Math::Backend::FixedSimdCPU<4>;
 
+    inline constexpr Simd::ArchTraits kAvx512VlTraits{(1ULL << 15U) | (1ULL << 19U)};
+    inline constexpr Simd::ArchTraits kAvx512Traits{1ULL << 15U};
+
+    static_assert(std::same_as<decltype(Simd::NativeAbi<float, kAvx512VlTraits>()),
+                               Simd::AbiT<16, 1, Simd::AbiVariant::kBitMask>>);
+    static_assert(std::same_as<decltype(Simd::PreferredAbi<float, 32, kAvx512VlTraits>()),
+                               Simd::AbiT<8, 1, Simd::AbiVariant::kBitMask>>);
+    static_assert(std::same_as<decltype(Simd::PreferredAbi<float, 32, kAvx512Traits>()), Simd::AbiT<8, 1>>);
+    static_assert(std::same_as<decltype(Simd::PreferredAbi<float, 64, kAvx512VlTraits>()),
+                               decltype(Simd::NativeAbi<float, kAvx512VlTraits>())>);
+    static_assert(std::same_as<decltype(Simd::PreferredAbi<std::complex<float>, 32, kAvx512VlTraits>()),
+                               Simd::AbiT<4, 1, Simd::AbiVariant::kBitMask, Simd::AbiVariant::kCxIleav>>);
+    static_assert(Simd::PreferredAbiT<float>::kStorageSize <= Simd::NativeAbiT<float>::kStorageSize);
+
     consteval bool ConstexprArithmeticWorks() {
         const Int1 left(4);
         const Int1 right(2);
@@ -292,12 +306,24 @@ TEST_CASE("batch executor vectorizes multiple inputs and masks the tail", "[Sora
     const std::array<float, 7> left{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F};
     const std::array<float, 7> right{2.0F, 2.0F, 2.0F, 2.0F, 2.0F, 2.0F, 2.0F};
     std::array<float, 7> output{};
+    std::array<float, 7> preferredOutput{};
+    std::array<float, 7> preferredUnroll2Output{};
 
     Sora::Math::TransformBatchNative<float>(
         std::span(output), [](auto x, auto y) noexcept { return Sora::Math::Fma(x, y, 1.0F); },
         std::span<const float>(left), std::span<const float>(right));
 
+    Sora::Math::TransformBatch(
+        std::span(preferredOutput), [](auto x, auto y) noexcept { return Sora::Math::Fma(x, y, 1.0F); },
+        std::span<const float>(left), std::span<const float>(right));
+
+    Sora::Math::TransformBatch<float, 2>(
+        std::span(preferredUnroll2Output), [](auto x, auto y) noexcept { return Sora::Math::Fma(x, y, 1.0F); },
+        std::span<const float>(left), std::span<const float>(right));
+
     REQUIRE(output == std::array<float, 7>{3.0F, 5.0F, 7.0F, 9.0F, 11.0F, 13.0F, 15.0F});
+    REQUIRE(preferredOutput == output);
+    REQUIRE(preferredUnroll2Output == output);
 
     constexpr std::size_t count = 39;
     std::array<float, count> largeLeft{};

@@ -38,6 +38,9 @@
 
 namespace Sora::Math::Simd {
 
+    /** @brief Default upper bound, in bytes, for a throughput-oriented SIMD register. */
+    inline constexpr std::size_t kDefaultPreferredVectorBytes = 32;
+
     template<typename Tp>
     inline constexpr Tp kIota = [] { static_assert(false, "invalid kIota specialization"); }();
 
@@ -590,6 +593,47 @@ namespace Sora::Math::Simd {
         }
     }
 
+    /**
+     * @brief Select an ABI no wider than both the native register and @p MaximumBytes.
+     * @details This is a compile-time throughput policy, not a query of LLVM's target cost model. Narrow AVX-512
+     * ABIs retain compact masks only when AVX-512VL is available; otherwise they use vector masks. Without native
+     * FP16 arithmetic, each _Float16 lane counts as 32 bits of effective arithmetic width.
+     * @tparam Tp Vectorizable element type.
+     * @tparam MaximumBytes Maximum effective arithmetic width in bytes; must be a non-zero power of two.
+     */
+    template<typename Tp, std::size_t MaximumBytes = kDefaultPreferredVectorBytes, ArchTraits Traits = {}>
+        requires(std::has_single_bit(MaximumBytes))
+    consteval auto PreferredAbi() {
+        constexpr int adjustedSize = sizeof(Tp) * (1 + std::is_same_v<Tp, _Float16>);
+        if constexpr (!Vectorizable<Tp>) {
+            return InvalidAbi();
+        } else if constexpr (ComplexLike<Tp>) {
+            constexpr auto underlying =
+                Sora::Math::Simd::PreferredAbi<typename Tp::value_type, MaximumBytes, Traits>();
+            constexpr int complexSize = underlying.kStorageSize / (underlying.kStorageSize == 1 ? 1 : 2);
+            return AbiT<complexSize, 1, underlying.kVariant, AbiVariant::kCxIleav>();
+        } else {
+            constexpr auto native = Sora::Math::Simd::NativeAbi<Tp, Traits>();
+            constexpr std::size_t nativeBytes = std::size_t(native.kStorageSize) * adjustedSize;
+            if constexpr (MaximumBytes >= nativeBytes) {
+                return native;
+            } else {
+                constexpr int preferredSize = MaximumBytes < std::size_t(adjustedSize)
+                                                  ? 1
+                                                  : static_cast<int>(MaximumBytes / adjustedSize);
+                if constexpr (preferredSize == 1) {
+                    return AbiT<1, 1>();
+                } else if constexpr (Traits.HaveAvx512vl()) {
+                    constexpr AbiVariant maskVariant =
+                        FilterAbiVariant(native.kVariant, AbiVariant::kMaskVariants);
+                    return AbiT<preferredSize, 1, maskVariant>();
+                } else {
+                    return AbiT<preferredSize, 1>();
+                }
+            }
+        }
+    }
+
 #else
 
     // scalar fallback
@@ -599,15 +643,22 @@ namespace Sora::Math::Simd {
         constexpr bool Test(int bit) const { return ((flags >> bit) & 1) == 1; }
     };
 
-    template<typename Tp>
+    template<typename Tp, ArchTraits = {}>
     consteval auto NativeAbi() {
         if constexpr (!Vectorizable<Tp>) {
             return InvalidAbi();
         } else if constexpr (ComplexLike<Tp>) {
-            return AbiT<1, 1, AbiVariant::CxIleav>();
+            return AbiT<1, 1, AbiVariant::kCxIleav>();
         } else {
             return AbiT<1, 1>();
         }
+    }
+
+    /** @brief Select the scalar fallback ABI on targets without a SIMD implementation. */
+    template<typename Tp, std::size_t MaximumBytes = kDefaultPreferredVectorBytes, ArchTraits = {}>
+        requires(std::has_single_bit(MaximumBytes))
+    consteval auto PreferredAbi() {
+        return Sora::Math::Simd::NativeAbi<Tp>();
     }
 
 #endif
@@ -619,8 +670,7 @@ namespace Sora::Math::Simd {
     struct TargetTraits : ArchTraits, OptTraits {};
 
     /** @internal
-     * Alias for an ABI tag such that BasicVector<Tp, NativeAbiT<Tp>> stores one SIMD register of
-     * optimal width.
+     * Alias for an ABI tag such that BasicVector<Tp, NativeAbiT<Tp>> stores one widest native SIMD register.
      *
      * @tparam Tp  A vectorizable type.
      *
@@ -628,6 +678,14 @@ namespace Sora::Math::Simd {
      */
     template<typename Tp>
     using NativeAbiT = decltype(Sora::Math::Simd::NativeAbi<Tp>());
+
+    /**
+     * @brief ABI capped to a throughput-oriented effective width.
+     * @tparam Tp Vectorizable element type.
+     * @tparam MaximumBytes Maximum effective arithmetic width in bytes.
+     */
+    template<typename Tp, std::size_t MaximumBytes = kDefaultPreferredVectorBytes>
+    using PreferredAbiT = decltype(Sora::Math::Simd::PreferredAbi<Tp, MaximumBytes>());
 
     /**
      * @brief Deduce a target-independent fixed-width ABI for @p Np values.

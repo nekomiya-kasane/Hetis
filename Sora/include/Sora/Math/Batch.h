@@ -68,7 +68,20 @@ namespace Sora::Math {
         }
     }
 
-    /** @brief Transform using the native SIMD width selected for @p T by the active compilation target. */
+    /**
+     * @brief Transform using the preferred throughput ABI and the measured default unroll factor.
+     * @details The preferred ABI is capped by @ref Simd::kDefaultPreferredVectorBytes. Use the explicit @c V overload
+     * to select another compile-time width or @ref TransformBatchNative for the widest native register.
+     */
+    template<Simd::Vectorizable T, std::size_t Unroll = 4, std::size_t Extent = std::dynamic_extent, typename Function,
+             typename... Inputs>
+    constexpr void TransformBatch(std::span<T, Extent> output, Function&& function,
+                                  std::span<const Inputs>... inputs) noexcept {
+        using V = Simd::BasicVector<T, Simd::PreferredAbiT<T>>;
+        TransformBatch<V, Unroll>(std::span<T>(output), std::forward<Function>(function), inputs...);
+    }
+
+    /** @brief Transform using the widest native SIMD register selected for @p T by the active target. */
     template<Simd::Vectorizable T, std::size_t Unroll = 4, typename Function, typename... Inputs>
     constexpr void TransformBatchNative(std::span<T> output, Function&& function,
                                         std::span<const Inputs>... inputs) noexcept {
@@ -128,7 +141,22 @@ namespace Sora::Math {
         }
     }
 
-    /** @brief Batched JVP using the native SIMD width selected for @p T. */
+    /**
+     * @brief Batched JVP using the preferred throughput ABI and the measured default unroll factor.
+     * @details Use the explicit @c V overload to select another compile-time width or @ref TransformBatchJvpNative
+     * for the widest native register.
+     */
+    template<Simd::Vectorizable T, std::size_t Unroll = 4, std::size_t PrimalExtent = std::dynamic_extent,
+             std::size_t TangentExtent = std::dynamic_extent, typename Function, typename... Inputs>
+    constexpr void TransformBatchJvp(std::span<T, PrimalExtent> primalOutput, std::span<T, TangentExtent> tangentOutput,
+                                     Function&& function,
+                                     JvpInput<Inputs>... inputs) noexcept {
+        using V = Simd::BasicVector<T, Simd::PreferredAbiT<T>>;
+        TransformBatchJvp<V, Unroll>(std::span<T>(primalOutput), std::span<T>(tangentOutput),
+                                     std::forward<Function>(function), inputs...);
+    }
+
+    /** @brief Batched JVP using the widest native SIMD register selected for @p T. */
     template<Simd::Vectorizable T, std::size_t Unroll = 4, typename Function, typename... Inputs>
     constexpr void TransformBatchJvpNative(std::span<T> primalOutput, std::span<T> tangentOutput, Function&& function,
                                            JvpInput<Inputs>... inputs) noexcept {
