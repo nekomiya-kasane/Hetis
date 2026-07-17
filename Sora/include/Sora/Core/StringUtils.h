@@ -142,6 +142,30 @@ namespace Sora {
             }
 
             /**
+             * @brief Truncate @p text to at most @p maxBytes, appending @p marker when truncation is required.
+             * @details This function operates on bytes. It does not preserve UTF-8 code-point boundaries. When
+             * @p marker itself exceeds @p maxBytes, its prefix is returned so the result always satisfies the bound.
+             * @param[in] text Source bytes.
+             * @param[in] maxBytes Maximum result size in bytes.
+             * @param[in] marker Truncation marker, conventionally @c "...".
+             * @return A copy of @p text when it fits, otherwise a bounded prefix followed by @p marker.
+             */
+            [[nodiscard]] constexpr std::string Truncate(std::string_view text, size_t maxBytes,
+                                                         std::string_view marker = "...") {
+                if (text.size() <= maxBytes) {
+                    return std::string{text};
+                }
+                if (marker.size() >= maxBytes) {
+                    return std::string{marker.substr(0, maxBytes)};
+                }
+                std::string result;
+                result.reserve(maxBytes);
+                result.append(text.substr(0, maxBytes - marker.size()));
+                result.append(marker);
+                return result;
+            }
+
+            /**
              * @brief Append @p source converted to lower-kebab spelling into @p out.
              * @details Accepts ASCII letters, digits, dot, underscore, space, and hyphen. Word separators collapse to a
              * single hyphen; uppercase letters introduce a word boundary when they follow another segment character.

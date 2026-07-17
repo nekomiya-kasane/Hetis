@@ -247,7 +247,7 @@ namespace Sora {
             StackTrace stackTrace;
             if (settings.captureStackTrace) {
                 try {
-                    stackTrace = StackTrace::Capture(2, 32);
+                    stackTrace = StackTrace::Capture({.skipFrames = 2, .maxFrames = 32});
                 } catch (...) {
                     stackTrace = {};
                 }
