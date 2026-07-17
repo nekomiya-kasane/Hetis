@@ -1,0 +1,85 @@
+label,category,scenario,implementation,payload_bytes,capacity,producers,consumers,sample,observations,seconds,operations_per_second,p50_ns,p90_ns,p99_ns,p999_ns,max_ns,bytes,thread_placement,park_delay_us
+optimized-asan-quick,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,0,6526,0.10888,59937.8,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,1,1499,0.0453164,33078.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,0,16000,0.0459238,348403,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,1,8711,0.245117,35538.1,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,0,2000,0.0298659,66966,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,1,1675,0.0290781,57603.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,0,4000,0.0316498,126383,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,1,3160,0.0317688,99468.7,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,oneTBB bounded,8,1024,1,1,0,2000,0.0305531,65459.8,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,oneTBB bounded,8,1024,1,1,1,1637,0.0309137,52953.9,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,moodycamel blocking,8,1024,1,1,0,4000,0.0316856,126240,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,moodycamel blocking,8,1024,1,1,1,3157,0.0311623,101308,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,condition variable,8,1024,1,1,0,2000,0.0313379,63820.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,condition variable,8,1024,1,1,1,1596,0.0311686,51205.4,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,0,8000,0.23148,34560.2,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,1,868,0.0457771,18961.4,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,0,8000,0.108349,73835.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,1,1848,0.0309991,59614.6,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,0,8000,0.0449784,177863,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,1,4448,0.0310757,143134,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,0,8000,0.0462434,172998,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,1,4328,0.0447372,96742.8,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,oneTBB bounded,8,1024,4,1,0,8000,0.0302259,264674,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,oneTBB bounded,8,1024,4,1,1,6620,0.0315113,210083,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,moodycamel blocking,8,1024,4,1,0,8000,0.0510956,156569,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,moodycamel blocking,8,1024,4,1,1,3916,0.0268965,145595,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,condition variable,8,1024,4,1,0,8000,0.0290942,274969,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,condition variable,8,1024,4,1,1,6876,0.0275043,249997,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,0,8000,0.0601671,132963,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,1,3328,0.0450653,73848.4,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,0,8000,0.0460221,173830,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,1,4348,0.0306938,141657,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,0,8000,0.0308847,259028,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,1,6476,0.0291418,222224,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,0,8000,0.029757,268844,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,1,6724,0.0287967,233499,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,oneTBB bounded,8,1024,4,4,0,8000,0.0311694,256662,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,oneTBB bounded,8,1024,4,4,1,6420,0.0294927,217681,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,moodycamel blocking,8,1024,4,4,0,8000,0.0291021,274894,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,moodycamel blocking,8,1024,4,4,1,6876,0.0299473,229603,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,condition variable,8,1024,4,4,0,8000,0.0305106,262204,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,condition variable,8,1024,4,4,1,6556,0.0308191,212725,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,0,2000,0.0758144,26380.2,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,1,660,0.0459315,14369.2,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,0,2000,0.0304722,65633.6,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,1,1641,0.077789,21095.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,0,2000,0.0296294,67500.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,1,1688,0.0301259,56031.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,0,2000,0.0309309,64660.3,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,1,1617,0.0224162,72135.3,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,oneTBB bounded,64,1024,1,1,0,4000,0.0309185,129372,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,oneTBB bounded,64,1024,1,1,1,3235,0.0265592,121803,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,moodycamel blocking,64,1024,1,1,0,2000,0.0292452,68387.3,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,moodycamel blocking,64,1024,1,1,1,1710,0.0305688,55939.4,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,condition variable,64,1024,1,1,0,2000,0.0301021,66440.5,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,SPSC,condition variable,64,1024,1,1,1,1662,0.0306818,54168.9,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,0,8000,0.139848,57204.8,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,1,1432,0.0443647,32277.9,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,0,8000,0.128688,62165.9,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,1,1556,0.023304,66769.7,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,0,8000,0.07458,107267,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,1,2684,0.0297663,90169.1,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,0,8000,0.0472757,169220,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,1,4232,0.0302595,139857,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,oneTBB bounded,64,1024,4,1,0,8000,0.0454087,176178,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,oneTBB bounded,64,1024,4,1,1,4408,0.0299817,147023,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,moodycamel blocking,64,1024,4,1,0,8000,0.0300348,266358,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,moodycamel blocking,64,1024,4,1,1,6660,0.0302784,219959,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,condition variable,64,1024,4,1,0,8000,0.0313472,255206,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPSC,condition variable,64,1024,4,1,1,6384,0.0294286,216932,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,0,8000,0.0453987,176216,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,1,4408,0.0301657,146126,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,0,8000,0.0766673,104347,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,1,2612,0.0455399,57356.3,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,0,8000,0.0285162,280542,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,1,7016,0.0295221,237652,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,0,8000,0.0293306,272753,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,1,6820,0.0300351,227068,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,oneTBB bounded,64,1024,4,4,0,8000,0.0446772,179062,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,oneTBB bounded,64,1024,4,4,1,4480,0.0282896,158362,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,moodycamel blocking,64,1024,4,4,0,8000,0.0249743,320329,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,moodycamel blocking,64,1024,4,4,1,8012,0.0291858,274517,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,condition variable,64,1024,4,4,0,8000,0.031012,257965,,,,,,0,scheduler,20
+optimized-asan-quick,throughput,MPMC,condition variable,64,1024,4,4,1,6452,0.0303446,212624,,,,,,0,scheduler,20

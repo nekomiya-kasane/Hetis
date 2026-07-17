@@ -1,0 +1,501 @@
+label,category,scenario,implementation,payload_bytes,capacity,producers,consumers,sample,observations,seconds,operations_per_second,p50_ns,p90_ns,p99_ns,p999_ns,max_ns,bytes,thread_placement,park_delay_us
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,0,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,1,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,2,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,3,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,4,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,5,1,0,0,700,700,700,700,700,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,6,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,7,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,8,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,9,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,10,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,11,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,12,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,13,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,14,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,15,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,16,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,17,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,18,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,19,1,0,0,0,0,0,0,0,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,20,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,21,1,0,0,0,0,0,0,0,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,22,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,23,1,0,0,0,0,0,0,0,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-1,Mashiro AsyncQueue,0,0,1,1,24,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,0,1,0,0,15866500,15866500,15866500,15866500,15866500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,1,1,0,0,15597400,15597400,15597400,15597400,15597400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,2,1,0,0,30456000,30456000,30456000,30456000,30456000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,3,1,0,0,31380100,31380100,31380100,31380100,31380100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,4,1,0,0,30055400,30055400,30055400,30055400,30055400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,5,1,0,0,45800,45800,45800,45800,45800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,6,1,0,0,47800,47800,47800,47800,47800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,7,1,0,0,14895800,14895800,14895800,14895800,14895800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,8,1,0,0,15248600,15248600,15248600,15248600,15248600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,9,1,0,0,30029500,30029500,30029500,30029500,30029500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,10,1,0,0,31985800,31985800,31985800,31985800,31985800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,11,1,0,0,34300,34300,34300,34300,34300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,12,1,0,0,68100,68100,68100,68100,68100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,13,1,0,0,114000,114000,114000,114000,114000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,14,1,0,0,30613600,30613600,30613600,30613600,30613600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,15,1,0,0,15310100,15310100,15310100,15310100,15310100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,16,1,0,0,15650400,15650400,15650400,15650400,15650400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,17,1,0,0,21800,21800,21800,21800,21800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,18,1,0,0,39000,39000,39000,39000,39000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,19,1,0,0,15895300,15895300,15895300,15895300,15895300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,20,1,0,0,30783100,30783100,30783100,30783100,30783100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,21,1,0,0,15792400,15792400,15792400,15792400,15792400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,22,1,0,0,69600,69600,69600,69600,69600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,23,1,0,0,69100,69100,69100,69100,69100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,Mashiro + atomic wait,0,0,1,1,24,1,0,0,30861500,30861500,30861500,30861500,30861500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,0,1,0,0,59400,59400,59400,59400,59400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,1,1,0,0,15560200,15560200,15560200,15560200,15560200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,2,1,0,0,15107300,15107300,15107300,15107300,15107300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,3,1,0,0,15056100,15056100,15056100,15056100,15056100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,4,1,0,0,14815600,14815600,14815600,14815600,14815600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,5,1,0,0,15805500,15805500,15805500,15805500,15805500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,6,1,0,0,15257500,15257500,15257500,15257500,15257500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,7,1,0,0,69600,69600,69600,69600,69600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,8,1,0,0,76100,76100,76100,76100,76100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,9,1,0,0,70000,70000,70000,70000,70000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,10,1,0,0,93700,93700,93700,93700,93700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,11,1,0,0,59400,59400,59400,59400,59400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,12,1,0,0,69200,69200,69200,69200,69200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,13,1,0,0,67500,67500,67500,67500,67500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,14,1,0,0,81700,81700,81700,81700,81700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,15,1,0,0,15454900,15454900,15454900,15454900,15454900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,16,1,0,0,64100,64100,64100,64100,64100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,17,1,0,0,15322200,15322200,15322200,15322200,15322200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,18,1,0,0,15402100,15402100,15402100,15402100,15402100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,19,1,0,0,16155600,16155600,16155600,16155600,16155600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,20,1,0,0,65000,65000,65000,65000,65000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,21,1,0,0,72100,72100,72100,72100,72100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,22,1,0,0,98000,98000,98000,98000,98000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,23,1,0,0,15978600,15978600,15978600,15978600,15978600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,oneTBB bounded,0,0,1,1,24,1,0,0,15670300,15670300,15670300,15670300,15670300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,0,1,0,0,171000,171000,171000,171000,171000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,1,1,0,0,32900,32900,32900,32900,32900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,2,1,0,0,15224700,15224700,15224700,15224700,15224700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,3,1,0,0,15941700,15941700,15941700,15941700,15941700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,4,1,0,0,37500,37500,37500,37500,37500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,5,1,0,0,11900,11900,11900,11900,11900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,6,1,0,0,14600,14600,14600,14600,14600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,7,1,0,0,15293100,15293100,15293100,15293100,15293100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,8,1,0,0,15279900,15279900,15279900,15279900,15279900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,9,1,0,0,39800,39800,39800,39800,39800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,10,1,0,0,17800,17800,17800,17800,17800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,11,1,0,0,47700,47700,47700,47700,47700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,12,1,0,0,54400,54400,54400,54400,54400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,13,1,0,0,15936900,15936900,15936900,15936900,15936900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,14,1,0,0,15700,15700,15700,15700,15700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,15,1,0,0,72900,72900,72900,72900,72900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,16,1,0,0,15504200,15504200,15504200,15504200,15504200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,17,1,0,0,27800,27800,27800,27800,27800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,18,1,0,0,14980000,14980000,14980000,14980000,14980000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,19,1,0,0,24200,24200,24200,24200,24200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,20,1,0,0,15377400,15377400,15377400,15377400,15377400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,21,1,0,0,61700,61700,61700,61700,61700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,22,1,0,0,15612100,15612100,15612100,15612100,15612100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,23,1,0,0,49100,49100,49100,49100,49100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-1,condition variable,0,0,1,1,24,1,0,0,15970000,15970000,15970000,15970000,15970000,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,0,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,1,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,2,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,3,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,4,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,5,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,6,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,7,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,8,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,9,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,10,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,11,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,12,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,13,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,14,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,15,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,16,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,17,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,18,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,19,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,20,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,21,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,22,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,23,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-2,Mashiro AsyncQueue,0,0,1,1,24,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,0,1,0,0,15251000,15251000,15251000,15251000,15251000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,1,1,0,0,30491100,30491100,30491100,30491100,30491100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,2,1,0,0,15801800,15801800,15801800,15801800,15801800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,3,1,0,0,31613200,31613200,31613200,31613200,31613200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,4,1,0,0,30934300,30934300,30934300,30934300,30934300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,5,1,0,0,15906800,15906800,15906800,15906800,15906800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,6,1,0,0,15466100,15466100,15466100,15466100,15466100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,7,1,0,0,15852500,15852500,15852500,15852500,15852500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,8,1,0,0,15743400,15743400,15743400,15743400,15743400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,9,1,0,0,15335200,15335200,15335200,15335200,15335200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,10,1,0,0,1200,1200,1200,1200,1200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,11,1,0,0,15617200,15617200,15617200,15617200,15617200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,12,1,0,0,30810700,30810700,30810700,30810700,30810700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,13,1,0,0,15989700,15989700,15989700,15989700,15989700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,14,1,0,0,15775800,15775800,15775800,15775800,15775800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,15,1,0,0,15219100,15219100,15219100,15219100,15219100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,16,1,0,0,15944800,15944800,15944800,15944800,15944800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,17,1,0,0,15393500,15393500,15393500,15393500,15393500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,18,1,0,0,15541100,15541100,15541100,15541100,15541100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,19,1,0,0,15693200,15693200,15693200,15693200,15693200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,20,1,0,0,15721000,15721000,15721000,15721000,15721000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,21,1,0,0,29000,29000,29000,29000,29000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,22,1,0,0,31657500,31657500,31657500,31657500,31657500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,23,1,0,0,116300,116300,116300,116300,116300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,Mashiro + atomic wait,0,0,1,1,24,1,0,0,15067500,15067500,15067500,15067500,15067500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,0,1,0,0,123900,123900,123900,123900,123900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,1,1,0,0,134500,134500,134500,134500,134500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,2,1,0,0,49700,49700,49700,49700,49700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,3,1,0,0,81400,81400,81400,81400,81400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,4,1,0,0,37500,37500,37500,37500,37500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,5,1,0,0,15275100,15275100,15275100,15275100,15275100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,6,1,0,0,15304300,15304300,15304300,15304300,15304300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,7,1,0,0,15640400,15640400,15640400,15640400,15640400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,8,1,0,0,15667400,15667400,15667400,15667400,15667400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,9,1,0,0,15244700,15244700,15244700,15244700,15244700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,10,1,0,0,15232700,15232700,15232700,15232700,15232700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,11,1,0,0,15146400,15146400,15146400,15146400,15146400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,12,1,0,0,15870300,15870300,15870300,15870300,15870300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,13,1,0,0,30790300,30790300,30790300,30790300,30790300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,14,1,0,0,15302800,15302800,15302800,15302800,15302800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,15,1,0,0,15144500,15144500,15144500,15144500,15144500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,16,1,0,0,16029800,16029800,16029800,16029800,16029800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,17,1,0,0,85700,85700,85700,85700,85700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,18,1,0,0,15498700,15498700,15498700,15498700,15498700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,19,1,0,0,133400,133400,133400,133400,133400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,20,1,0,0,15443200,15443200,15443200,15443200,15443200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,21,1,0,0,68600,68600,68600,68600,68600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,22,1,0,0,31400,31400,31400,31400,31400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,23,1,0,0,32800,32800,32800,32800,32800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,oneTBB bounded,0,0,1,1,24,1,0,0,26400,26400,26400,26400,26400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,0,1,0,0,15584300,15584300,15584300,15584300,15584300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,1,1,0,0,15739600,15739600,15739600,15739600,15739600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,2,1,0,0,15985400,15985400,15985400,15985400,15985400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,3,1,0,0,15954100,15954100,15954100,15954100,15954100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,4,1,0,0,59700,59700,59700,59700,59700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,5,1,0,0,35400,35400,35400,35400,35400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,6,1,0,0,72000,72000,72000,72000,72000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,7,1,0,0,40600,40600,40600,40600,40600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,8,1,0,0,15509700,15509700,15509700,15509700,15509700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,9,1,0,0,15445700,15445700,15445700,15445700,15445700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,10,1,0,0,15713100,15713100,15713100,15713100,15713100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,11,1,0,0,14725600,14725600,14725600,14725600,14725600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,12,1,0,0,96200,96200,96200,96200,96200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,13,1,0,0,10400,10400,10400,10400,10400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,14,1,0,0,15434000,15434000,15434000,15434000,15434000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,15,1,0,0,15584900,15584900,15584900,15584900,15584900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,16,1,0,0,15425500,15425500,15425500,15425500,15425500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,17,1,0,0,15168400,15168400,15168400,15168400,15168400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,18,1,0,0,36600,36600,36600,36600,36600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,19,1,0,0,21200,21200,21200,21200,21200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,20,1,0,0,14940400,14940400,14940400,14940400,14940400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,21,1,0,0,17400,17400,17400,17400,17400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,22,1,0,0,43700,43700,43700,43700,43700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,23,1,0,0,28700,28700,28700,28700,28700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-2,condition variable,0,0,1,1,24,1,0,0,14679600,14679600,14679600,14679600,14679600,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,0,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,1,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,2,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,3,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,4,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,5,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,6,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,7,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,8,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,9,1,0,0,100,100,100,100,100,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,10,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,11,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,12,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,13,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,14,1,0,0,800,800,800,800,800,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,15,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,16,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,17,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,18,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,19,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,20,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,21,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,22,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,23,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-4,Mashiro AsyncQueue,0,0,1,1,24,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,0,1,0,0,15606300,15606300,15606300,15606300,15606300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,1,1,0,0,31520900,31520900,31520900,31520900,31520900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,2,1,0,0,14992000,14992000,14992000,14992000,14992000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,3,1,0,0,14912700,14912700,14912700,14912700,14912700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,4,1,0,0,15133100,15133100,15133100,15133100,15133100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,5,1,0,0,16057200,16057200,16057200,16057200,16057200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,6,1,0,0,15579200,15579200,15579200,15579200,15579200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,7,1,0,0,30325900,30325900,30325900,30325900,30325900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,8,1,0,0,30685900,30685900,30685900,30685900,30685900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,9,1,0,0,15123800,15123800,15123800,15123800,15123800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,10,1,0,0,31086500,31086500,31086500,31086500,31086500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,11,1,0,0,30693900,30693900,30693900,30693900,30693900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,12,1,0,0,15533600,15533600,15533600,15533600,15533600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,13,1,0,0,30978800,30978800,30978800,30978800,30978800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,14,1,0,0,14971900,14971900,14971900,14971900,14971900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,15,1,0,0,16055500,16055500,16055500,16055500,16055500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,16,1,0,0,14890500,14890500,14890500,14890500,14890500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,17,1,0,0,16219200,16219200,16219200,16219200,16219200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,18,1,0,0,30816900,30816900,30816900,30816900,30816900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,19,1,0,0,16133000,16133000,16133000,16133000,16133000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,20,1,0,0,15524600,15524600,15524600,15524600,15524600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,21,1,0,0,30936900,30936900,30936900,30936900,30936900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,22,1,0,0,15165800,15165800,15165800,15165800,15165800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,23,1,0,0,30545300,30545300,30545300,30545300,30545300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,Mashiro + atomic wait,0,0,1,1,24,1,0,0,30081400,30081400,30081400,30081400,30081400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,0,1,0,0,139800,139800,139800,139800,139800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,1,1,0,0,15356600,15356600,15356600,15356600,15356600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,2,1,0,0,15368800,15368800,15368800,15368800,15368800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,3,1,0,0,47300,47300,47300,47300,47300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,4,1,0,0,90900,90900,90900,90900,90900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,5,1,0,0,15863600,15863600,15863600,15863600,15863600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,6,1,0,0,15337600,15337600,15337600,15337600,15337600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,7,1,0,0,15829700,15829700,15829700,15829700,15829700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,8,1,0,0,15292000,15292000,15292000,15292000,15292000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,9,1,0,0,16049700,16049700,16049700,16049700,16049700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,10,1,0,0,15591700,15591700,15591700,15591700,15591700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,11,1,0,0,15302900,15302900,15302900,15302900,15302900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,12,1,0,0,15205100,15205100,15205100,15205100,15205100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,13,1,0,0,172400,172400,172400,172400,172400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,14,1,0,0,14143100,14143100,14143100,14143100,14143100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,15,1,0,0,15088500,15088500,15088500,15088500,15088500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,16,1,0,0,15425100,15425100,15425100,15425100,15425100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,17,1,0,0,15147500,15147500,15147500,15147500,15147500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,18,1,0,0,73900,73900,73900,73900,73900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,19,1,0,0,72700,72700,72700,72700,72700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,20,1,0,0,15213400,15213400,15213400,15213400,15213400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,21,1,0,0,15668200,15668200,15668200,15668200,15668200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,22,1,0,0,15488700,15488700,15488700,15488700,15488700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,23,1,0,0,15507700,15507700,15507700,15507700,15507700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,oneTBB bounded,0,0,1,1,24,1,0,0,15077000,15077000,15077000,15077000,15077000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,0,1,0,0,15375500,15375500,15375500,15375500,15375500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,1,1,0,0,15444600,15444600,15444600,15444600,15444600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,2,1,0,0,14956400,14956400,14956400,14956400,14956400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,3,1,0,0,107900,107900,107900,107900,107900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,4,1,0,0,15140700,15140700,15140700,15140700,15140700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,5,1,0,0,15018400,15018400,15018400,15018400,15018400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,6,1,0,0,14996700,14996700,14996700,14996700,14996700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,7,1,0,0,30707100,30707100,30707100,30707100,30707100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,8,1,0,0,15466900,15466900,15466900,15466900,15466900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,9,1,0,0,15670100,15670100,15670100,15670100,15670100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,10,1,0,0,31200,31200,31200,31200,31200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,11,1,0,0,19700,19700,19700,19700,19700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,12,1,0,0,178900,178900,178900,178900,178900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,13,1,0,0,25800,25800,25800,25800,25800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,14,1,0,0,15356800,15356800,15356800,15356800,15356800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,15,1,0,0,87500,87500,87500,87500,87500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,16,1,0,0,54600,54600,54600,54600,54600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,17,1,0,0,15536300,15536300,15536300,15536300,15536300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,18,1,0,0,15155500,15155500,15155500,15155500,15155500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,19,1,0,0,93900,93900,93900,93900,93900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,20,1,0,0,15650400,15650400,15650400,15650400,15650400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,21,1,0,0,15829200,15829200,15829200,15829200,15829200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,22,1,0,0,14953900,14953900,14953900,14953900,14953900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,23,1,0,0,16088400,16088400,16088400,16088400,16088400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-4,condition variable,0,0,1,1,24,1,0,0,15890200,15890200,15890200,15890200,15890200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,0,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,1,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,2,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,3,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,4,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,5,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,6,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,7,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,8,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,9,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,10,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,11,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,12,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,13,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,14,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,15,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,16,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,17,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,18,1,0,0,200,200,200,200,200,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,19,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,20,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,21,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,22,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,23,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-8,Mashiro AsyncQueue,0,0,1,1,24,1,0,0,300,300,300,300,300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,0,1,0,0,30551200,30551200,30551200,30551200,30551200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,1,1,0,0,30918300,30918300,30918300,30918300,30918300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,2,1,0,0,15221200,15221200,15221200,15221200,15221200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,3,1,0,0,30615800,30615800,30615800,30615800,30615800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,4,1,0,0,31357000,31357000,31357000,31357000,31357000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,5,1,0,0,31117700,31117700,31117700,31117700,31117700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,6,1,0,0,31049300,31049300,31049300,31049300,31049300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,7,1,0,0,31122200,31122200,31122200,31122200,31122200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,8,1,0,0,30455500,30455500,30455500,30455500,30455500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,9,1,0,0,31483600,31483600,31483600,31483600,31483600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,10,1,0,0,31099200,31099200,31099200,31099200,31099200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,11,1,0,0,14977100,14977100,14977100,14977100,14977100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,12,1,0,0,61582400,61582400,61582400,61582400,61582400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,13,1,0,0,31090800,31090800,31090800,31090800,31090800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,14,1,0,0,30630800,30630800,30630800,30630800,30630800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,15,1,0,0,15590500,15590500,15590500,15590500,15590500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,16,1,0,0,31849300,31849300,31849300,31849300,31849300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,17,1,0,0,31714400,31714400,31714400,31714400,31714400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,18,1,0,0,31534600,31534600,31534600,31534600,31534600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,19,1,0,0,15678800,15678800,15678800,15678800,15678800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,20,1,0,0,31125200,31125200,31125200,31125200,31125200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,21,1,0,0,32203800,32203800,32203800,32203800,32203800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,22,1,0,0,30115700,30115700,30115700,30115700,30115700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,23,1,0,0,31436900,31436900,31436900,31436900,31436900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,Mashiro + atomic wait,0,0,1,1,24,1,0,0,15637500,15637500,15637500,15637500,15637500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,0,1,0,0,15727700,15727700,15727700,15727700,15727700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,1,1,0,0,372700,372700,372700,372700,372700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,2,1,0,0,15223500,15223500,15223500,15223500,15223500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,3,1,0,0,15318400,15318400,15318400,15318400,15318400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,4,1,0,0,15115500,15115500,15115500,15115500,15115500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,5,1,0,0,15274000,15274000,15274000,15274000,15274000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,6,1,0,0,15063900,15063900,15063900,15063900,15063900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,7,1,0,0,15161800,15161800,15161800,15161800,15161800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,8,1,0,0,14727200,14727200,14727200,14727200,14727200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,9,1,0,0,15942200,15942200,15942200,15942200,15942200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,10,1,0,0,15226300,15226300,15226300,15226300,15226300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,11,1,0,0,15142500,15142500,15142500,15142500,15142500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,12,1,0,0,15883200,15883200,15883200,15883200,15883200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,13,1,0,0,15670400,15670400,15670400,15670400,15670400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,14,1,0,0,15350800,15350800,15350800,15350800,15350800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,15,1,0,0,15209400,15209400,15209400,15209400,15209400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,16,1,0,0,15199300,15199300,15199300,15199300,15199300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,17,1,0,0,14805500,14805500,14805500,14805500,14805500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,18,1,0,0,15248100,15248100,15248100,15248100,15248100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,19,1,0,0,14433000,14433000,14433000,14433000,14433000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,20,1,0,0,15635900,15635900,15635900,15635900,15635900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,21,1,0,0,208600,208600,208600,208600,208600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,22,1,0,0,15178900,15178900,15178900,15178900,15178900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,23,1,0,0,15057700,15057700,15057700,15057700,15057700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,oneTBB bounded,0,0,1,1,24,1,0,0,15239300,15239300,15239300,15239300,15239300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,0,1,0,0,14984600,14984600,14984600,14984600,14984600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,1,1,0,0,15131700,15131700,15131700,15131700,15131700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,2,1,0,0,15695500,15695500,15695500,15695500,15695500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,3,1,0,0,15530800,15530800,15530800,15530800,15530800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,4,1,0,0,16010500,16010500,16010500,16010500,16010500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,5,1,0,0,15616800,15616800,15616800,15616800,15616800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,6,1,0,0,14830200,14830200,14830200,14830200,14830200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,7,1,0,0,15645700,15645700,15645700,15645700,15645700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,8,1,0,0,15267200,15267200,15267200,15267200,15267200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,9,1,0,0,15546000,15546000,15546000,15546000,15546000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,10,1,0,0,15919700,15919700,15919700,15919700,15919700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,11,1,0,0,15147500,15147500,15147500,15147500,15147500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,12,1,0,0,15007500,15007500,15007500,15007500,15007500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,13,1,0,0,15521900,15521900,15521900,15521900,15521900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,14,1,0,0,14866600,14866600,14866600,14866600,14866600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,15,1,0,0,15390600,15390600,15390600,15390600,15390600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,16,1,0,0,15094600,15094600,15094600,15094600,15094600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,17,1,0,0,15575000,15575000,15575000,15575000,15575000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,18,1,0,0,120200,120200,120200,120200,120200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,19,1,0,0,15511000,15511000,15511000,15511000,15511000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,20,1,0,0,15321700,15321700,15321700,15321700,15321700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,21,1,0,0,15539200,15539200,15539200,15539200,15539200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,22,1,0,0,15547600,15547600,15547600,15547600,15547600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,23,1,0,0,31200200,31200200,31200200,31200200,31200200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-8,condition variable,0,0,1,1,24,1,0,0,15721600,15721600,15721600,15721600,15721600,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,0,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,1,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,2,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,3,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,4,1,0,0,600,600,600,600,600,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,5,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,6,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,7,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,8,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,9,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,10,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,11,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,12,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,13,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,14,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,15,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,16,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,17,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,18,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,19,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,20,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,21,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,22,1,0,0,400,400,400,400,400,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,23,1,0,0,600,600,600,600,600,0,cpu-set,20
+fanout-formal-20260717,abort-callback-fanout,waiters-16,Mashiro AsyncQueue,0,0,1,1,24,1,0,0,500,500,500,500,500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,0,1,0,0,31677700,31677700,31677700,31677700,31677700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,1,1,0,0,30926500,30926500,30926500,30926500,30926500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,2,1,0,0,31988600,31988600,31988600,31988600,31988600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,3,1,0,0,15423300,15423300,15423300,15423300,15423300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,4,1,0,0,30752900,30752900,30752900,30752900,30752900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,5,1,0,0,31336600,31336600,31336600,31336600,31336600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,6,1,0,0,15588500,15588500,15588500,15588500,15588500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,7,1,0,0,31403500,31403500,31403500,31403500,31403500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,8,1,0,0,15626500,15626500,15626500,15626500,15626500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,9,1,0,0,31413000,31413000,31413000,31413000,31413000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,10,1,0,0,15895100,15895100,15895100,15895100,15895100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,11,1,0,0,30887600,30887600,30887600,30887600,30887600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,12,1,0,0,30640600,30640600,30640600,30640600,30640600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,13,1,0,0,15231500,15231500,15231500,15231500,15231500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,14,1,0,0,31176400,31176400,31176400,31176400,31176400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,15,1,0,0,15088700,15088700,15088700,15088700,15088700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,16,1,0,0,30844000,30844000,30844000,30844000,30844000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,17,1,0,0,15585200,15585200,15585200,15585200,15585200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,18,1,0,0,15368600,15368600,15368600,15368600,15368600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,19,1,0,0,29777500,29777500,29777500,29777500,29777500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,20,1,0,0,15527300,15527300,15527300,15527300,15527300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,21,1,0,0,30408000,30408000,30408000,30408000,30408000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,22,1,0,0,15276500,15276500,15276500,15276500,15276500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,23,1,0,0,30395000,30395000,30395000,30395000,30395000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,Mashiro + atomic wait,0,0,1,1,24,1,0,0,15335400,15335400,15335400,15335400,15335400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,0,1,0,0,15010500,15010500,15010500,15010500,15010500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,1,1,0,0,15650600,15650600,15650600,15650600,15650600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,2,1,0,0,15114800,15114800,15114800,15114800,15114800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,3,1,0,0,16009400,16009400,16009400,16009400,16009400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,4,1,0,0,15999500,15999500,15999500,15999500,15999500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,5,1,0,0,15578800,15578800,15578800,15578800,15578800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,6,1,0,0,15995800,15995800,15995800,15995800,15995800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,7,1,0,0,14909100,14909100,14909100,14909100,14909100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,8,1,0,0,16007300,16007300,16007300,16007300,16007300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,9,1,0,0,15640900,15640900,15640900,15640900,15640900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,10,1,0,0,616000,616000,616000,616000,616000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,11,1,0,0,15980600,15980600,15980600,15980600,15980600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,12,1,0,0,15965400,15965400,15965400,15965400,15965400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,13,1,0,0,15321500,15321500,15321500,15321500,15321500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,14,1,0,0,348900,348900,348900,348900,348900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,15,1,0,0,15152900,15152900,15152900,15152900,15152900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,16,1,0,0,15522200,15522200,15522200,15522200,15522200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,17,1,0,0,16068800,16068800,16068800,16068800,16068800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,18,1,0,0,15118300,15118300,15118300,15118300,15118300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,19,1,0,0,15477000,15477000,15477000,15477000,15477000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,20,1,0,0,274700,274700,274700,274700,274700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,21,1,0,0,15915200,15915200,15915200,15915200,15915200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,22,1,0,0,15568200,15568200,15568200,15568200,15568200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,23,1,0,0,16441700,16441700,16441700,16441700,16441700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,oneTBB bounded,0,0,1,1,24,1,0,0,290000,290000,290000,290000,290000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,0,1,0,0,15945200,15945200,15945200,15945200,15945200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,1,1,0,0,15724700,15724700,15724700,15724700,15724700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,2,1,0,0,16029500,16029500,16029500,16029500,16029500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,3,1,0,0,15239800,15239800,15239800,15239800,15239800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,4,1,0,0,15989000,15989000,15989000,15989000,15989000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,5,1,0,0,216150900,216150900,216150900,216150900,216150900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,6,1,0,0,15268400,15268400,15268400,15268400,15268400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,7,1,0,0,15833400,15833400,15833400,15833400,15833400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,8,1,0,0,15476100,15476100,15476100,15476100,15476100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,9,1,0,0,14346500,14346500,14346500,14346500,14346500,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,10,1,0,0,15119400,15119400,15119400,15119400,15119400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,11,1,0,0,14887100,14887100,14887100,14887100,14887100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,12,1,0,0,15227900,15227900,15227900,15227900,15227900,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,13,1,0,0,15166400,15166400,15166400,15166400,15166400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,14,1,0,0,15513400,15513400,15513400,15513400,15513400,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,15,1,0,0,15490200,15490200,15490200,15490200,15490200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,16,1,0,0,15770600,15770600,15770600,15770600,15770600,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,17,1,0,0,16068100,16068100,16068100,16068100,16068100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,18,1,0,0,32060200,32060200,32060200,32060200,32060200,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,19,1,0,0,15779700,15779700,15779700,15779700,15779700,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,20,1,0,0,15779300,15779300,15779300,15779300,15779300,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,21,1,0,0,15579800,15579800,15579800,15579800,15579800,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,22,1,0,0,15740000,15740000,15740000,15740000,15740000,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,23,1,0,0,15338100,15338100,15338100,15338100,15338100,0,cpu-set,20
+fanout-formal-20260717,abort-thread-fanout,waiters-16,condition variable,0,0,1,1,24,1,0,0,219400,219400,219400,219400,219400,0,cpu-set,20

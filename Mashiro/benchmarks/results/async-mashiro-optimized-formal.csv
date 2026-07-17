@@ -1,0 +1,241 @@
+label,category,scenario,implementation,payload_bytes,capacity,producers,consumers,sample,observations,seconds,operations_per_second,p50_ns,p90_ns,p99_ns,p999_ns,max_ns,bytes,thread_placement,park_delay_us
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,0,463340,0.184048,2.51749e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,1,314687,0.124603,2.52551e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,2,315690,0.123983,2.54623e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,3,318279,0.123614,2.57478e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,4,321848,0.119973,2.68267e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,5,335335,0.122256,2.74289e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,6,342862,0.123314,2.7804e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,7,347551,0.125669,2.7656e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,8,345701,0.107578,3.2135e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,9,401688,0.124632,3.22299e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,0,20000,0.18309,109236,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,1,13655,0.186637,73163.3,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,2,9146,0.124129,73681.5,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,3,9211,0.17022,54112.4,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,4,17777,0.261796,67904,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,5,71486,0.481621,148428,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,6,156240,1.44041,108469,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,7,15624,0.183789,85010.5,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,8,10627,0.215528,49306.7,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,9,6164,0.186633,33027.5,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,0,661163,0.291593,2.26742e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,1,566856,0.294051,1.92775e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,2,481938,0.18251,2.64062e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,3,330078,0.123174,2.67976e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,4,334971,0.123842,2.70483e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,5,338105,0.186424,1.81363e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,6,226704,0.185607,1.22142e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,7,305356,0.123454,2.47345e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,8,309181,0.123547,2.50254e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,9,312818,0.125615,2.49029e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,0,306560,0.184868,1.65826e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,1,207283,0.125017,1.65804e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,2,414510,0.169712,2.44243e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,3,305304,0.125054,2.44139e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,4,305174,0.185484,1.64528e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,5,411322,0.184589,2.22832e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,6,278540,0.124269,2.24143e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,7,560358,0.201156,2.78569e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,8,348212,0.184822,1.88404e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,9,235505,0.123403,1.90842e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,0,204620,0.108645,1.88338e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,1,470848,0.170031,2.7692e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,2,346152,0.155622,2.22431e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,3,278040,0.12525,2.21988e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,4,277488,0.171177,1.62106e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,5,202636,0.109675,1.84761e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,6,461904,0.248382,1.85965e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,7,464920,0.200319,2.3209e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,8,290116,0.121808,2.38175e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,9,297720,0.107015,2.78203e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,0,80000,0.354636,225583,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,1,28200,0.309356,91157,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,2,11396,0.124209,91748.9,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,3,11472,0.106323,107898,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,4,13488,0.138116,97657,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,5,12208,0.201238,60664.4,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,6,15500,0.137805,112478,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,7,14060,0.123667,113692,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,8,14212,0.183061,77635.4,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,9,19416,0.107049,181375,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,0,308680,0.185588,1.66325e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,1,207908,0.124829,1.66554e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,2,208196,0.199882,1.0416e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,3,130200,0.108068,1.2048e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,4,301200,0.20216,1.48991e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,5,186240,0.110737,1.68183e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,6,420464,0.169402,2.48205e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,7,310260,0.106256,2.91993e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,8,364992,0.185812,1.96431e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,9,491080,0.184103,2.66743e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,0,420736,0.215515,1.95224e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,1,244032,0.107793,2.26389e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,2,282988,0.120394,2.35052e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,3,293816,0.122115,2.40605e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,4,300760,0.125533,2.39585e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,5,299484,0.183572,1.63143e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,6,407864,0.16936,2.40827e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,7,301036,0.182391,1.6505e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,8,412632,0.137619,2.99838e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,9,374800,0.140679,2.66423e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,0,208052,0.122024,1.70501e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,1,213128,0.123471,1.72614e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,2,215768,0.106331,2.02921e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,3,253652,0.187264,1.35452e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,4,169316,0.107884,1.56942e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,5,196180,0.139412,1.4072e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,6,351800,0.12287,2.86318e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,7,357900,0.187032,1.91358e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,8,239200,0.123193,1.94167e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,9,242712,0.107064,2.26697e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,0,160000,0.126924,1.2606e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,1,157576,0.390542,403480,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,2,100872,0.137508,733570,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,3,91700,0.261126,351172,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,4,356208,0.127484,2.79414e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,5,349268,0.213603,1.63513e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,6,204392,0.292665,698381,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,7,87300,0.123797,705186,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,8,88152,0.107222,822144,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,9,205536,0.121339,1.6939e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,0,413072,0.139518,2.96071e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,1,370092,0.170069,2.17613e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,2,272020,0.125574,2.16621e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,3,270776,0.124256,2.17917e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,4,272400,0.121241,2.24677e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,5,280848,0.124342,2.25867e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,6,282336,0.123795,2.28068e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,7,285088,0.14009,2.03504e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,8,254380,0.109245,2.32853e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,9,291068,0.139783,2.08229e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,0,320000,0.141707,2.25818e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,1,282276,0.122838,2.29795e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,2,287244,0.122108,2.35238e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,3,294048,0.122491,2.40057e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,4,300072,0.124775,2.4049e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,5,300616,0.107654,2.79242e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,6,349056,0.154057,2.26576e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,7,283224,0.137622,2.05799e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,8,257252,0.107909,2.38397e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,9,298000,0.124485,2.39387e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,0,779484,0.340082,2.29204e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,1,286506,0.169015,1.69515e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,2,211895,0.122094,1.7355e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,3,216939,0.156918,1.3825e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,4,172813,0.122521,1.41047e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,5,176309,0.124093,1.42078e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,6,177598,0.138962,1.27803e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,7,319510,0.187166,1.7071e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,8,426774,0.216971,1.96697e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,9,491742,0.23301,2.11039e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,0,20000,0.122223,163635,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,1,20455,0.126116,162192,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,2,20275,0.339734,59679.1,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,3,14920,0.218955,68141.8,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,4,70881,0.64184,110434,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,5,55220,0.280493,196868,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,6,24609,0.124218,198111,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,7,24764,0.246374,100514,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,8,12565,0.169802,73997.8,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,9,9250,0.124242,74451.2,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,0,529578,0.356945,1.48364e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,1,185456,0.125207,1.48119e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,2,370298,0.170419,2.17287e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,3,543218,0.186131,2.91847e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,4,364809,0.187641,1.94418e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,5,243023,0.124988,1.94438e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,6,243047,0.125305,1.93965e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,7,242457,0.108202,2.24079e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,8,280099,0.125367,2.23424e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,9,279280,0.123445,2.26239e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,0,304144,0.218,1.39515e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,1,348790,0.18577,1.87754e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,2,234693,0.185889,1.26255e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,3,157819,0.109086,1.44675e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,4,180844,0.12316,1.46837e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,5,183547,0.186197,985768,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,6,517947,0.124013,4.17654e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,7,522068,0.123562,4.22515e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,8,528144,0.184015,2.87011e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,9,358765,0.182718,1.96349e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,0,320000,0.124472,2.57085e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,1,321360,0.139858,2.29776e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,2,287220,0.138154,2.07898e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,3,259876,0.139038,1.86911e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,4,233640,0.12329,1.89504e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,5,236880,0.139301,1.70049e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,6,425128,0.170501,2.49341e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,7,311680,0.122987,2.53425e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,8,316784,0.126303,2.50813e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,9,313516,0.139141,2.25323e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,0,80000,0.681535,117382,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,1,29352,0.21444,136877,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,2,17112,0.292287,58545.2,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,3,20104,0.124923,160932,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,4,41020,0.107314,382244,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,5,47784,0.153457,311384,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,6,38924,0.264019,147429,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,7,18432,0.201933,91277.7,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,8,22824,0.169874,134358,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,9,33592,0.173062,194104,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,0,320000,0.12337,2.59382e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,1,324228,0.169013,1.91836e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,2,479592,0.21605,2.21982e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,3,277480,0.157125,1.76598e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,4,220748,0.125348,1.76108e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,5,220136,0.126233,1.74389e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,6,217988,0.107235,2.03281e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,7,508208,0.199869,2.54271e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,8,317840,0.171641,1.85177e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,9,462944,0.140956,3.28432e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,0,320000,0.136382,2.34635e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,1,293296,0.138811,2.11292e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,2,264116,0.123775,2.13384e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,3,266732,0.108944,2.44834e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,4,306044,0.140635,2.17615e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,5,272020,0.109634,2.48116e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,6,310148,0.138252,2.24336e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,7,280420,0.122084,2.29694e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,8,287120,0.123217,2.3302e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,9,291276,0.12287,2.37061e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,0,320000,0.13993,2.28686e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,1,285860,0.155364,1.83993e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,2,229992,0.124885,1.84163e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,3,230204,0.121243,1.89871e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,4,237340,0.108889,2.17965e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,5,272460,0.123933,2.19844e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,6,274808,0.154012,1.78433e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,7,223044,0.137776,1.61889e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,8,404728,0.18294,2.21236e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,9,276548,0.123906,2.23191e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,0,80000,0.199462,401079,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,1,50136,0.107967,464365,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,2,119604,0.123404,969207,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,3,242304,0.262609,922679,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,4,115336,0.140666,819930,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,5,102492,0.168349,608808,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,6,152208,0.123109,1.23637e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,7,154548,0.153225,1.00863e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,8,126080,0.10815,1.16579e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,9,145724,0.122885,1.18586e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,0,207092,0.109765,1.88669e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,1,235840,0.121243,1.94519e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,2,243152,0.139635,1.74133e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,3,217668,0.125598,1.73306e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,4,216632,0.122922,1.76235e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,5,220296,0.123187,1.78831e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,6,223540,0.123485,1.81026e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,7,226284,0.121581,1.86118e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,8,232648,0.10726,2.169e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,9,271128,0.12514,2.1666e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,0,320000,0.278643,1.14842e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,1,287112,0.169083,1.69805e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,2,212260,0.125082,1.69696e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,3,212124,0.123589,1.71637e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,4,214548,0.123332,1.7396e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,5,217452,0.12349,1.76088e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,6,220112,0.122501,1.79682e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,7,224604,0.152713,1.47076e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,8,183848,0.124128,1.48111e+06,,,,,,0,cpu-set,20
+optimized-formal,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,9,185140,0.107097,1.72871e+06,,,,,,0,cpu-set,20

@@ -1,0 +1,211 @@
+label,category,scenario,implementation,payload_bytes,capacity,producers,consumers,sample,observations,seconds,operations_per_second,p50_ns,p90_ns,p99_ns,p999_ns,max_ns,bytes,thread_placement,park_delay_us
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,0,70204,0.601852,116647,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,1,58324,0.371169,157136,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,2,39285,0.247238,158895,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,3,39724,0.324939,122251,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,4,167969,0.929646,180681,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,0,40000,0.496815,80512.9,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,1,20129,0.216869,92816.2,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,2,93533,0.512487,182508,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,3,92449,0.558719,165466,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,4,41367,0.58292,70965.1,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,0,974854,0.263465,3.70013e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,1,925032,0.231559,3.99481e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,2,998702,0.260492,3.83391e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,3,958479,0.229826,4.17046e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,4,1042615,0.350768,2.97238e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,0,623042,0.265119,2.35005e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,1,587513,0.324684,1.80949e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,2,452373,0.200834,2.25248e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,3,563119,0.217762,2.58593e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,4,646484,0.37459,1.72584e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,8,1024,1,1,0,389378,0.223797,1.73987e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,8,1024,1,1,1,434968,0.249158,1.74575e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,8,1024,1,1,2,436438,0.337517,1.29308e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,8,1024,1,1,3,323272,0.243809,1.32593e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,8,1024,1,1,4,1355147,0.386675,3.50462e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,8,1024,1,1,0,2559240,0.323496,7.9112e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,8,1024,1,1,1,1977802,0.277828,7.11881e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,8,1024,1,1,2,1779702,0.200932,8.85723e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,8,1024,1,1,3,2214308,0.290595,7.6199e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,8,1024,1,1,4,1904976,0.214487,8.88153e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,8,1024,1,1,0,1657904,0.21805,7.60332e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,8,1024,1,1,1,1900831,0.230316,8.25315e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,8,1024,1,1,2,2063288,0.247562,8.33444e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,8,1024,1,1,3,2083610,0.248014,8.40118e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,8,1024,1,1,4,2100296,0.246488,8.5209e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,0,80000,0.262352,304934,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,1,76236,0.322986,236035,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,2,118024,0.63582,185625,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,3,46408,0.260804,177942,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,4,44488,0.336811,132086,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,0,320000,0.553502,578137,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,1,144536,0.42182,342648,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,2,85664,0.215334,397820,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,3,99456,0.248011,401014,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,4,100256,0.279432,358785,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,0,648100,0.216347,2.99565e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,1,748912,0.217649,3.44091e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,2,860232,0.46317,1.85727e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,3,928640,0.403701,2.30032e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,4,575080,0.275096,2.09047e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,0,814464,0.528264,1.54178e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,1,770888,0.418313,1.84285e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,2,460712,0.306131,1.50495e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,3,376240,0.254621,1.47765e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,4,738824,0.340635,2.16896e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,8,1024,4,1,0,80000,0.217543,367743,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,8,1024,4,1,1,369088,0.229417,1.60881e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,8,1024,4,1,2,814208,0.479762,1.69711e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,8,1024,4,1,3,424280,0.460262,921822,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,8,1024,4,1,4,460912,0.447593,1.02976e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,8,1024,4,1,0,2459848,0.322617,7.62468e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,8,1024,4,1,1,1906172,0.200493,9.50744e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,8,1024,4,1,2,2376864,0.340909,6.97213e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,8,1024,4,1,3,1743032,0.216491,8.05129e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,8,1024,4,1,4,2012824,0.229458,8.7721e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,8,1024,4,1,0,853624,0.215792,3.95577e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,8,1024,4,1,1,988944,0.260403,3.79775e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,8,1024,4,1,2,949440,0.23259,4.08203e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,8,1024,4,1,3,1020508,0.248683,4.10365e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,8,1024,4,1,4,1025916,0.232326,4.41584e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,0,640000,0.262252,2.4404e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,1,610104,0.233934,2.60801e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,2,652004,0.574545,1.13482e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,3,567416,0.291102,1.9492e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,4,487304,0.428728,1.13663e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,0,418480,0.217517,1.9239e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,1,480976,0.216447,2.22214e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,2,555536,0.246775,2.25119e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,3,562800,0.26346,2.13619e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,4,534048,0.25913,2.06093e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,0,613568,0.232342,2.6408e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,1,660200,0.230251,2.8673e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,2,716828,0.215785,3.32196e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,3,830492,0.297061,2.79569e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,4,698924,0.248525,2.81229e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,0,629136,0.263359,2.38889e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,1,597224,0.219435,2.72165e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,2,680416,0.26284,2.58871e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,3,647180,0.261149,2.4782e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,4,619552,0.277969,2.22885e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,8,1024,4,4,0,80000,0.525094,152354,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,8,1024,4,4,1,414348,0.201331,2.05804e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,8,1024,4,4,2,514512,0.46697,1.10181e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,8,1024,4,4,3,1124296,0.769277,1.4615e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,8,1024,4,4,4,365376,1.00768,362593,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,8,1024,4,4,0,1279560,0.280022,4.56949e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,8,1024,4,4,1,1142376,0.230475,4.95662e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,8,1024,4,4,2,1239160,0.216789,5.71596e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,8,1024,4,4,3,1428992,0.276571,5.16683e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,8,1024,4,4,4,1291708,0.278568,4.63695e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,8,1024,4,4,0,1293828,0.202022,6.40439e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,8,1024,4,4,1,1601100,0.248208,6.45064e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,8,1024,4,4,2,1612664,0.276417,5.83418e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,8,1024,4,4,3,1458548,0.357643,4.07823e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,8,1024,4,4,4,2039120,0.322431,6.32422e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,0,51722,0.60641,85292.1,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,1,21324,0.278965,76439.6,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,2,19110,0.250054,76423.4,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,3,38611,0.420588,91802.5,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,4,22951,0.456815,50241.4,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,0,20000,0.805519,24828.7,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,1,6208,0.316497,19614.8,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,2,4904,0.324113,15130.5,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,3,3783,0.405459,9330.18,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,4,2333,0.262779,8878.19,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,0,229960,0.291364,789254,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,1,197314,0.248724,793305,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,2,198327,0.275335,720313,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,3,360158,0.232219,1.55094e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,4,775472,0.294549,2.63274e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,0,640316,0.249735,2.56398e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,1,640996,0.232383,2.75836e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,2,689589,0.276818,2.49113e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,3,622783,0.230605,2.70065e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,4,675162,0.246977,2.7337e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,64,1024,1,1,0,951670,0.338598,2.81062e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,64,1024,1,1,1,1405312,0.526404,2.66965e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,64,1024,1,1,2,1334824,0.278113,4.79957e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,64,1024,1,1,3,1199894,0.262085,4.57826e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,oneTBB bounded,64,1024,1,1,4,1144567,0.243759,4.69548e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,64,1024,1,1,0,2470742,0.355736,6.94544e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,64,1024,1,1,1,1736361,0.242658,7.1556e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,64,1024,1,1,2,1788900,0.263883,6.77915e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,64,1024,1,1,3,1694788,0.229534,7.38359e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,moodycamel blocking,64,1024,1,1,4,1845899,0.372606,4.95402e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,64,1024,1,1,0,3018368,0.400086,7.5443e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,64,1024,1,1,1,1886076,0.230607,8.17873e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,64,1024,1,1,2,2044682,0.215608,9.48331e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,64,1024,1,1,3,2370829,0.324909,7.29689e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,SPSC,condition variable,64,1024,1,1,4,1824224,0.292133,6.2445e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,0,437580,0.368204,1.18842e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,1,297108,0.262297,1.13272e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,2,566360,0.831516,681118,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,3,170280,0.353687,481443,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,4,120364,0.261235,460749,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,0,613048,0.899927,681219,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,1,170308,0.603445,282226,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,2,229860,0.231051,994844,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,3,807040,0.806654,1.00048e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,4,250120,0.337675,740712,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,0,840872,0.293504,2.86495e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,1,716240,0.216056,3.31506e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,2,828768,0.23339,3.551e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,3,887752,0.264295,3.35894e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,4,839736,0.24616,3.41134e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,0,825592,0.339146,2.43432e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,1,608584,0.493526,1.23314e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,2,616568,0.31878,1.93415e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,3,483540,0.247032,1.9574e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,4,489352,0.200207,2.44424e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,64,1024,4,1,0,491144,0.262111,1.8738e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,64,1024,4,1,1,468452,0.461301,1.0155e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,64,1024,4,1,2,253876,0.41391,613360,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,64,1024,4,1,3,153340,0.340695,450081,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,oneTBB bounded,64,1024,4,1,4,112524,1.08018,104172,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,64,1024,4,1,0,1725272,0.274502,6.2851e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,64,1024,4,1,1,1571276,0.213681,7.35336e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,64,1024,4,1,2,1838340,0.290447,6.32936e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,64,1024,4,1,3,1582340,0.213291,7.4187e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,moodycamel blocking,64,1024,4,1,4,1854680,0.293616,6.31668e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,64,1024,4,1,0,2520288,0.698228,3.60955e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,64,1024,4,1,1,1804776,0.40263,4.48247e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,64,1024,4,1,2,1120620,0.251319,4.45896e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,64,1024,4,1,3,2229480,0.443899,5.02249e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPSC,condition variable,64,1024,4,1,4,1255624,0.230291,5.45233e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,0,470872,0.320971,1.46702e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,1,366756,0.233956,1.56763e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,2,391908,0.227825,1.72022e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,3,430056,0.303875,1.41524e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,4,353812,0.44792,789901,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,0,617248,0.432758,1.42631e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,1,356580,0.292452,1.21928e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,2,304820,0.243845,1.25006e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,3,625032,0.305801,2.04392e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,4,510984,0.200689,2.54615e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,0,814656,0.340078,2.3955e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,1,598876,0.344176,1.74003e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,2,870016,0.353971,2.45787e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,3,614468,0.247302,2.48469e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,4,621172,0.250476,2.47997e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,0,838856,0.355305,2.36095e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,1,590240,0.249359,2.36703e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,2,591760,0.246893,2.39682e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,3,599208,0.24612,2.43462e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,4,608656,0.261531,2.32728e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,64,1024,4,4,0,80000,0.328119,243814,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,64,1024,4,4,1,671000,1.0538,636741,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,64,1024,4,4,2,159188,0.25996,612356,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,64,1024,4,4,3,616536,0.401848,1.53425e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,oneTBB bounded,64,1024,4,4,4,1026064,0.847524,1.21066e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,64,1024,4,4,0,1241008,0.26137,4.74809e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,64,1024,4,4,1,1187024,0.217617,5.45463e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,64,1024,4,4,2,1363660,0.244638,5.57421e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,64,1024,4,4,3,1393552,0.30798,4.52481e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,moodycamel blocking,64,1024,4,4,4,1131204,0.26193,4.31872e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,64,1024,4,4,0,2112048,0.323966,6.51935e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,64,1024,4,4,1,1629840,0.276295,5.89891e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,64,1024,4,4,2,1474732,0.230603,6.39512e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,64,1024,4,4,3,1598784,0.26326,6.07302e+06,,,,,,0,cpu-set,20
+terminal-isolation-spin-probe,throughput,MPMC,condition variable,64,1024,4,4,4,1518256,0.263129,5.77001e+06,,,,,,0,cpu-set,20

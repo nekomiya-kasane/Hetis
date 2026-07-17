@@ -1,0 +1,49 @@
+label,category,scenario,implementation,payload_bytes,capacity,producers,consumers,sample,observations,seconds,operations_per_second,p50_ns,p90_ns,p99_ns,p999_ns,max_ns,bytes,thread_placement,park_delay_us
+optimized-final-asan,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,0,4222,0.031348,134682,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,1,3368,0.0304104,110752,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,0,2000,0.0762087,26243.7,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,1,657,0.0458843,14318.6,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,0,2000,0.0307845,64967.8,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro spin terminal,8,1024,1,1,1,1625,0.03055,53191.5,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,0,2000,0.0313028,63892,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,1,1598,0.0296583,53880.4,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,0,8000,0.0766722,104340,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,1,2612,0.0311995,83719.3,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,0,8000,0.185435,43141.8,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,1,1080,0.0789371,13681.8,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,0,8000,0.0459255,174195,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro spin terminal,8,1024,4,1,1,4356,0.0300394,145010,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,0,8000,0.0457906,174708,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,1,4368,0.0312461,139793,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,0,8000,0.0312885,255685,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,1,6396,0.0452913,141219,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,0,8000,0.045921,174212,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,1,4356,0.0612184,71155.1,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,0,8000,0.0463152,172729,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro spin terminal,8,1024,4,4,1,4320,0.0305197,141548,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,0,8000,0.0461247,173443,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,1,4340,0.0308268,140787,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,0,2000,0.031646,63199.1,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,1,1580,0.0307484,51384.8,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,0,2000,0.0780786,25615.2,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,1,641,0.0457425,14013.2,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,0,2000,0.0296485,67457,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro spin terminal,64,1024,1,1,1,1687,0.0308353,54710,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,0,2000,0.0310513,64409.5,,,,,,0,scheduler,20
+optimized-final-asan,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,1,1611,0.0310875,51821.5,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,0,8000,0.0792889,100897,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,1,2524,0.0460807,54773.5,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,0,8000,0.0475137,168372,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,1,4212,0.0420389,100193,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,0,8000,0.100285,79772.3,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro spin terminal,64,1024,4,1,1,1996,0.048772,40925.1,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,0,8000,0.0613054,130494,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,1,3264,0.0309593,105429,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,0,8000,0.040342,198304,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,1,4960,0.0432886,114580,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,0,8000,0.0343722,232746,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,1,5820,0.0375455,155012,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,0,8000,0.0364721,219346,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro spin terminal,64,1024,4,4,1,5484,0.05249,104477,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,0,8000,0.0589501,135708,,,,,,0,scheduler,20
+optimized-final-asan,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,1,3396,0.0833581,40739.9,,,,,,0,scheduler,20

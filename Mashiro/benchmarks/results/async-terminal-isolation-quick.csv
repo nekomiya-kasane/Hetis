@@ -1,0 +1,73 @@
+label,category,scenario,implementation,payload_bytes,capacity,producers,consumers,sample,observations,seconds,operations_per_second,p50_ns,p90_ns,p99_ns,p999_ns,max_ns,bytes,thread_placement,park_delay_us
+terminal-isolation-quick,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,0,11515,0.232297,49570.1,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro sync_wait,8,1024,1,1,1,1240,0.0463302,26764.4,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,0,2000,0.0464916,43018.5,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro atomic terminal,8,1024,1,1,1,17216,0.339637,50689.5,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,0,4000,0.0292011,136981,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro CV terminal,8,1024,1,1,1,6850,0.0301587,227132,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,oneTBB bounded,8,1024,1,1,0,16000,0.0314337,509008,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,oneTBB bounded,8,1024,1,1,1,12726,0.0312292,407503,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,moodycamel blocking,8,1024,1,1,0,2000,0.0448986,44544.8,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,moodycamel blocking,8,1024,1,1,1,1114,0.0311312,35784,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,condition variable,8,1024,1,1,0,8000,0.0312216,256233,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,condition variable,8,1024,1,1,1,6406,0.0308267,207807,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,0,8000,0.0928125,86195.3,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro sync_wait,8,1024,4,1,1,2156,0.0302322,71314.7,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,0,8000,0.126472,63255.1,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro atomic terminal,8,1024,4,1,1,1584,0.0284935,55591.6,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,0,8000,0.031284,255722,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro CV terminal,8,1024,4,1,1,6396,0.0315668,202618,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,oneTBB bounded,8,1024,4,1,0,8000,0.0311548,256782,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,oneTBB bounded,8,1024,4,1,1,6420,0.0309012,207759,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,moodycamel blocking,8,1024,4,1,0,8000,0.0307131,260475,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,moodycamel blocking,8,1024,4,1,1,6512,0.0318162,204676,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,condition variable,8,1024,4,1,0,8000,0.0461449,173367,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,condition variable,8,1024,4,1,1,4336,0.0305292,142028,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,0,8000,0.0311054,257190,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro sync_wait,8,1024,4,4,1,6432,0.0466134,137986,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,0,8000,0.0459211,174212,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro atomic terminal,8,1024,4,4,1,4356,0.0628418,69316.9,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,0,8000,0.0322205,248289,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro CV terminal,8,1024,4,4,1,6208,0.0298313,208104,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,oneTBB bounded,8,1024,4,4,0,8000,0.0311856,256529,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,oneTBB bounded,8,1024,4,4,1,6416,0.0595701,107705,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,moodycamel blocking,8,1024,4,4,0,8000,0.0310963,257265,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,moodycamel blocking,8,1024,4,4,1,6432,0.029923,214952,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,condition variable,8,1024,4,4,0,8000,0.030071,266037,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,condition variable,8,1024,4,4,1,6652,0.0457706,145333,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,0,2000,0.0615726,32482,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro sync_wait,64,1024,1,1,1,813,0.0464398,17506.5,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,0,2000,0.0300675,66517,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro atomic terminal,64,1024,1,1,1,1663,0.0772006,21541.3,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,0,2000,0.0304156,65755.7,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,Mashiro CV terminal,64,1024,1,1,1,1644,0.0301103,54599.3,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,oneTBB bounded,64,1024,1,1,0,4000,0.0299441,133582,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,oneTBB bounded,64,1024,1,1,1,3340,0.0305388,109369,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,moodycamel blocking,64,1024,1,1,0,2000,0.0308068,64920.7,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,moodycamel blocking,64,1024,1,1,1,6496,0.029855,217585,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,condition variable,64,1024,1,1,0,2000,0.0304131,65761.1,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,SPSC,condition variable,64,1024,1,1,1,1645,0.0319102,51550.9,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,0,8000,0.138139,57912.7,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro sync_wait,64,1024,4,1,1,1448,0.0612169,23653.6,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,0,8000,0.107661,74307.4,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro atomic terminal,64,1024,4,1,1,1860,0.0456572,40738.4,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,0,8000,0.0306948,260630,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,Mashiro CV terminal,64,1024,4,1,1,6516,0.0305685,213161,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,oneTBB bounded,64,1024,4,1,0,8000,0.0307503,260160,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,oneTBB bounded,64,1024,4,1,1,6508,0.0317523,204962,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,moodycamel blocking,64,1024,4,1,0,8000,0.0298825,267715,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,moodycamel blocking,64,1024,4,1,1,6696,0.0307258,217928,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,condition variable,64,1024,4,1,0,8000,0.030109,265701,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPSC,condition variable,64,1024,4,1,1,6644,0.030424,218380,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,0,8000,0.0612595,130592,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro sync_wait,64,1024,4,4,1,3268,0.0314758,103826,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,0,8000,0.0466111,171633,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro atomic terminal,64,1024,4,4,1,4292,0.0461888,92923,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,0,8000,0.0300023,266646,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,Mashiro CV terminal,64,1024,4,4,1,6668,0.0468988,142178,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,oneTBB bounded,64,1024,4,4,0,8000,0.0310707,257477,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,oneTBB bounded,64,1024,4,4,1,6440,0.0301649,213493,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,moodycamel blocking,64,1024,4,4,0,8000,0.0469569,170369,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,moodycamel blocking,64,1024,4,4,1,4260,0.0456342,93351,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,condition variable,64,1024,4,4,0,8000,0.0462379,173018,,,,,,0,cpu-set,20
+terminal-isolation-quick,throughput,MPMC,condition variable,64,1024,4,4,1,4328,0.0615781,70284.7,,,,,,0,cpu-set,20
