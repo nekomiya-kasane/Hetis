@@ -220,23 +220,23 @@ namespace std {
         struct item_index_tuple; // for use in sort()
 
         // These two need to be raw pointers as instances of this type have pointer arithmetic done to them:
-        typedef aligned_element_struct* aligned_pointer_type; // pointer to the (potentially overaligned) element type,
+        using aligned_pointer_type = aligned_element_struct*; // pointer to the (potentially overaligned) element type,
                                                               // not the original element type
-        typedef skipfield_type* skipfield_pointer_type;
+        using skipfield_pointer_type = skipfield_type*;
 
-        typedef typename std::allocator_traits<allocator_type>::template rebind_alloc<aligned_element_struct>
-            aligned_allocator_type;
-        typedef typename std::allocator_traits<allocator_type>::template rebind_alloc<group> group_allocator_type;
-        typedef typename std::allocator_traits<allocator_type>::template rebind_alloc<skipfield_type>
-            skipfield_allocator_type;
-        typedef typename std::allocator_traits<allocator_type>::template rebind_alloc<aligned_allocation_struct>
-            aligned_struct_allocator_type;
-        typedef typename std::allocator_traits<allocator_type>::template rebind_alloc<item_index_tuple>
-            tuple_allocator_type;
+        using aligned_allocator_type =
+            typename std::allocator_traits<allocator_type>::template rebind_alloc<aligned_element_struct>;
+        using group_allocator_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<group>;
+        using skipfield_allocator_type =
+            typename std::allocator_traits<allocator_type>::template rebind_alloc<skipfield_type>;
+        using aligned_struct_allocator_type =
+            typename std::allocator_traits<allocator_type>::template rebind_alloc<aligned_allocation_struct>;
+        using tuple_allocator_type =
+            typename std::allocator_traits<allocator_type>::template rebind_alloc<item_index_tuple>;
 
-        typedef typename std::allocator_traits<group_allocator_type>::pointer group_pointer_type;
-        typedef typename std::allocator_traits<aligned_struct_allocator_type>::pointer aligned_struct_pointer_type;
-        typedef typename std::allocator_traits<tuple_allocator_type>::pointer tuple_pointer_type;
+        using group_pointer_type = typename std::allocator_traits<group_allocator_type>::pointer;
+        using aligned_struct_pointer_type = typename std::allocator_traits<aligned_struct_allocator_type>::pointer;
+        using tuple_pointer_type = typename std::allocator_traits<tuple_allocator_type>::pointer;
 
         // To simplify conversion when allocator supplies non-raw pointers:
         template<class destination_pointer_type, class source_pointer_type>
