@@ -45,9 +45,6 @@ namespace Sora::PAL {
         /** @brief Return the standard category that interprets @ref Value. */
         [[nodiscard]] const std::error_category& Category() const noexcept { return code_.category(); }
 
-        /** @brief Return the stable name of the standard error category. */
-        [[nodiscard]] std::string_view CategoryName() const noexcept { return code_.category().name(); }
-
         /** @brief Materialize a normalized diagnostic message, encoded as UTF-8 on Windows. */
         [[nodiscard]] std::string Message() const;
 

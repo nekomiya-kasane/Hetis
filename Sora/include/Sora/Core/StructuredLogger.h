@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include "Sora/Core/LogCategory.h"
 #include "Sora/Core/ToString.h"
 #include "Sora/Core/ToStyledString.h"
 #include "Sora/Core/Traits/EnumTraits.h"
@@ -37,21 +38,6 @@ namespace Sora {
         Warn = 3,  /**< Suspicious condition that did not prevent the current operation from continuing. */
         Error = 4, /**< Recoverable failure. */
         Fatal = 5, /**< Unrecoverable failure; callers normally abort or start crash handling after logging. */
-    };
-
-    /** @brief Built-in logging domains. User code can still pass explicitly cast extension values. */
-    enum class LogCategory : uint8_t {
-        Core = 0,     /**< Core library, memory, diagnostics, and platform services. */
-        Kernel = 1,   /**< Object model and Kernel runtime. */
-        Resource = 2, /**< Resource registry, packages, and IO. */
-        Render = 3,   /**< Rendering backend and frame graph. */
-        Scene = 4,    /**< Scene, entity, and world management. */
-        Input = 5,    /**< User input and window events. */
-        Audio = 6,    /**< Audio devices and mixing. */
-        Network = 7,  /**< Network IO and protocols. */
-        Script = 8,   /**< Scripting and dynamic command execution. */
-        Editor = 9,   /**< Editor and tooling UI. */
-        App = 10,     /**< Application layer. */
     };
 
 #ifndef SORA_MIN_LOG_LEVEL
@@ -96,7 +82,7 @@ namespace Sora {
         LogCategory category = LogCategory::Core;          /**< Semantic domain. */
         SourceLocation source{};                           /**< Source call site. */
         std::chrono::system_clock::time_point timestamp{}; /**< Wall-clock timestamp. */
-        uint64_t threadId = 0;                             /**< Stable hash of @c std::thread::id. */
+        uint64_t threadId = 0;                             /**< Process-local operating-system thread identifier. */
         std::string message;                               /**< Owning formatted message payload. */
     };
 

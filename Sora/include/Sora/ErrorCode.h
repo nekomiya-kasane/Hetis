@@ -75,6 +75,11 @@ namespace Sora {
         InvalidClipboardData = 0x0021,   ///< Native clipboard text violates its storage or encoding invariants.
         ClipboardTextTooLarge = 0x0022,  ///< Clipboard text cannot fit the platform-native representation.
         ClipboardNativeFailure = 0x0023, ///< A native clipboard or global-memory operation failed.
+
+        InvalidThreadName = 0x0024,       ///< A thread name is not valid UTF-8 or contains an embedded null.
+        ThreadNameTooLong = 0x0025,       ///< A thread name exceeds the native platform limit.
+        ThreadNativeFailure = 0x0026,     ///< A native thread metadata or introspection operation failed.
+        InvalidNativeThreadText = 0x0027, ///< Native thread metadata is not valid Unicode text.
         /** @} */
 
         /** @name Core Rendering (0x1000 – 0x1FFF) @{ */
