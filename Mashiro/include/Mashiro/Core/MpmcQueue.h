@@ -126,24 +126,18 @@ namespace Mashiro {
 
         /** @brief Consume one published head payload, or return @c std::nullopt when the head is unavailable. */
         [[nodiscard]] std::optional<T> TryPop() noexcept {
-            std::size_t position = dequeuePosition_.load(std::memory_order_relaxed);
-            for (;;) {
-                Detail::MpmcCell<T>& cell = cells_[position & kIndexMask];
-                const std::size_t sequence = cell.sequence.load(std::memory_order_acquire);
-                const auto difference = Detail::MpmcSequenceDifference(sequence, position + 1);
-                if (difference == 0) {
-                    if (dequeuePosition_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
-                        T value(std::move(*cell.Value()));
-                        std::destroy_at(cell.Value());
-                        cell.sequence.store(position + Capacity, std::memory_order_release);
-                        return std::optional<T>{std::move(value)};
-                    }
-                } else if (difference < 0) {
-                    return std::nullopt;
-                } else {
-                    position = dequeuePosition_.load(std::memory_order_relaxed);
-                }
+            std::optional<T> value;
+            if (!TryConsume([&value](T&& source) noexcept { value.emplace(std::move(source)); })) {
+                return std::nullopt;
             }
+            return value;
+        }
+
+        /** @brief Move one published head payload into @p value, returning @c false when unavailable. */
+        [[nodiscard]] bool TryPop(T& value) noexcept
+            requires std::is_nothrow_move_assignable_v<T>
+        {
+            return TryConsume([&value](T&& source) noexcept { value = std::move(source); });
         }
 
         /** @brief Return an approximate count of reserved or published cells. */
@@ -159,6 +153,30 @@ namespace Mashiro {
 
     private:
         static constexpr std::size_t kIndexMask = Capacity - 1;
+
+        /** @brief Claim, consume, destroy, and release one head cell through a non-throwing receiver. */
+        template<typename Consumer>
+            requires std::is_nothrow_invocable_v<Consumer&, T&&>
+        [[nodiscard]] bool TryConsume(Consumer&& consumer) noexcept {
+            std::size_t position = dequeuePosition_.load(std::memory_order_relaxed);
+            for (;;) {
+                Detail::MpmcCell<T>& cell = cells_[position & kIndexMask];
+                const std::size_t sequence = cell.sequence.load(std::memory_order_acquire);
+                const auto difference = Detail::MpmcSequenceDifference(sequence, position + 1);
+                if (difference == 0) {
+                    if (dequeuePosition_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
+                        consumer(std::move(*cell.Value()));
+                        std::destroy_at(cell.Value());
+                        cell.sequence.store(position + Capacity, std::memory_order_release);
+                        return true;
+                    }
+                } else if (difference < 0) {
+                    return false;
+                } else {
+                    position = dequeuePosition_.load(std::memory_order_relaxed);
+                }
+            }
+        }
 
         [[= Concurrency::Contended{}]] alignas(Platform::kCacheLineSize) std::atomic<std::size_t> enqueuePosition_{0};
         [[= Concurrency::Contended{}]] alignas(Platform::kCacheLineSize) std::atomic<std::size_t> dequeuePosition_{0};

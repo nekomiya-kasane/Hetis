@@ -141,18 +141,18 @@ namespace Mashiro {
          * producer has reserved a cell or that the oldest producer has reserved its cell but has not published it yet.
          */
         [[nodiscard]] std::optional<T> TryPop() noexcept {
-            const std::size_t position = head_.load(std::memory_order_relaxed);
-            Detail::MpscCell<T>& cell = cells_[position & kIndexMask];
-            const std::size_t sequence = cell.sequence.load(std::memory_order_acquire);
-            if (Detail::MpscSequenceDifference(sequence, position + 1) != 0) {
+            std::optional<T> value;
+            if (!TryConsume([&value](T&& source) noexcept { value.emplace(std::move(source)); })) {
                 return std::nullopt;
             }
+            return value;
+        }
 
-            T value(std::move(*cell.Value()));
-            std::destroy_at(cell.Value());
-            cell.sequence.store(position + Capacity, std::memory_order_release);
-            head_.store(position + 1, std::memory_order_relaxed);
-            return std::optional<T>{std::move(value)};
+        /** @brief Move the oldest published payload into @p value, returning @c false when unavailable. */
+        [[nodiscard]] bool TryPop(T& value) noexcept
+            requires std::is_nothrow_move_assignable_v<T>
+        {
+            return TryConsume([&value](T&& source) noexcept { value = std::move(source); });
         }
 
         /**
@@ -165,9 +165,20 @@ namespace Mashiro {
             requires std::invocable<Sink&, T&&>
         std::size_t Drain(Sink&& sink) noexcept(std::is_nothrow_invocable_v<Sink&, T&&>) {
             std::size_t drained = 0;
-            while (auto value = TryPop()) {
-                sink(std::move(*value));
+            std::size_t position = head_.load(std::memory_order_relaxed);
+            for (;;) {
+                Detail::MpscCell<T>& cell = cells_[position & kIndexMask];
+                const std::size_t sequence = cell.sequence.load(std::memory_order_acquire);
+                if (Detail::MpscSequenceDifference(sequence, position + 1) != 0) {
+                    break;
+                }
+                T value(std::move(*cell.Value()));
+                std::destroy_at(cell.Value());
+                cell.sequence.store(position + Capacity, std::memory_order_release);
+                ++position;
                 ++drained;
+                head_.store(position, std::memory_order_relaxed);
+                sink(std::move(value));
             }
             return drained;
         }
@@ -194,6 +205,24 @@ namespace Mashiro {
 
     private:
         static constexpr std::size_t kIndexMask = Capacity - 1;
+
+        /** @brief Claim, consume, destroy, and release one head cell through a non-throwing receiver. */
+        template<typename Consumer>
+            requires std::is_nothrow_invocable_v<Consumer&, T&&>
+        [[nodiscard]] bool TryConsume(Consumer&& consumer) noexcept {
+            const std::size_t position = head_.load(std::memory_order_relaxed);
+            Detail::MpscCell<T>& cell = cells_[position & kIndexMask];
+            const std::size_t sequence = cell.sequence.load(std::memory_order_acquire);
+            if (Detail::MpscSequenceDifference(sequence, position + 1) != 0) {
+                return false;
+            }
+
+            consumer(std::move(*cell.Value()));
+            std::destroy_at(cell.Value());
+            cell.sequence.store(position + Capacity, std::memory_order_release);
+            head_.store(position + 1, std::memory_order_relaxed);
+            return true;
+        }
 
         [[= Concurrency::Contended{}]] alignas(Platform::kCacheLineSize) std::atomic<std::size_t> tail_{0};
         [[= Concurrency::ConsumerOwned{}]] alignas(Platform::kCacheLineSize) std::atomic<std::size_t> head_{0};

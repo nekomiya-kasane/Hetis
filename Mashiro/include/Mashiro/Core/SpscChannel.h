@@ -1,6 +1,6 @@
 /**
  * @file SpscChannel.h
- * @brief SPSC payload channel with a monotonic wake sequence for predicate changes.
+ * @brief SPSC payload channel with directional wake sequences for readable and writable predicate changes.
  * @ingroup Core
  */
 #pragma once
@@ -18,11 +18,13 @@
 namespace Mashiro {
 
     /**
-     * @brief Wait-free bounded SPSC storage paired with an atomic wait/notify sequence.
+     * @brief Wait-free bounded SPSC storage paired with directional atomic wait/notify sequences.
      *
-     * The queue remains the source of truth. The sequence is only a wake plane: every successful operation that can
-     * change a waiting peer's predicate advances it after the queue's release publication. Observers use acquire loads,
-     * so waking on a changed sequence also observes the corresponding queue transition.
+     * The queue remains the source of truth. The sequences are only a wake plane: a successful push advances the
+     * consumer's readable sequence, while a successful pop or drain advances the producer's writable sequence. Keeping
+     * these write paths on separate cache lines prevents the notification layer from serializing otherwise independent
+     * producer and consumer progress. Observers use acquire loads, so a changed sequence also observes the
+     * corresponding queue transition.
      *
      * @tparam T Element type stored by the channel.
      * @tparam Capacity Power-of-two queue capacity.
@@ -36,16 +38,30 @@ namespace Mashiro {
         SpscChannel(const SpscChannel&) = delete;
         SpscChannel& operator=(const SpscChannel&) = delete;
 
-        /** @brief Return the current wake-sequence snapshot with acquire semantics. */
-        [[nodiscard]] uint64_t Observe() const noexcept { return epoch_.load(std::memory_order_acquire); }
+        /** @brief Return the producer-owned readable-predicate sequence. */
+        [[nodiscard]] uint64_t ObserveReadable() const noexcept {
+            return readableEpoch_.load(std::memory_order_acquire);
+        }
 
-        /** @brief Block until the wake sequence differs from @p snapshot. */
-        void Wait(uint64_t snapshot) const noexcept { epoch_.wait(snapshot, std::memory_order_acquire); }
+        /** @brief Block the consumer until the readable-predicate sequence differs from @p snapshot. */
+        void WaitReadable(uint64_t snapshot) const noexcept {
+            readableEpoch_.wait(snapshot, std::memory_order_acquire);
+        }
 
-        /** @brief Publish an external predicate change to a waiting peer. */
+        /** @brief Return the consumer-owned writable-predicate sequence. */
+        [[nodiscard]] uint64_t ObserveWritable() const noexcept {
+            return writableEpoch_.load(std::memory_order_acquire);
+        }
+
+        /** @brief Block the producer until the writable-predicate sequence differs from @p snapshot. */
+        void WaitWritable(uint64_t snapshot) const noexcept {
+            writableEpoch_.wait(snapshot, std::memory_order_acquire);
+        }
+
+        /** @brief Publish an external predicate change to both endpoints. */
         void SignalPredicateChanged() noexcept {
-            epoch_.fetch_add(1, std::memory_order_release);
-            epoch_.notify_one();
+            Signal(readableEpoch_);
+            Signal(writableEpoch_);
         }
 
         /**
@@ -60,7 +76,7 @@ namespace Mashiro {
             if (!queue_.TryEmplace(std::forward<Args>(args)...)) {
                 return false;
             }
-            SignalPredicateChanged();
+            Signal(readableEpoch_);
             return true;
         }
 
@@ -87,7 +103,7 @@ namespace Mashiro {
             if (!queue_.TryPop(value)) {
                 return false;
             }
-            SignalPredicateChanged();
+            Signal(writableEpoch_);
             return true;
         }
 
@@ -97,7 +113,7 @@ namespace Mashiro {
         {
             auto value = queue_.TryPop();
             if (value) {
-                SignalPredicateChanged();
+                Signal(writableEpoch_);
             }
             return value;
         }
@@ -113,7 +129,7 @@ namespace Mashiro {
         uint32_t Drain(Sink&& sink) noexcept {
             const uint32_t count = queue_.Drain(std::forward<Sink>(sink));
             if (count != 0) {
-                SignalPredicateChanged();
+                Signal(writableEpoch_);
             }
             return count;
         }
@@ -128,8 +144,17 @@ namespace Mashiro {
         [[nodiscard]] static consteval uint32_t GetCapacity() noexcept { return Capacity; }
 
     private:
+        /** @brief Advance one directional predicate sequence and notify its sole possible waiter. */
+        static void Signal(std::atomic<uint64_t>& epoch) noexcept {
+            epoch.fetch_add(1, std::memory_order_release);
+            epoch.notify_one();
+        }
+
         SpscRingBuffer<T, Capacity> queue_{};
-        [[=Concurrency::Contended{}]] alignas(Platform::kCacheLineSize) mutable std::atomic<uint64_t> epoch_{0};
+        [[=Concurrency::ProducerOwned{}]] alignas(Platform::kCacheLineSize) mutable std::atomic<uint64_t>
+            readableEpoch_{0};
+        [[=Concurrency::ConsumerOwned{}]] alignas(Platform::kCacheLineSize) mutable std::atomic<uint64_t>
+            writableEpoch_{0};
     };
 
 } // namespace Mashiro

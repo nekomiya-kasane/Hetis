@@ -12,28 +12,34 @@
 
 using namespace Mashiro;
 
-TEST_CASE("SpscChannel: successful pushes advance wake sequence and drain by snapshot", AUTO_TAG) {
+TEST_CASE("SpscChannel: successful operations advance only the opposite endpoint's sequence", AUTO_TAG) {
     SpscChannel<int, 4> channel;
 
-    const std::uint64_t before = channel.Observe();
+    const std::uint64_t readableBefore = channel.ObserveReadable();
+    const std::uint64_t writableBefore = channel.ObserveWritable();
     REQUIRE(channel.TryPush(1));
     REQUIRE(channel.TryPush(2));
-    REQUIRE(channel.Observe() == before + 2);
+    REQUIRE(channel.ObserveReadable() == readableBefore + 2);
+    REQUIRE(channel.ObserveWritable() == writableBefore);
 
     std::vector<int> drained;
     const std::uint32_t count = channel.Drain([&drained](int&& value) noexcept { drained.push_back(value); });
 
     REQUIRE(count == 2);
     REQUIRE(drained == std::vector<int>{1, 2});
+    REQUIRE(channel.ObserveReadable() == readableBefore + 2);
+    REQUIRE(channel.ObserveWritable() == writableBefore + 1);
     REQUIRE(channel.Empty());
 }
 
-TEST_CASE("SpscChannel: predicate signal advances wake sequence without payload", AUTO_TAG) {
+TEST_CASE("SpscChannel: external predicate signal advances both directional sequences", AUTO_TAG) {
     SpscChannel<int, 4> channel;
 
-    const std::uint64_t before = channel.Observe();
+    const std::uint64_t readableBefore = channel.ObserveReadable();
+    const std::uint64_t writableBefore = channel.ObserveWritable();
     channel.SignalPredicateChanged();
 
-    REQUIRE(channel.Observe() == before + 1);
+    REQUIRE(channel.ObserveReadable() == readableBefore + 1);
+    REQUIRE(channel.ObserveWritable() == writableBefore + 1);
     REQUIRE(channel.Empty());
 }
