@@ -36,6 +36,19 @@ namespace Sora::Kernel {
             Retain(NucleusOf(pointer_));
         }
 
+        /**
+         * @brief Adopt a pointer whose nucleus reference has already been retained.
+         *
+         * @tparam U Source component type.
+         * @param pointer Pointer carrying one reference that is transferred into the result.
+         * @return Owning pointer without an additional retain operation.
+         */
+        template<Concept::ComClass U>
+            requires std::convertible_to<U*, T*>
+        [[nodiscard]] static ComPtr Adopt(U* pointer) noexcept {
+            return ComPtr{pointer, AdoptTag{}};
+        }
+
         template<Concept::ComClass U>
             requires std::convertible_to<U*, T*>
         ComPtr(const ComPtr<U>& other) noexcept : pointer_(other.Get()) {

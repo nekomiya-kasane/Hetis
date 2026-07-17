@@ -15,10 +15,16 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <vector>
 
 namespace Sora::Kernel {
+
+    class WeakRef;
+
+    template<Concept::ComClass T>
+    class ComPtr;
 
     // ----------------------------------------------------------------------------------------------------
 
@@ -78,32 +84,6 @@ public:
         class BaseUnknownInternal;
 
     } // namespace Detail
-
-    /** @brief Shared state behind weak references to a closure nucleus. */
-    struct WeakState {
-        std::atomic<BaseUnknown*> nucleus{}; /**< Null when the nucleus has been destroyed. */
-    };
-
-    /** @brief Non-owning weak reference to a component closure nucleus. */
-    class WeakRef {
-    public:
-        /** @brief Construct an empty weak reference. */
-        WeakRef() noexcept = default;
-
-        /** @brief Construct from shared weak state. */
-        explicit WeakRef(std::shared_ptr<WeakState> state) noexcept : state_(std::move(state)) {}
-
-        /** @brief Return whether the referenced nucleus is gone or was never set. */
-        [[nodiscard]] bool Expired() const noexcept { return !Get(); }
-
-        /** @brief Return the referenced nucleus, or null after destruction. */
-        [[nodiscard]] BaseUnknown* Get() const noexcept {
-            return state_ ? state_->nucleus.load(std::memory_order_acquire) : nullptr;
-        }
-
-    private:
-        std::shared_ptr<WeakState> state_{};
-    };
 
     /** @brief Intrusive lifetime root and type-erased object-model anchor. */
     class alignas(16) [[= Sora::Kernel::$::Role{TypeOfClass::Implementation}]] BaseUnknown {
@@ -241,6 +221,7 @@ public:
         virtual ~BaseUnknown() noexcept;
 
         friend class Sora::Kernel::Detail::BaseUnknownInternal;
+        friend class Sora::Kernel::WeakRef;
 
     private:
         template<Concept::ComClass T, class... Args>
@@ -252,6 +233,9 @@ public:
         /** @brief Add one reference to this object storage or nucleus. */
         void Retain() noexcept;
 
+        /** @brief Try to add one reference while a weak-state lifetime gate is held. */
+        [[nodiscard]] bool TryRetain() noexcept;
+
         /** @brief Release one reference and return true on the last-reference transition. */
         bool Release() noexcept;
 
@@ -260,6 +244,45 @@ public:
 
     static_assert(sizeof(BaseUnknown) == 2 * sizeof(void*));
     static_assert(alignof(BaseUnknown) >= 16);
+
+    /** @brief Shared synchronization state behind weak references to a closure nucleus. */
+    struct WeakState {
+        mutable std::mutex mutex{};          /**< Serializes strong promotion against final release. */
+        std::atomic<BaseUnknown*> nucleus{}; /**< Null before destruction begins. */
+    };
+
+    /** @brief Non-owning weak reference to a component closure nucleus. */
+    class WeakRef {
+    public:
+        /** @brief Construct an empty weak reference. */
+        WeakRef() noexcept = default;
+
+        /** @brief Construct from shared weak state. */
+        explicit WeakRef(std::shared_ptr<WeakState> state) noexcept : state_(std::move(state)) {}
+
+        /** @brief Return whether a non-owning snapshot currently observes a nucleus. */
+        [[nodiscard]] bool Expired() const noexcept { return Get() == nullptr; }
+
+        /**
+         * @brief Return a non-owning snapshot of the nucleus.
+         *
+         * @warning The returned pointer may expire immediately. Use @ref Lock before dereferencing across a lifetime
+         * boundary.
+         */
+        [[nodiscard]] BaseUnknown* Get() const noexcept {
+            return state_ ? state_->nucleus.load(std::memory_order_acquire) : nullptr;
+        }
+
+        /**
+         * @brief Atomically promote this weak reference to an owning nucleus pointer, or return empty.
+         * @pre Concurrent destruction must occur through the intrusive @ref Release path; directly destroyed objects
+         * require external synchronization because C++ begins derived destruction before the base can invalidate state.
+         */
+        [[nodiscard]] ComPtr<BaseUnknown> Lock() const noexcept;
+
+    private:
+        std::shared_ptr<WeakState> state_{};
+    };
 
     namespace Detail {
 
