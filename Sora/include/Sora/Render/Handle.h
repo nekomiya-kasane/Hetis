@@ -43,49 +43,55 @@ namespace Sora::Render {
         OpenGL = 5       /**< OpenGL backend. */
     };
 
-    /** @brief Compile-time allocation policy for one handle pool kind. */
-    struct HandlePoolPolicy {
-        size_t maximumCount{};       /**< Hard slot limit. */
-        size_t allocatedChunkSize{}; /**< Number of slots in one stable storage chunk. */
-        size_t initialCount{};       /**< Slots initialized by default construction. */
+    namespace $ {
 
-        /** @brief Return whether this policy can instantiate a pool directory and chunks. */
-        [[nodiscard]] constexpr bool IsValid() const noexcept {
-            return maximumCount != 0 && maximumCount <= std::numeric_limits<uint32_t>::max() &&
-                   allocatedChunkSize != 0 && allocatedChunkSize <= maximumCount && initialCount <= maximumCount;
-        }
+        /** @brief Compile-time allocation policy for one handle pool kind. */
+        struct HandlePoolPolicy {
+            size_t maximumCount{};       /**< Hard slot limit. */
+            size_t allocatedChunkSize{}; /**< Number of slots in one stable storage chunk. */
+            size_t initialCount{};       /**< Slots initialized by default construction. */
 
-        /** @brief Return the maximum number of chunks required to store all slots. */
-        [[nodiscard]] constexpr size_t MaximumChunkCount() const noexcept {
-            return (maximumCount + allocatedChunkSize - 1) / allocatedChunkSize;
-        }
+            /** @brief Return whether this policy can instantiate a pool directory and chunks. */
+            [[nodiscard]] constexpr bool IsValid() const noexcept {
+                return maximumCount != 0 && maximumCount <= std::numeric_limits<uint32_t>::max() &&
+                       allocatedChunkSize != 0 && allocatedChunkSize <= maximumCount && initialCount <= maximumCount;
+            }
 
-        friend constexpr bool operator==(const HandlePoolPolicy&, const HandlePoolPolicy&) noexcept = default;
-    };
+            /** @brief Return the maximum number of chunks required to store all slots. */
+            [[nodiscard]] constexpr size_t MaximumChunkCount() const noexcept {
+                return (maximumCount + allocatedChunkSize - 1) / allocatedChunkSize;
+            }
+
+            friend constexpr bool operator==(const HandlePoolPolicy&, const HandlePoolPolicy&) noexcept = default;
+        };
+
+    } // namespace $
+
+    using HandlePoolPolicy = $::HandlePoolPolicy;
 
     /** @brief Render resource kind encoded in bits 8 through 15 of a resource handle. */
     enum class HandleKind : uint8_t {
         // clang-format off
-        Unknown               [[= HandlePoolPolicy{}]]                                                               = 0,  /**< Unregistered or erased resource kind. */
-        Buffer                [[= HandlePoolPolicy{16'384, 256, 256}]]  = 1,  /**< Buffer resource. */
-        Texture               [[= HandlePoolPolicy{16'384, 256, 256}]]  = 2,  /**< Texture resource. */
-        TextureView           [[= HandlePoolPolicy{32'768, 256, 256}]]  = 3,  /**< Texture view resource. */
-        Sampler               [[= HandlePoolPolicy{2'048, 256, 256}]]   = 4,  /**< Sampler resource. */
-        Pipeline              [[= HandlePoolPolicy{8'192, 256, 256}]]   = 5,  /**< Pipeline resource. */
-        PipelineLayout        [[= HandlePoolPolicy{4'096, 256, 256}]]   = 6,  /**< Pipeline layout resource. */
-        PipelineCache         [[= HandlePoolPolicy{16, 16, 16}]]        = 7,  /**< Pipeline cache resource. */
-        PipelineLibraryPart   [[= HandlePoolPolicy{4'096, 256, 256}]]   = 8,  /**< Pipeline-library component. */
-        ShaderModule          [[= HandlePoolPolicy{4'096, 256, 256}]]   = 9,  /**< Shader module resource. */
-        Fence                 [[= HandlePoolPolicy{256, 64, 64}]]       = 10, /**< Fence resource. */
-        Semaphore             [[= HandlePoolPolicy{512, 64, 64}]]       = 11, /**< Semaphore resource. */
-        QueryPool             [[= HandlePoolPolicy{128, 32, 32}]]       = 12, /**< Query pool resource. */
-        AccelerationStructure [[= HandlePoolPolicy{8'192, 256, 256}]]   = 13, /**< Acceleration structure. */
-        Swapchain             [[= HandlePoolPolicy{16, 16, 16}]]        = 14, /**< Presentation swapchain. */
-        DeviceMemory          [[= HandlePoolPolicy{1'024, 64, 64}]]     = 15, /**< Explicit device-memory allocation. */
-        DescriptorLayout      [[= HandlePoolPolicy{4'096, 256, 256}]]   = 16, /**< Descriptor layout resource. */
-        DescriptorSet         [[= HandlePoolPolicy{32'768, 256, 256}]]  = 17, /**< Descriptor set resource. */
-        CommandBuffer         [[= HandlePoolPolicy{512, 64, 64}]]       = 18, /**< Command buffer resource. */
-        CommandPool           [[= HandlePoolPolicy{64, 16, 16}]]        = 19  /**< Command pool resource. */
+        Unknown               [[= $::HandlePoolPolicy{}]]                                                               = 0,  /**< Unregistered or erased resource kind. */
+        Buffer                [[= $::HandlePoolPolicy{16'384, 256, 256}]]  = 1,  /**< Buffer resource. */
+        Texture               [[= $::HandlePoolPolicy{16'384, 256, 256}]]  = 2,  /**< Texture resource. */
+        TextureView           [[= $::HandlePoolPolicy{32'768, 256, 256}]]  = 3,  /**< Texture view resource. */
+        Sampler               [[= $::HandlePoolPolicy{2'048, 256, 256}]]   = 4,  /**< Sampler resource. */
+        Pipeline              [[= $::HandlePoolPolicy{8'192, 256, 256}]]   = 5,  /**< Pipeline resource. */
+        PipelineLayout        [[= $::HandlePoolPolicy{4'096, 256, 256}]]   = 6,  /**< Pipeline layout resource. */
+        PipelineCache         [[= $::HandlePoolPolicy{16, 16, 16}]]        = 7,  /**< Pipeline cache resource. */
+        PipelineLibraryPart   [[= $::HandlePoolPolicy{4'096, 256, 256}]]   = 8,  /**< Pipeline-library component. */
+        ShaderModule          [[= $::HandlePoolPolicy{4'096, 256, 256}]]   = 9,  /**< Shader module resource. */
+        Fence                 [[= $::HandlePoolPolicy{256, 64, 64}]]       = 10, /**< Fence resource. */
+        Semaphore             [[= $::HandlePoolPolicy{512, 64, 64}]]       = 11, /**< Semaphore resource. */
+        QueryPool             [[= $::HandlePoolPolicy{128, 32, 32}]]       = 12, /**< Query pool resource. */
+        AccelerationStructure [[= $::HandlePoolPolicy{8'192, 256, 256}]]   = 13, /**< Acceleration structure. */
+        Swapchain             [[= $::HandlePoolPolicy{16, 16, 16}]]        = 14, /**< Presentation swapchain. */
+        DeviceMemory          [[= $::HandlePoolPolicy{1'024, 64, 64}]]     = 15, /**< Explicit device-memory allocation. */
+        DescriptorLayout      [[= $::HandlePoolPolicy{4'096, 256, 256}]]   = 16, /**< Descriptor layout resource. */
+        DescriptorSet         [[= $::HandlePoolPolicy{32'768, 256, 256}]]  = 17, /**< Descriptor set resource. */
+        CommandBuffer         [[= $::HandlePoolPolicy{512, 64, 64}]]       = 18, /**< Command buffer resource. */
+        CommandPool           [[= $::HandlePoolPolicy{64, 16, 16}]]        = 19  /**< Command pool resource. */
         // clang-format on
     };
 
@@ -97,8 +103,8 @@ namespace Sora::Render {
          * @return Annotated pool policy.
          */
         template<HandleKind kind>
-        inline constexpr HandlePoolPolicy HandlePoolPolicyOf =
-            Sora::$::GetSingle<HandlePoolPolicy>(Sora::Meta::GetEnumeratorMetaOf(kind));
+        inline constexpr $::HandlePoolPolicy HandlePoolPolicyOf =
+            Sora::$::GetSingle<$::HandlePoolPolicy>(Sora::Meta::GetEnumeratorMetaOf(kind));
 
     } // namespace Traits
 
@@ -274,3 +280,28 @@ namespace Sora::Render {
     static_assert(alignof(BufferHandle) == alignof(uint64_t));
 
 } // namespace Sora::Render
+
+namespace Sora {
+
+    namespace $::Render {
+
+        using Sora::Render::$::HandlePoolPolicy;
+
+    } // namespace $::Render
+
+    namespace Traits::Render {
+
+        using Sora::Render::Traits::HandleKindOf;
+        using Sora::Render::Traits::HandleOf;
+        using Sora::Render::Traits::HandlePoolPolicyOf;
+
+    } // namespace Traits::Render
+
+    namespace Concept::Render {
+
+        using Sora::Render::Concept::PooledHandle;
+        using Sora::Render::Concept::PooledHandleKind;
+
+    } // namespace Concept::Render
+
+} // namespace Sora
