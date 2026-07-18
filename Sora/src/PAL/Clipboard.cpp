@@ -5,6 +5,7 @@
  */
 
 #include <Sora/Core/PAL/Clipboard.h>
+#include <Sora/Core/PAL/SystemAPI.h>
 #include <Sora/Core/Unicode.h>
 #include <Sora/Platform.h>
 
@@ -12,12 +13,6 @@
 #include <cstring>
 #include <limits>
 #include <utility>
-
-#ifdef PLATFORM_WINDOWS
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <windows.h>
-#endif
 
 namespace Sora::PAL::Clipboard {
 
@@ -45,12 +40,16 @@ namespace Sora::PAL::Clipboard {
 
             /** @brief Open the clipboard with bounded backoff for ordinary cross-process contention. */
             [[nodiscard]] static Result<ClipboardSession> Open() {
-                constexpr DWORD retryDelaysMilliseconds[] = {0, 1, 2, 4};
-                for (DWORD delay : retryDelaysMilliseconds) {
+                const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                if (api.sleep == nullptr || api.openClipboard == nullptr || api.closeClipboard == nullptr) {
+                    return std::unexpected(ErrorCode::NotSupported);
+                }
+                constexpr WindowsSystem::DWord retryDelaysMilliseconds[] = {0, 1, 2, 4};
+                for (WindowsSystem::DWord delay : retryDelaysMilliseconds) {
                     if (delay != 0) {
-                        ::Sleep(delay);
+                        api.sleep(delay);
                     }
-                    if (::OpenClipboard(nullptr) != 0) {
+                    if (api.openClipboard(nullptr) != 0) {
                         ClipboardSession session;
                         session.open_ = true;
                         return session;
@@ -64,7 +63,8 @@ namespace Sora::PAL::Clipboard {
                 if (!open_) {
                     return {};
                 }
-                if (::CloseClipboard() == 0) {
+                const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                if (api.closeClipboard == nullptr || api.closeClipboard() == 0) {
                     return std::unexpected(ErrorCode::ClipboardNativeFailure);
                 }
                 open_ = false;
@@ -75,7 +75,10 @@ namespace Sora::PAL::Clipboard {
             void CloseIgnoringError() noexcept {
                 if (open_) {
                     open_ = false;
-                    ::CloseClipboard();
+                    const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                    if (api.closeClipboard != nullptr) {
+                        api.closeClipboard();
+                    }
                 }
             }
 
@@ -85,7 +88,7 @@ namespace Sora::PAL::Clipboard {
         /** @brief Movable global-memory allocation that frees storage until ownership transfers to the clipboard. */
         class OwnedGlobalMemory {
         public:
-            explicit OwnedGlobalMemory(HGLOBAL handle) noexcept : handle_{handle} {}
+            explicit OwnedGlobalMemory(WindowsSystem::GlobalMemory handle) noexcept : handle_{handle} {}
             OwnedGlobalMemory(const OwnedGlobalMemory&) = delete;
             OwnedGlobalMemory& operator=(const OwnedGlobalMemory&) = delete;
 
@@ -101,24 +104,26 @@ namespace Sora::PAL::Clipboard {
 
             ~OwnedGlobalMemory() { Reset(); }
 
-            [[nodiscard]] HGLOBAL Get() const noexcept { return handle_; }
-            [[nodiscard]] HGLOBAL Release() noexcept { return std::exchange(handle_, nullptr); }
+            [[nodiscard]] WindowsSystem::GlobalMemory Get() const noexcept { return handle_; }
+            [[nodiscard]] WindowsSystem::GlobalMemory Release() noexcept { return std::exchange(handle_, nullptr); }
 
         private:
             void Reset() noexcept {
                 if (handle_ != nullptr) {
-                    ::GlobalFree(handle_);
+                    const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                    if (api.globalFree != nullptr) {
+                        api.globalFree(handle_);
+                    }
                     handle_ = nullptr;
                 }
             }
 
-            HGLOBAL handle_ = nullptr;
+            WindowsSystem::GlobalMemory handle_ = nullptr;
         };
 
         /** @brief Locked view of global memory with checked explicit unlock and destructor fallback. */
         class GlobalMemoryLock {
         public:
-            GlobalMemoryLock(HGLOBAL handle, void* data) noexcept : handle_{handle}, data_{data} {}
             GlobalMemoryLock(const GlobalMemoryLock&) = delete;
             GlobalMemoryLock& operator=(const GlobalMemoryLock&) = delete;
 
@@ -137,12 +142,17 @@ namespace Sora::PAL::Clipboard {
             ~GlobalMemoryLock() { UnlockIgnoringError(); }
 
             /** @brief Lock @p handle and report failure without retaining platform diagnostics. */
-            [[nodiscard]] static Result<GlobalMemoryLock> Lock(HGLOBAL handle) {
-                void* data = ::GlobalLock(handle);
+            [[nodiscard]] static Result<GlobalMemoryLock> Lock(WindowsSystem::GlobalMemory handle) {
+                const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                if (api.globalLock == nullptr || api.globalUnlock == nullptr || api.setLastError == nullptr ||
+                    api.getLastError == nullptr) {
+                    return std::unexpected(ErrorCode::NotSupported);
+                }
+                void* data = api.globalLock(handle);
                 if (data == nullptr) {
                     return std::unexpected(ErrorCode::ClipboardNativeFailure);
                 }
-                return GlobalMemoryLock{handle, data};
+                return GlobalMemoryLock{handle, LockedData{data}};
             }
 
             [[nodiscard]] void* Data() const noexcept { return data_; }
@@ -152,8 +162,9 @@ namespace Sora::PAL::Clipboard {
                 if (data_ == nullptr) {
                     return {};
                 }
-                ::SetLastError(ERROR_SUCCESS);
-                if (::GlobalUnlock(handle_) == 0 && ::GetLastError() != ERROR_SUCCESS) {
+                const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                api.setLastError(WindowsSystem::kErrorSuccess);
+                if (api.globalUnlock(handle_) == 0 && api.getLastError() != WindowsSystem::kErrorSuccess) {
                     return std::unexpected(ErrorCode::ClipboardNativeFailure);
                 }
                 data_ = nullptr;
@@ -162,26 +173,40 @@ namespace Sora::PAL::Clipboard {
             }
 
         private:
+            struct LockedData {
+                void* value;
+            };
+
+            GlobalMemoryLock(WindowsSystem::GlobalMemory handle, LockedData data) noexcept
+                : handle_{handle}, data_{data.value} {}
+
             void UnlockIgnoringError() noexcept {
                 if (data_ != nullptr) {
                     data_ = nullptr;
-                    ::GlobalUnlock(handle_);
+                    const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+                    if (api.globalUnlock != nullptr) {
+                        api.globalUnlock(handle_);
+                    }
                     handle_ = nullptr;
                 }
             }
 
-            HGLOBAL handle_ = nullptr;
+            WindowsSystem::GlobalMemory handle_ = nullptr;
             void* data_ = nullptr;
         };
 
         /** @brief Return the bounded byte size of a clipboard global-memory object. */
-        [[nodiscard]] Result<SIZE_T> GlobalMemorySize(HGLOBAL handle) {
-            ::SetLastError(ERROR_SUCCESS);
-            const SIZE_T size = ::GlobalSize(handle);
+        [[nodiscard]] Result<WindowsSystem::Size> GlobalMemorySize(WindowsSystem::GlobalMemory handle) {
+            const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+            if (api.setLastError == nullptr || api.getLastError == nullptr || api.globalSize == nullptr) {
+                return std::unexpected(ErrorCode::NotSupported);
+            }
+            api.setLastError(WindowsSystem::kErrorSuccess);
+            const WindowsSystem::Size size = api.globalSize(handle);
             if (size != 0) {
                 return size;
             }
-            if (::GetLastError() != ERROR_SUCCESS) {
+            if (api.getLastError() != WindowsSystem::kErrorSuccess) {
                 return std::unexpected(ErrorCode::ClipboardNativeFailure);
             }
             return std::unexpected(ErrorCode::InvalidClipboardData);
@@ -192,20 +217,24 @@ namespace Sora::PAL::Clipboard {
 
     Result<std::optional<std::string>> ReadText() {
 #ifdef PLATFORM_WINDOWS
+        const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+        if (api.isClipboardFormatAvailable == nullptr || api.getClipboardData == nullptr) {
+            return std::unexpected(ErrorCode::NotSupported);
+        }
         auto opened = ClipboardSession::Open();
         if (!opened) {
             return std::unexpected(opened.error());
         }
         ClipboardSession session = std::move(*opened);
 
-        if (::IsClipboardFormatAvailable(CF_UNICODETEXT) == 0) {
+        if (api.isClipboardFormatAvailable(WindowsSystem::kUnicodeTextClipboardFormat) == 0) {
             if (auto closed = session.Close(); !closed) {
                 return std::unexpected(closed.error());
             }
             return std::optional<std::string>{};
         }
 
-        HGLOBAL handle = static_cast<HGLOBAL>(::GetClipboardData(CF_UNICODETEXT));
+        WindowsSystem::GlobalMemory handle = api.getClipboardData(WindowsSystem::kUnicodeTextClipboardFormat);
         if (handle == nullptr) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
@@ -246,17 +275,22 @@ namespace Sora::PAL::Clipboard {
     VoidResult WriteText(std::string_view text) {
 #ifdef PLATFORM_WINDOWS
         static_assert(sizeof(wchar_t) == sizeof(uint16_t));
+        const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+        if (api.globalAllocate == nullptr || api.globalFree == nullptr || api.emptyClipboard == nullptr ||
+            api.setClipboardData == nullptr) {
+            return std::unexpected(ErrorCode::NotSupported);
+        }
         auto wide = Unicode::Utf8ToWide(text);
         if (!wide) {
             return std::unexpected(wide.error());
         }
         if (wide->size() == std::numeric_limits<size_t>::max() ||
-            wide->size() + 1 > std::numeric_limits<SIZE_T>::max() / sizeof(wchar_t)) {
+            wide->size() + 1 > std::numeric_limits<WindowsSystem::Size>::max() / sizeof(wchar_t)) {
             return std::unexpected(ErrorCode::ClipboardTextTooLarge);
         }
 
-        const SIZE_T byteSize = (wide->size() + 1) * sizeof(wchar_t);
-        HGLOBAL rawMemory = ::GlobalAlloc(GMEM_MOVEABLE, byteSize);
+        const WindowsSystem::Size byteSize = (wide->size() + 1) * sizeof(wchar_t);
+        WindowsSystem::GlobalMemory rawMemory = api.globalAllocate(WindowsSystem::kMovableGlobalMemory, byteSize);
         if (rawMemory == nullptr) {
             return std::unexpected(ErrorCode::OutOfMemory);
         }
@@ -276,10 +310,10 @@ namespace Sora::PAL::Clipboard {
             return std::unexpected(opened.error());
         }
         ClipboardSession session = std::move(*opened);
-        if (::EmptyClipboard() == 0) {
+        if (api.emptyClipboard() == 0) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
-        if (::SetClipboardData(CF_UNICODETEXT, memory.Get()) == nullptr) {
+        if (api.setClipboardData(WindowsSystem::kUnicodeTextClipboardFormat, memory.Get()) == nullptr) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
         static_cast<void>(memory.Release());
@@ -292,12 +326,16 @@ namespace Sora::PAL::Clipboard {
 
     Result<bool> HasText() {
 #ifdef PLATFORM_WINDOWS
+        const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+        if (api.isClipboardFormatAvailable == nullptr) {
+            return std::unexpected(ErrorCode::NotSupported);
+        }
         auto opened = ClipboardSession::Open();
         if (!opened) {
             return std::unexpected(opened.error());
         }
         ClipboardSession session = std::move(*opened);
-        const bool available = ::IsClipboardFormatAvailable(CF_UNICODETEXT) != 0;
+        const bool available = api.isClipboardFormatAvailable(WindowsSystem::kUnicodeTextClipboardFormat) != 0;
         if (auto closed = session.Close(); !closed) {
             return std::unexpected(closed.error());
         }
@@ -309,12 +347,16 @@ namespace Sora::PAL::Clipboard {
 
     VoidResult Clear() {
 #ifdef PLATFORM_WINDOWS
+        const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
+        if (api.emptyClipboard == nullptr) {
+            return std::unexpected(ErrorCode::NotSupported);
+        }
         auto opened = ClipboardSession::Open();
         if (!opened) {
             return std::unexpected(opened.error());
         }
         ClipboardSession session = std::move(*opened);
-        if (::EmptyClipboard() == 0) {
+        if (api.emptyClipboard() == 0) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
         return session.Close();

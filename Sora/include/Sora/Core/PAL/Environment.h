@@ -2,6 +2,31 @@
  * @file Environment.h
  * @brief Native process-environment access, immutable snapshots, and transactional bulk mutation.
  * @ingroup PAL
+ *
+ * @details PAL models the process environment as a flat set of UTF-8 @c (name,value) pairs. A name must be non-empty,
+ * contain neither @c '=' nor NUL, and be valid UTF-8. A value may be empty and may contain @c '=', but must contain no
+ * NUL and must be valid UTF-8. An existing empty value is therefore distinct from an absent variable:
+ *
+ * - @c NAME= represents the present pair @c ("NAME","").
+ * - No @c NAME entry represents absence and is returned as @c std::nullopt.
+ *
+ * PAL accepts names and values, not shell assignment syntax. It does not parse @c export, quoting, @c $NAME,
+ * @c %NAME%, or command-line expansion. Conceptually, each pair is translated to the native @c NAME=VALUE form:
+ *
+ * - On Windows, UTF-8 names and values are converted to UTF-16 and passed to the wide environment APIs. Snapshots are
+ *   decoded from the double-NUL-terminated UTF-16 environment block. Names compare case-insensitively; per-drive
+ *   current-directory pseudo-entries whose native names begin with @c '=' are intentionally omitted.
+ * - On POSIX systems, validated UTF-8 bytes are passed unchanged to @c getenv, @c setenv, and @c unsetenv. Snapshots
+ *   decode the NUL-terminated @c char* entries in @c environ. Names compare case-sensitively.
+ *
+ * Hierarchical configuration paths are encoded above PAL by @ref Sora::Configuration::EncodeEnvironmentName: every
+ * segment becomes upper-snake case and levels are separated by two underscores. For example, scope @c sora and path
+ * @c renderer.backend.device become the native pair
+ * @c SORA__RENDERER__BACKEND__DEVICE=discrete. PAL receives that encoded name unchanged:
+ *
+ * @code{.cpp}
+ * auto written = Sora::PAL::WriteEnvironmentVariable("SORA__RENDERER__BACKEND__DEVICE", "discrete");
+ * @endcode
  */
 #pragma once
 

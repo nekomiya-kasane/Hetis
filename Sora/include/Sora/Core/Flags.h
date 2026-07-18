@@ -133,6 +133,13 @@ namespace Sora {
         return static_cast<std::make_unsigned_t<std::underlying_type_t<E>>>(e) == 0;
     }
 
+    /** @brief Return whether @p set contains no bits outside the reflected enumerator mask. */
+    template<Concept::BitfieldEnum E>
+    [[nodiscard]] constexpr bool IsValidFlagSet(E set) noexcept {
+        using U = std::make_unsigned_t<std::underlying_type_t<E>>;
+        return (static_cast<U>(set) & ~static_cast<U>(Traits::BitfieldMask<E>)) == 0;
+    }
+
     /**
      * @brief Number of set bits.
      */

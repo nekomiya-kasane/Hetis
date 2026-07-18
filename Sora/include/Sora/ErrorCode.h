@@ -80,6 +80,7 @@ namespace Sora {
         ThreadNameTooLong = 0x0025,       ///< A thread name exceeds the native platform limit.
         ThreadNativeFailure = 0x0026,     ///< A native thread metadata or introspection operation failed.
         InvalidNativeThreadText = 0x0027, ///< Native thread metadata is not valid Unicode text.
+        AlreadyExists = 0x0028,           ///< Atomic creation failed because the destination already exists.
         /** @} */
 
         /** @name Core Rendering (0x1000 – 0x1FFF) @{ */

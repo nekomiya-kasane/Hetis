@@ -20,3 +20,14 @@ TEST_CASE("ASCII case-insensitive comparison provides a total lexical order", "[
     STATIC_REQUIRE(Sora::Ascii::CompareIgnoreCase("beta", "ALPHA") > 0);
     STATIC_REQUIRE(Sora::Ascii::CompareIgnoreCase("alpha", "alphabet") < 0);
 }
+
+TEST_CASE("ASCII truncation preserves its exact byte bound", "[Sora.Core.StringUtils]") {
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("short", 5) == "short");
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("short", 6) == "short");
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("long text", 0).empty());
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("long text", 2) == "..");
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("long text", 3) == "...");
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("long text", 4) == "l...");
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("long text", 5, "~") == "long~");
+    STATIC_REQUIRE(Sora::Ascii::String::Truncate("long text", 4, "") == "long");
+}
