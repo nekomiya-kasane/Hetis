@@ -53,7 +53,16 @@
 #include <utility>
 #include <vector>
 
+#if defined(NO_UNIQUE_ADDRESS)
+#    pragma push_macro("NO_UNIQUE_ADDRESS")
+#    undef NO_UNIQUE_ADDRESS
+#    define SORA_EVENT_PORT_RESTORE_NO_UNIQUE_ADDRESS
+#endif
 #include <stdexec/execution.hpp>
+#if defined(SORA_EVENT_PORT_RESTORE_NO_UNIQUE_ADDRESS)
+#    pragma pop_macro("NO_UNIQUE_ADDRESS")
+#    undef SORA_EVENT_PORT_RESTORE_NO_UNIQUE_ADDRESS
+#endif
 
 namespace Sora {
 
@@ -302,14 +311,14 @@ namespace Sora {
         /** @brief Type-list of event payloads emitted by @p T after inherited declarations are merged. */
         template<typename T>
             requires std::is_class_v<std::remove_cvref_t<T>>
-        using EmittedEventsOf =
-            typename [:Sora::Detail::DeclaredTypeListInfoOf<^^Meta::IsEventTypeList>(^^std::remove_cvref_t<T>, "Emits"):];
+        using EmittedEventsOf = typename
+            [:Sora::Detail::DeclaredTypeListInfoOf<^^Meta::IsEventTypeList>(^^std::remove_cvref_t<T>, "Emits"):];
 
         /** @brief Type-list of event payloads accepted by @p T after inherited declarations are merged. */
         template<typename T>
             requires std::is_class_v<std::remove_cvref_t<T>>
-        using AcceptedEventsOf =
-            typename [:Sora::Detail::DeclaredTypeListInfoOf<^^Meta::IsEventTypeList>(^^std::remove_cvref_t<T>, "Accepts"):];
+        using AcceptedEventsOf = typename
+            [:Sora::Detail::DeclaredTypeListInfoOf<^^Meta::IsEventTypeList>(^^std::remove_cvref_t<T>, "Accepts"):];
 
         /** @brief Type-list of callback tags allowed by @p T after inherited declarations are merged. */
         template<typename T>

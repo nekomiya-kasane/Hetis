@@ -1,4 +1,4 @@
-﻿
+
 /**
  * @file Module.cpp
  * @brief Platform implementation of module image inspection, dynamic loading, and symbol lookup.
@@ -6,7 +6,7 @@
  */
 
 #include <Sora/Core/PAL/Module.h>
-#include <Sora/Core/PAL/NativeError.h>
+#include <Sora/Core/PAL/File.h>
 #include <Sora/Core/PAL/Path.h>
 
 #include <Sora/Core/Wire.h>
@@ -16,16 +16,20 @@
 #include <algorithm>
 #include <array>
 #include <expected>
-#include <fstream>
 #include <functional>
-#include <optional>
+#include <limits>
+#include <new>
 #include <utility>
 
-#ifdef _WIN32
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <windows.h>
-#else
+#if defined(PLATFORM_WINDOWS)
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
+#    include <Windows.h>
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
 #    include <dlfcn.h>
 #endif
 
@@ -51,16 +55,11 @@ namespace Sora::PAL {
 
     namespace {
 
-        /** @brief Native-loader failure retained without formatting OS messages on the success path. */
-        struct NativeLoadFailure {
-            NativeError error;
-            std::string diagnostic;
-        };
-
-        using NativeLoadResult = std::expected<void*, NativeLoadFailure>;
+        using NativeLoadResult = Result<void*>;
 
         /** @brief Add @p candidate if it has not already appeared. */
-        void AddCandidate(std::vector<std::string>& candidates, std::string candidate) {
+        template<typename Candidate>
+        void AddCandidate(std::vector<Candidate>& candidates, Candidate candidate) {
             if (!candidate.empty() && !std::ranges::contains(candidates, candidate)) {
                 candidates.push_back(std::move(candidate));
             }
@@ -106,34 +105,28 @@ namespace Sora::PAL {
             return decorated;
         }
 
-        /** @brief Return a stable cache spelling for @p candidate and loader policy. */
-        [[nodiscard]] std::string CacheKey(std::string_view candidate, ModuleLoadOptions options) {
-            std::error_code ec;
-            auto path = std::filesystem::weakly_canonical(std::filesystem::path{candidate}, ec);
-            std::string key = ec ? std::string{candidate} : path.string();
-            key += '|';
-            key += static_cast<char>('0' + static_cast<int>(options.bindMode));
-            key += static_cast<char>('0' + static_cast<int>(options.visibility));
-            key += static_cast<char>(options.unloadOnDestroy ? '1' : '0');
-            return key;
-        }
-
         /** @brief Read an entire file as bytes. */
         [[nodiscard]] Result<std::vector<std::byte>> ReadFileBytes(const std::filesystem::path& path) {
-            std::ifstream file{path, std::ios::binary | std::ios::ate};
+            auto file = File::Open(path);
             if (!file) {
-                return std::unexpected{ErrorCode::ModuleLoadFailed};
+                return std::unexpected{file.error()};
             }
-            const std::streamoff size = file.tellg();
-            if (size < 0) {
-                return std::unexpected{ErrorCode::ModuleLoadFailed};
+            const auto size = file->Size();
+            if (!size) {
+                return std::unexpected{size.error()};
             }
-            std::vector<std::byte> bytes(static_cast<size_t>(size));
-            file.seekg(0, std::ios::beg);
-            if (!bytes.empty() && !file.read(reinterpret_cast<char*>(bytes.data()), size)) {
-                return std::unexpected{ErrorCode::ModuleLoadFailed};
+            if (*size > std::numeric_limits<std::size_t>::max()) {
+                return std::unexpected{ErrorCode::OutOfRange};
             }
-            return bytes;
+            try {
+                std::vector<std::byte> bytes(static_cast<std::size_t>(*size));
+                if (auto read = file->ReadAllAt(bytes, 0); !read) {
+                    return std::unexpected{read.error()};
+                }
+                return bytes;
+            } catch (const std::bad_alloc&) {
+                return std::unexpected{ErrorCode::OutOfMemory};
+            }
         }
 
         using Sora::Wire::HasRange;
@@ -156,27 +149,23 @@ namespace Sora::PAL {
             return littleEndian ? ReadLe<T>(bytes, offset) : ReadBe<T>(bytes, offset);
         }
 
+        struct FixedTextField {
+            uint64_t offset;
+            size_t size;
+        };
+
         /** @brief Decode a fixed-width, NUL-padded section name. */
-        [[nodiscard]] std::string FixedName(std::span<const std::byte> bytes, uint64_t offset, size_t size) {
+        [[nodiscard]] std::string FixedName(std::span<const std::byte> bytes, FixedTextField field) {
             std::string name;
-            name.reserve(size);
-            for (size_t i = 0; i < size; ++i) {
-                char c = static_cast<char>(std::to_integer<uint8_t>(bytes[static_cast<size_t>(offset) + i]));
+            name.reserve(field.size);
+            for (size_t i = 0; i < field.size; ++i) {
+                char c = static_cast<char>(std::to_integer<uint8_t>(bytes[static_cast<size_t>(field.offset) + i]));
                 if (c == '\0') {
                     break;
                 }
                 name.push_back(c);
             }
             return name;
-        }
-
-        /** @brief Build a byte span for a section range, clamping invalid zero-sized storage to an empty span. */
-        [[nodiscard]] std::span<const std::byte> SectionBytes(const std::vector<std::byte>& bytes, uint64_t offset,
-                                                              uint64_t size) noexcept {
-            if (!HasRange(bytes, offset, size) || size == 0) {
-                return {};
-            }
-            return {bytes.data() + static_cast<size_t>(offset), static_cast<size_t>(size)};
         }
 
         /** @brief Normalize PE section characteristics. */
@@ -232,11 +221,12 @@ namespace Sora::PAL {
                 const uint32_t rawSize = ReadLe<uint32_t>(bytes, base + 16);
                 const uint32_t rawOffset = ReadLe<uint32_t>(bytes, base + 20);
                 const uint32_t characteristics = ReadLe<uint32_t>(bytes, base + 36);
-                sections.push_back(SectionView{.name = FixedName(bytes, base, 8),
-                                               .bytes = SectionBytes(storage, rawOffset, rawSize),
-                                               .virtualAddress = virtualAddress,
-                                               .fileOffset = rawOffset,
-                                               .flags = PeFlags(characteristics)});
+                sections.push_back(SectionView{
+                    .name = FixedName(bytes, {.offset = base, .size = 8}),
+                    .bytes = Wire::Subspan(storage, rawOffset, rawSize).value_or(std::span<const std::byte>{}),
+                    .virtualAddress = virtualAddress,
+                    .fileOffset = rawOffset,
+                    .flags = PeFlags(characteristics)});
                 if (rawSize == 0 && virtualSize != 0) {
                     sections.back().flags = sections.back().flags | SectionFlag::Uninitialized;
                 }
@@ -244,19 +234,24 @@ namespace Sora::PAL {
             return {};
         }
 
+        struct ElfSectionMetadata {
+            uint64_t flags;
+            uint32_t type;
+        };
+
         /** @brief Normalize ELF section flags and type. */
-        [[nodiscard]] SectionFlag ElfFlags(uint64_t flags, uint32_t type) noexcept {
+        [[nodiscard]] SectionFlag ElfFlags(ElfSectionMetadata metadata) noexcept {
             SectionFlag result = SectionFlag::None;
-            if ((flags & 0x2u) != 0) {
+            if ((metadata.flags & 0x2u) != 0) {
                 result = result | SectionFlag::Alloc;
             }
-            if ((flags & 0x1u) != 0) {
+            if ((metadata.flags & 0x1u) != 0) {
                 result = result | SectionFlag::Write;
             }
-            if ((flags & 0x4u) != 0) {
+            if ((metadata.flags & 0x4u) != 0) {
                 result = result | SectionFlag::Execute | SectionFlag::Code;
             }
-            if (type == 8u) {
+            if (metadata.type == 8u) {
                 result = result | SectionFlag::Uninitialized;
             } else {
                 result = result | SectionFlag::Initialized | SectionFlag::Read;
@@ -348,12 +343,13 @@ namespace Sora::PAL {
                                              : ReadEndian<uint32_t>(bytes, base + 16, littleEndian);
                 const uint64_t size = is64 ? ReadEndian<uint64_t>(bytes, base + 32, littleEndian)
                                            : ReadEndian<uint32_t>(bytes, base + 20, littleEndian);
-                sections.push_back(SectionView{.name = ElfString(bytes, strOffset, strSize, nameOffset),
-                                               .bytes = type == 8u ? std::span<const std::byte>{}
-                                                                   : SectionBytes(storage, offset, size),
-                                               .virtualAddress = address,
-                                               .fileOffset = offset,
-                                               .flags = ElfFlags(flags, type)});
+                sections.push_back(SectionView{
+                    .name = ElfString(bytes, strOffset, strSize, nameOffset),
+                    .bytes = type == 8u ? std::span<const std::byte>{}
+                                        : Wire::Subspan(storage, offset, size).value_or(std::span<const std::byte>{}),
+                    .virtualAddress = address,
+                    .fileOffset = offset,
+                    .flags = ElfFlags({.flags = flags, .type = type})});
             }
             return {};
         }
@@ -421,11 +417,12 @@ namespace Sora::PAL {
                             is64 ? ReadLe<uint64_t>(bytes, base + 40) : ReadLe<uint32_t>(bytes, base + 36);
                         const uint32_t offset = ReadLe<uint32_t>(bytes, base + (is64 ? 48u : 40u));
                         const uint32_t attributes = ReadLe<uint32_t>(bytes, base + (is64 ? 68u : 56u));
-                        sections.push_back(SectionView{.name = FixedName(bytes, base, 16),
-                                                       .bytes = SectionBytes(storage, offset, size),
-                                                       .virtualAddress = address,
-                                                       .fileOffset = offset,
-                                                       .flags = MachOFlags(attributes)});
+                        sections.push_back(SectionView{
+                            .name = FixedName(bytes, {.offset = base, .size = 16}),
+                            .bytes = Wire::Subspan(storage, offset, size).value_or(std::span<const std::byte>{}),
+                            .virtualAddress = address,
+                            .fileOffset = offset,
+                            .flags = MachOFlags(attributes)});
                     }
                 }
                 command += cmdsize;
@@ -447,69 +444,122 @@ namespace Sora::PAL {
             return std::unexpected{ErrorCode::ModuleLoadFailed};
         }
 
-#ifdef PLATFORM_WINDOWS
-        /** @brief Convert UTF-8 or active-code-page text to a Windows UTF-16 string. */
-        [[nodiscard]] std::wstring ToWide(std::string_view text) {
-            if (text.empty()) {
-                return {};
-            }
-            UINT codePage = CP_UTF8;
-            DWORD flags = MB_ERR_INVALID_CHARS;
-            int size = ::MultiByteToWideChar(codePage, flags, text.data(), static_cast<int>(text.size()), nullptr, 0);
-            if (size <= 0) {
-                codePage = CP_ACP;
-                flags = 0;
-                size = ::MultiByteToWideChar(codePage, flags, text.data(), static_cast<int>(text.size()), nullptr, 0);
-            }
-            if (size <= 0) {
-                return {};
-            }
-            std::wstring result(static_cast<size_t>(size), L'\0');
-            ::MultiByteToWideChar(codePage, flags, text.data(), static_cast<int>(text.size()), result.data(), size);
-            return result;
+#if defined(PLATFORM_WINDOWS)
+        struct NativeModuleAPI {
+            using FreeFunction = decltype(&::FreeLibrary);
+
+            FreeFunction free = nullptr;
+        };
+
+        /** @brief Resolve non-bootstrap Win32 loader operations once. */
+        [[nodiscard]] const NativeModuleAPI& LoadNativeModuleAPI() noexcept {
+            static const NativeModuleAPI api = [] {
+                const HMODULE kernel = ::LoadLibraryW(L"kernel32.dll");
+                return NativeModuleAPI{
+                    .free = kernel != nullptr ? reinterpret_cast<NativeModuleAPI::FreeFunction>(
+                                                    ::GetProcAddress(kernel, "FreeLibrary"))
+                                              : nullptr,
+                };
+            }();
+            return api;
+        }
+
+        /** @brief Observe the current process image without acquiring unload ownership. */
+        [[nodiscard]] void* CurrentProcessNativeHandle() noexcept {
+            return reinterpret_cast<void*>(::GetModuleHandleW(nullptr));
         }
 
         /** @brief Load @p candidate through the Win32 loader. */
-        [[nodiscard]] NativeLoadResult TryLoadNative(std::string_view candidate, ModuleLoadOptions) {
-            std::wstring wide = ToWide(candidate);
-            if (wide.empty()) {
-                return std::unexpected{NativeLoadFailure{
-                    .diagnostic = "module name is empty or cannot be converted to a native Windows path"}};
-            }
-            if (HMODULE handle = ::LoadLibraryW(wide.c_str())) {
+        [[nodiscard]] NativeLoadResult TryLoadNative(const std::filesystem::path& candidate, ModuleLoadOptions) {
+            if (HMODULE handle = ::LoadLibraryW(candidate.c_str())) {
                 return reinterpret_cast<void*>(handle);
             }
-            return std::unexpected{NativeLoadFailure{.error = CaptureLastNativeError()}};
+            return std::unexpected{ErrorCode::ModuleLoadFailed};
         }
 
         /** @brief Close a Win32 module handle. */
         void CloseNative(void* handle) noexcept {
-            if (handle != nullptr) {
-                ::FreeLibrary(reinterpret_cast<HMODULE>(handle));
+            const NativeModuleAPI& api = LoadNativeModuleAPI();
+            if (handle != nullptr && api.free != nullptr) {
+                api.free(reinterpret_cast<HMODULE>(handle));
             }
         }
-#else
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+        struct NativeModuleAPI {
+            using OpenFunction = decltype(&::dlopen);
+            using CloseFunction = decltype(&::dlclose);
+
+            OpenFunction open = nullptr;
+            CloseFunction close = nullptr;
+        };
+
+        /** @brief Resolve non-bootstrap POSIX loader operations once. */
+        [[nodiscard]] const NativeModuleAPI& LoadNativeModuleAPI() noexcept {
+            static const NativeModuleAPI api{
+                .open = reinterpret_cast<NativeModuleAPI::OpenFunction>(::dlsym(RTLD_DEFAULT, "dlopen")),
+                .close = reinterpret_cast<NativeModuleAPI::CloseFunction>(::dlsym(RTLD_DEFAULT, "dlclose")),
+            };
+            return api;
+        }
+
+        /** @brief Acquire a process-lifetime handle spanning the current POSIX global symbol scope. */
+        [[nodiscard]] void* CurrentProcessNativeHandle() noexcept {
+            const NativeModuleAPI& api = LoadNativeModuleAPI();
+            return api.open != nullptr ? api.open(nullptr, RTLD_LAZY | RTLD_LOCAL) : nullptr;
+        }
+
         /** @brief Load @p candidate through the POSIX dynamic loader. */
-        [[nodiscard]] NativeLoadResult TryLoadNative(std::string_view candidate, ModuleLoadOptions options) {
+        [[nodiscard]] NativeLoadResult TryLoadNative(const std::filesystem::path& candidate,
+                                                     ModuleLoadOptions options) {
+            const NativeModuleAPI& api = LoadNativeModuleAPI();
+            if (api.open == nullptr) {
+                return std::unexpected{ErrorCode::ModuleLoadFailed};
+            }
             int flags = options.bindMode == ModuleBindMode::Now ? RTLD_NOW : RTLD_LAZY;
             flags |= options.visibility == ModuleVisibility::Global ? RTLD_GLOBAL : RTLD_LOCAL;
-            std::string name{candidate};
-            ::dlerror();
-            if (void* handle = ::dlopen(name.c_str(), flags)) {
+            if (void* handle = api.open(candidate.c_str(), flags)) {
                 return handle;
             }
-            const char* error = ::dlerror();
-            return std::unexpected{NativeLoadFailure{
-                .diagnostic = error != nullptr ? std::string{error} : "unknown dynamic-loader error"}};
+            return std::unexpected{ErrorCode::ModuleLoadFailed};
         }
 
         /** @brief Close a POSIX module handle. */
         void CloseNative(void* handle) noexcept {
-            if (handle != nullptr) {
-                ::dlclose(handle);
+            const NativeModuleAPI& api = LoadNativeModuleAPI();
+            if (handle != nullptr && api.close != nullptr) {
+                api.close(handle);
             }
         }
+#else
+        /** @brief Report that dynamic module loading is unavailable on this platform. */
+        [[nodiscard]] NativeLoadResult TryLoadNative(const std::filesystem::path&, ModuleLoadOptions) {
+            return std::unexpected{ErrorCode::ModuleLoadFailed};
+        }
+
+        /** @brief Report that the current process has no dynamic module view on this platform. */
+        [[nodiscard]] void* CurrentProcessNativeHandle() noexcept { return nullptr; }
+
+        /** @brief Ignore a native handle on an unsupported platform. */
+        void CloseNative(void*) noexcept {}
 #endif
+
+        /** @brief Close a newly loaded native handle unless ownership is transferred to a Module. */
+        class NativeModuleGuard {
+        public:
+            explicit NativeModuleGuard(void* handle) noexcept : handle_{handle} {}
+
+            NativeModuleGuard(const NativeModuleGuard&) = delete;
+            NativeModuleGuard& operator=(const NativeModuleGuard&) = delete;
+
+            ~NativeModuleGuard() { CloseNative(handle_); }
+
+            [[nodiscard]] void* Get() const noexcept { return handle_; }
+
+            void Release() noexcept { handle_ = nullptr; }
+
+        private:
+            void* handle_ = nullptr;
+        };
 
     } // namespace
 
@@ -523,23 +573,39 @@ namespace Sora::PAL {
 
     namespace Detail {
 
-#ifdef PLATFORM_WINDOWS
         void* FindNativeSymbol(void* handle, std::string_view symbol) noexcept {
             if (handle == nullptr || symbol.empty()) {
                 return nullptr;
             }
-            std::string name{symbol};
-            return reinterpret_cast<void*>(::GetProcAddress(reinterpret_cast<HMODULE>(handle), name.c_str()));
-        }
-#else
-        void* FindNativeSymbol(void* handle, std::string_view symbol) noexcept {
-            if (handle == nullptr || symbol.empty()) {
-                return nullptr;
-            }
-            std::string name{symbol};
-            return ::dlsym(handle, name.c_str());
-        }
+#if !defined(PLATFORM_WINDOWS) && !defined(PLATFORM_LINUX) && !defined(PLATFORM_MACOS)
+            static_cast<void>(handle);
+            return nullptr;
 #endif
+
+            constexpr size_t kStackNameCapacity = 256;
+            std::array<char, kStackNameCapacity> stackName{};
+            std::string ownedName;
+            const char* nativeName = nullptr;
+            if (symbol.size() < stackName.size()) {
+                std::ranges::copy(symbol, stackName.begin());
+                nativeName = stackName.data();
+            } else {
+                try {
+                    ownedName.assign(symbol);
+                    nativeName = ownedName.c_str();
+                } catch (...) {
+                    return nullptr;
+                }
+            }
+
+#if defined(PLATFORM_WINDOWS)
+            return reinterpret_cast<void*>(::GetProcAddress(reinterpret_cast<HMODULE>(handle), nativeName));
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+            return ::dlsym(handle, nativeName);
+#else
+            return nullptr;
+#endif
+        }
 
     } // namespace Detail
     Module::Module(void* handle, std::filesystem::path path, bool unloadOnDestroy) noexcept
@@ -551,6 +617,21 @@ namespace Sora::PAL {
         }
     }
 
+    const ModulePtr& CurrentProcessModule() noexcept {
+        static const ModulePtr module = [] {
+            void* handle = CurrentProcessNativeHandle();
+            if (handle == nullptr) {
+                return ModulePtr{};
+            }
+            try {
+                return ModulePtr{new Module{handle, {}, false}};
+            } catch (...) {
+                return ModulePtr{};
+            }
+        }();
+        return module;
+    }
+
     ModuleLoader& ModuleLoader::Default() noexcept {
         static ModuleLoader loader;
         return loader;
@@ -558,8 +639,8 @@ namespace Sora::PAL {
 
     ModuleLoader::ModuleLoader() = default;
 
-    std::vector<std::string> ModuleLoader::GenerateCandidates(std::span<const std::string_view> names,
-                                                              ModuleLoadOptions options) const {
+    std::vector<std::filesystem::path> ModuleLoader::GenerateCandidates(std::span<const std::string_view> names,
+                                                                        ModuleLoadOptions options) const {
         std::vector<std::filesystem::path> roots;
         {
             std::scoped_lock lock{mutex_};
@@ -567,53 +648,44 @@ namespace Sora::PAL {
         }
         roots.insert_range(roots.end(), options.searchPaths);
 
-        std::vector<std::string> candidates;
+        std::vector<std::filesystem::path> candidates;
         candidates.reserve(names.size() * std::max<size_t>(roots.size() + 1u, 1u) * 8u);
         for (std::string_view name : names) {
             std::vector<std::string> decorated = DecorateName(name, options);
             const bool exact = options.nameKind == ModuleNameKind::ExactPath || HasPathSeparator(name);
             for (const std::string& candidate : decorated) {
+                const std::u8string utf8Candidate{candidate.begin(), candidate.end()};
+                const std::filesystem::path nativeCandidate{utf8Candidate};
                 if (!exact) {
                     for (const std::filesystem::path& root : roots) {
-                        AddCandidate(candidates, (root / candidate).string());
+                        AddCandidate(candidates, root / nativeCandidate);
                     }
                 }
-                AddCandidate(candidates, candidate);
+                AddCandidate(candidates, nativeCandidate);
             }
         }
         return candidates;
     }
 
-    std::string ModuleLoadAttempt::Message() const {
-        if (!diagnostic.empty()) {
-            return diagnostic;
-        }
-        return nativeError.ToString();
-    }
-
-    std::string ModuleLoadError::Message() const {
-        if (attempts.empty()) {
-            return "no module candidates were generated";
-        }
-        std::string message = "failed to load module candidates:";
-        for (const ModuleLoadAttempt& attempt : attempts) {
-            message += "\n  ";
-            message += attempt.candidate;
-            message += ": ";
-            message += attempt.Message();
-        }
-        return message;
-    }
-
-    ModuleLoadResult ModuleLoader::Load(std::span<const std::string_view> names, ModuleLoadOptions options) {
+    Result<ModulePtr> ModuleLoader::Load(std::span<const std::string_view> names, ModuleLoadOptions options) {
         auto attempted = GenerateCandidates(names, options);
-        ModuleLoadError error;
 
-        for (const std::string& candidate : attempted) {
-            const std::string key = CacheKey(candidate, options);
+        for (const std::filesystem::path& candidate : attempted) {
+            CacheKey key;
 
             // 1. See if the module is already cached and return it if so.
             if (options.cachePolicy == ModuleCachePolicy::Shared) {
+                std::error_code error;
+                std::filesystem::path canonical = std::filesystem::weakly_canonical(candidate, error);
+                if (error) {
+                    canonical = candidate;
+                }
+                key = CacheKey{
+                    .path = std::move(canonical),
+                    .bindMode = options.bindMode,
+                    .visibility = options.visibility,
+                    .unloadOnDestroy = options.unloadOnDestroy,
+                };
                 std::scoped_lock lock{mutex_};
                 if (auto it = cache_.find(key); it != cache_.end()) {
                     if (ModulePtr cached = it->second.lock()) {
@@ -626,21 +698,23 @@ namespace Sora::PAL {
             // 2. Try to load the module from the native loader and cache it if successful.
             NativeLoadResult loaded = TryLoadNative(candidate, options);
             if (loaded) {
-                ModulePtr module{new Module{*loaded, std::filesystem::path{candidate}, options.unloadOnDestroy}};
+                NativeModuleGuard nativeHandle{*loaded};
+                Module* moduleObject = new Module{nativeHandle.Get(), candidate, options.unloadOnDestroy};
+                nativeHandle.Release();
+                ModulePtr module{moduleObject};
                 if (options.cachePolicy == ModuleCachePolicy::Shared) {
                     std::scoped_lock lock{mutex_};
+                    if (auto it = cache_.find(key); it != cache_.end()) {
+                        if (ModulePtr cached = it->second.lock()) {
+                            return cached;
+                        }
+                    }
                     cache_[key] = module;
                 }
                 return module;
             }
-            if (error.attempts.empty()) {
-                error.attempts.reserve(attempted.size());
-            }
-            error.attempts.push_back(ModuleLoadAttempt{.candidate = candidate,
-                                                       .nativeError = loaded.error().error,
-                                                       .diagnostic = std::move(loaded.error().diagnostic)});
         }
-        return std::unexpected{std::move(error)};
+        return std::unexpected{ErrorCode::ModuleLoadFailed};
     }
 
     Result<ModuleImage> ModuleLoader::OpenImage(const std::filesystem::path& path) const {
@@ -687,11 +761,11 @@ namespace Sora::PAL {
         std::erase_if(cache_, [](const auto& entry) { return entry.second.expired(); });
     }
 
-    ModuleLoadResult LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options) {
+    Result<ModulePtr> LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options) {
         return ModuleLoader::Default().Load(names, options);
     }
 
-    ModuleLoadResult LoadModule(std::initializer_list<std::string_view> names, ModuleLoadOptions options) {
+    Result<ModulePtr> LoadModule(std::initializer_list<std::string_view> names, ModuleLoadOptions options) {
         return LoadModule(std::span<const std::string_view>{names.begin(), names.size()}, options);
     }
 

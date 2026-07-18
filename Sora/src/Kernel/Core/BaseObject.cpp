@@ -1,5 +1,6 @@
 #include "Sora/Kernel/Core/BaseObject.h"
 #include "Sora/Kernel/Core/ClassTypes.h"
+#include "Sora/Kernel/Core/ComPtr.h"
 #include "Sora/Kernel/Core/IID.h"
 #include "Sora/Kernel/Core/MetaClass.h"
 #include "Sora/Kernel/Core/Registry.h"
@@ -22,6 +23,7 @@ namespace Sora::Kernel {
 
             ~ClosureState() noexcept {
                 if (weak) {
+                    std::scoped_lock weakLock(weak->mutex);
                     weak->nucleus.store(nullptr, std::memory_order_release);
                 }
 
@@ -38,10 +40,6 @@ namespace Sora::Kernel {
                 }
             }
 
-            void InvalidateWeakRef() noexcept {
-                std::scoped_lock lock(mutex);
-                weak->nucleus.store(nullptr, std::memory_order_release);
-            }
         };
 
         void BaseUnknownInternal::BindExtendee(BaseUnknown* object, BaseUnknown* extendee) noexcept {
@@ -376,8 +374,23 @@ namespace Sora::Kernel {
     WeakRef BaseUnknown::GetComponentWeakRef() {
         BaseUnknown* nucleus = Nucleus();
         Detail::ClosureState& state = Detail::BaseUnknownInternal::EnsureClosureState(nucleus);
-        state.weak->nucleus.store(nucleus, std::memory_order_release);
+        {
+            std::scoped_lock lock(state.weak->mutex);
+            state.weak->nucleus.store(nucleus, std::memory_order_release);
+        }
         return WeakRef{state.weak};
+    }
+
+    ComPtr<BaseUnknown> WeakRef::Lock() const noexcept {
+        if (!state_) {
+            return {};
+        }
+        std::scoped_lock lock(state_->mutex);
+        BaseUnknown* nucleus = state_->nucleus.load(std::memory_order_acquire);
+        if (!nucleus || !nucleus->TryRetain()) {
+            return {};
+        }
+        return ComPtr<BaseUnknown>::Adopt(nucleus);
     }
 
     void BaseUnknown::Retain() noexcept {
@@ -386,8 +399,21 @@ namespace Sora::Kernel {
         }
     }
 
+    bool BaseUnknown::TryRetain() noexcept {
+        return ComData::TryIncrement(data_);
+    }
+
     bool BaseUnknown::Release() noexcept {
+        Detail::ClosureState* state = Detail::BaseUnknownInternal::TryClosureState(this);
+        std::unique_lock<std::mutex> weakLock;
+        if (state && state->weak) {
+            weakLock = std::unique_lock{state->weak->mutex};
+        }
         if (ComData::TryDecrement(data_)) {
+            if (state && state->weak) {
+                state->weak->nucleus.store(nullptr, std::memory_order_release);
+                weakLock.unlock();
+            }
             delete this;
             return true;
         }

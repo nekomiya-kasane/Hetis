@@ -2,6 +2,10 @@
  * @file Module.h
  * @brief Portable module images, dynamic-library loading, and symbol lookup services.
  * @ingroup PAL
+ *
+ * @details Narrow module spellings supplied through @ref LoadModule or @ref ModuleLoader::Load are UTF-8. Search roots
+ * use @c std::filesystem::path and therefore retain the platform-native path representation. A loaded @ref Module owns
+ * its native handle by default and provides typed symbol lookup without exposing platform loader declarations.
  */
 #pragma once
 
@@ -21,7 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Sora/Core/PAL/NativeError.h"
+#include "Sora/Core/Flags.h"
 #include "Sora/ErrorCode.h"
 
 namespace Sora::PAL {
@@ -70,27 +74,6 @@ namespace Sora::PAL {
         std::span<const std::filesystem::path> searchPaths = {};
     };
 
-    /** @brief One failed native module-load attempt. */
-    struct ModuleLoadAttempt {
-        std::string candidate;   /**< Candidate path or module spelling passed to the native loader. */
-        NativeError nativeError; /**< Category-bearing OS error when the loader reports one. */
-        std::string diagnostic;  /**< Loader-specific diagnostic when no native error code represents the failure. */
-
-        /** @brief Materialize the most specific diagnostic available for this attempt. */
-        [[nodiscard]] std::string Message() const;
-    };
-
-    /** @brief Structured diagnostics produced when no candidate module can be loaded. */
-    struct ModuleLoadError {
-        std::vector<ModuleLoadAttempt> attempts; /**< Failed candidates in native-loader invocation order. */
-
-        /** @brief Return the portable semantic error represented by this diagnostic. */
-        [[nodiscard]] constexpr ErrorCode Code() const noexcept { return ErrorCode::ModuleLoadFailed; }
-
-        /** @brief Materialize a concise multi-attempt diagnostic. */
-        [[nodiscard]] std::string Message() const;
-    };
-
     /** @brief Section flags normalized from PE, ELF, and Mach-O image metadata. */
     enum class SectionFlag : uint8_t {
         None = 0,                /**< No normalized section property is known. */
@@ -102,16 +85,6 @@ namespace Sora::PAL {
         Initialized = 1u << 5u,  /**< Section contains initialized data. */
         Uninitialized = 1u << 6u /**< Section describes zero-initialized data rather than stored file bytes. */
     };
-
-    /** @brief Return the bitwise union of two normalized section flag sets. */
-    [[nodiscard]] constexpr SectionFlag operator|(SectionFlag lhs, SectionFlag rhs) noexcept {
-        return static_cast<SectionFlag>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
-    }
-
-    /** @brief Return true when @p flags contains every bit in @p bit. */
-    [[nodiscard]] constexpr bool HasFlag(SectionFlag flags, SectionFlag bit) noexcept {
-        return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bit)) == static_cast<uint32_t>(bit);
-    }
 
     /** @brief Immutable view of one section in a module image file. */
     struct SectionView {
@@ -184,7 +157,12 @@ namespace Sora::PAL {
         std::vector<SectionView> sections_;
     };
 
-    /** @brief Owning runtime handle for a dynamically loaded module. */
+    class Module;
+
+    /** @brief Shared handle for a loaded module or the current process module. */
+    using ModulePtr = std::shared_ptr<const Module>;
+
+    /** @brief Runtime view of an owned or process-lifetime native module handle. */
     class Module {
     public:
         Module(const Module&) = delete;
@@ -217,7 +195,7 @@ namespace Sora::PAL {
 
         /**
          * @brief Look up @p name and cast it to a function pointer.
-         * @tparam Fn Function type, not a pointer type.
+         * @tparam Fn Exact function type, including its platform calling convention.
          * @param[in] name Exported symbol name.
          * @return Function pointer, or @c nullptr when the symbol is absent.
          */
@@ -227,11 +205,24 @@ namespace Sora::PAL {
             return TryFindSymbol<Fn>(name);
         }
 
+        /**
+         * @brief Look up @p name and cast it to a function pointer.
+         * @tparam Fn Exact function-pointer type, including its platform calling convention.
+         * @param[in] name Exported symbol name.
+         * @return Function pointer, or @c nullptr when the symbol is absent.
+         */
+        template<typename Fn>
+            requires std::is_pointer_v<Fn> && std::is_function_v<std::remove_pointer_t<Fn>>
+        [[nodiscard]] Fn TryFindFunction(std::string_view name) const noexcept {
+            return TryFindSymbol<std::remove_pointer_t<Fn>>(name);
+        }
+
     private:
         friend class ModuleLoader;
         friend struct Detail::ModuleImageBuilder;
+        friend const ModulePtr& CurrentProcessModule() noexcept;
 
-        /** @brief Adopt @p handle as a native module handle produced from @p path. */
+        /** @brief Create a module view over @p handle with explicit unload ownership. */
         Module(void* handle, std::filesystem::path path, bool unloadOnDestroy) noexcept;
 
         void* handle_ = nullptr;
@@ -239,11 +230,13 @@ namespace Sora::PAL {
         bool unloadOnDestroy_ = false;
     };
 
-    /** @brief Shared handle type returned by the process module loader. */
-    using ModulePtr = std::shared_ptr<const Module>;
-
-    /** @brief Result of dynamic module loading with structured per-candidate diagnostics. */
-    using ModuleLoadResult = std::expected<ModulePtr, ModuleLoadError>;
+    /**
+     * @brief Return the process-lifetime module view used to resolve symbols from the current process scope.
+     * @details The view observes the main executable on Windows and the @c dlopen(nullptr, ...) global lookup scope on
+     * POSIX. Its native handle is never unloaded, and its path is empty because no module path produced the view.
+     * @return Immutable shared view, or an empty pointer when the platform has no process-module facility.
+     */
+    [[nodiscard]] const ModulePtr& CurrentProcessModule() noexcept;
 
     /** @brief Process-level service for module search paths, image inspection, loading, and module cache ownership. */
     class ModuleLoader {
@@ -257,11 +250,11 @@ namespace Sora::PAL {
 
         /**
          * @brief Load the first available dynamic module from @p names.
-         * @param[in] names Candidate module spellings in priority order.
+         * @param[in] names UTF-8 candidate module spellings in priority order.
          * @param[in] options Candidate-generation, cache, search, and native-loader options.
-         * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
+         * @return Shared loaded module, or @ref ErrorCode::ModuleLoadFailed when no candidate can be loaded.
          */
-        [[nodiscard]] ModuleLoadResult Load(std::span<const std::string_view> names, ModuleLoadOptions options = {});
+        [[nodiscard]] Result<ModulePtr> Load(std::span<const std::string_view> names, ModuleLoadOptions options = {});
 
         /**
          * @brief Open @p path as a read-only module image without loading or initializing it.
@@ -286,29 +279,52 @@ namespace Sora::PAL {
         void PruneCache();
 
     private:
-        [[nodiscard]] std::vector<std::string> GenerateCandidates(std::span<const std::string_view> names,
-                                                                  ModuleLoadOptions options) const;
+        struct CacheKey {
+            std::filesystem::path path;
+            ModuleBindMode bindMode = ModuleBindMode::Lazy;
+            ModuleVisibility visibility = ModuleVisibility::Local;
+            bool unloadOnDestroy = true;
+
+            [[nodiscard]] friend bool operator==(const CacheKey&, const CacheKey&) noexcept = default;
+        };
+
+        struct CacheKeyHash {
+            [[nodiscard]] size_t operator()(const CacheKey& key) const noexcept {
+                size_t hash = std::filesystem::hash_value(key.path);
+                const auto combine = [&hash](size_t value) {
+                    constexpr size_t kGoldenRatio = static_cast<size_t>(0x9E3779B97F4A7C15ull);
+                    hash ^= value + kGoldenRatio + (hash << 6u) + (hash >> 2u);
+                };
+                combine(static_cast<size_t>(key.bindMode));
+                combine(static_cast<size_t>(key.visibility));
+                combine(static_cast<size_t>(key.unloadOnDestroy));
+                return hash;
+            }
+        };
+
+        [[nodiscard]] std::vector<std::filesystem::path> GenerateCandidates(std::span<const std::string_view> names,
+                                                                            ModuleLoadOptions options) const;
 
         mutable std::mutex mutex_;
         std::vector<std::filesystem::path> searchPaths_;
-        std::unordered_map<std::string, std::weak_ptr<const Module>> cache_;
+        std::unordered_map<CacheKey, std::weak_ptr<const Module>, CacheKeyHash> cache_;
     };
 
     /**
      * @brief Load the first available dynamic module from @p names through @ref ModuleLoader::Default.
-     * @param[in] names Candidate module spellings in priority order.
+     * @param[in] names UTF-8 candidate module spellings in priority order.
      * @param[in] options Candidate-generation and native-loader options.
-     * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
+     * @return Shared loaded module, or @ref ErrorCode::ModuleLoadFailed when no candidate can be loaded.
      */
-    [[nodiscard]] ModuleLoadResult LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options = {});
+    [[nodiscard]] Result<ModulePtr> LoadModule(std::span<const std::string_view> names, ModuleLoadOptions options = {});
 
     /**
      * @brief Convenience overload for brace-init candidate lists.
-     * @param[in] names Candidate module spellings in priority order.
+     * @param[in] names UTF-8 candidate module spellings in priority order.
      * @param[in] options Candidate-generation and native-loader options.
-     * @return Shared loaded module, or detailed diagnostics for all attempted candidates.
+     * @return Shared loaded module, or @ref ErrorCode::ModuleLoadFailed when no candidate can be loaded.
      */
-    [[nodiscard]] ModuleLoadResult LoadModule(std::initializer_list<std::string_view> names,
-                                              ModuleLoadOptions options = {});
+    [[nodiscard]] Result<ModulePtr> LoadModule(std::initializer_list<std::string_view> names,
+                                               ModuleLoadOptions options = {});
 
 } // namespace Sora::PAL
