@@ -15,7 +15,6 @@
 #include <string>
 #include <thread>
 
-static_assert(Sora::PAL::kPortableThreadNameMaxBytes == 15);
 static_assert(Sora::PAL::ThreadStackBounds{.lower = 2, .upper = 1}.Size() == 0);
 
 TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[Sora.PAL.Thread]") {
@@ -71,7 +70,7 @@ TEST_CASE("Thread names reject malformed UTF-8 and embedded nulls", "[Sora.PAL.T
     REQUIRE(invalidNull.error() == Sora::ErrorCode::InvalidThreadName);
 
     if constexpr (Sora::kIsLinux || Sora::kIsMacOS) {
-        const size_t nativeLimit = Sora::kIsLinux ? Sora::PAL::kPortableThreadNameMaxBytes : 63;
+        const size_t nativeLimit = 15;
         const std::string tooLong(nativeLimit + 1, 'x');
         const auto invalidLength = Sora::PAL::SetCurrentThreadName(tooLong);
         REQUIRE_FALSE(invalidLength.has_value());
