@@ -81,6 +81,8 @@ namespace Sora {
         ThreadNativeFailure = 0x0026,     ///< A native thread metadata or introspection operation failed.
         InvalidNativeThreadText = 0x0027, ///< Native thread metadata is not valid Unicode text.
         AlreadyExists = 0x0028,           ///< Atomic creation failed because the destination already exists.
+        ProcessNativeFailure = 0x0029,     ///< A native current-process introspection operation failed.
+        InvalidNativeProcessText = 0x002A, ///< Native process metadata is not valid Unicode text.
         /** @} */
 
         /** @name Core Rendering (0x1000 – 0x1FFF) @{ */

@@ -19,17 +19,20 @@
  */
 #pragma once
 
+#include "Sora/Core/FixedString.h"
 #include <Sora/Platform.h>
 
 #include <cstddef>
 #include <cstdarg>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <type_traits>
 
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
 struct kevent;
 struct pollfd;
+struct rusage;
 struct sigaction;
 struct stat;
 struct timespec;
@@ -39,16 +42,37 @@ struct timespec;
 struct _IMAGEHLP_LINE64;
 struct _IMAGEHLP_MODULE64;
 struct _EXCEPTION_POINTERS;
+struct _FILETIME;
+struct _PROCESS_MEMORY_COUNTERS;
 union _LARGE_INTEGER;
 struct _OVERLAPPED;
 struct _SECURITY_ATTRIBUTES;
 struct _SYMBOL_INFO;
+struct tagPROCESSENTRY32W;
 #endif
 
 namespace Sora::PAL {
 
+    namespace $ {
+
+        struct Macro {
+            enum class Type : uint8_t { Mask, Serial };
+            FixedString<256> value = "";
+            Type type = Type::Serial;
+        };
+
+    } // namespace $
+
+    /** @brief Platform-normalized counters produced by native process-accounting adapters. */
+    struct ProcessUsageCounters {
+        uint64_t userCpuNanoseconds = 0;
+        uint64_t kernelCpuNanoseconds = 0;
+        uint64_t residentMemoryBytes = 0;
+        uint64_t peakResidentMemoryBytes = 0;
+    };
+
     /** @brief Capture the calling thread's native error slot without triggering lazy symbol resolution. */
-    [[nodiscard]] int CaptureLastSystemError() noexcept;
+    [[nodiscard]] uint64_t CaptureLastSystemError() noexcept;
 
 #if defined(PLATFORM_WINDOWS)
 
@@ -70,33 +94,150 @@ namespace Sora::PAL {
             uint8_t reserved = 0;
         };
 
-        inline constexpr Bool kFalse = 0;
-        inline constexpr DWord kErrorSuccess = 0;
-        inline constexpr DWord kErrorEnvironmentVariableNotFound = 203;
-        inline constexpr DWord kFormatMessageAllocateBuffer = 0x00000100;
-        inline constexpr DWord kFormatMessageIgnoreInserts = 0x00000200;
-        inline constexpr DWord kFormatMessageFromSystem = 0x00001000;
-        inline constexpr DWord kGenericWrite = 0x40000000;
-        inline constexpr DWord kGenericRead = 0x80000000;
-        inline constexpr DWord kFileShareRead = 0x00000001;
-        inline constexpr DWord kFileShareWrite = 0x00000002;
-        inline constexpr DWord kFileShareDelete = 0x00000004;
-        inline constexpr DWord kCreateNew = 1;
-        inline constexpr DWord kCreateAlways = 2;
-        inline constexpr DWord kOpenExisting = 3;
-        inline constexpr DWord kOpenAlways = 4;
-        inline constexpr DWord kTruncateExisting = 5;
-        inline constexpr DWord kFileAttributeNormal = 0x00000080;
-        inline constexpr DWord kFileFlagWriteThrough = 0x80000000;
-        inline constexpr DWord kFileFlagOverlapped = 0x40000000;
-        inline constexpr DWord kFileFlagNoBuffering = 0x20000000;
-        inline constexpr DWord kFileFlagRandomAccess = 0x10000000;
-        inline constexpr DWord kFileFlagSequentialScan = 0x08000000;
-        inline constexpr DWord kFileFlagDeleteOnClose = 0x04000000;
-        inline constexpr DWord kFileFlagBackupSemantics = 0x02000000;
-        inline constexpr DWord kStandardErrorHandle = static_cast<DWord>(-12);
-        inline constexpr UInt kMovableGlobalMemory = 0x0002;
-        inline constexpr UInt kUnicodeTextClipboardFormat = 13;
+        /** @brief Win32 constants exposed without including the Windows SDK headers. */
+        inline namespace Constant {
+
+            /** @brief Boolean constants shared by Win32 APIs using the @c BOOL ABI type. */
+            inline namespace Common {
+
+                // clang-format off
+                [[= PAL::$::Macro{"FALSE"}]]
+                inline constexpr Bool kFalse = 0;
+                [[= PAL::$::Macro{"TRUE"}]]
+                inline constexpr Bool kTrue  = 1;
+                // clang-format on
+
+            } // namespace Common
+
+            /** @brief Status and formatting flags consumed by @c NativeErrorSystemAPI. */
+            inline namespace NativeError {
+
+                // clang-format off
+                [[= PAL::$::Macro{"ERROR_SUCCESS"}]]
+                inline constexpr DWord kErrorSuccess                     = 0;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_ALLOCATE_BUFFER", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageAllocateBuffer      = 0x00000100;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_IGNORE_INSERTS", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageIgnoreInserts       = 0x00000200;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_STRING", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageFromString          = 0x00000400;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_HMODULE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageFromModule          = 0x00000800;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_SYSTEM", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageFromSystem          = 0x00001000;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_ARGUMENT_ARRAY", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageArgumentArray       = 0x00002000;
+                [[= PAL::$::Macro{"FORMAT_MESSAGE_MAX_WIDTH_MASK", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFormatMessageMaximumWidthMask    = 0x000000FF;
+                // clang-format on
+
+            } // namespace NativeError
+
+            /** @brief Error codes consumed by @c EnvironmentSystemAPI. */
+            inline namespace Environment {
+
+                // clang-format off
+                [[= PAL::$::Macro{"ERROR_INSUFFICIENT_BUFFER"}]]
+                inline constexpr DWord kErrorInsufficientBuffer          = 122;
+                [[= PAL::$::Macro{"ERROR_ENVVAR_NOT_FOUND"}]]
+                inline constexpr DWord kErrorEnvironmentVariableNotFound = 203;
+                // clang-format on
+
+            } // namespace Environment
+
+            /** @brief Access, sharing, creation, attribute, and handle constants consumed by @c FileSystemAPI. */
+            inline namespace File {
+
+                // clang-format off
+                [[= PAL::$::Macro{"GENERIC_READ",      PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kGenericRead                      = 0x80000000;
+                [[= PAL::$::Macro{"GENERIC_WRITE",     PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kGenericWrite                     = 0x40000000;
+                [[= PAL::$::Macro{"GENERIC_EXECUTE",   PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kGenericExecute                   = 0x20000000;
+                [[= PAL::$::Macro{"GENERIC_ALL",       PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kGenericAll                       = 0x10000000;
+                [[= PAL::$::Macro{"FILE_SHARE_READ",   PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileShareRead                    = 0x00000001;
+                [[= PAL::$::Macro{"FILE_SHARE_WRITE",  PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileShareWrite                   = 0x00000002;
+                [[= PAL::$::Macro{"FILE_SHARE_DELETE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileShareDelete                  = 0x00000004;
+                [[= PAL::$::Macro{"CREATE_NEW"}]]
+                inline constexpr DWord kCreateNew                        = 1;
+                [[= PAL::$::Macro{"CREATE_ALWAYS"}]]
+                inline constexpr DWord kCreateAlways                     = 2;
+                [[= PAL::$::Macro{"OPEN_EXISTING"}]]
+                inline constexpr DWord kOpenExisting                     = 3;
+                [[= PAL::$::Macro{"OPEN_ALWAYS"}]]
+                inline constexpr DWord kOpenAlways                       = 4;
+                [[= PAL::$::Macro{"TRUNCATE_EXISTING"}]]
+                inline constexpr DWord kTruncateExisting                 = 5;
+                [[= PAL::$::Macro{"FILE_ATTRIBUTE_NORMAL", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileAttributeNormal              = 0x00000080;
+                [[= PAL::$::Macro{"FILE_FLAG_WRITE_THROUGH", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagWriteThrough             = 0x80000000;
+                [[= PAL::$::Macro{"FILE_FLAG_OVERLAPPED", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagOverlapped               = 0x40000000;
+                [[= PAL::$::Macro{"FILE_FLAG_NO_BUFFERING", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagNoBuffering              = 0x20000000;
+                [[= PAL::$::Macro{"FILE_FLAG_RANDOM_ACCESS", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagRandomAccess             = 0x10000000;
+                [[= PAL::$::Macro{"FILE_FLAG_SEQUENTIAL_SCAN", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagSequentialScan           = 0x08000000;
+                [[= PAL::$::Macro{"FILE_FLAG_DELETE_ON_CLOSE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagDeleteOnClose            = 0x04000000;
+                [[= PAL::$::Macro{"FILE_FLAG_BACKUP_SEMANTICS", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagBackupSemantics          = 0x02000000;
+                [[= PAL::$::Macro{"FILE_FLAG_POSIX_SEMANTICS", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagPosixSemantics           = 0x01000000;
+                [[= PAL::$::Macro{"FILE_FLAG_SESSION_AWARE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagSessionAware             = 0x00800000;
+                [[= PAL::$::Macro{"FILE_FLAG_OPEN_REPARSE_POINT", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagOpenReparsePoint         = 0x00200000;
+                [[= PAL::$::Macro{"FILE_FLAG_OPEN_NO_RECALL", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagOpenNoRecall             = 0x00100000;
+                [[= PAL::$::Macro{"FILE_FLAG_FIRST_PIPE_INSTANCE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileFlagFirstPipeInstance        = 0x00080000;
+                [[= PAL::$::Macro{"STD_INPUT_HANDLE"}]]
+                inline constexpr DWord kStandardInputHandle              = static_cast<DWord>(-10);
+                [[= PAL::$::Macro{"STD_OUTPUT_HANDLE"}]]
+                inline constexpr DWord kStandardOutputHandle             = static_cast<DWord>(-11);
+                [[= PAL::$::Macro{"STD_ERROR_HANDLE"}]]
+                inline constexpr DWord kStandardErrorHandle              = static_cast<DWord>(-12);
+                // clang-format on
+
+            } // namespace File
+
+            /** @brief Allocation flags consumed by @c GlobalMemorySystemAPI. */
+            inline namespace GlobalMemoryBehavior {
+
+                // clang-format off
+                [[= PAL::$::Macro{"GMEM_FIXED",    PAL::$::Macro::Type::Mask}]]
+                inline constexpr UInt kFixedGlobalMemory          = 0x0000;
+                [[= PAL::$::Macro{"GMEM_MOVEABLE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr UInt kMovableGlobalMemory        = 0x0002;
+                [[= PAL::$::Macro{"GMEM_ZEROINIT", PAL::$::Macro::Type::Mask}]]
+                inline constexpr UInt kZeroInitializeGlobalMemory = 0x0040;
+                // clang-format on
+
+            } // namespace GlobalMemoryBehavior
+
+            /** @brief Standard clipboard formats consumed by @c ClipboardSystemAPI. */
+            inline namespace Clipboard {
+
+                // clang-format off
+                [[= PAL::$::Macro{"CF_TEXT"}]]
+                inline constexpr UInt kTextClipboardFormat        = 1;
+                [[= PAL::$::Macro{"CF_OEMTEXT"}]]
+                inline constexpr UInt kOemTextClipboardFormat     = 7;
+                [[= PAL::$::Macro{"CF_UNICODETEXT"}]]
+                inline constexpr UInt kUnicodeTextClipboardFormat = 13;
+                // clang-format on
+
+            } // namespace Clipboard
+
+        } // namespace Constant
 
         /** @brief Return whether @p result represents a successful Win32 @c HRESULT. */
         [[nodiscard]] constexpr bool Succeeded(HResult result) noexcept {
@@ -107,227 +248,235 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved Win32 error-reporting entry points. */
     struct NativeErrorSystemAPI {
-        using GetLastErrorFunction = WindowsSystem::DWord(__stdcall*)();
-        using SetLastErrorFunction = void(__stdcall*)(WindowsSystem::DWord);
-        using FormatMessageWideFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const void*,
-                                                                           WindowsSystem::DWord, WindowsSystem::DWord,
-                                                                           wchar_t*, WindowsSystem::DWord,
-                                                                           std::va_list*);
-        using LocalFreeFunction = void*(__stdcall*)(void*);
+        // clang-format off
+        using GetLastErrorFunction      = WindowsSystem::DWord(__stdcall*)();
+        using SetLastErrorFunction      = void(__stdcall*)(WindowsSystem::DWord);
+        using FormatMessageWideFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const void*, WindowsSystem::DWord, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord, std::va_list*);
+        using LocalFreeFunction         = void*(__stdcall*)(void*);
 
-        GetLastErrorFunction getLastError = nullptr;
-        SetLastErrorFunction setLastError = nullptr;
+        GetLastErrorFunction      getLastError      = nullptr;
+        SetLastErrorFunction      setLastError      = nullptr;
         FormatMessageWideFunction formatMessageWide = nullptr;
-        LocalFreeFunction localFree = nullptr;
+        LocalFreeFunction         localFree         = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 environment entry points. */
     struct EnvironmentSystemAPI {
-        using GetLastErrorFunction = WindowsSystem::DWord(__stdcall*)();
-        using SetLastErrorFunction = void(__stdcall*)(WindowsSystem::DWord);
-        using GetEnvironmentVariableWideFunction = WindowsSystem::DWord(__stdcall*)(const wchar_t*, wchar_t*,
-                                                                                    WindowsSystem::DWord);
+        // clang-format off
+        using GetLastErrorFunction               = WindowsSystem::DWord(__stdcall*)();
+        using SetLastErrorFunction               = void(__stdcall*)(WindowsSystem::DWord);
+        using GetEnvironmentVariableWideFunction = WindowsSystem::DWord(__stdcall*)(const wchar_t*, wchar_t*, WindowsSystem::DWord);
         using SetEnvironmentVariableWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*);
-        using GetEnvironmentStringsWideFunction = wchar_t*(__stdcall*)();
+        using GetEnvironmentStringsWideFunction  = wchar_t*(__stdcall*)();
         using FreeEnvironmentStringsWideFunction = WindowsSystem::Bool(__stdcall*)(wchar_t*);
 
-        GetLastErrorFunction getLastError = nullptr;
-        SetLastErrorFunction setLastError = nullptr;
-        GetEnvironmentVariableWideFunction getEnvironmentVariableWide = nullptr;
-        SetEnvironmentVariableWideFunction setEnvironmentVariableWide = nullptr;
-        GetEnvironmentStringsWideFunction getEnvironmentStringsWide = nullptr;
-        FreeEnvironmentStringsWideFunction freeEnvironmentStringsWide = nullptr;
+        GetLastErrorFunction                    getLastError                    = nullptr;
+        SetLastErrorFunction                    setLastError                    = nullptr;
+        GetEnvironmentVariableWideFunction      getEnvironmentVariableWide      = nullptr;
+        SetEnvironmentVariableWideFunction      setEnvironmentVariableWide      = nullptr;
+        GetEnvironmentStringsWideFunction       getEnvironmentStringsWide       = nullptr;
+        FreeEnvironmentStringsWideFunction      freeEnvironmentStringsWide      = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved and normalized Win32 current-process introspection operations. */
+    struct ProcessSystemAPI {
+        // clang-format off
+        using GetCurrentProcessIdFunction           = WindowsSystem::DWord(__stdcall*)();
+        using GetCurrentProcessFunction             = WindowsSystem::Handle(__stdcall*)();
+        using CreateProcessSnapshotFunction         = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord);
+        using ReadProcessEntryFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::tagPROCESSENTRY32W*);
+        using CloseHandleFunction                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using QueryFullProcessImageNameWideFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord*);
+        using GetCommandLineWideFunction            = wchar_t*(__stdcall*)();
+        using CommandLineToArgvWideFunction         = wchar_t**(__stdcall*)(const wchar_t*, int*);
+        using LocalFreeFunction                     = void*(__stdcall*)(void*);
+        using GetProcessTimesFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*);
+        using GetProcessMemoryInfoFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_PROCESS_MEMORY_COUNTERS*, WindowsSystem::DWord);
+        using QueryParentProcessIdFunction          = bool (*)(WindowsSystem::DWord*) noexcept;
+        using CaptureUsageFunction                  = bool (*)(ProcessUsageCounters*) noexcept;
+
+        GetCurrentProcessIdFunction           getCurrentProcessId           = nullptr;
+        GetCurrentProcessFunction             getCurrentProcess             = nullptr;
+        CreateProcessSnapshotFunction         createProcessSnapshot         = nullptr;
+        ReadProcessEntryFunction              firstProcess                  = nullptr;
+        ReadProcessEntryFunction              nextProcess                   = nullptr;
+        CloseHandleFunction                   closeHandle                    = nullptr;
+        QueryFullProcessImageNameWideFunction queryFullProcessImageNameWide = nullptr;
+        GetCommandLineWideFunction            getCommandLineWide            = nullptr;
+        CommandLineToArgvWideFunction         commandLineToArgvWide         = nullptr;
+        LocalFreeFunction                     localFree                     = nullptr;
+        GetProcessTimesFunction               getProcessTimes               = nullptr;
+        GetProcessMemoryInfoFunction          getProcessMemoryInfo          = nullptr;
+        QueryParentProcessIdFunction          queryParentProcessId          = nullptr;
+        CaptureUsageFunction                  captureUsage                  = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 current-thread entry points. */
     struct ThreadSystemAPI {
-        using GetCurrentThreadIdFunction = WindowsSystem::DWord(__stdcall*)();
-        using GetCurrentThreadFunction = WindowsSystem::Handle(__stdcall*)();
-        using SetThreadDescriptionFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, const wchar_t*);
-        using GetThreadDescriptionFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, wchar_t**);
-        using LocalFreeFunction = void*(__stdcall*)(void*);
+        // clang-format off
+        using GetCurrentThreadIdFunction          = WindowsSystem::DWord(__stdcall*)();
+        using GetCurrentThreadFunction            = WindowsSystem::Handle(__stdcall*)();
+        using SetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, const wchar_t*);
+        using GetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, wchar_t**);
+        using LocalFreeFunction                   = void*(__stdcall*)(void*);
         using GetCurrentProcessorNumberExFunction = void(__stdcall*)(WindowsSystem::ProcessorNumber*);
         using GetCurrentThreadStackLimitsFunction = void(__stdcall*)(uintptr_t*, uintptr_t*);
 
-        GetCurrentThreadIdFunction getCurrentThreadId = nullptr;
-        GetCurrentThreadFunction getCurrentThread = nullptr;
-        SetThreadDescriptionFunction setThreadDescription = nullptr;
-        GetThreadDescriptionFunction getThreadDescription = nullptr;
-        LocalFreeFunction localFree = nullptr;
+        GetCurrentThreadIdFunction          getCurrentThreadId          = nullptr;
+        GetCurrentThreadFunction            getCurrentThread            = nullptr;
+        SetThreadDescriptionFunction        setThreadDescription        = nullptr;
+        GetThreadDescriptionFunction        getThreadDescription        = nullptr;
+        LocalFreeFunction                   localFree                   = nullptr;
         GetCurrentProcessorNumberExFunction getCurrentProcessorNumberEx = nullptr;
         GetCurrentThreadStackLimitsFunction getCurrentThreadStackLimits = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 movable-global-memory entry points. */
     struct GlobalMemorySystemAPI {
-        using GlobalAllocateFunction = WindowsSystem::GlobalMemory(__stdcall*)(WindowsSystem::UInt,
-                                                                               WindowsSystem::Size);
-        using GlobalFreeFunction = WindowsSystem::GlobalMemory(__stdcall*)(WindowsSystem::GlobalMemory);
-        using GlobalLockFunction = void*(__stdcall*)(WindowsSystem::GlobalMemory);
-        using GlobalUnlockFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::GlobalMemory);
-        using GlobalSizeFunction = WindowsSystem::Size(__stdcall*)(WindowsSystem::GlobalMemory);
+        // clang-format off
+        using GlobalAllocateFunction = WindowsSystem::GlobalMemory(__stdcall*)(WindowsSystem::UInt, WindowsSystem::Size);
+        using GlobalFreeFunction     = WindowsSystem::GlobalMemory(__stdcall*)(WindowsSystem::GlobalMemory);
+        using GlobalLockFunction     = void*(__stdcall*)(WindowsSystem::GlobalMemory);
+        using GlobalUnlockFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::GlobalMemory);
+        using GlobalSizeFunction     = WindowsSystem::Size(__stdcall*)(WindowsSystem::GlobalMemory);
 
         GlobalAllocateFunction globalAllocate = nullptr;
-        GlobalFreeFunction globalFree = nullptr;
-        GlobalLockFunction globalLock = nullptr;
-        GlobalUnlockFunction globalUnlock = nullptr;
-        GlobalSizeFunction globalSize = nullptr;
+        GlobalFreeFunction     globalFree     = nullptr;
+        GlobalLockFunction     globalLock     = nullptr;
+        GlobalUnlockFunction   globalUnlock   = nullptr;
+        GlobalSizeFunction     globalSize     = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 clipboard entry points. */
     struct ClipboardSystemAPI {
-        using OpenClipboardFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using CloseClipboardFunction = WindowsSystem::Bool(__stdcall*)();
-        using EmptyClipboardFunction = WindowsSystem::Bool(__stdcall*)();
-        using GetClipboardDataFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::UInt);
-        using SetClipboardDataFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::UInt, WindowsSystem::Handle);
+        // clang-format off
+        using OpenClipboardFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using CloseClipboardFunction             = WindowsSystem::Bool(__stdcall*)();
+        using EmptyClipboardFunction             = WindowsSystem::Bool(__stdcall*)();
+        using GetClipboardDataFunction           = WindowsSystem::Handle(__stdcall*)(WindowsSystem::UInt);
+        using SetClipboardDataFunction           = WindowsSystem::Handle(__stdcall*)(WindowsSystem::UInt, WindowsSystem::Handle);
         using IsClipboardFormatAvailableFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::UInt);
 
-        OpenClipboardFunction openClipboard = nullptr;
-        CloseClipboardFunction closeClipboard = nullptr;
-        EmptyClipboardFunction emptyClipboard = nullptr;
-        GetClipboardDataFunction getClipboardData = nullptr;
-        SetClipboardDataFunction setClipboardData = nullptr;
+        OpenClipboardFunction              openClipboard              = nullptr;
+        CloseClipboardFunction             closeClipboard             = nullptr;
+        EmptyClipboardFunction             emptyClipboard             = nullptr;
+        GetClipboardDataFunction           getClipboardData           = nullptr;
+        SetClipboardDataFunction           setClipboardData           = nullptr;
         IsClipboardFormatAvailableFunction isClipboardFormatAvailable = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 file, mapping, replacement, and directory-monitoring entry points. */
     struct FileSystemAPI {
-        using GetStandardHandleFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord);
-        using CreateFileWideFunction = WindowsSystem::Handle(__stdcall*)(const wchar_t*, WindowsSystem::DWord,
-                                                                         WindowsSystem::DWord, ::_SECURITY_ATTRIBUTES*,
-                                                                         WindowsSystem::DWord, WindowsSystem::DWord,
-                                                                         WindowsSystem::Handle);
-        using CloseHandleFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using WriteFileFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const void*,
-                                                                  WindowsSystem::DWord, WindowsSystem::DWord*,
-                                                                  ::_OVERLAPPED*);
-        using FlushFileBuffersFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using ReadFileFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord,
-                                                                  WindowsSystem::DWord*, ::_OVERLAPPED*);
-        using GetFileSizeFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_LARGE_INTEGER*);
-        using SetFileInformationFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*,
-                                                                           WindowsSystem::DWord);
-        using GetFileInformationFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*,
-                                                                           WindowsSystem::DWord);
-        using CreateFileMappingWideFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle,
-                                                                                 ::_SECURITY_ATTRIBUTES*,
-                                                                                 WindowsSystem::DWord,
-                                                                                 WindowsSystem::DWord,
-                                                                                 WindowsSystem::DWord, const wchar_t*);
-        using MapViewOfFileFunction = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord,
-                                                        WindowsSystem::DWord, WindowsSystem::DWord, size_t);
-        using UnmapViewOfFileFunction = WindowsSystem::Bool(__stdcall*)(const void*);
-        using FlushViewOfFileFunction = WindowsSystem::Bool(__stdcall*)(const void*, size_t);
-        using ReplaceFileWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*,
-                                                                         const wchar_t*, WindowsSystem::DWord, void*,
-                                                                         void*);
-        using MoveFileWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*,
-                                                                      WindowsSystem::DWord);
-        using DeleteFileWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
-        using CreateEventWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*,
-                                                                           WindowsSystem::Bool, WindowsSystem::Bool,
-                                                                           const wchar_t*);
-        using ResetEventFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using WaitForSingleObjectFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle,
-                                                                             WindowsSystem::DWord);
-        using GetOverlappedResultFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*,
-                                                                            WindowsSystem::DWord*, WindowsSystem::Bool);
-        using CancelIoFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*);
-        using DirectoryCompletionFunction = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord,
-                                                              ::_OVERLAPPED*);
-        using ReadDirectoryChangesFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*,
-                                                                              WindowsSystem::DWord,
-                                                                              WindowsSystem::Bool,
-                                                                              WindowsSystem::DWord,
-                                                                              WindowsSystem::DWord*, ::_OVERLAPPED*,
-                                                                              DirectoryCompletionFunction);
-        using GetCurrentProcessIdFunction = WindowsSystem::DWord(__stdcall*)();
-        using GetSystemInfoFunction = void(__stdcall*)(void*);
-        using GetCurrentProcessFunction = WindowsSystem::Handle(__stdcall*)();
-        using DuplicateHandleFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle,
-                                                                         WindowsSystem::Handle, WindowsSystem::Handle*,
-                                                                         WindowsSystem::DWord, WindowsSystem::Bool,
-                                                                         WindowsSystem::DWord);
+        // clang-format off
+        using GetStandardHandleFunction     = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord);
+        using CreateFileWideFunction        = WindowsSystem::Handle(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::Handle);
+        using CloseHandleFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using WriteFileFunction             = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*);
+        using FlushFileBuffersFunction      = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using ReadFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*);
+        using GetFileSizeFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_LARGE_INTEGER*);
+        using SetFileInformationFunction    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*, WindowsSystem::DWord);
+        using GetFileInformationFunction    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*, WindowsSystem::DWord);
+        using CreateFileMappingWideFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, const wchar_t*);
+        using MapViewOfFileFunction         = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, size_t);
+        using UnmapViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*);
+        using FlushViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*, size_t);
+        using ReplaceFileWideFunction       = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, const wchar_t*, WindowsSystem::DWord, void*, void*);
+        using MoveFileWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, WindowsSystem::DWord);
+        using DeleteFileWideFunction        = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
+        using CreateEventWideFunction       = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::Bool, const wchar_t*);
+        using ResetEventFunction            = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using WaitForSingleObjectFunction   = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
+        using GetOverlappedResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool);
+        using CancelIoFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*);
+        using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
+        using ReadDirectoryChangesFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*, DirectoryCompletionFunction);
+        using GetSystemInfoFunction         = void(__stdcall*)(void*);
+        using GetCurrentProcessFunction     = WindowsSystem::Handle(__stdcall*)();
+        using DuplicateHandleFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
 
-        GetStandardHandleFunction getStandardHandle = nullptr;
-        CreateFileWideFunction createFileWide = nullptr;
-        CloseHandleFunction closeHandle = nullptr;
-        WriteFileFunction writeFile = nullptr;
-        FlushFileBuffersFunction flushFileBuffers = nullptr;
-        ReadFileFunction readFile = nullptr;
-        GetFileSizeFunction getFileSize = nullptr;
-        SetFileInformationFunction setFileInformation = nullptr;
-        GetFileInformationFunction getFileInformation = nullptr;
+        GetStandardHandleFunction     getStandardHandle     = nullptr;
+        CreateFileWideFunction        createFileWide        = nullptr;
+        CloseHandleFunction           closeHandle           = nullptr;
+        WriteFileFunction             writeFile             = nullptr;
+        FlushFileBuffersFunction      flushFileBuffers      = nullptr;
+        ReadFileFunction              readFile              = nullptr;
+        GetFileSizeFunction           getFileSize           = nullptr;
+        SetFileInformationFunction    setFileInformation    = nullptr;
+        GetFileInformationFunction    getFileInformation    = nullptr;
         CreateFileMappingWideFunction createFileMappingWide = nullptr;
-        MapViewOfFileFunction mapViewOfFile = nullptr;
-        UnmapViewOfFileFunction unmapViewOfFile = nullptr;
-        FlushViewOfFileFunction flushViewOfFile = nullptr;
-        ReplaceFileWideFunction replaceFileWide = nullptr;
-        MoveFileWideFunction moveFileWide = nullptr;
-        DeleteFileWideFunction deleteFileWide = nullptr;
-        CreateEventWideFunction createEventWide = nullptr;
-        ResetEventFunction resetEvent = nullptr;
-        WaitForSingleObjectFunction waitForSingleObject = nullptr;
-        GetOverlappedResultFunction getOverlappedResult = nullptr;
-        CancelIoFunction cancelIo = nullptr;
-        ReadDirectoryChangesFunction readDirectoryChanges = nullptr;
-        GetCurrentProcessIdFunction getCurrentProcessId = nullptr;
-        GetSystemInfoFunction getSystemInfo = nullptr;
-        GetCurrentProcessFunction getCurrentProcess = nullptr;
-        DuplicateHandleFunction duplicateHandle = nullptr;
+        MapViewOfFileFunction         mapViewOfFile         = nullptr;
+        UnmapViewOfFileFunction       unmapViewOfFile       = nullptr;
+        FlushViewOfFileFunction       flushViewOfFile       = nullptr;
+        ReplaceFileWideFunction       replaceFileWide       = nullptr;
+        MoveFileWideFunction          moveFileWide          = nullptr;
+        DeleteFileWideFunction        deleteFileWide        = nullptr;
+        CreateEventWideFunction       createEventWide       = nullptr;
+        ResetEventFunction            resetEvent            = nullptr;
+        WaitForSingleObjectFunction   waitForSingleObject   = nullptr;
+        GetOverlappedResultFunction   getOverlappedResult   = nullptr;
+        CancelIoFunction              cancelIo              = nullptr;
+        ReadDirectoryChangesFunction  readDirectoryChanges  = nullptr;
+        GetSystemInfoFunction         getSystemInfo         = nullptr;
+        GetCurrentProcessFunction     getCurrentProcess     = nullptr;
+        DuplicateHandleFunction       duplicateHandle       = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 fatal-exception entry points. */
     struct CrashSystemAPI {
-        using ExceptionFilterFunction = long(__stdcall*)(::_EXCEPTION_POINTERS*);
-        using SetUnhandledExceptionFilterFunction = ExceptionFilterFunction(__stdcall*)(ExceptionFilterFunction);
-        using GetErrorModeFunction = WindowsSystem::DWord(__stdcall*)();
-        using SetErrorModeFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
-        using GetCurrentProcessFunction = WindowsSystem::Handle(__stdcall*)();
-        using WerGetFlagsFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
-        using WerSetFlagsFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord);
+        // clang-format off
+        using ExceptionFilterFunction              = long(__stdcall*)(::_EXCEPTION_POINTERS*);
+        using SetUnhandledExceptionFilterFunction  = ExceptionFilterFunction(__stdcall*)(ExceptionFilterFunction);
+        using GetErrorModeFunction                 = WindowsSystem::DWord(__stdcall*)();
+        using SetErrorModeFunction                 = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
+        using GetCurrentProcessFunction            = WindowsSystem::Handle(__stdcall*)();
+        using WerGetFlagsFunction                  = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
+        using WerSetFlagsFunction                  = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord);
 
-        SetUnhandledExceptionFilterFunction setUnhandledExceptionFilter = nullptr;
-        GetErrorModeFunction getErrorMode = nullptr;
-        SetErrorModeFunction setErrorMode = nullptr;
-        GetCurrentProcessFunction getCurrentProcess = nullptr;
-        WerGetFlagsFunction werGetFlags = nullptr;
-        WerSetFlagsFunction werSetFlags = nullptr;
+        SetUnhandledExceptionFilterFunction  setUnhandledExceptionFilter  = nullptr;
+        GetErrorModeFunction                 getErrorMode                 = nullptr;
+        SetErrorModeFunction                 setErrorMode                 = nullptr;
+        GetCurrentProcessFunction            getCurrentProcess            = nullptr;
+        WerGetFlagsFunction                  werGetFlags                  = nullptr;
+        WerSetFlagsFunction                  werSetFlags                  = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Windows DbgHelp entry points shared by diagnostic services. */
     struct DbgHelpSystemAPI {
-        using SymSetOptionsFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
-        using SymInitializeFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const char*,
-                                                                      WindowsSystem::Bool);
-        using SymFromAddressFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64,
-                                                                       WindowsSystem::DWord64*, ::_SYMBOL_INFO*);
-        using SymGetLineFromAddressFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle,
-                                                                              WindowsSystem::DWord64,
-                                                                              WindowsSystem::DWord*,
-                                                                              ::_IMAGEHLP_LINE64*);
-        using SymGetModuleInfoFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64,
-                                                                         ::_IMAGEHLP_MODULE64*);
-        using UndecorateSymbolNameFunction = WindowsSystem::DWord(__stdcall*)(const char*, char*, WindowsSystem::DWord,
-                                                                              WindowsSystem::DWord);
+        // clang-format off
+        using SymSetOptionsFunction           = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
+        using SymInitializeFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const char*, WindowsSystem::Bool);
+        using SymFromAddressFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, WindowsSystem::DWord64*, ::_SYMBOL_INFO*);
+        using SymGetLineFromAddressFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, WindowsSystem::DWord*, ::_IMAGEHLP_LINE64*);
+        using SymGetModuleInfoFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, ::_IMAGEHLP_MODULE64*);
+        using UndecorateSymbolNameFunction    = WindowsSystem::DWord(__stdcall*)(const char*, char*, WindowsSystem::DWord, WindowsSystem::DWord);
 
-        SymSetOptionsFunction symSetOptions = nullptr;
-        SymInitializeFunction symInitialize = nullptr;
-        SymFromAddressFunction symFromAddress = nullptr;
+        SymSetOptionsFunction         symSetOptions         = nullptr;
+        SymInitializeFunction         symInitialize         = nullptr;
+        SymFromAddressFunction        symFromAddress        = nullptr;
         SymGetLineFromAddressFunction symGetLineFromAddress = nullptr;
-        SymGetModuleInfoFunction symGetModuleInfo = nullptr;
-        UndecorateSymbolNameFunction undecorateSymbolName = nullptr;
+        SymGetModuleInfoFunction      symGetModuleInfo      = nullptr;
+        UndecorateSymbolNameFunction  undecorateSymbolName  = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Windows stack-capture and process entry points. */
     struct StackTraceSystemAPI {
-        using CaptureStackBackTraceFunction = uint16_t(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, void**,
-                                                                   WindowsSystem::DWord*);
-        using GetCurrentProcessFunction = WindowsSystem::Handle(__stdcall*)();
+        // clang-format off
+        using CaptureStackBackTraceFunction = uint16_t(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, void**, WindowsSystem::DWord*);
+        using GetCurrentProcessFunction     = WindowsSystem::Handle(__stdcall*)();
 
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
-        GetCurrentProcessFunction getCurrentProcess = nullptr;
+        GetCurrentProcessFunction     getCurrentProcess     = nullptr;
+        // clang-format on
     };
 
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
@@ -349,6 +498,9 @@ namespace Sora::PAL {
         /** @brief POSIX poll descriptor-count ABI type without including @c poll.h. */
         using PollCount = std::size_t;
 
+        /** @brief Opaque Darwin process-accounting buffer pointer used by @c proc_pid_rusage. */
+        using ResourceUsageInfo = void*;
+
     } // namespace PosixSystem
 
     /** @brief POSIX has no additional native-error entry points beyond thread-local @c errno. */
@@ -356,48 +508,78 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX process-environment entry points. */
     struct EnvironmentSystemAPI {
-        using GetFunction = char* (*)(const char*);
-        using SetFunction = int (*)(const char*, const char*, int);
+        // clang-format off
+        using GetFunction    = char* (*)(const char*);
+        using SetFunction    = int (*)(const char*, const char*, int);
         using RemoveFunction = int (*)(const char*);
 
-        GetFunction get = nullptr;
-        SetFunction set = nullptr;
+        GetFunction    get    = nullptr;
+        SetFunction    set    = nullptr;
         RemoveFunction remove = nullptr;
+        // clang-format on
     };
 
+    /** @brief Dynamically resolved and normalized POSIX current-process introspection operations. */
+    struct ProcessSystemAPI {
+        // clang-format off
+        using GetProcessIdFunction       = int (*)();
+        using GetParentProcessIdFunction = int (*)();
+        using GetResourceUsageFunction   = int (*)(int, ::rusage*);
+        using CaptureUsageFunction       = bool (*)(ProcessUsageCounters*) noexcept;
+
+        GetProcessIdFunction       getProcessId       = nullptr;
+        GetParentProcessIdFunction getParentProcessId = nullptr;
+        GetResourceUsageFunction   getResourceUsage   = nullptr;
+        CaptureUsageFunction       captureUsage       = nullptr;
+        
+#    if defined(PLATFORM_MACOS)
+        using GetExecutablePathFunction      = int (*)(char*, uint32_t*);
+        using GetArgumentCountFunction       = int* (*)();
+        using GetArgumentVectorFunction      = char*** (*)();
+        using ProcessResourceUsageFunction   = int (*)(int, int, PosixSystem::ResourceUsageInfo*);
+        
+        GetExecutablePathFunction      getExecutablePath      = nullptr;
+        GetArgumentCountFunction       getArgumentCount       = nullptr;
+        GetArgumentVectorFunction      getArgumentVector      = nullptr;
+        ProcessResourceUsageFunction   processResourceUsage   = nullptr;
+#    endif
+        // clang-format on
+    };
     /** @brief Dynamically resolved Linux or Darwin current-thread entry points. */
     struct ThreadSystemAPI {
-        using PthreadSelfFunction = PosixSystem::ThreadId (*)();
+        // clang-format off
+        using PthreadSelfFunction    = PosixSystem::ThreadId (*)();
         using PthreadGetNameFunction = int (*)(PosixSystem::ThreadId, char*, size_t);
 
-        PthreadSelfFunction pthreadSelf = nullptr;
+        PthreadSelfFunction    pthreadSelf    = nullptr;
         PthreadGetNameFunction pthreadGetName = nullptr;
 
 #    if defined(PLATFORM_LINUX)
-        using SystemCallFunction = long (*)(long, ...);
-        using ScheduleGetCpuFunction = int (*)();
-        using PthreadSetNameFunction = int (*)(PosixSystem::ThreadId, const char*);
-        using PthreadGetAttributesFunction = int (*)(PosixSystem::ThreadId, PosixSystem::ThreadAttributes*);
+        using SystemCallFunction               = long (*)(long, ...);
+        using ScheduleGetCpuFunction           = int (*)();
+        using PthreadSetNameFunction           = int (*)(PosixSystem::ThreadId, const char*);
+        using PthreadGetAttributesFunction     = int (*)(PosixSystem::ThreadId, PosixSystem::ThreadAttributes*);
         using PthreadDestroyAttributesFunction = int (*)(PosixSystem::ThreadAttributes*);
-        using PthreadGetStackFunction = int (*)(const PosixSystem::ThreadAttributes*, void**, size_t*);
+        using PthreadGetStackFunction          = int (*)(const PosixSystem::ThreadAttributes*, void**, size_t*);
 
-        SystemCallFunction systemCall = nullptr;
-        ScheduleGetCpuFunction scheduleGetCpu = nullptr;
-        PthreadSetNameFunction pthreadSetName = nullptr;
-        PthreadGetAttributesFunction pthreadGetAttributes = nullptr;
+        SystemCallFunction               systemCall               = nullptr;
+        ScheduleGetCpuFunction           scheduleGetCpu           = nullptr;
+        PthreadSetNameFunction           pthreadSetName           = nullptr;
+        PthreadGetAttributesFunction     pthreadGetAttributes     = nullptr;
         PthreadDestroyAttributesFunction pthreadDestroyAttributes = nullptr;
-        PthreadGetStackFunction pthreadGetStack = nullptr;
+        PthreadGetStackFunction          pthreadGetStack          = nullptr;
 #    else
-        using PthreadThreadIdFunction = int (*)(PosixSystem::ThreadId, uint64_t*);
-        using PthreadSetNameFunction = int (*)(const char*);
-        using PthreadGetStackAddressFunction = void* (*)(PosixSystem::ThreadId);
-        using PthreadGetStackSizeFunction = size_t (*)(PosixSystem::ThreadId);
-
-        PthreadThreadIdFunction pthreadThreadId = nullptr;
-        PthreadSetNameFunction pthreadSetName = nullptr;
-        PthreadGetStackAddressFunction pthreadGetStackAddress = nullptr;
-        PthreadGetStackSizeFunction pthreadGetStackSize = nullptr;
+        using PthreadThreadIdFunction          = int (*)(PosixSystem::ThreadId, uint64_t*);
+        using PthreadSetNameFunction           = int (*)(const char*);
+        using PthreadGetStackAddressFunction   = void* (*)(PosixSystem::ThreadId);
+        using PthreadGetStackSizeFunction      = size_t (*)(PosixSystem::ThreadId);
+        
+        PthreadThreadIdFunction          pthreadThreadId          = nullptr;
+        PthreadSetNameFunction           pthreadSetName           = nullptr;
+        PthreadGetStackAddressFunction   pthreadGetStackAddress   = nullptr;
+        PthreadGetStackSizeFunction      pthreadGetStackSize      = nullptr;
 #    endif
+        // clang-format on
     };
 
     /** @brief Win32 movable global memory is unavailable on POSIX. */
@@ -408,79 +590,80 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX file, mapping, replacement, and monitoring entry points. */
     struct FileSystemAPI {
-        using OpenFunction = int (*)(const char*, int, ...);
-        using CloseFunction = int (*)(int);
-        using ReadFunction = Sora::ssize_t (*)(int, void*, size_t);
-        using WriteFunction = Sora::ssize_t (*)(int, const void*, size_t);
-        using ReadAtFunction = Sora::ssize_t (*)(int, void*, size_t, PosixSystem::FileOffset);
-        using WriteAtFunction = Sora::ssize_t (*)(int, const void*, size_t, PosixSystem::FileOffset);
-        using SyncFunction = int (*)(int);
-        using ResizeFunction = int (*)(int, PosixSystem::FileOffset);
-        using StatFunction = int (*)(int, struct stat*);
-        using MapFunction = void* (*)(void*, size_t, int, int, int, PosixSystem::FileOffset);
-        using UnmapFunction = int (*)(void*, size_t);
-        using SyncMapFunction = int (*)(void*, size_t, int);
-        using AdviseMapFunction = int (*)(void*, size_t, int);
-        using RenameFunction = int (*)(const char*, const char*);
-        using UnlinkFunction = int (*)(const char*);
-        using ControlFunction = int (*)(int, int, ...);
+        // clang-format off
+        using OpenFunction                = int (*)(const char*, int, ...);
+        using CloseFunction               = int (*)(int);
+        using ReadFunction                = Sora::ssize_t (*)(int, void*, size_t);
+        using WriteFunction               = Sora::ssize_t (*)(int, const void*, size_t);
+        using ReadAtFunction              = Sora::ssize_t (*)(int, void*, size_t, PosixSystem::FileOffset);
+        using WriteAtFunction             = Sora::ssize_t (*)(int, const void*, size_t, PosixSystem::FileOffset);
+        using SyncFunction                = int (*)(int);
+        using ResizeFunction              = int (*)(int, PosixSystem::FileOffset);
+        using StatFunction                = int (*)(int, struct stat*);
+        using MapFunction                 = void* (*)(void*, size_t, int, int, int, PosixSystem::FileOffset);
+        using UnmapFunction               = int (*)(void*, size_t);
+        using SyncMapFunction             = int (*)(void*, size_t, int);
+        using AdviseMapFunction           = int (*)(void*, size_t, int);
+        using RenameFunction              = int (*)(const char*, const char*);
+        using UnlinkFunction              = int (*)(const char*);
+        using ControlFunction             = int (*)(int, int, ...);
         using SystemConfigurationFunction = long (*)(int);
-        using DuplicateFunction = int (*)(int);
-        using GetProcessIdFunction = int (*)();
-        using AdviseFileFunction = int (*)(int, PosixSystem::FileOffset, PosixSystem::FileOffset, int);
+        using DuplicateFunction           = int (*)(int);
+        using AdviseFileFunction          = int (*)(int, PosixSystem::FileOffset, PosixSystem::FileOffset, int);
 
-        OpenFunction open = nullptr;
-        CloseFunction close = nullptr;
-        ReadFunction read = nullptr;
-        WriteFunction write = nullptr;
-        ReadAtFunction readAt = nullptr;
-        WriteAtFunction writeAt = nullptr;
-        SyncFunction sync = nullptr;
-        ResizeFunction resize = nullptr;
-        StatFunction stat = nullptr;
-        MapFunction map = nullptr;
-        UnmapFunction unmap = nullptr;
-        SyncMapFunction syncMap = nullptr;
-        AdviseMapFunction adviseMap = nullptr;
-        RenameFunction rename = nullptr;
-        UnlinkFunction unlink = nullptr;
-        ControlFunction control = nullptr;
+        OpenFunction                open                = nullptr;
+        CloseFunction               close               = nullptr;
+        ReadFunction                read                = nullptr;
+        WriteFunction               write               = nullptr;
+        ReadAtFunction              readAt              = nullptr;
+        WriteAtFunction             writeAt             = nullptr;
+        SyncFunction                sync                = nullptr;
+        ResizeFunction              resize              = nullptr;
+        StatFunction                stat                = nullptr;
+        MapFunction                 map                 = nullptr;
+        UnmapFunction               unmap               = nullptr;
+        SyncMapFunction             syncMap             = nullptr;
+        AdviseMapFunction           adviseMap           = nullptr;
+        RenameFunction              rename              = nullptr;
+        UnlinkFunction              unlink              = nullptr;
+        ControlFunction             control             = nullptr;
         SystemConfigurationFunction systemConfiguration = nullptr;
-        DuplicateFunction duplicate = nullptr;
-        GetProcessIdFunction getProcessId = nullptr;
-        AdviseFileFunction adviseFile = nullptr;
+        DuplicateFunction           duplicate           = nullptr;
+        AdviseFileFunction          adviseFile          = nullptr;
 
 #    if defined(PLATFORM_LINUX)
         using InitializeNotifyFunction = int (*)(int);
-        using AddNotifyFunction = int (*)(int, const char*, uint32_t);
-        using RemoveNotifyFunction = int (*)(int, int);
-        using PollFunction = int (*)(struct pollfd*, PosixSystem::PollCount, int);
+        using AddNotifyFunction        = int (*)(int, const char*, uint32_t);
+        using RemoveNotifyFunction     = int (*)(int, int);
+        using PollFunction             = int (*)(struct pollfd*, PosixSystem::PollCount, int);
 
         InitializeNotifyFunction initializeNotify = nullptr;
-        AddNotifyFunction addNotify = nullptr;
-        RemoveNotifyFunction removeNotify = nullptr;
-        PollFunction poll = nullptr;
+        AddNotifyFunction        addNotify        = nullptr;
+        RemoveNotifyFunction     removeNotify     = nullptr;
+        PollFunction             poll             = nullptr;
 #    elif defined(PLATFORM_MACOS)
         using CreateQueueFunction = int (*)();
-        using QueueEventFunction = int (*)(int, const struct kevent*, int, struct kevent*, int,
-                                            const struct timespec*);
+        using QueueEventFunction  = int (*)(int, const struct kevent*, int, struct kevent*, int, const struct timespec*);
 
         CreateQueueFunction createQueue = nullptr;
-        QueueEventFunction queueEvent = nullptr;
+        QueueEventFunction  queueEvent  = nullptr;
 #    endif
+        // clang-format on
     };
 
     /** @brief Dynamically resolved POSIX fatal-signal entry points. */
     struct CrashSystemAPI {
-        using SignalActionFunction = int (*)(int, const struct sigaction*, struct sigaction*);
+        // clang-format off
+        using SignalActionFunction   = int (*)(int, const struct sigaction*, struct sigaction*);
         using EmptySignalSetFunction = int (*)(PosixSystem::SignalSet*);
-        using RaiseSignalFunction = int (*)(int);
-        using ImmediateExitFunction = void (*)(int);
+        using RaiseSignalFunction    = int (*)(int);
+        using ImmediateExitFunction  = void (*)(int);
 
-        SignalActionFunction signalAction = nullptr;
+        SignalActionFunction   signalAction   = nullptr;
         EmptySignalSetFunction emptySignalSet = nullptr;
-        RaiseSignalFunction raiseSignal = nullptr;
-        ImmediateExitFunction immediateExit = nullptr;
+        RaiseSignalFunction    raiseSignal    = nullptr;
+        ImmediateExitFunction  immediateExit  = nullptr;
+        // clang-format on
     };
 
     /** @brief DbgHelp is unavailable outside Windows. */
@@ -488,11 +671,13 @@ namespace Sora::PAL {
 
     /** @brief Native POSIX stack-capture and dynamic-symbol entry points before PAL normalization. */
     struct PosixStackTraceNativeAPI {
+        // clang-format off
         using CaptureStackBackTraceFunction = int (*)(void**, int);
-        using FindDynamicSymbolFunction = int (*)(const void*, void*);
+        using FindDynamicSymbolFunction     = int (*)(const void*, void*);
 
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
-        FindDynamicSymbolFunction findDynamicSymbol = nullptr;
+        FindDynamicSymbolFunction     findDynamicSymbol     = nullptr;
+        // clang-format on
     };
 
     /** @brief ABI-compatible result returned by the POSIX @c dladdr function. */
@@ -505,17 +690,20 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX stack-capture and symbol-query entry points. */
     struct StackTraceSystemAPI {
+        // clang-format off
         using CaptureStackBackTraceFunction = int (*)(void**, int);
-        using FindDynamicSymbolFunction = int (*)(const void*, DynamicSymbolInfo*);
+        using FindDynamicSymbolFunction     = int (*)(const void*, DynamicSymbolInfo*);
 
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
-        FindDynamicSymbolFunction findDynamicSymbol = nullptr;
+        FindDynamicSymbolFunction     findDynamicSymbol     = nullptr;
+        // clang-format on
     };
 
 #else
 
     struct NativeErrorSystemAPI {};
     struct EnvironmentSystemAPI {};
+    struct ProcessSystemAPI {};
     struct ThreadSystemAPI {};
     struct GlobalMemorySystemAPI {};
     struct ClipboardSystemAPI {};
@@ -554,6 +742,9 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable process-environment function table. */
     [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable current-process introspection function table. */
+    [[nodiscard]] const ProcessSystemAPI& LoadProcessSystemAPI() noexcept;
 
     /** @brief Load and return the immutable current-thread function table. */
     [[nodiscard]] const ThreadSystemAPI& LoadThreadSystemAPI() noexcept;

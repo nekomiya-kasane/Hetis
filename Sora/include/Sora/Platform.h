@@ -206,6 +206,9 @@ namespace Sora {
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::ELF;
 #elif defined(__linux__)
 #    define PLATFORM_LINUX 1
+#    ifndef _GNU_SOURCE
+#        define _GNU_SOURCE
+#    endif
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::Linux;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::Linux;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
