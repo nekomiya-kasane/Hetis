@@ -21,154 +21,99 @@
 
 #pragma once
 
+#include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Core/Traits/EnumTraits.h"
-#include <Sora/Core/ToString.h>
-
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <meta>
+#include <limits>
+#include <type_traits>
 
 namespace Sora::Render {
 
     /** @brief Rendering backend encoded in the low eight bits of a resource handle. */
-    enum class Backend : std::uint8_t {
+    enum class Backend : uint8_t {
         Unspecified = 0, /**< No concrete backend has been assigned. */
         Vulkan = 1,      /**< Vulkan backend. */
-        Direct3D11 = 2,  /**< Direct3D 11 backend. */
-        Direct3D12 = 3,  /**< Direct3D 12 backend. */
-        Metal = 4,       /**< Metal backend. */
-        WebGPU = 5,      /**< WebGPU backend. */
-        OpenGL = 6       /**< OpenGL backend. */
+        Direct3D = 2,    /**< Direct3D backend. */
+        Metal = 3,       /**< Metal backend. */
+        WebGPU = 4,      /**< WebGPU backend. */
+        OpenGL = 5       /**< OpenGL backend. */
+    };
+
+    /** @brief Compile-time allocation policy for one handle pool kind. */
+    struct HandlePoolPolicy {
+        size_t maximumCount{};       /**< Hard slot limit. */
+        size_t allocatedChunkSize{}; /**< Number of slots in one stable storage chunk. */
+        size_t initialCount{};       /**< Slots initialized by default construction. */
+
+        /** @brief Return whether this policy can instantiate a pool directory and chunks. */
+        [[nodiscard]] constexpr bool IsValid() const noexcept {
+            return maximumCount != 0 && maximumCount <= std::numeric_limits<uint32_t>::max() &&
+                   allocatedChunkSize != 0 && allocatedChunkSize <= maximumCount && initialCount <= maximumCount;
+        }
+
+        /** @brief Return the maximum number of chunks required to store all slots. */
+        [[nodiscard]] constexpr size_t MaximumChunkCount() const noexcept {
+            return (maximumCount + allocatedChunkSize - 1) / allocatedChunkSize;
+        }
+
+        friend constexpr bool operator==(const HandlePoolPolicy&, const HandlePoolPolicy&) noexcept = default;
     };
 
     /** @brief Render resource kind encoded in bits 8 through 15 of a resource handle. */
-    enum class HandleKind : std::uint8_t {
-        Unknown = 0,                /**< Unregistered or erased resource kind. */
-        Buffer = 1,                 /**< Buffer resource. */
-        Texture = 2,                /**< Texture resource. */
-        TextureView = 3,            /**< Texture view resource. */
-        Sampler = 4,                /**< Sampler resource. */
-        Pipeline = 5,               /**< Pipeline resource. */
-        PipelineLayout = 6,         /**< Pipeline layout resource. */
-        PipelineCache = 7,          /**< Pipeline cache resource. */
-        PipelineLibraryPart = 8,    /**< Pipeline-library component. */
-        ShaderModule = 9,           /**< Shader module resource. */
-        Fence = 10,                 /**< Fence resource. */
-        Semaphore = 11,             /**< Semaphore resource. */
-        QueryPool = 12,             /**< Query pool resource. */
-        AccelerationStructure = 13, /**< Ray-tracing acceleration structure. */
-        Swapchain = 14,             /**< Presentation swapchain. */
-        DeviceMemory = 15,          /**< Explicit device-memory allocation. */
-        DescriptorLayout = 16,      /**< Descriptor layout resource. */
-        DescriptorSet = 17,         /**< Descriptor set resource. */
-        CommandBuffer = 18,         /**< Command buffer resource. */
-        CommandPool = 19            /**< Command pool resource. */
+    enum class HandleKind : uint8_t {
+        // clang-format off
+        Unknown               [[= HandlePoolPolicy{}]]                                                               = 0,  /**< Unregistered or erased resource kind. */
+        Buffer                [[= HandlePoolPolicy{16'384, 256, 256}]]  = 1,  /**< Buffer resource. */
+        Texture               [[= HandlePoolPolicy{16'384, 256, 256}]]  = 2,  /**< Texture resource. */
+        TextureView           [[= HandlePoolPolicy{32'768, 256, 256}]]  = 3,  /**< Texture view resource. */
+        Sampler               [[= HandlePoolPolicy{2'048, 256, 256}]]   = 4,  /**< Sampler resource. */
+        Pipeline              [[= HandlePoolPolicy{8'192, 256, 256}]]   = 5,  /**< Pipeline resource. */
+        PipelineLayout        [[= HandlePoolPolicy{4'096, 256, 256}]]   = 6,  /**< Pipeline layout resource. */
+        PipelineCache         [[= HandlePoolPolicy{16, 16, 16}]]        = 7,  /**< Pipeline cache resource. */
+        PipelineLibraryPart   [[= HandlePoolPolicy{4'096, 256, 256}]]   = 8,  /**< Pipeline-library component. */
+        ShaderModule          [[= HandlePoolPolicy{4'096, 256, 256}]]   = 9,  /**< Shader module resource. */
+        Fence                 [[= HandlePoolPolicy{256, 64, 64}]]       = 10, /**< Fence resource. */
+        Semaphore             [[= HandlePoolPolicy{512, 64, 64}]]       = 11, /**< Semaphore resource. */
+        QueryPool             [[= HandlePoolPolicy{128, 32, 32}]]       = 12, /**< Query pool resource. */
+        AccelerationStructure [[= HandlePoolPolicy{8'192, 256, 256}]]   = 13, /**< Acceleration structure. */
+        Swapchain             [[= HandlePoolPolicy{16, 16, 16}]]        = 14, /**< Presentation swapchain. */
+        DeviceMemory          [[= HandlePoolPolicy{1'024, 64, 64}]]     = 15, /**< Explicit device-memory allocation. */
+        DescriptorLayout      [[= HandlePoolPolicy{4'096, 256, 256}]]   = 16, /**< Descriptor layout resource. */
+        DescriptorSet         [[= HandlePoolPolicy{32'768, 256, 256}]]  = 17, /**< Descriptor set resource. */
+        CommandBuffer         [[= HandlePoolPolicy{512, 64, 64}]]       = 18, /**< Command buffer resource. */
+        CommandPool           [[= HandlePoolPolicy{64, 16, 16}]]        = 19  /**< Command pool resource. */
+        // clang-format on
     };
 
-    /**
-     * @brief Expose the compile-time policy for @p Tag.
-     * @tparam Tag Compile-time resource identity.
-     */
-    template<HandleKind Tag>
-    struct HandleTraits {
-        // clang-format off
-        static constexpr std::pair<HandleKind, size_t> chunkSizeMap[]{
-            {HandleKind::Texture,               256},
-            {HandleKind::TextureView,           256},
-            {HandleKind::Sampler,               256},
-            {HandleKind::Pipeline,              256},
-            {HandleKind::PipelineLayout,        256},
-            {HandleKind::PipelineCache,         16},
-            {HandleKind::PipelineLibraryPart,   256},
-            {HandleKind::ShaderModule,          256},
-            {HandleKind::Fence,                 64},
-            {HandleKind::Semaphore,             64},
-            {HandleKind::QueryPool,             32},
-            {HandleKind::AccelerationStructure, 256},
-            {HandleKind::Swapchain,             16},
-            {HandleKind::DeviceMemory,          64},
-            {HandleKind::DescriptorLayout,      256},
-            {HandleKind::DescriptorSet,         256},
-            {HandleKind::CommandBuffer,         64},
-            {HandleKind::CommandPool,           16} 
-        };
-        // clang-format on
+    namespace Traits {
 
-        // clang-format off
-        static constexpr std::pair<HandleKind, size_t> capacityMap[]{
-            {HandleKind::Texture,               1'6384},
-            {HandleKind::TextureView,           3'2768},
-            {HandleKind::Sampler,               2048},
-            {HandleKind::Pipeline,              8192},
-            {HandleKind::PipelineLayout,        4096},
-            {HandleKind::PipelineCache,         16},
-            {HandleKind::PipelineLibraryPart,   4096},
-            {HandleKind::ShaderModule,          4096},
-            {HandleKind::Fence,                 256},
-            {HandleKind::Semaphore,             512},
-            {HandleKind::QueryPool,             128},
-            {HandleKind::AccelerationStructure, 8192},
-            {HandleKind::Swapchain,             16},
-            {HandleKind::DeviceMemory,          1024},
-            {HandleKind::DescriptorLayout,      4096},
-            {HandleKind::DescriptorSet,         3'2768},
-            {HandleKind::CommandBuffer,         512},
-            {HandleKind::CommandPool,           64},
-        };
-        // clang-format on
+        /**
+         * @brief Return the allocation policy annotated on @p kind's enumerator.
+         * @param[in] kind Handle kind whose pool policy is requested.
+         * @return Annotated pool policy.
+         */
+        template<HandleKind kind>
+        inline constexpr HandlePoolPolicy HandlePoolPolicyOf =
+            Sora::$::GetSingle<HandlePoolPolicy>(Sora::Meta::GetEnumeratorMetaOf(kind));
 
-        // clang-format off
-        static constexpr std::pair<HandleKind, size_t> initialCapacityMap[]{
-            {HandleKind::Texture,               256},
-            {HandleKind::TextureView,           256},
-            {HandleKind::Sampler,               256},
-            {HandleKind::Pipeline,              256},
-            {HandleKind::PipelineLayout,        256},
-            {HandleKind::PipelineCache,         16},
-            {HandleKind::PipelineLibraryPart,   256},
-            {HandleKind::ShaderModule,          256},
-            {HandleKind::Fence,                 64},
-            {HandleKind::Semaphore,             64},
-            {HandleKind::QueryPool,             32},
-            {HandleKind::AccelerationStructure, 256},
-            {HandleKind::Swapchain,             16},
-            {HandleKind::DeviceMemory,          64},
-            {HandleKind::DescriptorLayout,      256},
-            {HandleKind::DescriptorSet,         256},
-            {HandleKind::CommandBuffer,         64},
-            {HandleKind::CommandPool,           16}
-        };
-        // clang-format on
+    } // namespace Traits
 
-        static constexpr size_t GetProp(HandleKind kind, std::span<const std::pair<HandleKind, size_t>> map) {
-            for (const auto& [k, v] : map) {
-                if (k == kind) {
-                    return v;
-                }
-            }
-            return size_t{0};
-        }
+    namespace Concept {
 
-        inline static constexpr HandleKind kKind = Tag; /**< Encoded resource kind. */
+        /** @brief Resource kind that has a valid pool policy and may back a typed handle pool. */
+        template<HandleKind Kind>
+        concept PooledHandleKind =
+            Kind != HandleKind::Unknown && Sora::Render::Traits::HandlePoolPolicyOf<Kind>.IsValid();
 
-        inline static constexpr size_t kInvalidIndex =
-            std::numeric_limits<uint32_t>::max(); /**< Sentinel slot index. */
-        inline static constexpr size_t kMaximumCount =
-            GetProp(Tag, std::span{capacityMap}); /**< Default maximum slot count. */
-        inline static constexpr size_t kAllocatedChunkSize =
-            GetProp(Tag, std::span{chunkSizeMap}); /**< Default sparse chunk size. */
-        inline static constexpr size_t kMaximumChunkCount =
-            (kMaximumCount + kAllocatedChunkSize - 1) / kAllocatedChunkSize; /**< Maximum sparse chunk count. */
-        inline static constexpr size_t kInitialCount =
-            GetProp(Tag, std::span{initialCapacityMap}); /**< Default initial slot count. */
-
-        inline static constexpr FixedString<32> kName =
-            Sora::String::Wrap("<", ">", Sora::Traits::EnumDisplayName<Tag>()); /**< Diagnostic name. */
-    };
+    } // namespace Concept
 
     /**
      * @brief Eight-byte opaque identity for one statically selected Render resource kind.
-     * @tparam Tag Compile-time resource identity registered by @ref DescribeHandle.
+     * @tparam Tag Compile-time resource identity declared by @ref HandleKind.
      *
      * @details Bit layout of the packed 64-bit @c value:
      * @code
@@ -181,50 +126,59 @@ namespace Sora::Render {
      */
     template<HandleKind Tag>
     struct Handle {
-        inline static constexpr uint64_t kGenerationBits = 16; /**< Generation field width. */
-        inline static constexpr uint64_t kIndexBits = 32;      /**< Slot-index field width. */
-        inline static constexpr uint64_t kTypeBits = 8;        /**< Resource-kind field width. */
-        inline static constexpr uint64_t kBackendBits = 8;     /**< Backend field width. */
+        inline static constexpr uint64_t kBackendShift = 0;
+        inline static constexpr uint64_t kKindShift = 8;
+        inline static constexpr uint64_t kIndexShift = 16;
+        inline static constexpr uint64_t kGenerationShift = 48;
 
-        union {
-            uint64_t value = 0; /**< Packed identity; zero denotes the null handle. */
+        inline static constexpr uint32_t kInvalidIndex = std::numeric_limits<uint32_t>::max();
+        inline static constexpr uint16_t kInvalidGeneration = std::numeric_limits<uint16_t>::max();
 
-            struct {
-                uint64_t backend : kBackendBits;       /**< Originating rendering backend. */
-                uint64_t typeTag : kTypeBits;          /**< Encoded resource-kind tag. */
-                uint64_t index : kIndexBits;           /**< Pool slot index. */
-                uint64_t generation : kGenerationBits; /**< Slot generation. */
-            } fields;
-        };
+        inline static constexpr HandleKind Type = Tag; /**< Unsigned integer type for @p Tag. */
 
         /** @brief Construct a null handle. */
-        constexpr Handle() noexcept : value(0) {}
+        constexpr Handle() noexcept = default;
 
         /** @brief Construct from a packed 64-bit identity. */
-        constexpr explicit Handle(uint64_t rawValue) noexcept : value(rawValue) {}
+        constexpr explicit Handle(uint64_t rawValue) noexcept : value_(rawValue) {}
 
         constexpr Handle(const Handle&) noexcept = default;
         constexpr Handle& operator=(const Handle&) noexcept = default;
 
         /** @brief Return whether this handle is non-null. */
-        [[nodiscard]] constexpr bool IsValid() const noexcept { return value != 0; }
+        [[nodiscard]] constexpr bool IsValid() const noexcept { return Raw() != 0; }
 
         /** @brief Convert to @c true when this handle is non-null. */
         [[nodiscard]] constexpr explicit operator bool() const noexcept { return IsValid(); }
 
+        /** @brief Return the packed 64-bit identity. */
+        [[nodiscard]] constexpr uint64_t Raw() const noexcept { return value_; }
+
         /** @brief Return the generation captured when the slot was allocated. */
         [[nodiscard]] constexpr uint16_t GetGeneration() const noexcept {
-            return static_cast<uint16_t>(fields.generation);
+            return static_cast<uint16_t>(value_ >> kGenerationShift);
         }
 
         /** @brief Return the pool slot index. */
-        [[nodiscard]] constexpr uint32_t GetIndex() const noexcept { return static_cast<uint32_t>(fields.index); }
+        [[nodiscard]] constexpr uint32_t GetIndex() const noexcept {
+            return static_cast<uint32_t>(value_ >> kIndexShift);
+        }
+
+        /** @brief Return the raw encoded resource-kind byte. */
+        [[nodiscard]] constexpr uint8_t GetTypeTag() const noexcept {
+            return static_cast<uint8_t>(value_ >> kKindShift);
+        }
 
         /** @brief Return the encoded resource kind. */
-        [[nodiscard]] constexpr HandleKind GetKind() const noexcept { return static_cast<HandleKind>(fields.typeTag); }
+        [[nodiscard]] constexpr HandleKind GetKind() const noexcept { return static_cast<HandleKind>(GetTypeTag()); }
+
+        /** @brief Return the raw encoded backend byte. */
+        [[nodiscard]] constexpr uint8_t GetBackendTag() const noexcept {
+            return static_cast<uint8_t>(value_ >> kBackendShift);
+        }
 
         /** @brief Return the encoded rendering backend. */
-        [[nodiscard]] constexpr Backend GetBackend() const noexcept { return static_cast<Backend>(fields.backend); }
+        [[nodiscard]] constexpr Backend GetBackend() const noexcept { return static_cast<Backend>(GetBackendTag()); }
 
         /** @brief Return a null handle of this resource type. */
         [[nodiscard]] static constexpr Handle Null() noexcept { return {}; }
@@ -238,65 +192,83 @@ namespace Sora::Render {
          */
         [[nodiscard]] static constexpr Handle Pack(uint16_t generation, uint32_t index,
                                                    Backend backend = Backend::Unspecified) noexcept {
-            Handle handle;
-            handle.fields.backend = static_cast<uint64_t>(backend);
-            handle.fields.typeTag = static_cast<uint64_t>(Tag);
-            handle.fields.index = index;
-            handle.fields.generation = generation;
-            return handle;
+            return Handle{(static_cast<uint64_t>(generation) << kGenerationShift) |
+                          (static_cast<uint64_t>(index) << kIndexShift) | (static_cast<uint64_t>(Tag) << kKindShift) |
+                          (static_cast<uint64_t>(backend) << kBackendShift)};
         }
 
         friend constexpr bool operator==(const Handle& lhs, const Handle& rhs) noexcept {
-            return lhs.value == rhs.value;
+            return lhs.Raw() == rhs.Raw();
         }
         friend constexpr auto operator<=>(const Handle& lhs, const Handle& rhs) noexcept {
-            return lhs.value <=> rhs.value;
+            return lhs.Raw() <=> rhs.Raw();
         }
+
+    private:
+        uint64_t value_ = 0;
     };
 
-    // clang-format off
-    using BufferHandle              = Handle<HandleKind::Buffer>;                    /**< Buffer identity. */
-    using TextureHandle             = Handle<HandleKind::Texture>;                   /**< Texture identity. */
-    using TextureViewHandle         = Handle<HandleKind::TextureView>;               /**< Texture-view identity. */
-    using SamplerHandle             = Handle<HandleKind::Sampler>;                   /**< Sampler identity. */
-    using PipelineHandle            = Handle<HandleKind::Pipeline>;                  /**< Pipeline identity. */
-    using PipelineLayoutHandle      = Handle<HandleKind::PipelineLayout>;            /**< Pipeline-layout identity. */
-    using PipelineCacheHandle       = Handle<HandleKind::PipelineCache>;             /**< Pipeline-cache identity. */
-    using PipelineLibraryPartHandle = Handle<HandleKind::PipelineLibraryPart>;       /**< Pipeline-library-part identity. */
-    using ShaderModuleHandle        = Handle<HandleKind::ShaderModule>;              /**< Shader-module identity. */
-    using FenceHandle               = Handle<HandleKind::Fence>;                     /**< Fence identity. */
-    using SemaphoreHandle           = Handle<HandleKind::Semaphore>;                 /**< Semaphore identity. */
-    using QueryPoolHandle           = Handle<HandleKind::QueryPool>;                 /**< Query-pool identity. */
-    using AccelStructHandle         = Handle<HandleKind::AccelerationStructure>;     /**< Acceleration-structure identity. */
-    using SwapchainHandle           = Handle<HandleKind::Swapchain>;                 /**< Swapchain identity. */
-    using DeviceMemoryHandle        = Handle<HandleKind::DeviceMemory>;              /**< Device-memory identity. */
-    using DescriptorLayoutHandle    = Handle<HandleKind::DescriptorLayout>;          /**< Descriptor-layout identity. */
-    using DescriptorSetHandle       = Handle<HandleKind::DescriptorSet>;             /**< Descriptor-set identity. */
-    using CommandBufferHandle       = Handle<HandleKind::CommandBuffer>;             /**< Command-buffer identity. */
-    using CommandPoolHandle         = Handle<HandleKind::CommandPool>;               /**< Command-pool identity. */
-    // clang-format on
+    namespace Concept {
 
-    // clang-format off
-    inline constexpr std::size_t kMaxBufferCount              = HandleTraits<HandleKind::Buffer>::kMaximumCount;
-    inline constexpr std::size_t kMaxTextureCount             = HandleTraits<HandleKind::Texture>::kMaximumCount;
-    inline constexpr std::size_t kMaxTextureViewCount         = HandleTraits<HandleKind::TextureView>::kMaximumCount;
-    inline constexpr std::size_t kMaxSamplerCount             = HandleTraits<HandleKind::Sampler>::kMaximumCount;
-    inline constexpr std::size_t kMaxShaderModuleCount        = HandleTraits<HandleKind::ShaderModule>::kMaximumCount;
-    inline constexpr std::size_t kMaxFenceCount               = HandleTraits<HandleKind::Fence>::kMaximumCount;
-    inline constexpr std::size_t kMaxSemaphoreCount           = HandleTraits<HandleKind::Semaphore>::kMaximumCount;
-    inline constexpr std::size_t kMaxPipelineCount            = HandleTraits<HandleKind::Pipeline>::kMaximumCount;
-    inline constexpr std::size_t kMaxPipelineLayoutCount      = HandleTraits<HandleKind::PipelineLayout>::kMaximumCount;
-    inline constexpr std::size_t kMaxDescriptorLayoutCount    = HandleTraits<HandleKind::DescriptorLayout>::kMaximumCount;
-    inline constexpr std::size_t kMaxDescriptorSetCount       = HandleTraits<HandleKind::DescriptorSet>::kMaximumCount;
-    inline constexpr std::size_t kMaxPipelineCacheCount       = HandleTraits<HandleKind::PipelineCache>::kMaximumCount;
-    inline constexpr std::size_t kMaxPipelineLibraryPartCount = HandleTraits<HandleKind::PipelineLibraryPart>::kMaximumCount;
-    inline constexpr std::size_t kMaxQueryPoolCount           = HandleTraits<HandleKind::QueryPool>::kMaximumCount;
-    inline constexpr std::size_t kMaxAccelStructCount         = HandleTraits<HandleKind::AccelerationStructure>::kMaximumCount;
-    inline constexpr std::size_t kMaxSwapchainCount           = HandleTraits<HandleKind::Swapchain>::kMaximumCount;
-    inline constexpr std::size_t kMaxCommandBufferCount       = HandleTraits<HandleKind::CommandBuffer>::kMaximumCount;
-    inline constexpr std::size_t kMaxCommandPoolCount         = HandleTraits<HandleKind::CommandPool>::kMaximumCount;
-    inline constexpr std::size_t kMaxDeviceMemoryCount        = HandleTraits<HandleKind::DeviceMemory>::kMaximumCount;
-    // clang-format on
+        /** @brief Strongly typed Render handle instantiation. */
+        template<typename T>
+        concept PooledHandle = requires(T handle) {
+            typename T::Type;
+            { T::Pack(1, 0) } -> std::same_as<T>;
+        } && std::same_as<std::remove_cvref_t<T>, Handle<T::Type>> && Concept::PooledHandleKind<T::Type>;
+
+    } // namespace Concept
+
+    namespace Traits {
+
+        /** @brief Strong handle type for @p Kind. */
+        template<HandleKind Kind>
+        using HandleOf = Handle<Kind>;
+
+        /** @brief Compile-time resource kind encoded by a @ref Render::Handle specialization. */
+        template<Concept::PooledHandle T>
+        inline constexpr HandleKind HandleKindOf = std::remove_cvref_t<T>::Type;
+
+    } // namespace Traits
+
+    /** @brief Buffer identity. */
+    using BufferHandle = Handle<HandleKind::Buffer>;
+    /** @brief Texture identity. */
+    using TextureHandle = Handle<HandleKind::Texture>;
+    /** @brief Texture-view identity. */
+    using TextureViewHandle = Handle<HandleKind::TextureView>;
+    /** @brief Sampler identity. */
+    using SamplerHandle = Handle<HandleKind::Sampler>;
+    /** @brief Pipeline identity. */
+    using PipelineHandle = Handle<HandleKind::Pipeline>;
+    /** @brief Pipeline-layout identity. */
+    using PipelineLayoutHandle = Handle<HandleKind::PipelineLayout>;
+    /** @brief Pipeline-cache identity. */
+    using PipelineCacheHandle = Handle<HandleKind::PipelineCache>;
+    /** @brief Pipeline-library-part identity. */
+    using PipelineLibraryPartHandle = Handle<HandleKind::PipelineLibraryPart>;
+    /** @brief Shader-module identity. */
+    using ShaderModuleHandle = Handle<HandleKind::ShaderModule>;
+    /** @brief Fence identity. */
+    using FenceHandle = Handle<HandleKind::Fence>;
+    /** @brief Semaphore identity. */
+    using SemaphoreHandle = Handle<HandleKind::Semaphore>;
+    /** @brief Query-pool identity. */
+    using QueryPoolHandle = Handle<HandleKind::QueryPool>;
+    /** @brief Acceleration-structure identity. */
+    using AccelStructHandle = Handle<HandleKind::AccelerationStructure>;
+    /** @brief Swapchain identity. */
+    using SwapchainHandle = Handle<HandleKind::Swapchain>;
+    /** @brief Device-memory identity. */
+    using DeviceMemoryHandle = Handle<HandleKind::DeviceMemory>;
+    /** @brief Descriptor-layout identity. */
+    using DescriptorLayoutHandle = Handle<HandleKind::DescriptorLayout>;
+    /** @brief Descriptor-set identity. */
+    using DescriptorSetHandle = Handle<HandleKind::DescriptorSet>;
+    /** @brief Command-buffer identity. */
+    using CommandBufferHandle = Handle<HandleKind::CommandBuffer>;
+    /** @brief Command-pool identity. */
+    using CommandPoolHandle = Handle<HandleKind::CommandPool>;
 
     static_assert(sizeof(BufferHandle) == sizeof(uint64_t));
     static_assert(alignof(BufferHandle) == alignof(uint64_t));

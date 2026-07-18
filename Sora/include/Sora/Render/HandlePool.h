@@ -12,7 +12,7 @@
  *     uint64_t native = 0;
  * };
  *
- * Sora::Render::HandlePool<BufferRecord, Sora::Render::BufferTag> buffers;
+ * Sora::Render::HandlePool<BufferRecord, Sora::Render::HandleKind::Buffer> buffers;
  * auto allocation = buffers.Emplace(Sora::Render::Backend::Vulkan, BufferRecord{.native = 42});
  * if (!allocation) {
  *     return allocation.error();
@@ -40,6 +40,7 @@
 
 #pragma once
 
+#include <Sora/Core/Guard.h>
 #include <Sora/ErrorCode.h>
 #include <Sora/Render/Handle.h>
 
@@ -70,25 +71,14 @@ namespace Sora::Render {
 
     } // namespace Concept
 
-    namespace Detail {
-
-        inline constexpr size_t kHandlePoolTargetChunkSize = 256;
-
-        /** @brief Return the default initial capacity for one built-in handle kind. */
-        template<HandleKind Tag>
-        inline constexpr size_t kDefaultHandlePoolInitialCapacity =
-            std::min(HandleTraits<Tag>::kMaximumCount, kHandlePoolTargetChunkSize);
-
-    } // namespace Detail
-
     /**
      * @brief Store stable-address Render payloads behind typed, generation-checked handles.
      * @tparam T Payload type; its destructor must be non-throwing.
      * @tparam Tag Compile-time resource identity from @ref Handle.h.
-     * @tparam InitialCapacity Number of slots initialized by construction; zero defers allocation until first use.
-     * @tparam MaximumCapacity Hard slot limit and upper bound for the fixed chunk directory.
+     * @tparam Policy Pool capacity policy; defaults to the policy annotated on @p Tag.
      *
-     * @details Capacity grows geometrically up to @p MaximumCapacity. Each chunk is allocated once and retained until
+     * @details Capacity grows geometrically up to @p Policy.maximumCount. Each chunk is allocated once and retained
+     * until
      * pool destruction, so growth does not move existing payloads. Free slots use a FIFO queue: this improves temporal
      * locality less than LIFO reuse, but distributes generation consumption across the pool and greatly delays 16-bit
      * generation exhaustion. A slot is permanently retired instead of wrapping its generation and reviving an ancient
@@ -98,8 +88,8 @@ namespace Sora::Render {
      * mutex, but their returned raw pointers do not own lifetime. External scheduling, a frame/fence lifetime regime,
      * or deferred reclamation must prevent concurrent destruction while a returned pointer is in use.
      */
-    template<Concept::HandlePoolValue T, HandleKind Tag>
-        requires(HandleTraits<Tag>::kKind != HandleKind::Unknown)
+    template<Concept::HandlePoolValue T, HandleKind Tag, HandlePoolPolicy Policy = Traits::HandlePoolPolicyOf<Tag>>
+        requires Concept::PooledHandleKind<Tag> && (Policy.IsValid())
     class HandlePool {
     public:
         using HandleType = Handle<Tag>; /**< Strongly typed public handle. */
@@ -133,7 +123,7 @@ namespace Sora::Render {
             std::atomic<uint64_t> publishedHandle{0};
             std::atomic<uint16_t> generation{1};
             std::atomic<SlotState> state{SlotState::Free};
-            uint32_t nextFree = HandleTraits<Tag>::kInvalidIndex;
+            uint32_t nextFree = HandleType::kInvlidIndex;
             alignas(T) std::byte storage[sizeof(T)];
 
             Slot() = default;
@@ -151,16 +141,16 @@ namespace Sora::Render {
         };
 
         struct Chunk {
-            std::array<Slot, HandleTraits<Tag>::kAllocatedChunkSize> slots;
+            std::array<Slot, Policy.allocatedChunkSize> slots;
         };
 
     public:
         /** @name Construction and Assignment @{ ------------------------------------------------------------ */
 
-        /** @brief Construct a pool and initialize @p InitialCapacity slots. */
+        /** @brief Construct a pool and initialize @p Policy.initialCount slots. */
         HandlePool() {
-            if constexpr (HandleTraits<Tag>::kInitialCount != 0) {
-                GrowToUnlocked(HandleTraits<Tag>::kInitialCount);
+            if constexpr (Policy.initialCount != 0) {
+                GrowToUnlocked(Policy.initialCount);
             }
         }
 
@@ -198,29 +188,26 @@ namespace Sora::Render {
             requires std::constructible_from<T, Args...>
         [[nodiscard]] Result<Allocation> Emplace(Backend backend, Args&&... args) {
             std::unique_lock lock{mutex_};
-            if (freeHead_ == HandleTraits<Tag>::kInvalidIndex && !GrowUnlocked()) {
+            if (freeHead_ == HandleType::kInvlidIndex && !GrowUnlocked()) {
                 return std::unexpected{ErrorCode::ResourceExhausted};
             }
 
             const uint32_t index = PopFreeUnlocked();
             Slot& slot = SlotAt(index);
-            T* object = nullptr;
-            lock.unlock();
-            try {
-                object = std::construct_at(slot.Storage(), std::forward<Args>(args)...);
-            } catch (...) {
-                lock.lock();
+            Sora::ScopeExit rollback{[this, index] noexcept {
+                std::scoped_lock rollbackLock{mutex_};
                 PushFreeUnlocked(index);
-                lock.unlock();
-                throw;
-            }
+            }};
+            lock.unlock();
+            T* object = std::construct_at(slot.Storage(), std::forward<Args>(args)...);
 
             lock.lock();
             const uint16_t generation = slot.generation.load(std::memory_order_relaxed);
             const HandleType handle = HandleType::Pack(generation, index, backend);
             slot.state.store(SlotState::Alive, std::memory_order_relaxed);
-            slot.publishedHandle.store(handle.value, std::memory_order_release);
+            slot.publishedHandle.store(handle.Raw(), std::memory_order_release);
             liveCount_.fetch_add(1, std::memory_order_relaxed);
+            rollback.Release();
             return Allocation{.handle = handle, .value = object};
         }
 
@@ -238,11 +225,11 @@ namespace Sora::Render {
         /**
          * @brief Ensure at least @p requested slots have initialized metadata and stable storage.
          * @param[in] requested Required capacity.
-         * @return Success, or @ref ErrorCode::ResourceExhausted when @p requested exceeds @ref kMaximumCapacity.
+         * @return Success, or @ref ErrorCode::ResourceExhausted when @p requested exceeds @p Policy.maximumCount.
          * @throws std::bad_alloc when host allocation fails.
          */
         [[nodiscard]] VoidResult Reserve(size_t requested) {
-            if (requested > HandleTraits<Tag>::kMaximumCount) {
+            if (requested > Policy.maximumCount) {
                 return std::unexpected{ErrorCode::ResourceExhausted};
             }
             std::scoped_lock lock{mutex_};
@@ -288,7 +275,7 @@ namespace Sora::Render {
                 return static_cast<Pointer>(nullptr);
             }
             auto& slot = self.SlotAt(handle.GetIndex());
-            if (slot.publishedHandle.load(std::memory_order_acquire) != handle.value) [[unlikely]] {
+            if (slot.publishedHandle.load(std::memory_order_acquire) != handle.Raw()) [[unlikely]] {
                 return static_cast<Pointer>(nullptr);
             }
             return static_cast<Pointer>(slot.Object());
@@ -428,9 +415,9 @@ namespace Sora::Render {
                 return;
             }
             if (name.empty()) {
-                debugNames_.erase(handle.value);
+                debugNames_.erase(handle.Raw());
             } else {
-                debugNames_.insert_or_assign(handle.value, name);
+                debugNames_.insert_or_assign(handle.Raw(), name);
             }
 #endif
         }
@@ -440,7 +427,7 @@ namespace Sora::Render {
 #ifndef NDEBUG
             std::scoped_lock lock{mutex_};
             if (FindLiveSlotUnlocked(handle) != nullptr) {
-                if (const auto iterator = debugNames_.find(handle.value); iterator != debugNames_.end()) {
+                if (const auto iterator = debugNames_.find(handle.Raw()); iterator != debugNames_.end()) {
                     return iterator->second;
                 }
             }
@@ -452,14 +439,13 @@ namespace Sora::Render {
 
     private:
         [[nodiscard]] Slot& SlotAt(uint32_t index) noexcept {
-            Chunk* chunk = directory_[index / HandleTraits<Tag>::kAllocatedChunkSize].load(std::memory_order_relaxed);
-            return chunk->slots[index % HandleTraits<Tag>::kAllocatedChunkSize];
+            Chunk* chunk = directory_[index / Policy.allocatedChunkSize].load(std::memory_order_relaxed);
+            return chunk->slots[index % Policy.allocatedChunkSize];
         }
 
         [[nodiscard]] const Slot& SlotAt(uint32_t index) const noexcept {
-            const Chunk* chunk =
-                directory_[index / HandleTraits<Tag>::kAllocatedChunkSize].load(std::memory_order_relaxed);
-            return chunk->slots[index % HandleTraits<Tag>::kAllocatedChunkSize];
+            const Chunk* chunk = directory_[index / Policy.allocatedChunkSize].load(std::memory_order_relaxed);
+            return chunk->slots[index % Policy.allocatedChunkSize];
         }
 
         [[nodiscard]] Slot* FindLiveSlotUnlocked(HandleType handle) noexcept {
@@ -468,7 +454,7 @@ namespace Sora::Render {
                 return nullptr;
             }
             Slot& slot = SlotAt(handle.GetIndex());
-            return slot.publishedHandle.load(std::memory_order_relaxed) == handle.value ? std::addressof(slot)
+            return slot.publishedHandle.load(std::memory_order_relaxed) == handle.Raw() ? std::addressof(slot)
                                                                                         : nullptr;
         }
 
@@ -478,20 +464,18 @@ namespace Sora::Render {
                 return nullptr;
             }
             const Slot& slot = SlotAt(handle.GetIndex());
-            return slot.publishedHandle.load(std::memory_order_relaxed) == handle.value ? std::addressof(slot)
+            return slot.publishedHandle.load(std::memory_order_relaxed) == handle.Raw() ? std::addressof(slot)
                                                                                         : nullptr;
         }
 
         [[nodiscard]] bool GrowUnlocked() {
             const size_t current = capacity_.load(std::memory_order_relaxed);
-            if (current == HandleTraits<Tag>::kMaximumCount) {
+            if (current == Policy.maximumCount) {
                 return false;
             }
-            size_t target = current == 0
-                                ? std::min(HandleTraits<Tag>::kMaximumCount, HandleTraits<Tag>::kAllocatedChunkSize)
-                                : current * 2;
-            if (target < current || target > HandleTraits<Tag>::kMaximumCount) {
-                target = HandleTraits<Tag>::kMaximumCount;
+            size_t target = current == 0 ? std::min(Policy.maximumCount, Policy.allocatedChunkSize) : current * 2;
+            if (target < current || target > Policy.maximumCount) {
+                target = Policy.maximumCount;
             }
             GrowToUnlocked(target);
             return true;
@@ -503,8 +487,7 @@ namespace Sora::Render {
                 return;
             }
 
-            const size_t requiredChunks =
-                (target + HandleTraits<Tag>::kAllocatedChunkSize - 1) / HandleTraits<Tag>::kAllocatedChunkSize;
+            const size_t requiredChunks = (target + Policy.allocatedChunkSize - 1) / Policy.allocatedChunkSize;
             for (size_t chunkIndex = 0; chunkIndex < requiredChunks; ++chunkIndex) {
                 if (ownedChunks_[chunkIndex] == nullptr) {
                     auto chunk = std::make_unique<Chunk>();
@@ -524,9 +507,9 @@ namespace Sora::Render {
             }
             for (uint32_t index = begin; index < end; ++index) {
                 Slot& slot = SlotAt(index);
-                slot.nextFree = index + 1 < end ? index + 1 : HandleTraits<Tag>::kInvalidIndex;
+                slot.nextFree = index + 1 < end ? index + 1 : HandleType::kInvlidIndex;
             }
-            if (freeTail_ == HandleTraits<Tag>::kInvalidIndex) {
+            if (freeTail_ == HandleType::kInvlidIndex) {
                 freeHead_ = begin;
             } else {
                 SlotAt(freeTail_).nextFree = begin;
@@ -539,17 +522,17 @@ namespace Sora::Render {
             const uint32_t index = freeHead_;
             Slot& slot = SlotAt(index);
             freeHead_ = slot.nextFree;
-            slot.nextFree = HandleTraits<Tag>::kInvalidIndex;
-            if (freeHead_ == HandleTraits<Tag>::kInvalidIndex) {
-                freeTail_ = HandleTraits<Tag>::kInvalidIndex;
+            slot.nextFree = HandleType::kInvlidIndex;
+            if (freeHead_ == HandleType::kInvlidIndex) {
+                freeTail_ = HandleType::kInvlidIndex;
             }
             freeCount_.fetch_sub(1, std::memory_order_relaxed);
             return index;
         }
 
         void PushFreeUnlocked(uint32_t index) noexcept {
-            SlotAt(index).nextFree = HandleTraits<Tag>::kInvalidIndex;
-            if (freeTail_ == HandleTraits<Tag>::kInvalidIndex) {
+            SlotAt(index).nextFree = HandleType::kInvlidIndex;
+            if (freeTail_ == HandleType::kInvlidIndex) {
                 freeHead_ = index;
             } else {
                 SlotAt(freeTail_).nextFree = index;
@@ -569,23 +552,27 @@ namespace Sora::Render {
 
         void EraseDebugNameUnlocked([[maybe_unused]] HandleType handle) noexcept {
 #ifndef NDEBUG
-            debugNames_.erase(handle.value);
+            debugNames_.erase(handle.Raw());
 #endif
         }
 
         mutable std::mutex mutex_;
-        uint32_t freeHead_ = HandleTraits<Tag>::kInvalidIndex;
-        uint32_t freeTail_ = HandleTraits<Tag>::kInvalidIndex;
+        uint32_t freeHead_ = HandleType::kInvlidIndex;
+        uint32_t freeTail_ = HandleType::kInvlidIndex;
         std::atomic<uint32_t> capacity_{0};
         std::atomic<uint32_t> freeCount_{0};
         std::atomic<uint32_t> liveCount_{0};
         std::atomic<uint32_t> deadCount_{0};
         std::atomic<uint32_t> retiredCount_{0};
-        std::array<std::atomic<Chunk*>, HandleTraits<Tag>::kAllocatedChunkCount> directory_{};
-        std::array<std::unique_ptr<Chunk>, HandleTraits<Tag>::kAllocatedChunkCount> ownedChunks_{};
+        std::array<std::atomic<Chunk*>, Policy.MaximumChunkCount()> directory_{};
+        std::array<std::unique_ptr<Chunk>, Policy.MaximumChunkCount()> ownedChunks_{};
 #ifndef NDEBUG
         std::unordered_map<uint64_t, std::string> debugNames_;
 #endif
     };
+
+    /** @brief Namespace-level concept alias kept beside @ref HandlePool for unqualified Render API checks. */
+    template<typename T>
+    concept HandlePoolValue = Concept::HandlePoolValue<T>;
 
 } // namespace Sora::Render
