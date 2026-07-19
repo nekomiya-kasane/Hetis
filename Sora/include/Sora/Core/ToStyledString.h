@@ -299,6 +299,38 @@ namespace Sora {
     /** @cond INTERNAL */
     namespace Detail {
 
+        template<typename T>
+        void ToStyledStringImpl(Styled::StyledStringBuilder& builder, T&& value);
+
+        template<typename T>
+        void ReflectiveClassToStyledString(Styled::StyledStringBuilder& builder, const T& value);
+
+        template<typename Pointer>
+        void DereferencedPointerToStyledString(Styled::StyledStringBuilder& builder, Pointer pointer) {
+            using Pointee = std::remove_cv_t<std::remove_pointer_t<Pointer>>;
+            if constexpr (std::is_class_v<Pointee> && Meta::HasVirtualToStringMember<Pointee> &&
+                          HasMemberToString<decltype(*pointer)>) {
+                builder.Text(Styled::StyledRole::Plain, pointer->ToString());
+            } else {
+                ToStyledStringImpl(builder, *pointer);
+            }
+
+            switch (PointeeCompleteness(pointer)) {
+                case PointeeViewCompleteness::Complete:
+                    break;
+                case PointeeViewCompleteness::Incomplete:
+                    builder.Text(Styled::StyledRole::Error,
+                                 std::format(" <incomplete: dynamic object rendered through non-virtual {} view>",
+                                             Traits::TypeName<Pointee>));
+                    break;
+                case PointeeViewCompleteness::Indeterminate:
+                    builder.Text(Styled::StyledRole::Error,
+                                 std::format(" <possibly incomplete: dynamic type is not observable through {}>",
+                                             Traits::TypeName<Pointee>));
+                    break;
+            }
+        }
+
         /** @brief Core dispatch from a value to styled terminal text. */
         template<typename T>
         void ToStyledStringImpl(Styled::StyledStringBuilder& builder, T&& value) {
@@ -384,36 +416,7 @@ namespace Sora {
                 ss << std::forward<T>(value);
                 builder.Text($$::StyledRole::Plain, ss.str());
             } else if constexpr (std::is_class_v<U> && !std::is_union_v<U> && requires { sizeof(U); }) {
-                builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
-                builder.Raw($$::StyledRole::Punctuation, "{");
-
-                template for (bool first = true; constexpr auto m : Traits::DataMembers<U>) {
-                    if constexpr (!$::Has<$::Serialization::Ignore>(m)) {
-                        if (!first) {
-                            builder.Raw($$::StyledRole::Punctuation, ", ");
-                        }
-                        first = false;
-
-                        builder.Text($$::StyledRole::FieldName, Meta::SerializationFieldNameOf<m>());
-                        builder.Raw($$::StyledRole::Punctuation, "=");
-
-                        if constexpr (std::meta::is_bit_field(m)) {
-                            ToStyledStringImpl(builder, auto(value.[:m:]));
-                        } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(m):]> &&
-                                             $::Has<$::Serialization::DerefPrint>(m)) {
-                            auto* ptr = value.[:m:];
-                            if (ptr == nullptr) {
-                                builder.Text($$::StyledRole::Null, "nullptr");
-                            } else {
-                                ToStyledStringImpl(builder, *ptr);
-                            }
-                        } else {
-                            ToStyledStringImpl(builder, value.[:m:]);
-                        }
-                    }
-                }
-
-                builder.Raw($$::StyledRole::Punctuation, "}");
+                ReflectiveClassToStyledString(builder, value);
             } else if constexpr (std::is_object_v<U>) {
                 builder.Raw($$::StyledRole::Punctuation, "<");
                 builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
@@ -424,6 +427,64 @@ namespace Sora {
             } else {
                 builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
             }
+        }
+
+        template<typename T>
+        void ReflectiveClassToStyledString(Styled::StyledStringBuilder& builder, const T& value) {
+            using U = std::remove_cv_t<T>;
+            namespace $$ = Styled;
+
+            builder.Text($$::StyledRole::TypeName, Traits::TypeName<U>);
+            builder.Raw($$::StyledRole::Punctuation, "{");
+            bool first = true;
+            template for (constexpr auto member : Traits::DataMembers<U>) {
+                if constexpr (!$::Has<$::Serialization::Ignore>(member)) {
+                    if (!std::exchange(first, false)) {
+                        builder.Raw($$::StyledRole::Punctuation, ", ");
+                    }
+                    builder.Text($$::StyledRole::FieldName, Meta::SerializationFieldNameOf<member>());
+                    builder.Raw($$::StyledRole::Punctuation, "=");
+                    if constexpr (std::meta::is_bit_field(member)) {
+                        ToStyledStringImpl(builder, auto(value.[:member:]));
+                    } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(member):]> &&
+                                         $::Has<$::Serialization::DerefPrint>(member)) {
+                        auto* pointer = value.[:member:];
+                        if (pointer == nullptr) {
+                            builder.Text($$::StyledRole::Null, "nullptr");
+                        } else {
+                            DereferencedPointerToStyledString(builder, pointer);
+                        }
+                    } else {
+                        ToStyledStringImpl(builder, value.[:member:]);
+                    }
+                }
+            }
+            template for (constexpr auto base : Meta::BasesOf(^^U, std::meta::access_context::unprivileged())) {
+                using Base = typename [:std::meta::type_of(base):];
+                if (!std::exchange(first, false)) {
+                    builder.Raw($$::StyledRole::Punctuation, ", ");
+                }
+                builder.Text($$::StyledRole::Keyword, "base");
+                builder.Raw($$::StyledRole::Punctuation, "[");
+                builder.Text($$::StyledRole::TypeName, Traits::TypeName<Base>);
+                builder.Raw($$::StyledRole::Punctuation, "]=");
+                if constexpr (std::is_convertible_v<const U*, const Base*>) {
+                    ReflectiveClassToStyledString(builder, static_cast<const Base&>(value));
+                } else {
+                    builder.Text($$::StyledRole::Error, "<incomplete: ambiguous base subobject>");
+                }
+            }
+            if constexpr (Meta::HasInaccessibleDirectBases(^^U)) {
+                if (!std::exchange(first, false)) {
+                    builder.Raw($$::StyledRole::Punctuation, ", ");
+                }
+                builder.Text($$::StyledRole::Keyword, "base");
+                builder.Raw($$::StyledRole::Punctuation, "[");
+                builder.Text($$::StyledRole::Error, "<inaccessible>");
+                builder.Raw($$::StyledRole::Punctuation, "]=");
+                builder.Text($$::StyledRole::Error, "<incomplete>");
+            }
+            builder.Raw($$::StyledRole::Punctuation, "}");
         }
 
     } // namespace Detail

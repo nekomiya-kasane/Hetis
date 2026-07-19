@@ -19,12 +19,14 @@
  */
 #pragma once
 
-#include "Sora/Core/FixedString.h"
+#include <Sora/Core/FixedString.h>
 #include <Sora/Platform.h>
 
+#include <concepts>
 #include <cstddef>
 #include <cstdarg>
 #include <cstdint>
+#include <initializer_list>
 #include <mutex>
 #include <string>
 #include <type_traits>
@@ -71,9 +73,6 @@ namespace Sora::PAL {
         uint64_t peakResidentMemoryBytes = 0;
     };
 
-    /** @brief Capture the calling thread's native error slot without triggering lazy symbol resolution. */
-    [[nodiscard]] uint64_t CaptureLastSystemError() noexcept;
-
 #if defined(PLATFORM_WINDOWS)
 
     namespace WindowsSystem {
@@ -86,6 +85,71 @@ namespace Sora::PAL {
         using Size = uintptr_t;
         using Handle = void*;
         using GlobalMemory = void*;
+        /** @brief Opaque native type used by the existing Win32 file API table. */
+        using NativeOverlapped = ::_OVERLAPPED;
+        using NativeLargeInteger = ::_LARGE_INTEGER;
+
+        /** @brief Layout used by Win32 asynchronous file operations without including the Windows SDK. */
+        struct Overlapped {
+            uintptr_t internal = 0;
+            uintptr_t internalHigh = 0;
+            union {
+                struct {
+                    DWord offset;
+                    DWord offsetHigh;
+                };
+                void* pointer;
+            };
+            Handle event = nullptr;
+        };
+
+        /** @brief Fixed prefix of a variable-length Win32 directory notification record. */
+        struct FileNotifyInformationHeader {
+            DWord nextEntryOffset = 0;
+            DWord action = 0;
+            DWord fileNameLength = 0;
+        };
+
+        /** @brief ABI-compatible Win32 system information used for allocation-granularity queries. */
+        struct SystemInfo {
+            union {
+                DWord oemIdentifier;
+                struct {
+                    uint16_t processorArchitecture;
+                    uint16_t reserved;
+                };
+            };
+            DWord pageSize;
+            void* minimumApplicationAddress;
+            void* maximumApplicationAddress;
+            uintptr_t activeProcessorMask;
+            DWord processorCount;
+            DWord processorType;
+            DWord allocationGranularity;
+            uint16_t processorLevel;
+            uint16_t processorRevision;
+        };
+
+        /** @brief ABI-compatible Win32 storage information used for direct-I/O alignment. */
+        struct FileStorageInfo {
+            uint32_t logicalBytesPerSector;
+            uint32_t physicalBytesPerSectorForAtomicity;
+            uint32_t physicalBytesPerSectorForPerformance;
+            uint32_t fileSystemEffectivePhysicalBytesPerSectorForAtomicity;
+            DWord flags;
+            DWord byteOffsetForSectorAlignment;
+            DWord byteOffsetForPartitionAlignment;
+        };
+
+        /** @brief ABI-compatible signed 64-bit integer returned by Win32 file-size APIs. */
+        struct LargeInteger {
+            int64_t quadPart = 0;
+        };
+
+        /** @brief ABI-compatible end-of-file information passed to Win32 file-information APIs. */
+        struct FileEndOfFileInformation {
+            LargeInteger endOfFile{};
+        };
 
         /** @brief ABI-compatible representation of Win32 @c PROCESSOR_NUMBER. */
         struct ProcessorNumber {
@@ -125,6 +189,17 @@ namespace Sora::PAL {
                 inline constexpr DWord kFormatMessageFromModule          = 0x00000800;
                 [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_SYSTEM", PAL::$::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageFromSystem          = 0x00001000;
+                [[= PAL::$::Macro{"ERROR_FILE_NOT_FOUND"}]]
+                inline constexpr DWord kErrorFileNotFound                = 2;
+                [[= PAL::$::Macro{"ERROR_PATH_NOT_FOUND"}]]
+                inline constexpr DWord kErrorPathNotFound                = 3;
+                [[= PAL::$::Macro{"ERROR_HANDLE_EOF"}]]
+                inline constexpr DWord kErrorHandleEof                   = 38;
+                [[= PAL::$::Macro{"ERROR_FILE_EXISTS"}]]
+                inline constexpr DWord kErrorFileExists                  = 80;
+                [[= PAL::$::Macro{"ERROR_ALREADY_EXISTS"}]]
+                inline constexpr DWord kErrorAlreadyExists               = 183;
+                inline constexpr int kFileEndOfFileInformation            = 6;
                 [[= PAL::$::Macro{"FORMAT_MESSAGE_ARGUMENT_ARRAY", PAL::$::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageArgumentArray       = 0x00002000;
                 [[= PAL::$::Macro{"FORMAT_MESSAGE_MAX_WIDTH_MASK", PAL::$::Macro::Type::Mask}]]
@@ -189,6 +264,10 @@ namespace Sora::PAL {
                 inline constexpr DWord kFileFlagDeleteOnClose            = 0x04000000;
                 [[= PAL::$::Macro{"FILE_FLAG_BACKUP_SEMANTICS", PAL::$::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagBackupSemantics          = 0x02000000;
+                [[= PAL::$::Macro{"FILE_LIST_DIRECTORY", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kFileListDirectory                = 0x00000001;
+                [[= PAL::$::Macro{"FILE_STORAGE_INFO", PAL::$::Macro::Type::Mask}]]
+                inline constexpr int kFileStorageInformation              = 16;
                 [[= PAL::$::Macro{"FILE_FLAG_POSIX_SEMANTICS", PAL::$::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagPosixSemantics           = 0x01000000;
                 [[= PAL::$::Macro{"FILE_FLAG_SESSION_AWARE", PAL::$::Macro::Type::Mask}]]
@@ -208,6 +287,77 @@ namespace Sora::PAL {
                 // clang-format on
 
             } // namespace File
+
+            /** @brief Directory-notification masks, actions, statuses, and wait results. */
+            inline namespace FileWatch {
+
+                // clang-format off
+                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_FILE_NAME", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kNotifyFileName       = 0x00000001;
+                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_DIR_NAME", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kNotifyDirectoryName  = 0x00000002;
+                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_SIZE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kNotifySize            = 0x00000008;
+                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_LAST_WRITE", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kNotifyLastWrite      = 0x00000010;
+                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_CREATION", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kNotifyCreation       = 0x00000040;
+                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_SECURITY", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kNotifySecurity       = 0x00000100;
+                [[= PAL::$::Macro{"FILE_ACTION_ADDED"}]]
+                inline constexpr DWord kActionAdded          = 1;
+                [[= PAL::$::Macro{"FILE_ACTION_REMOVED"}]]
+                inline constexpr DWord kActionRemoved        = 2;
+                [[= PAL::$::Macro{"FILE_ACTION_MODIFIED"}]]
+                inline constexpr DWord kActionModified       = 3;
+                [[= PAL::$::Macro{"FILE_ACTION_RENAMED_OLD_NAME"}]]
+                inline constexpr DWord kActionRenamedOld     = 4;
+                [[= PAL::$::Macro{"FILE_ACTION_RENAMED_NEW_NAME"}]]
+                inline constexpr DWord kActionRenamedNew     = 5;
+                [[= PAL::$::Macro{"ERROR_IO_PENDING"}]]
+                inline constexpr DWord kErrorIoPending       = 997;
+                [[= PAL::$::Macro{"INFINITE"}]]
+                inline constexpr DWord kInfinite             = 0xFFFFFFFFu;
+                [[= PAL::$::Macro{"WAIT_OBJECT_0"}]]
+                inline constexpr DWord kWaitObject           = 0;
+                [[= PAL::$::Macro{"WAIT_TIMEOUT"}]]
+                inline constexpr DWord kWaitTimeout          = 258;
+                // clang-format on
+
+                /** @brief Return whether @p handle is the Win32 invalid-handle sentinel. */
+                [[nodiscard]] inline bool IsInvalidHandle(Handle handle) noexcept {
+                    return reinterpret_cast<uintptr_t>(handle) == static_cast<uintptr_t>(-1);
+                }
+
+            } // namespace FileWatch
+
+            /** @brief File replacement and mapping constants. */
+            inline namespace FileMapping {
+
+                // clang-format off
+                [[= PAL::$::Macro{"REPLACEFILE_WRITE_THROUGH", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kReplaceWriteThrough = 0x00000001;
+                [[= PAL::$::Macro{"MOVEFILE_REPLACE_EXISTING", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kMoveReplaceExisting = 0x00000001;
+                [[= PAL::$::Macro{"MOVEFILE_WRITE_THROUGH", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kMoveWriteThrough    = 0x00000008;
+                [[= PAL::$::Macro{"PAGE_READONLY"}]]
+                inline constexpr DWord kPageReadOnly        = 0x00000002;
+                [[= PAL::$::Macro{"PAGE_READWRITE"}]]
+                inline constexpr DWord kPageReadWrite       = 0x00000004;
+                [[= PAL::$::Macro{"PAGE_WRITECOPY"}]]
+                inline constexpr DWord kPageWriteCopy       = 0x00000008;
+                [[= PAL::$::Macro{"FILE_MAP_COPY"}]]
+                inline constexpr DWord kFileMapCopy         = 0x00000001;
+                [[= PAL::$::Macro{"FILE_MAP_WRITE"}]]
+                inline constexpr DWord kFileMapWrite        = 0x00000002;
+                [[= PAL::$::Macro{"FILE_MAP_READ"}]]
+                inline constexpr DWord kFileMapRead         = 0x00000004;
+                [[= PAL::$::Macro{"DUPLICATE_SAME_ACCESS"}]]
+                inline constexpr DWord kDuplicateSameAccess = 0x00000002;
+                // clang-format on
+
+            } // namespace FileMapping
 
             /** @brief Allocation flags consumed by @c GlobalMemorySystemAPI. */
             inline namespace GlobalMemoryBehavior {
@@ -246,6 +396,12 @@ namespace Sora::PAL {
 
     } // namespace WindowsSystem
 
+    /** @brief Native system error type depending on the platform. */
+    using SystemError = std::conditional_t<Sora::Platform::kIsWindows, WindowsSystem::DWord, int>;
+
+    /** @brief Capture the calling thread's native error slot without triggering lazy symbol resolution. */
+    [[nodiscard]] SystemError CaptureLastSystemError() noexcept;
+
     /** @brief Dynamically resolved Win32 error-reporting entry points. */
     struct NativeErrorSystemAPI {
         // clang-format off
@@ -277,6 +433,21 @@ namespace Sora::PAL {
         SetEnvironmentVariableWideFunction      setEnvironmentVariableWide      = nullptr;
         GetEnvironmentStringsWideFunction       getEnvironmentStringsWide       = nullptr;
         FreeEnvironmentStringsWideFunction      freeEnvironmentStringsWide      = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved module-loader operations with normalized PAL handle semantics. */
+    struct ModuleSystemAPI {
+        // clang-format off
+        using LoadLibraryWideFunction       = WindowsSystem::Handle (*)(const wchar_t*) noexcept;
+        using GetModuleHandleWideFunction   = WindowsSystem::Handle (*)(const wchar_t*) noexcept;
+        using FindSymbolFunction             = void* (*)(WindowsSystem::Handle, const char*) noexcept;
+        using FreeLibraryFunction            = WindowsSystem::Bool (*)(WindowsSystem::Handle) noexcept;
+
+        LoadLibraryWideFunction     loadLibraryWide     = nullptr;
+        GetModuleHandleWideFunction getModuleHandleWide = nullptr;
+        FindSymbolFunction           findSymbol          = nullptr;
+        FreeLibraryFunction          freeLibrary         = nullptr;
         // clang-format on
     };
 
@@ -495,11 +666,168 @@ namespace Sora::PAL {
         /** @brief POSIX file offset ABI type without including @c sys/types.h. */
         using FileOffset = std::int64_t;
 
+        /** @brief POSIX creation-mode ABI type without including @c sys/types.h. */
+        using FileMode = std::conditional_t<Platform::kIsLinux, uint32_t, uint16_t>;
+
         /** @brief POSIX poll descriptor-count ABI type without including @c poll.h. */
         using PollCount = std::size_t;
 
         /** @brief Opaque Darwin process-accounting buffer pointer used by @c proc_pid_rusage. */
         using ResourceUsageInfo = void*;
+
+        /** @brief Opaque native poll descriptor used by the POSIX file API table. */
+        using NativePollDescriptor = ::pollfd;
+
+        /** @brief Opaque native kqueue event used by the Darwin file API table. */
+        using NativeKernelEvent = ::kevent;
+
+        /** @brief Opaque native timeout record used by the Darwin file API table. */
+        using NativeTimeSpec = ::timespec;
+
+        /** @brief ABI-compatible fixed prefix of a Linux inotify record. */
+        struct InotifyEventHeader {
+            int32_t watchDescriptor = -1;
+            uint32_t mask = 0;
+            uint32_t cookie = 0;
+            uint32_t nameLength = 0;
+        };
+
+        /** @brief ABI-compatible poll descriptor used by the Linux watcher backend. */
+        struct PollDescriptor {
+            int descriptor = -1;
+            int16_t events = 0;
+            int16_t revents = 0;
+        };
+
+        /** @brief ABI-compatible kqueue event record used by the Darwin watcher backend. */
+        struct KernelEvent {
+            uintptr_t identifier = 0;
+            int16_t filter = 0;
+            uint16_t flags = 0;
+            uint32_t filterFlags = 0;
+            int64_t data = 0;
+            void* userData = nullptr;
+        };
+
+        /** @brief ABI-compatible timeout record used by the Darwin watcher backend. */
+        struct TimeSpec {
+            int64_t seconds = 0;
+            int64_t nanoseconds = 0;
+        };
+
+        /** @brief Platform-specific watcher flags and event masks. */
+        inline namespace FileWatch {
+
+#    if defined(PLATFORM_LINUX)
+            // clang-format off
+            inline constexpr int      kOpenNonBlocking    = 0x00000800;
+            inline constexpr int      kOpenCloseOnExec    = 0x00080000;
+            inline constexpr uint32_t kEventModify        = 0x00000002;
+            inline constexpr uint32_t kEventAttrib        = 0x00000004;
+            inline constexpr uint32_t kEventCloseWrite    = 0x00000008;
+            inline constexpr uint32_t kEventMovedFrom     = 0x00000040;
+            inline constexpr uint32_t kEventMovedTo       = 0x00000080;
+            inline constexpr uint32_t kEventCreate        = 0x00000100;
+            inline constexpr uint32_t kEventDelete        = 0x00000200;
+            inline constexpr uint32_t kEventDeleteSelf    = 0x00000400;
+            inline constexpr uint32_t kEventMoveSelf      = 0x00000800;
+            inline constexpr uint32_t kEventQueueOverflow = 0x00004000;
+            inline constexpr uint32_t kEventIgnored       = 0x00008000;
+            inline constexpr uint32_t kEventIsDirectory   = 0x40000000;
+            inline constexpr int16_t  kPollInput          = 0x0001;
+            inline constexpr int16_t  kPollError          = 0x0008;
+            inline constexpr int16_t  kPollHangup         = 0x0010;
+            inline constexpr int16_t  kPollInvalid        = 0x0020;
+            // clang-format on
+#    elif defined(PLATFORM_MACOS)
+            // clang-format off
+            inline constexpr int      kOpenEventOnly      = 0x00008000;
+            inline constexpr int      kOpenCloseOnExec    = 0x01000000;
+            inline constexpr int16_t  kFilterVnode        = -4;
+            inline constexpr uint16_t kEventAdd           = 0x0001;
+            inline constexpr uint16_t kEventClear         = 0x0020;
+            inline constexpr uint32_t kNoteWrite          = 0x00000002;
+            inline constexpr uint32_t kNoteDelete         = 0x00000001;
+            inline constexpr uint32_t kNoteRename         = 0x00000020;
+            inline constexpr uint32_t kNoteExtend         = 0x00000004;
+            inline constexpr uint32_t kNoteAttribute      = 0x00000008;
+            // clang-format on
+#    endif
+
+        } // namespace FileWatch
+
+        /** @brief POSIX file-opening and mapping constants used by PAL implementations. */
+        inline namespace File {
+
+#    if defined(PLATFORM_LINUX)
+            // clang-format off
+            inline constexpr int kOpenReadOnly = 0x00000000;
+            inline constexpr int kOpenWriteOnly = 0x00000001;
+            inline constexpr int kOpenReadWrite = 0x00000002;
+            inline constexpr int kOpenCreate = 0x00000040;
+            inline constexpr int kOpenExclusive = 0x00000080;
+            inline constexpr int kOpenTruncate = 0x00000200;
+            inline constexpr int kOpenDirectory = 0x00010000;
+            inline constexpr int kOpenDirect = 0x00004000;
+            inline constexpr int kOpenSync = 0x00101000;
+            inline constexpr int kPageSizeConfiguration = 30;
+            inline constexpr int kFileAdviceSequential = 2;
+            inline constexpr int kFileAdviceRandom = 1;
+            // clang-format on
+#    elif defined(PLATFORM_MACOS)
+            // clang-format off
+            inline constexpr int kOpenReadOnly = 0x00000000;
+            inline constexpr int kOpenWriteOnly = 0x00000001;
+            inline constexpr int kOpenReadWrite = 0x00000002;
+            inline constexpr int kOpenCreate = 0x00000200;
+            inline constexpr int kOpenExclusive = 0x00000800;
+            inline constexpr int kOpenTruncate = 0x00000400;
+            inline constexpr int kOpenDirectory = 0x00100000;
+            inline constexpr int kOpenSync = 0x00000080;
+            inline constexpr int kNoCacheControl = 48;
+            inline constexpr int kFullSyncControl = 51;
+            inline constexpr int kPageSizeConfiguration = 29;
+            // clang-format on
+#    endif
+
+        } // namespace File
+
+        /** @brief POSIX virtual-memory protection, mapping, and synchronization constants. */
+        inline namespace Mapping {
+
+            // clang-format off
+            inline constexpr int kProtectionRead = 0x1;
+            inline constexpr int kProtectionWrite = 0x2;
+            inline constexpr int kMapShared = 0x1;
+            inline constexpr int kMapPrivate = 0x2;
+            inline constexpr int kSynchronize = 0x4;
+            inline constexpr int kAdviceNormal = 0;
+            inline constexpr int kAdviceRandom = 1;
+            inline constexpr int kAdviceSequential = 2;
+            inline constexpr int kAdviceWillNeed = 3;
+            inline constexpr int kAdviceDontNeed = 4;
+            // clang-format on
+
+            /** @brief Return whether @p address is the POSIX failed-mapping sentinel. */
+            [[nodiscard]] inline bool IsMapFailed(void* address) noexcept {
+                return reinterpret_cast<uintptr_t>(address) == static_cast<uintptr_t>(-1);
+            }
+
+        } // namespace Mapping
+
+        /** @brief POSIX dynamic-loader binding and visibility flags. */
+        inline namespace Module {
+
+            inline constexpr int kDynamicLazy = 0x00000001;
+            inline constexpr int kDynamicNow = 0x00000002;
+            inline constexpr int kDynamicLocal = 0x00000004;
+#    if defined(PLATFORM_LINUX)
+            inline constexpr int kDynamicGlobal = 0x00000100;
+#    else
+            inline constexpr int kDynamicGlobal = 0x00000008;
+#    endif
+
+        } // namespace Module
 
     } // namespace PosixSystem
 
@@ -516,6 +844,19 @@ namespace Sora::PAL {
         GetFunction    get    = nullptr;
         SetFunction    set    = nullptr;
         RemoveFunction remove = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved module-loader operations with normalized POSIX handle semantics. */
+    struct ModuleSystemAPI {
+        // clang-format off
+        using OpenFunction   = void* (*)(const char*, int) noexcept;
+        using CloseFunction  = int (*)(void*) noexcept;
+        using FindSymbolFunction = void* (*)(void*, const char*) noexcept;
+
+        OpenFunction        open        = nullptr;
+        CloseFunction       close       = nullptr;
+        FindSymbolFunction  findSymbol  = nullptr;
         // clang-format on
     };
 
@@ -608,6 +949,8 @@ namespace Sora::PAL {
         using UnlinkFunction              = int (*)(const char*);
         using ControlFunction             = int (*)(int, int, ...);
         using SystemConfigurationFunction = long (*)(int);
+        using QueryFileBlockSizeFunction  = bool (*)(int, size_t*) noexcept;
+        using QueryFileSizeFunction       = bool (*)(int, uint64_t*) noexcept;
         using DuplicateFunction           = int (*)(int);
         using AdviseFileFunction          = int (*)(int, PosixSystem::FileOffset, PosixSystem::FileOffset, int);
 
@@ -628,6 +971,8 @@ namespace Sora::PAL {
         UnlinkFunction              unlink              = nullptr;
         ControlFunction             control             = nullptr;
         SystemConfigurationFunction systemConfiguration = nullptr;
+        QueryFileBlockSizeFunction  queryFileBlockSize  = nullptr;
+        QueryFileSizeFunction       queryFileSize       = nullptr;
         DuplicateFunction           duplicate           = nullptr;
         AdviseFileFunction          adviseFile          = nullptr;
 
@@ -703,6 +1048,7 @@ namespace Sora::PAL {
 
     struct NativeErrorSystemAPI {};
     struct EnvironmentSystemAPI {};
+    struct ModuleSystemAPI {};
     struct ProcessSystemAPI {};
     struct ThreadSystemAPI {};
     struct GlobalMemorySystemAPI {};
@@ -719,22 +1065,22 @@ namespace Sora::PAL {
     public:
         LockedDbgHelpSystemAPI(const LockedDbgHelpSystemAPI&) = delete;
         LockedDbgHelpSystemAPI& operator=(const LockedDbgHelpSystemAPI&) = delete;
-        LockedDbgHelpSystemAPI(LockedDbgHelpSystemAPI&&) noexcept = default;
-        LockedDbgHelpSystemAPI& operator=(LockedDbgHelpSystemAPI&&) noexcept = default;
+        LockedDbgHelpSystemAPI(LockedDbgHelpSystemAPI&&) noexcept = delete;
+        LockedDbgHelpSystemAPI& operator=(LockedDbgHelpSystemAPI&&) noexcept = delete;
 
         /** @brief Access DbgHelp entry points while this token owns the process-global lock. */
-        [[nodiscard]] const DbgHelpSystemAPI& operator*() const noexcept { return *api_; }
+        [[nodiscard]] const DbgHelpSystemAPI& operator*() const noexcept { return api_; }
 
         /** @brief Access DbgHelp entry points while this token owns the process-global lock. */
-        [[nodiscard]] const DbgHelpSystemAPI* operator->() const noexcept { return api_; }
+        [[nodiscard]] const DbgHelpSystemAPI* operator->() const noexcept { return &api_; }
 
     private:
         friend LockedDbgHelpSystemAPI LockDbgHelpSystemAPI();
 
-        LockedDbgHelpSystemAPI(std::mutex& mutex, const DbgHelpSystemAPI& api) : lock_{mutex}, api_{&api} {}
+        LockedDbgHelpSystemAPI(std::mutex& mutex, const DbgHelpSystemAPI& api) : lock_{mutex}, api_{api} {}
 
         std::unique_lock<std::mutex> lock_;
-        const DbgHelpSystemAPI* api_ = nullptr;
+        const DbgHelpSystemAPI& api_;
     };
 
     /** @brief Load and return the immutable native error-reporting function table. */
@@ -742,6 +1088,9 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable process-environment function table. */
     [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable normalized dynamic-module function table. */
+    [[nodiscard]] const ModuleSystemAPI& LoadModuleSystemAPI() noexcept;
 
     /** @brief Load and return the immutable current-process introspection function table. */
     [[nodiscard]] const ProcessSystemAPI& LoadProcessSystemAPI() noexcept;
@@ -769,5 +1118,12 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable native stack-trace function table. */
     [[nodiscard]] const StackTraceSystemAPI& LoadStackTraceSystemAPI() noexcept;
+
+    /** @brief Ensure that all provided system APIs are loaded and valid. */
+    template<typename... Ts>
+        requires(sizeof...(Ts) > 0 && (std::is_function_v<std::remove_pointer_t<Ts>> && ...))
+    [[nodiscard]] bool EnsureSystemAPIs(Ts&... apis) noexcept {
+        return (apis && ...);
+    }
 
 } // namespace Sora::PAL

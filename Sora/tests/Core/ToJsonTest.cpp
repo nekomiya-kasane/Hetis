@@ -41,6 +41,30 @@ namespace ToJsonTest {
         value.value = input.at("native").get<int>();
     }
 
+    struct JsonGrandBase {
+        int grandBaseValue = 0;
+
+        constexpr bool operator==(const JsonGrandBase&) const = default;
+    };
+
+    struct JsonBase : JsonGrandBase {
+        int baseValue = 0;
+
+        constexpr bool operator==(const JsonBase&) const = default;
+    };
+
+    struct JsonSideBase {
+        std::string sideValue;
+
+        constexpr bool operator==(const JsonSideBase&) const = default;
+    };
+
+    struct JsonDerived : JsonBase, JsonSideBase {
+        int derivedValue = 0;
+
+        constexpr bool operator==(const JsonDerived&) const = default;
+    };
+
 } // namespace ToJsonTest
 
 using namespace ToJsonTest;
@@ -63,6 +87,24 @@ TEST_CASE("JSON CPOs serialize and deserialize reflected classes", "[Sora.Core.T
     Payload output;
     Sora::FromJson(encoded, output);
     REQUIRE(output == source);
+}
+
+TEST_CASE("JSON reflection preserves base subobjects in an explicit inheritance partition", "[Sora.Core.ToJson]") {
+    JsonDerived source;
+    source.baseValue = 29;
+    source.sideValue = "side";
+    source.derivedValue = 31;
+
+    const Sora::Json encoded = Sora::ToJson(source);
+    const auto& bases = encoded.at("$bases");
+    const auto& encodedBase = bases.at(std::string(Sora::Traits::TypeName<JsonBase>));
+    REQUIRE(encoded.at("derivedValue") == 31);
+    REQUIRE(encodedBase.at("baseValue") == 29);
+    REQUIRE(encodedBase.at("$bases").at(std::string(Sora::Traits::TypeName<JsonGrandBase>)).at("grandBaseValue") == 0);
+    REQUIRE(bases.at(std::string(Sora::Traits::TypeName<JsonSideBase>)).at("sideValue") == "side");
+    REQUIRE(Sora::FromJson(std::in_place_type<JsonDerived>, encoded) == source);
+    REQUIRE_THROWS_AS(Sora::FromJson(std::in_place_type<JsonDerived>, Sora::Json{{"$bases", Sora::Json::array()}}),
+                      nlohmann::json::type_error);
 }
 
 TEST_CASE("JSON CPOs honor explicit member customizations", "[Sora.Core.ToJson]") {

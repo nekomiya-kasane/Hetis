@@ -51,6 +51,22 @@ namespace Sora::PAL {
     namespace {
 
 #if defined(PLATFORM_WINDOWS)
+        WindowsSystem::Handle LoadWindowsLibrary(const wchar_t* name) noexcept {
+            return reinterpret_cast<WindowsSystem::Handle>(::LoadLibraryW(name));
+        }
+
+        WindowsSystem::Handle GetWindowsModuleHandle(const wchar_t* name) noexcept {
+            return reinterpret_cast<WindowsSystem::Handle>(::GetModuleHandleW(name));
+        }
+
+        void* FindWindowsSymbol(WindowsSystem::Handle module, const char* name) noexcept {
+            return reinterpret_cast<void*>(::GetProcAddress(reinterpret_cast<HMODULE>(module), name));
+        }
+
+        WindowsSystem::Bool FreeWindowsLibrary(WindowsSystem::Handle module) noexcept {
+            return ::FreeLibrary(reinterpret_cast<HMODULE>(module));
+        }
+
         /** @brief Load one exact system module and retain it for the process lifetime. */
         [[nodiscard]] ModulePtr LoadSystemModule(std::string_view name) noexcept {
             try {
@@ -92,8 +108,8 @@ namespace Sora::PAL {
                 return false;
             }
             const ProcessSystemAPI& api = LoadProcessSystemAPI();
-            if (api.getCurrentProcessId == nullptr || api.createProcessSnapshot == nullptr ||
-                api.firstProcess == nullptr || api.nextProcess == nullptr || api.closeHandle == nullptr) {
+            if (!EnsureSystemAPIs(api.getCurrentProcessId, api.createProcessSnapshot, api.firstProcess, api.nextProcess,
+                                  api.closeHandle)) {
                 return false;
             }
 
@@ -126,8 +142,7 @@ namespace Sora::PAL {
                 return false;
             }
             const ProcessSystemAPI& api = LoadProcessSystemAPI();
-            if (api.getCurrentProcess == nullptr || api.getProcessTimes == nullptr ||
-                api.getProcessMemoryInfo == nullptr) {
+            if (!EnsureSystemAPIs(api.getCurrentProcess, api.getProcessTimes, api.getProcessMemoryInfo)) {
                 return false;
             }
 
@@ -157,69 +172,113 @@ namespace Sora::PAL {
         }
 
         // clang-format off
-        static_assert(sizeof(WindowsSystem::ProcessorNumber) == sizeof(PROCESSOR_NUMBER));
-        static_assert(alignof(WindowsSystem::ProcessorNumber) == alignof(PROCESSOR_NUMBER));
+        static_assert(sizeof(WindowsSystem::ProcessorNumber)                     == sizeof(PROCESSOR_NUMBER));
+        static_assert(alignof(WindowsSystem::ProcessorNumber)                    == alignof(PROCESSOR_NUMBER));
+        static_assert(sizeof(WindowsSystem::Overlapped)                          == sizeof(OVERLAPPED));
+        static_assert(alignof(WindowsSystem::Overlapped)                         == alignof(OVERLAPPED));
+        static_assert(offsetof(WindowsSystem::Overlapped, internal)              == offsetof(OVERLAPPED, Internal));
+        static_assert(offsetof(WindowsSystem::Overlapped, internalHigh)          == offsetof(OVERLAPPED, InternalHigh));
+        static_assert(sizeof(WindowsSystem::FileNotifyInformationHeader)         == offsetof(FILE_NOTIFY_INFORMATION, FileName));
+        static_assert(alignof(WindowsSystem::FileNotifyInformationHeader)        == alignof(FILE_NOTIFY_INFORMATION));
+        static_assert(sizeof(WindowsSystem::SystemInfo)                          == sizeof(SYSTEM_INFO));
+        static_assert(alignof(WindowsSystem::SystemInfo)                         == alignof(SYSTEM_INFO));
+        static_assert(offsetof(WindowsSystem::SystemInfo, allocationGranularity) == offsetof(SYSTEM_INFO, dwAllocationGranularity));
+        static_assert(sizeof(WindowsSystem::FileStorageInfo)                     == sizeof(FILE_STORAGE_INFO));
+        static_assert(alignof(WindowsSystem::FileStorageInfo)                    == alignof(FILE_STORAGE_INFO));
+        static_assert(sizeof(WindowsSystem::LargeInteger)                        == sizeof(LARGE_INTEGER));
+        static_assert(alignof(WindowsSystem::LargeInteger)                       == alignof(LARGE_INTEGER));
+        static_assert(sizeof(WindowsSystem::FileEndOfFileInformation)            == sizeof(FILE_END_OF_FILE_INFO));
+        static_assert(WindowsSystem::kFileStorageInformation                     == FileStorageInfo);
+        static_assert(WindowsSystem::kFileEndOfFileInformation                   == FileEndOfFileInfo);
+        static_assert(WindowsSystem::kFileListDirectory                          == FILE_LIST_DIRECTORY);
+        static_assert(WindowsSystem::kNotifyFileName                             == FILE_NOTIFY_CHANGE_FILE_NAME);
+        static_assert(WindowsSystem::kNotifyDirectoryName                        == FILE_NOTIFY_CHANGE_DIR_NAME);
+        static_assert(WindowsSystem::kNotifySize                                 == FILE_NOTIFY_CHANGE_SIZE);
+        static_assert(WindowsSystem::kNotifyLastWrite                            == FILE_NOTIFY_CHANGE_LAST_WRITE);
+        static_assert(WindowsSystem::kNotifyCreation                             == FILE_NOTIFY_CHANGE_CREATION);
+        static_assert(WindowsSystem::kNotifySecurity                             == FILE_NOTIFY_CHANGE_SECURITY);
+        static_assert(WindowsSystem::kActionAdded                                == FILE_ACTION_ADDED);
+        static_assert(WindowsSystem::kActionRemoved                              == FILE_ACTION_REMOVED);
+        static_assert(WindowsSystem::kActionModified                             == FILE_ACTION_MODIFIED);
+        static_assert(WindowsSystem::kActionRenamedOld                           == FILE_ACTION_RENAMED_OLD_NAME);
+        static_assert(WindowsSystem::kActionRenamedNew                           == FILE_ACTION_RENAMED_NEW_NAME);
+        static_assert(WindowsSystem::kErrorIoPending                             == ERROR_IO_PENDING);
+        static_assert(WindowsSystem::kInfinite                                   == INFINITE);
+        static_assert(WindowsSystem::kWaitObject                                 == WAIT_OBJECT_0);
+        static_assert(WindowsSystem::kWaitTimeout                                == WAIT_TIMEOUT);
 
-        static_assert(std::is_same_v<WindowsSystem::Bool, BOOL>);
-        static_assert(std::is_same_v<WindowsSystem::DWord, DWORD>);
+        static_assert(std::is_same_v<WindowsSystem::Bool,    BOOL>);
+        static_assert(std::is_same_v<WindowsSystem::DWord,   DWORD>);
         static_assert(std::is_same_v<WindowsSystem::DWord64, DWORD64>);
-        static_assert(std::is_same_v<WindowsSystem::UInt, UINT>);
+        static_assert(std::is_same_v<WindowsSystem::UInt,    UINT>);
         static_assert(std::is_same_v<WindowsSystem::HResult, HRESULT>);
 
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction, decltype(&::SymSetOptions)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction, decltype(&::SymInitialize)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymFromAddressFunction, decltype(&::SymFromAddr)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetLineFromAddressFunction, decltype(&::SymGetLineFromAddr64)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetModuleInfoFunction, decltype(&::SymGetModuleInfo64)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::UndecorateSymbolNameFunction, decltype(&::UnDecorateSymbolName)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction,                   decltype(&::SymSetOptions)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction,                   decltype(&::SymInitialize)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymFromAddressFunction,                  decltype(&::SymFromAddr)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetLineFromAddressFunction,           decltype(&::SymGetLineFromAddr64)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetModuleInfoFunction,                decltype(&::SymGetModuleInfo64)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::UndecorateSymbolNameFunction,            decltype(&::UnDecorateSymbolName)>);
+       
+        static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction,        decltype(&::RtlCaptureStackBackTrace)>);
+        static_assert(std::is_same_v<StackTraceSystemAPI::GetCurrentProcessFunction,            decltype(&::GetCurrentProcess)>);
 
-        static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction, decltype(&::RtlCaptureStackBackTrace)>);
-        static_assert(std::is_same_v<StackTraceSystemAPI::GetCurrentProcessFunction, decltype(&::GetCurrentProcess)>);
+        static_assert(std::is_same_v<CrashSystemAPI::SetUnhandledExceptionFilterFunction,       decltype(&::SetUnhandledExceptionFilter)>);
 
-        static_assert(std::is_same_v<CrashSystemAPI::SetUnhandledExceptionFilterFunction, decltype(&::SetUnhandledExceptionFilter)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessIdFunction,             decltype(&::GetCurrentProcessId)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessFunction,               decltype(&::GetCurrentProcess)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::CreateProcessSnapshotFunction,           decltype(&::CreateToolhelp32Snapshot)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::ReadProcessEntryFunction,                decltype(&::Process32FirstW)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::ReadProcessEntryFunction,                decltype(&::Process32NextW)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::CloseHandleFunction,                     decltype(&::CloseHandle)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::QueryFullProcessImageNameWideFunction,   decltype(&::QueryFullProcessImageNameW)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetCommandLineWideFunction,              decltype(&::GetCommandLineW)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::CommandLineToArgvWideFunction,           decltype(&::CommandLineToArgvW)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::LocalFreeFunction,                       decltype(&::LocalFree)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetProcessTimesFunction,                 decltype(&::GetProcessTimes)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetProcessMemoryInfoFunction,            decltype(&::K32GetProcessMemoryInfo)>);
 
-        static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessIdFunction, decltype(&::GetCurrentProcessId)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessFunction, decltype(&::GetCurrentProcess)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::CreateProcessSnapshotFunction, decltype(&::CreateToolhelp32Snapshot)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::ReadProcessEntryFunction, decltype(&::Process32FirstW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::ReadProcessEntryFunction, decltype(&::Process32NextW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::CloseHandleFunction, decltype(&::CloseHandle)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::QueryFullProcessImageNameWideFunction, decltype(&::QueryFullProcessImageNameW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::GetCommandLineWideFunction, decltype(&::GetCommandLineW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::CommandLineToArgvWideFunction, decltype(&::CommandLineToArgvW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::LocalFreeFunction, decltype(&::LocalFree)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::GetProcessTimesFunction, decltype(&::GetProcessTimes)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::GetProcessMemoryInfoFunction, decltype(&::K32GetProcessMemoryInfo)>);
-
-        static_assert(sizeof(WindowsSystem::GlobalMemory) == sizeof(HGLOBAL));
+        static_assert(sizeof(WindowsSystem::GlobalMemory)  == sizeof(HGLOBAL));
         static_assert(alignof(WindowsSystem::GlobalMemory) == alignof(HGLOBAL));
-        static_assert(sizeof(WindowsSystem::Handle) == sizeof(HWND));
-        static_assert(alignof(WindowsSystem::Handle) == alignof(HWND));
+        static_assert(sizeof(WindowsSystem::Handle)        == sizeof(HWND));
+        static_assert(alignof(WindowsSystem::Handle)       == alignof(HWND));
 
-        static_assert(std::is_same_v<ClipboardSystemAPI::CloseClipboardFunction, decltype(&::CloseClipboard)>);
-        static_assert(std::is_same_v<ClipboardSystemAPI::EmptyClipboardFunction, decltype(&::EmptyClipboard)>);
-        static_assert(std::is_same_v<ClipboardSystemAPI::GetClipboardDataFunction, decltype(&::GetClipboardData)>);
-        static_assert(std::is_same_v<ClipboardSystemAPI::SetClipboardDataFunction, decltype(&::SetClipboardData)>);
-        static_assert(std::is_same_v<ClipboardSystemAPI::IsClipboardFormatAvailableFunction, decltype(&::IsClipboardFormatAvailable)>);
+        static_assert(std::is_same_v<ClipboardSystemAPI::CloseClipboardFunction,                decltype(&::CloseClipboard)>);
+        static_assert(std::is_same_v<ClipboardSystemAPI::EmptyClipboardFunction,                decltype(&::EmptyClipboard)>);
+        static_assert(std::is_same_v<ClipboardSystemAPI::GetClipboardDataFunction,              decltype(&::GetClipboardData)>);
+        static_assert(std::is_same_v<ClipboardSystemAPI::SetClipboardDataFunction,              decltype(&::SetClipboardData)>);
+        static_assert(std::is_same_v<ClipboardSystemAPI::IsClipboardFormatAvailableFunction,    decltype(&::IsClipboardFormatAvailable)>);
 
-        static_assert(std::is_same_v<FileSystemAPI::GetStandardHandleFunction, decltype(&::GetStdHandle)>);
-        static_assert(std::is_same_v<FileSystemAPI::CreateFileWideFunction, decltype(&::CreateFileW)>);
-        static_assert(std::is_same_v<FileSystemAPI::CloseHandleFunction, decltype(&::CloseHandle)>);
-        static_assert(std::is_same_v<FileSystemAPI::ReadFileFunction, decltype(&::ReadFile)>);
-        static_assert(std::is_same_v<FileSystemAPI::WriteFileFunction, decltype(&::WriteFile)>);
-        static_assert(std::is_same_v<FileSystemAPI::FlushFileBuffersFunction, decltype(&::FlushFileBuffers)>);
+        static_assert(std::is_same_v<FileSystemAPI::GetStandardHandleFunction,                  decltype(&::GetStdHandle)>);
+        static_assert(std::is_same_v<FileSystemAPI::CreateFileWideFunction,                     decltype(&::CreateFileW)>);
+        static_assert(std::is_same_v<FileSystemAPI::CloseHandleFunction,                        decltype(&::CloseHandle)>);
+        static_assert(std::is_same_v<FileSystemAPI::ReadFileFunction,                           decltype(&::ReadFile)>);
+        static_assert(std::is_same_v<FileSystemAPI::WriteFileFunction,                          decltype(&::WriteFile)>);
+        static_assert(std::is_same_v<FileSystemAPI::FlushFileBuffersFunction,                   decltype(&::FlushFileBuffers)>);
 
-        static_assert(sizeof(WindowsSystem::DWord) == sizeof(DWORD));
-        static_assert(alignof(WindowsSystem::DWord) == alignof(DWORD));
-        static_assert(std::is_unsigned_v<WindowsSystem::DWord> == std::is_unsigned_v<DWORD>);
-        static_assert(sizeof(WindowsSystem::UInt) == sizeof(UINT));
-        static_assert(alignof(WindowsSystem::UInt) == alignof(UINT));
-        static_assert(std::is_unsigned_v<WindowsSystem::UInt> == std::is_unsigned_v<UINT>);
-        static_assert(sizeof(WindowsSystem::Size) == sizeof(SIZE_T));
-        static_assert(alignof(WindowsSystem::Size) == alignof(SIZE_T));
-        static_assert(std::is_unsigned_v<WindowsSystem::Size> == std::is_unsigned_v<SIZE_T>);
+        static_assert(sizeof(WindowsSystem::DWord)                  == sizeof(DWORD));
+        static_assert(alignof(WindowsSystem::DWord)                 == alignof(DWORD));
+        static_assert(std::is_unsigned_v<WindowsSystem::DWord>      == std::is_unsigned_v<DWORD>);
+        static_assert(sizeof(WindowsSystem::UInt)                   == sizeof(UINT));
+        static_assert(alignof(WindowsSystem::UInt)                  == alignof(UINT));
+        static_assert(std::is_unsigned_v<WindowsSystem::UInt>       == std::is_unsigned_v<UINT>);
+        static_assert(sizeof(WindowsSystem::Size)                   == sizeof(SIZE_T));
+        static_assert(alignof(WindowsSystem::Size)                  == alignof(SIZE_T));
+        static_assert(std::is_unsigned_v<WindowsSystem::Size>       == std::is_unsigned_v<SIZE_T>);
         // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+        void* OpenPosixModule(const char* name, int flags) noexcept {
+            return ::dlopen(name, flags);
+        }
+
+        int ClosePosixModule(void* module) noexcept {
+            return ::dlclose(module);
+        }
+
+        void* FindPosixSymbol(void* module, const char* name) noexcept {
+            return ::dlsym(module, name);
+        }
+
         [[nodiscard]] const PosixStackTraceNativeAPI& PosixStackTraceAPI() noexcept {
             static const PosixStackTraceNativeAPI api = [] {
                 PosixStackTraceNativeAPI loaded{};
@@ -227,10 +286,10 @@ namespace Sora::PAL {
                 if (module == nullptr) {
                     return loaded;
                 }
-                loaded.captureStackBackTrace =
-                    module->TryFindFunction<PosixStackTraceNativeAPI::CaptureStackBackTraceFunction>("backtrace");
-                loaded.findDynamicSymbol =
-                    module->TryFindFunction<PosixStackTraceNativeAPI::FindDynamicSymbolFunction>("dladdr");
+                // clang-format off
+                loaded.captureStackBackTrace = module->TryFindFunction<PosixStackTraceNativeAPI::CaptureStackBackTraceFunction>("backtrace");
+                loaded.findDynamicSymbol     = module->TryFindFunction<PosixStackTraceNativeAPI::FindDynamicSymbolFunction>("dladdr");
+                // clang-format on
                 return loaded;
             }();
             return api;
@@ -280,8 +339,7 @@ namespace Sora::PAL {
                 return false;
             }
             const FileSystemAPI& file = LoadFileSystemAPI();
-            if (file.systemConfiguration == nullptr || file.open == nullptr || file.read == nullptr ||
-                file.close == nullptr) {
+            if (!EnsureSystemAPIs(file.systemConfiguration, file.open, file.read, file.close)) {
                 return false;
             }
 
@@ -350,7 +408,7 @@ namespace Sora::PAL {
             }
             uint64_t peakResidentBytes = static_cast<uint64_t>(usage.ru_maxrss) * 1024;
 #    else
-            if (api.getProcessId == nullptr || api.processResourceUsage == nullptr) {
+            if (!EnsureSystemAPIs(api.getProcessId, api.processResourceUsage)) {
                 return false;
             }
             rusage_info_v2 nativeUsage{};
@@ -374,6 +432,40 @@ namespace Sora::PAL {
         }
 
         // clang-format off
+        /** @brief Query a POSIX file's preferred block size through the native stat ABI. */
+        [[nodiscard]] bool QueryPosixFileBlockSize(int descriptor, size_t* output) noexcept {
+            if (output == nullptr) {
+                return false;
+            }
+            const FileSystemAPI& api = LoadFileSystemAPI();
+            if (api.stat == nullptr) {
+                return false;
+            }
+            struct stat information {};
+            if (api.stat(descriptor, &information) != 0 || information.st_blksize <= 0) {
+                return false;
+            }
+            *output = static_cast<size_t>(information.st_blksize);
+            return true;
+        }
+
+        /** @brief Query a POSIX file size through the native stat ABI. */
+        [[nodiscard]] bool QueryPosixFileSize(int descriptor, uint64_t* output) noexcept {
+            if (output == nullptr) {
+                return false;
+            }
+            const FileSystemAPI& api = LoadFileSystemAPI();
+            if (api.stat == nullptr) {
+                return false;
+            }
+            struct stat information {};
+            if (api.stat(descriptor, &information) != 0 || information.st_size < 0) {
+                return false;
+            }
+            *output = static_cast<uint64_t>(information.st_size);
+            return true;
+        }
+
         static_assert(std::is_convertible_v<decltype(&::getpid),    ProcessSystemAPI::GetProcessIdFunction>);
         static_assert(std::is_convertible_v<decltype(&::getppid),   ProcessSystemAPI::GetParentProcessIdFunction>);
         static_assert(std::is_convertible_v<decltype(&::getrusage), ProcessSystemAPI::GetResourceUsageFunction>);
@@ -401,30 +493,119 @@ namespace Sora::PAL {
         static_assert(std::is_convertible_v<decltype(&::fcntl),         FileSystemAPI::ControlFunction>);
         static_assert(std::is_convertible_v<decltype(&::posix_fadvise), FileSystemAPI::AdviseFileFunction>);
 
-        static_assert(std::is_convertible_v<decltype(&::sigaction), CrashSystemAPI::SignalActionFunction>);
-        static_assert(std::is_convertible_v<decltype(&::raise),     CrashSystemAPI::RaiseSignalFunction>);
-        static_assert(std::is_convertible_v<decltype(&::_exit),     CrashSystemAPI::ImmediateExitFunction>);
+        static_assert(std::is_convertible_v<decltype(&::sigaction),     CrashSystemAPI::SignalActionFunction>);
+        static_assert(std::is_convertible_v<decltype(&::raise),         CrashSystemAPI::RaiseSignalFunction>);
+        static_assert(std::is_convertible_v<decltype(&::_exit),         CrashSystemAPI::ImmediateExitFunction>);
 
         static_assert(sizeof(PosixSystem::SignalSet*)        == sizeof(sigset_t*));
         static_assert(sizeof(PosixSystem::ThreadId)          == sizeof(pthread_t));
         static_assert(sizeof(PosixSystem::ThreadAttributes*) == sizeof(pthread_attr_t*));
         static_assert(sizeof(PosixSystem::FileOffset)        == sizeof(off_t));
+        static_assert(sizeof(PosixSystem::FileMode)          == sizeof(mode_t));
         static_assert(sizeof(PosixSystem::PollCount)         == sizeof(nfds_t));
-        
         static_assert(alignof(PosixSystem::SignalSet*)       == alignof(sigset_t*));
         static_assert(alignof(PosixSystem::ThreadId)         == alignof(pthread_t));
         static_assert(alignof(PosixSystem::FileOffset)       == alignof(off_t));
+        static_assert(alignof(PosixSystem::FileMode)         == alignof(mode_t));
+        static_assert(PosixSystem::kProtectionRead   == PROT_READ);
+        static_assert(PosixSystem::kProtectionWrite  == PROT_WRITE);
+        static_assert(PosixSystem::kMapShared        == MAP_SHARED);
+        static_assert(PosixSystem::kMapPrivate       == MAP_PRIVATE);
+        static_assert(PosixSystem::kSynchronize      == MS_SYNC);
+        static_assert(PosixSystem::kAdviceNormal     == MADV_NORMAL);
+        static_assert(PosixSystem::kAdviceSequential == MADV_SEQUENTIAL);
+        static_assert(PosixSystem::kAdviceRandom     == MADV_RANDOM);
+        static_assert(PosixSystem::kAdviceWillNeed   == MADV_WILLNEED);
+        static_assert(PosixSystem::kAdviceDontNeed   == MADV_DONTNEED);
+        static_assert(PosixSystem::kDynamicLazy      == RTLD_LAZY);
+        static_assert(PosixSystem::kDynamicNow       == RTLD_NOW);
+        static_assert(PosixSystem::kDynamicLocal     == RTLD_LOCAL);
+        static_assert(PosixSystem::kDynamicGlobal    == RTLD_GLOBAL);
+#    if defined(PLATFORM_LINUX)
+        static_assert(sizeof(PosixSystem::InotifyEventHeader)                     == sizeof(inotify_event));
+        static_assert(alignof(PosixSystem::InotifyEventHeader)                    == alignof(inotify_event));
+        static_assert(offsetof(PosixSystem::InotifyEventHeader, watchDescriptor)  == offsetof(inotify_event, wd));
+        static_assert(offsetof(PosixSystem::InotifyEventHeader, nameLength)       == offsetof(inotify_event, len));
+        static_assert(sizeof(PosixSystem::PollDescriptor)                         == sizeof(pollfd));
+        static_assert(alignof(PosixSystem::PollDescriptor)                        == alignof(pollfd));
+        static_assert(offsetof(PosixSystem::PollDescriptor, descriptor)           == offsetof(pollfd, fd));
+        static_assert(offsetof(PosixSystem::PollDescriptor, events)               == offsetof(pollfd, events));
+        static_assert(offsetof(PosixSystem::PollDescriptor, revents)              == offsetof(pollfd, revents));
+        static_assert(PosixSystem::kOpenNonBlocking                               == O_NONBLOCK);
+        static_assert(PosixSystem::kOpenCloseOnExec                               == O_CLOEXEC);
+        static_assert(PosixSystem::kOpenReadOnly                                  == O_RDONLY);
+        static_assert(PosixSystem::kOpenWriteOnly                                 == O_WRONLY);
+        static_assert(PosixSystem::kOpenReadWrite                                 == O_RDWR);
+        static_assert(PosixSystem::kOpenCreate                                    == O_CREAT);
+        static_assert(PosixSystem::kOpenExclusive                                 == O_EXCL);
+        static_assert(PosixSystem::kOpenTruncate                                  == O_TRUNC);
+        static_assert(PosixSystem::kOpenDirectory                                 == O_DIRECTORY);
+        static_assert(PosixSystem::kOpenDirect                                    == O_DIRECT);
+        static_assert(PosixSystem::kOpenSync                                      == O_SYNC);
+        static_assert(PosixSystem::kPageSizeConfiguration                         == _SC_PAGESIZE);
+        static_assert(PosixSystem::kFileAdviceSequential                          == POSIX_FADV_SEQUENTIAL);
+        static_assert(PosixSystem::kFileAdviceRandom                              == POSIX_FADV_RANDOM);
+        static_assert(PosixSystem::kEventModify                                   == IN_MODIFY);
+        static_assert(PosixSystem::kEventAttrib                                   == IN_ATTRIB);
+        static_assert(PosixSystem::kEventCloseWrite                               == IN_CLOSE_WRITE);
+        static_assert(PosixSystem::kEventMovedFrom                                == IN_MOVED_FROM);
+        static_assert(PosixSystem::kEventMovedTo                                  == IN_MOVED_TO);
+        static_assert(PosixSystem::kEventCreate                                   == IN_CREATE);
+        static_assert(PosixSystem::kEventDelete                                   == IN_DELETE);
+        static_assert(PosixSystem::kEventDeleteSelf                               == IN_DELETE_SELF);
+        static_assert(PosixSystem::kEventMoveSelf                                 == IN_MOVE_SELF);
+        static_assert(PosixSystem::kEventQueueOverflow                            == IN_Q_OVERFLOW);
+        static_assert(PosixSystem::kEventIgnored                                  == IN_IGNORED);
+        static_assert(PosixSystem::kEventIsDirectory                              == IN_ISDIR);
+        static_assert(PosixSystem::kPollInput                                     == POLLIN);
+        static_assert(PosixSystem::kPollError                                     == POLLERR);
+        static_assert(PosixSystem::kPollHangup                                    == POLLHUP);
+        static_assert(PosixSystem::kPollInvalid                                   == POLLNVAL);
+#    elif defined(PLATFORM_MACOS)
+        static_assert(sizeof(PosixSystem::KernelEvent)                 == sizeof(kevent));
+        static_assert(alignof(PosixSystem::KernelEvent)                == alignof(kevent));
+        static_assert(offsetof(PosixSystem::KernelEvent, identifier)   == offsetof(kevent, ident));
+        static_assert(offsetof(PosixSystem::KernelEvent, filter)       == offsetof(kevent, filter));
+        static_assert(offsetof(PosixSystem::KernelEvent, flags)        == offsetof(kevent, flags));
+        static_assert(offsetof(PosixSystem::KernelEvent, filterFlags)  == offsetof(kevent, fflags));
+        static_assert(offsetof(PosixSystem::KernelEvent, data)         == offsetof(kevent, data));
+        static_assert(offsetof(PosixSystem::KernelEvent, userData)     == offsetof(kevent, udata));
+        static_assert(sizeof(PosixSystem::TimeSpec)                    == sizeof(timespec));
+        static_assert(alignof(PosixSystem::TimeSpec)                   == alignof(timespec));
+        static_assert(PosixSystem::kOpenEventOnly                      == O_EVTONLY);
+        static_assert(PosixSystem::kOpenCloseOnExec                    == O_CLOEXEC);
+        static_assert(PosixSystem::kOpenReadOnly                       == O_RDONLY);
+        static_assert(PosixSystem::kOpenWriteOnly                      == O_WRONLY);
+        static_assert(PosixSystem::kOpenReadWrite                      == O_RDWR);
+        static_assert(PosixSystem::kOpenCreate                         == O_CREAT);
+        static_assert(PosixSystem::kOpenExclusive                      == O_EXCL);
+        static_assert(PosixSystem::kOpenTruncate                       == O_TRUNC);
+        static_assert(PosixSystem::kOpenDirectory                      == O_DIRECTORY);
+        static_assert(PosixSystem::kOpenSync                           == O_SYNC);
+        static_assert(PosixSystem::kNoCacheControl                     == F_NOCACHE);
+        static_assert(PosixSystem::kFullSyncControl                    == F_FULLFSYNC);
+        static_assert(PosixSystem::kPageSizeConfiguration              == _SC_PAGESIZE);
+        static_assert(PosixSystem::kFilterVnode                        == EVFILT_VNODE);
+        static_assert(PosixSystem::kEventAdd                           == EV_ADD);
+        static_assert(PosixSystem::kEventClear                         == EV_CLEAR);
+        static_assert(PosixSystem::kNoteWrite                          == NOTE_WRITE);
+        static_assert(PosixSystem::kNoteDelete                         == NOTE_DELETE);
+        static_assert(PosixSystem::kNoteRename                         == NOTE_RENAME);
+        static_assert(PosixSystem::kNoteExtend                         == NOTE_EXTEND);
+        static_assert(PosixSystem::kNoteAttribute                      == NOTE_ATTRIB);
+#    endif
         // clang-format on
 #endif
 
     } // namespace
 
-    uint64_t CaptureLastSystemError() noexcept {
+    SystemError CaptureLastSystemError() noexcept {
 #if defined(PLATFORM_WINDOWS)
-        return static_cast<uint64_t>(::GetLastError());
+        return static_cast<WindowsSystem::DWord>(::GetLastError());
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        return std::bit_cast<uint64_t>(errno);
+        return static_cast<int>(errno);
 #else
+        // TODO
         return 0;
 #endif
     }
@@ -485,6 +666,28 @@ namespace Sora::PAL {
         return api;
     }
 
+    const ModuleSystemAPI& LoadModuleSystemAPI() noexcept {
+        static const ModuleSystemAPI api = [] {
+            ModuleSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            // clang-format off
+            loaded.loadLibraryWide     = LoadWindowsLibrary;
+            loaded.getModuleHandleWide = GetWindowsModuleHandle;
+            loaded.findSymbol          = FindWindowsSymbol;
+            loaded.freeLibrary         = FreeWindowsLibrary;
+            // clang-format on
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+            // clang-format off
+            loaded.open       = OpenPosixModule;
+            loaded.close      = ClosePosixModule;
+            loaded.findSymbol = FindPosixSymbol;
+            // clang-format on
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
     const ProcessSystemAPI& LoadProcessSystemAPI() noexcept {
         static const ProcessSystemAPI api = [] {
             using API = ProcessSystemAPI;
@@ -506,12 +709,11 @@ namespace Sora::PAL {
                 loaded.getProcessMemoryInfo          = module->TryFindFunction<API::GetProcessMemoryInfoFunction>("K32GetProcessMemoryInfo");
                 // clang-format on
             }
-            if (loaded.getCurrentProcessId != nullptr && loaded.createProcessSnapshot != nullptr &&
-                loaded.firstProcess != nullptr && loaded.nextProcess != nullptr && loaded.closeHandle != nullptr) {
+            if (EnsureSystemAPIs(loaded.getCurrentProcessId, loaded.createProcessSnapshot, loaded.firstProcess,
+                                 loaded.nextProcess, loaded.closeHandle)) {
                 loaded.queryParentProcessId = QueryWindowsParentProcessId;
             }
-            if (loaded.getCurrentProcess != nullptr && loaded.getProcessTimes != nullptr &&
-                loaded.getProcessMemoryInfo != nullptr) {
+            if (EnsureSystemAPIs(loaded.getCurrentProcess, loaded.getProcessTimes, loaded.getProcessMemoryInfo)) {
                 loaded.captureUsage = CaptureWindowsProcessUsage;
             }
 
@@ -523,29 +725,24 @@ namespace Sora::PAL {
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             const ModulePtr& module = CurrentProcessModule();
             if (module != nullptr) {
-                loaded.getProcessId = module->TryFindFunction<ProcessSystemAPI::GetProcessIdFunction>("getpid");
-                loaded.getParentProcessId =
-                    module->TryFindFunction<ProcessSystemAPI::GetParentProcessIdFunction>("getppid");
-                loaded.getResourceUsage =
-                    module->TryFindFunction<ProcessSystemAPI::GetResourceUsageFunction>("getrusage");
+                // clang-format off
+                loaded.getProcessId         = module->TryFindFunction<ProcessSystemAPI::GetProcessIdFunction>("getpid");
+                loaded.getParentProcessId   = module->TryFindFunction<ProcessSystemAPI::GetParentProcessIdFunction>("getppid");
+                loaded.getResourceUsage     = module->TryFindFunction<ProcessSystemAPI::GetResourceUsageFunction>("getrusage");
 #    if defined(PLATFORM_MACOS)
-                loaded.getExecutablePath =
-                    module->TryFindFunction<ProcessSystemAPI::GetExecutablePathFunction>("_NSGetExecutablePath");
-                loaded.getArgumentCount =
-                    module->TryFindFunction<ProcessSystemAPI::GetArgumentCountFunction>("_NSGetArgc");
-                loaded.getArgumentVector =
-                    module->TryFindFunction<ProcessSystemAPI::GetArgumentVectorFunction>("_NSGetArgv");
-                loaded.processResourceUsage =
-                    module->TryFindFunction<ProcessSystemAPI::ProcessResourceUsageFunction>("proc_pid_rusage");
+                loaded.getExecutablePath     = module->TryFindFunction<ProcessSystemAPI::GetExecutablePathFunction>("_NSGetExecutablePath");
+                loaded.getArgumentCount      = module->TryFindFunction<ProcessSystemAPI::GetArgumentCountFunction>("_NSGetArgc");
+                loaded.getArgumentVector     = module->TryFindFunction<ProcessSystemAPI::GetArgumentVectorFunction>("_NSGetArgv");
+                loaded.processResourceUsage = module->TryFindFunction<ProcessSystemAPI::ProcessResourceUsageFunction>("proc_pid_rusage");
 #    endif
+                // clang-format on
             }
 #    if defined(PLATFORM_LINUX)
-            if (loaded.getResourceUsage != nullptr && LoadFileSystemAPI().systemConfiguration != nullptr) {
+            if (EnsureSystemAPIs(loaded.getResourceUsage, LoadFileSystemAPI().systemConfiguration)) {
                 loaded.captureUsage = CapturePosixProcessUsage;
             }
 #    else
-            if (loaded.getResourceUsage != nullptr && loaded.getProcessId != nullptr &&
-                loaded.processResourceUsage != nullptr) {
+            if (EnsureSystemAPIs(loaded.getResourceUsage, loaded.getProcessId, loaded.processResourceUsage)) {
                 loaded.captureUsage = CapturePosixProcessUsage;
             }
 #    endif
@@ -569,8 +766,8 @@ namespace Sora::PAL {
                 return loaded;
             }
 #endif
-#if defined(PLATFORM_WINDOWS)
             // clang-format off
+#if defined(PLATFORM_WINDOWS)
             loaded.getCurrentThreadId          = module->TryFindFunction<API::GetCurrentThreadIdFunction>("GetCurrentThreadId");
             loaded.getCurrentThread            = module->TryFindFunction<API::GetCurrentThreadFunction>("GetCurrentThread");
             loaded.setThreadDescription        = module->TryFindFunction<API::SetThreadDescriptionFunction>("SetThreadDescription");
@@ -578,30 +775,24 @@ namespace Sora::PAL {
             loaded.localFree                   = module->TryFindFunction<API::LocalFreeFunction>("LocalFree");
             loaded.getCurrentProcessorNumberEx = module->TryFindFunction<API::GetCurrentProcessorNumberExFunction>("GetCurrentProcessorNumberEx");
             loaded.getCurrentThreadStackLimits = module->TryFindFunction<API::GetCurrentThreadStackLimitsFunction>("GetCurrentThreadStackLimits");
-            // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-            // clang-format off
             loaded.pthreadSelf                 = module->TryFindFunction<API::PthreadSelfFunction>("pthread_self");
             loaded.pthreadGetName              = module->TryFindFunction<API::PthreadGetNameFunction>("pthread_getname_np");
-            // clang-format on
 #    if defined(PLATFORM_LINUX)
-            // clang-format off
             loaded.systemCall                  = module->TryFindFunction<API::SystemCallFunction>("syscall");
             loaded.scheduleGetCpu              = module->TryFindFunction<API::ScheduleGetCpuFunction>("sched_getcpu");
             loaded.pthreadSetName              = module->TryFindFunction<API::PthreadSetNameFunction>("pthread_setname_np");
             loaded.pthreadGetAttributes        = module->TryFindFunction<API::PthreadGetAttributesFunction>("pthread_getattr_np");
             loaded.pthreadDestroyAttributes    = module->TryFindFunction<API::PthreadDestroyAttributesFunction>("pthread_attr_destroy");
             loaded.pthreadGetStack             = module->TryFindFunction<API::PthreadGetStackFunction>("pthread_attr_getstack");
-            // clang-format on
 #    else
-            // clang-format off
             loaded.pthreadThreadId             = module->TryFindFunction<API::PthreadThreadIdFunction>("pthread_threadid_np");
             loaded.pthreadSetName              = module->TryFindFunction<API::PthreadSetNameFunction>("pthread_setname_np");
             loaded.pthreadGetStackAddress      = module->TryFindFunction<API::PthreadGetStackAddressFunction>("pthread_get_stackaddr_np");
             loaded.pthreadGetStackSize         = module->TryFindFunction<API::PthreadGetStackSizeFunction>("pthread_get_stacksize_np");
-            // clang-format on
 #    endif
 #endif
+            // clang-format on
             return loaded;
         }();
         return api;
@@ -715,6 +906,8 @@ namespace Sora::PAL {
             loaded.unlink                = module->TryFindFunction<API::UnlinkFunction>("unlink");
             loaded.control               = module->TryFindFunction<API::ControlFunction>("fcntl");
             loaded.systemConfiguration   = module->TryFindFunction<API::SystemConfigurationFunction>("sysconf");
+            loaded.queryFileBlockSize    = loaded.stat != nullptr ? &QueryPosixFileBlockSize : nullptr;
+            loaded.queryFileSize         = loaded.stat != nullptr ? &QueryPosixFileSize : nullptr;
             loaded.duplicate             = module->TryFindFunction<API::DuplicateFunction>("dup");
             loaded.adviseFile            = module->TryFindFunction<API::AdviseFileFunction>("posix_fadvise");
 #    if defined(PLATFORM_LINUX)
@@ -803,8 +996,7 @@ namespace Sora::PAL {
             std::call_once(flag, [] {
                 LockedDbgHelpSystemAPI dbgHelp = LockDbgHelpSystemAPI();
                 const StackTraceSystemAPI& stackTrace = LoadStackTraceSystemAPI();
-                if (dbgHelp->symSetOptions == nullptr || dbgHelp->symInitialize == nullptr ||
-                    stackTrace.getCurrentProcess == nullptr) {
+                if (!EnsureSystemAPIs(dbgHelp->symSetOptions, dbgHelp->symInitialize, stackTrace.getCurrentProcess)) {
                     return;
                 }
                 dbgHelp->symSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);

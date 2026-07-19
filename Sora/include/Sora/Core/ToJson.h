@@ -155,6 +155,18 @@ namespace Sora {
                                                               : true;
         }
 
+        /** @brief Return whether a serialized member conflicts with JSON's reserved inheritance partition key. */
+        template<typename T>
+        consteval bool HasReservedJsonInheritanceKey() {
+            bool found = false;
+            template for (constexpr auto member : JsonSerializableMembersOf<T>()) {
+                if constexpr (SerializationFieldNameOf<member>() == "$bases") {
+                    found = true;
+                }
+            }
+            return found;
+        }
+
     } // namespace Meta
 
     /** @cond INTERNAL */
@@ -363,6 +375,8 @@ namespace Sora {
         /** @brief Convert reflectable class @p value to a JSON object. */
         template<typename T>
         [[nodiscard]] Sora::Json ClassToJson(const T& value) {
+            static_assert(!Meta::HasReservedJsonInheritanceKey<T>(),
+                          "'$bases' is reserved for reflected base-class subobjects");
             Sora::Json object = Sora::Json::object();
             template for (constexpr auto m : Meta::JsonSerializableMembersOf<T>()) {
                 using Member = typename [:std::meta::type_of(m):];
@@ -402,12 +416,31 @@ namespace Sora {
                     }
                 }
             }
+            if constexpr (!Meta::BasesOf(^^T, std::meta::access_context::unprivileged()).empty() ||
+                          Meta::HasInaccessibleDirectBases(^^T)) {
+                Sora::Json bases = Sora::Json::object();
+                template for (constexpr auto base : Meta::BasesOf(^^T, std::meta::access_context::unprivileged())) {
+                    using Base = typename [:std::meta::type_of(base):];
+                    if constexpr (std::is_convertible_v<const T*, const Base*>) {
+                        bases[std::string(Traits::TypeName<Base>)] = ClassToJson(static_cast<const Base&>(value));
+                    } else {
+                        bases[std::string(Traits::TypeName<Base>)] =
+                            Sora::Json{{"$incomplete", "ambiguous base subobject"}};
+                    }
+                }
+                if constexpr (Meta::HasInaccessibleDirectBases(^^T)) {
+                    bases["<inaccessible>"] = Sora::Json{{"$incomplete", true}};
+                }
+                object["$bases"] = std::move(bases);
+            }
             return object;
         }
 
         /** @brief Parse reflectable class @p output from JSON object @p input. */
         template<typename T>
         void ClassFromJson(const Sora::Json& input, T& output) {
+            static_assert(!Meta::HasReservedJsonInheritanceKey<T>(),
+                          "'$bases' is reserved for reflected base-class subobjects");
             if (!input.is_object()) {
                 throw nlohmann::json::type_error::create(302, "expected JSON object", &input);
             }
@@ -433,6 +466,23 @@ namespace Sora {
                         EnumFromJson(*it, field);
                     } else {
                         FromJsonImpl(*it, field);
+                    }
+                }
+            }
+            if constexpr (!Meta::BasesOf(^^T, std::meta::access_context::unprivileged()).empty()) {
+                const auto bases = input.find("$bases");
+                if (bases != input.end() && !bases->is_object()) {
+                    throw nlohmann::json::type_error::create(302, "expected '$bases' to be a JSON object", &input);
+                }
+                const Sora::Json empty = Sora::Json::object();
+                template for (constexpr auto base : Meta::BasesOf(^^T, std::meta::access_context::unprivileged())) {
+                    using Base = typename [:std::meta::type_of(base):];
+                    if constexpr (std::is_convertible_v<T*, Base*>) {
+                        const auto key = std::string(Traits::TypeName<Base>);
+                        const auto serializedBase = bases == input.end() ? empty.end() : bases->find(key);
+                        const Sora::Json& baseInput =
+                            bases == input.end() || serializedBase == bases->end() ? empty : *serializedBase;
+                        ClassFromJson(baseInput, static_cast<Base&>(output));
                     }
                 }
             }

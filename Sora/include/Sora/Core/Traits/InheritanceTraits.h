@@ -12,22 +12,23 @@
 #include <algorithm>
 #include <cstddef>
 #include <meta>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
-#include <ranges>
 
 namespace Sora {
 
     namespace Meta {
 
         /**
-         * @brief Return direct base types of a reflected class type as a static array.
+         * @brief Return direct base specifiers of a reflected class type as a static array.
          * @param[in] type Reflection of a class type.
          * @param[in] context Reflection access context used for base-specifier discovery.
-         * @return Static array of type reflections for every direct base in declaration order.
+         * @return Static array of base-specifier reflections in declaration order.
          */
         consteval auto BasesOf(std::meta::info type,
                                std::meta::access_context context = std::meta::access_context::unchecked()) {
@@ -66,30 +67,72 @@ namespace Sora {
         /**
          * @brief Walk the class @p root's reflection hierarchy in derived-first order, invoking @p visit for each
          * (depth, member) pair across @p root and every base class. Visits each unique base class exactly once (handles
-         * diamond inheritance and virtual bases) — duplicates are filtered by reflection-info equality of the base
+         * diamond inheritance and virtual bases); duplicates are filtered by reflection-info equality of the base
          * class type.
          *
-         * @tparam Visit Callable as @c void(size_t depth, std::meta::info member). Depth is 0 for members declared in
-         * @p root, 1 for direct bases, etc.
+         * @tparam Visit Callable as @c void(size_t, std::meta::info). Depth is 0 for @p root, 1 for direct bases, etc.
+         * @param[in] root Reflected root class type.
+         * @param[in] visit Callback invoked once for every member of each unique class type.
+         * @param[in] context Reflection access context used for member and base discovery.
          */
         template<typename Visit>
-        consteval void WalkHierarchyMembers(std::meta::info root, Visit&& visit) {
-            std::vector<std::meta::info> stack{root};
+        consteval void WalkHierarchyMembers(
+            std::meta::info root, Visit&& visit,
+            std::meta::access_context context = std::meta::access_context::unchecked()) {
+            root = std::meta::dealias(root);
+            std::vector<std::pair<std::meta::info, std::size_t>> queue{{root, 0}};
             std::vector<std::meta::info> seen{root};
-            for (size_t i = 0; i < stack.size(); ++i) {
-                const size_t depth = i;
-                for (auto m : std::meta::members_of(stack[i], std::meta::access_context::unchecked())) {
+            for (std::size_t i = 0; i < queue.size(); ++i) {
+                const auto [type, depth] = queue[i];
+                for (auto m : std::meta::members_of(type, context)) {
                     visit(depth, m);
                 }
 
-                for (auto b : BasesOf(stack[i]) | std::views::transform(std::meta::type_of)) {
-                    bool already = std::ranges::any_of(seen, [&](std::meta::info s) { return s == b; });
-                    if (std::ranges::all_of(seen, [&](std::meta::info s) { return s != b; })) {
-                        stack.push_back(b);
-                        seen.push_back(b);
+                for (auto base : BasesOf(type, context)) {
+                    const auto baseType = std::meta::dealias(std::meta::type_of(base));
+                    if (std::ranges::none_of(seen, [&](std::meta::info known) { return known == baseType; })) {
+                        queue.emplace_back(baseType, depth + 1);
+                        seen.push_back(baseType);
                     }
                 }
             }
+        }
+
+        /**
+         * @brief Return whether @p context hides one or more direct base specifiers of @p type.
+         * @param[in] type Reflected class type.
+         * @param[in] context Access context whose visible direct bases are compared with unchecked discovery.
+         * @return True when at least one direct base is inaccessible from @p context.
+         */
+        consteval bool HasInaccessibleDirectBases(
+            std::meta::info type,
+            std::meta::access_context context = std::meta::access_context::unprivileged()) {
+            return BasesOf(type, std::meta::access_context::unchecked()).size() != BasesOf(type, context).size();
+        }
+
+        /**
+         * @brief Return whether a class hierarchy declares a matching virtual member function.
+         * @param[in] type Reflected root class type.
+         * @param[in] identifier Source identifier of the member function.
+         * @param[in] parameterCount Number of explicit function parameters.
+         * @param[in] context Reflection access context used while traversing the hierarchy.
+         * @return True when a matching virtual member function is found in @p type or a recursively reachable base.
+         */
+        consteval bool HasVirtualMemberFunctionInHierarchy(
+            std::meta::info type, std::string_view identifier, std::size_t parameterCount,
+            std::meta::access_context context = std::meta::access_context::unchecked()) {
+            bool found = false;
+            WalkHierarchyMembers(
+                type,
+                [&](std::size_t, std::meta::info member) {
+                    if (!found && std::meta::is_function(member) && std::meta::is_virtual(member) &&
+                        std::meta::has_identifier(member) && std::meta::identifier_of(member) == identifier &&
+                        std::meta::parameters_of(member).size() == parameterCount) {
+                        found = true;
+                    }
+                },
+                context);
+            return found;
         }
 
         /**

@@ -18,6 +18,7 @@
 #include <array>
 #include <charconv>
 #include <concepts>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <memory>
@@ -28,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <typeinfo>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -52,7 +54,11 @@ namespace Sora {
             constexpr bool operator==(const Rename&) const = default;
         };
 
-        /** @brief Ask reflective string conversion to print a pointee instead of its pointer address. */
+        /**
+         * @brief Ask reflective string conversion to print a pointee instead of its pointer address.
+         * @details Polymorphic base pointers use a callable virtual @c ToString when available; otherwise rendering
+         * appends an explicit incomplete-view diagnostic whenever the dynamic object is or may be more derived.
+         */
         struct DerefPrint {
             constexpr bool operator==(const DerefPrint&) const = default;
         };
@@ -90,6 +96,17 @@ namespace Sora {
             }
             return name;
         }
+
+        /** @brief Return whether @p T's hierarchy declares a virtual nullary @c ToString member. */
+        template<typename T>
+        inline constexpr bool HasVirtualToStringMember = [] consteval {
+            using U = std::remove_cv_t<T>;
+            if constexpr (requires { sizeof(U); }) {
+                return HasVirtualMemberFunctionInHierarchy(^^U, "ToString", 0);
+            } else {
+                return false;
+            }
+        }();
 
     } // namespace Meta
 
@@ -268,6 +285,64 @@ namespace Sora {
     /** @cond INTERNAL */
     namespace Detail {
 
+        enum class PointeeViewCompleteness : uint8_t {
+            Complete,
+            Incomplete,
+            Indeterminate,
+        };
+
+        template<typename T>
+        [[nodiscard]] constexpr std::string ToStringImpl(T&& value);
+
+        template<typename T>
+        [[nodiscard]] constexpr std::string ReflectiveClassToString(const T& value);
+
+        /** @brief Classify whether a statically typed pointer view can represent the complete dynamic object. */
+        template<typename Pointer>
+        [[nodiscard]] PointeeViewCompleteness PointeeCompleteness(Pointer pointer) {
+            using Pointee = std::remove_cv_t<std::remove_pointer_t<Pointer>>;
+            if constexpr (!std::is_class_v<Pointee>) {
+                return PointeeViewCompleteness::Complete;
+            } else if constexpr (!requires { sizeof(Pointee); }) {
+                return PointeeViewCompleteness::Indeterminate;
+            } else if constexpr (std::is_final_v<Pointee> ||
+                                 (Meta::HasVirtualToStringMember<Pointee> && HasMemberToString<decltype(*pointer)>)) {
+                return PointeeViewCompleteness::Complete;
+            } else if constexpr (std::is_polymorphic_v<Pointee>) {
+                return typeid(*pointer) == typeid(Pointee) ? PointeeViewCompleteness::Complete
+                                                           : PointeeViewCompleteness::Incomplete;
+            } else {
+                return PointeeViewCompleteness::Indeterminate;
+            }
+        }
+
+        /** @brief Render an explicitly dereferenced pointer without silently hiding a possible dynamic subobject. */
+        template<typename Pointer>
+        [[nodiscard]] constexpr std::string DereferencedPointerToString(Pointer pointer) {
+            using Pointee = std::remove_cv_t<std::remove_pointer_t<Pointer>>;
+            std::string result;
+            if constexpr (std::is_class_v<Pointee> && Meta::HasVirtualToStringMember<Pointee> &&
+                          HasMemberToString<decltype(*pointer)>) {
+                result = MakeString(pointer->ToString());
+            } else {
+                result = ToStringImpl(*pointer);
+            }
+
+            switch (PointeeCompleteness(pointer)) {
+                case PointeeViewCompleteness::Complete:
+                    break;
+                case PointeeViewCompleteness::Incomplete:
+                    result += std::format(" <incomplete: dynamic object rendered through non-virtual {} view>",
+                                          Traits::TypeName<Pointee>);
+                    break;
+                case PointeeViewCompleteness::Indeterminate:
+                    result += std::format(" <possibly incomplete: dynamic type is not observable through {}>",
+                                          Traits::TypeName<Pointee>);
+                    break;
+            }
+            return result;
+        }
+
         template<typename T>
             requires std::integral<T> && (!std::same_as<T, bool>) && (!std::same_as<T, char>)
         [[nodiscard]] constexpr Result<T> IntegerFromString(std::string_view text) noexcept {
@@ -393,34 +468,60 @@ namespace Sora {
                 stream << std::forward<T>(value);
                 return std::move(stream).str();
             } else if constexpr (std::is_class_v<U> && !std::is_union_v<U> && requires { sizeof(U); }) {
-                std::string result = std::string(Traits::TypeName<U>) + " {";
-                template for (bool first = true; constexpr auto member : Traits::DataMembers<U>) {
-                    if constexpr (!$::Has<$::Serialization::Ignore>(member)) {
-                        if (!first) {
-                            result += ", ";
-                        }
-                        first = false;
-                        result += Meta::SerializationFieldNameOf<member>();
-                        result += "=";
-                        if constexpr (std::meta::is_bit_field(member)) {
-                            result += ToStringImpl(auto(value.[:member:]));
-                        } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(member):]> &&
-                                             $::Has<$::Serialization::DerefPrint>(member)) {
-                            auto* pointer = value.[:member:];
-                            result += pointer == nullptr ? "nullptr" : ToStringImpl(*pointer);
-                        } else {
-                            result += ToStringImpl(value.[:member:]);
-                        }
-                    }
-                }
-                result += "}";
-                return result;
+                return ReflectiveClassToString(value);
             } else if constexpr (std::is_object_v<U>) {
                 return std::format("<{} at {:p}>", Traits::TypeName<U>,
                                    static_cast<const void*>(std::addressof(value)));
             } else {
                 return std::string(Traits::TypeName<U>);
             }
+        }
+
+        template<typename T>
+        [[nodiscard]] constexpr std::string ReflectiveClassToString(const T& value) {
+            using U = std::remove_cv_t<T>;
+            std::string result = std::string(Traits::TypeName<U>) + " {";
+            bool first = true;
+            template for (constexpr auto member : Traits::DataMembers<U>) {
+                if constexpr (!$::Has<$::Serialization::Ignore>(member)) {
+                    if (!std::exchange(first, false)) {
+                        result += ", ";
+                    }
+                    result += Meta::SerializationFieldNameOf<member>();
+                    result += "=";
+                    if constexpr (std::meta::is_bit_field(member)) {
+                        result += ToStringImpl(auto(value.[:member:]));
+                    } else if constexpr (std::is_pointer_v<typename [:std::meta::type_of(member):]> &&
+                                         $::Has<$::Serialization::DerefPrint>(member)) {
+                        auto* pointer = value.[:member:];
+                        result += pointer == nullptr ? "nullptr" : DereferencedPointerToString(pointer);
+                    } else {
+                        result += ToStringImpl(value.[:member:]);
+                    }
+                }
+            }
+            template for (constexpr auto base : Meta::BasesOf(^^U, std::meta::access_context::unprivileged())) {
+                using Base = typename [:std::meta::type_of(base):];
+                if (!std::exchange(first, false)) {
+                    result += ", ";
+                }
+                result += "base[";
+                result += Traits::TypeName<Base>;
+                result += "]=";
+                if constexpr (std::is_convertible_v<const U*, const Base*>) {
+                    result += ReflectiveClassToString(static_cast<const Base&>(value));
+                } else {
+                    result += "<incomplete: ambiguous base subobject>";
+                }
+            }
+            if constexpr (Meta::HasInaccessibleDirectBases(^^U)) {
+                if (!std::exchange(first, false)) {
+                    result += ", ";
+                }
+                result += "base[<inaccessible>]=<incomplete>";
+            }
+            result += "}";
+            return result;
         }
 
         template<typename T>

@@ -9,6 +9,8 @@
 
 namespace ToStringTest {
 
+    struct IncompletePointee;
+
     enum class Mode : std::uint8_t {
         Fast,
         Safe,
@@ -49,6 +51,67 @@ namespace ToStringTest {
             return decoded ? Sora::Result<CanonicalValue>{CanonicalValue{.value = *decoded}}
                            : std::unexpected(decoded.error());
         }
+    };
+
+    struct ReflectedGrandBase {
+        int grandBaseValue = 7;
+    };
+
+    struct ReflectedBase : ReflectedGrandBase {
+        int baseValue = 11;
+    };
+
+    struct ReflectedSideBase {
+        int sideValue = 13;
+    };
+
+    struct ReflectedDerived : ReflectedBase, ReflectedSideBase {
+        int derivedValue = 17;
+    };
+
+    struct PrivateBase {
+        int privateBaseValue = 31;
+    };
+
+    class PrivateDerived : private PrivateBase {
+    public:
+        int derivedValue = 37;
+    };
+
+    struct VirtualStringBase {
+        virtual ~VirtualStringBase() = default;
+        [[nodiscard]] virtual std::string ToString() const { return "virtual-base"; }
+    };
+
+    struct VirtualStringDerived : VirtualStringBase {
+        [[nodiscard]] std::string ToString() const override { return "virtual-derived"; }
+    };
+
+    struct NonVirtualStringBase {
+        virtual ~NonVirtualStringBase() = default;
+        int baseValue = 19;
+    };
+
+    struct NonVirtualStringDerived : NonVirtualStringBase {
+        int derivedValue = 23;
+    };
+
+    struct NonPolymorphicBase {
+        int baseValue = 41;
+    };
+
+    struct NonPolymorphicDerived : NonPolymorphicBase {
+        int derivedValue = 43;
+    };
+
+    struct PolymorphicPointers {
+        [[= Sora::$::Serialization::DerefPrint{}]] const VirtualStringBase* complete = nullptr;
+        [[= Sora::$::Serialization::DerefPrint{}]] const NonVirtualStringBase* incomplete = nullptr;
+        [[= Sora::$::Serialization::DerefPrint{}]] const NonPolymorphicBase* indeterminate = nullptr;
+    };
+
+    struct IncompletePointer {
+        [[= Sora::$::Serialization::DerefPrint{}]] const IncompletePointee* value = nullptr;
     };
 
     [[nodiscard]] constexpr Sora::VoidResult FromString(Port& port, std::string_view text) {
@@ -104,6 +167,36 @@ TEST_CASE("ToString is the single canonical formatting protocol", "[Sora.Core.To
     const std::string reflected = Sora::ToString(RenamedField{});
     REQUIRE(reflected.find("answer=42") != std::string::npos);
     REQUIRE(reflected.find("value=42") == std::string::npos);
+}
+
+TEST_CASE("ToString partitions reflected base subobjects from directly declared members", "[Sora.Core.ToString]") {
+    ReflectedDerived value;
+    const std::string text = Sora::ToString(value);
+
+    REQUIRE(text.find("derivedValue=17") != std::string::npos);
+    REQUIRE(text.find(std::format("base[{}]", Sora::Traits::TypeName<ReflectedBase>)) != std::string::npos);
+    REQUIRE(text.find(std::format("base[{}]", Sora::Traits::TypeName<ReflectedSideBase>)) != std::string::npos);
+    REQUIRE(text.find(std::format("base[{}]", Sora::Traits::TypeName<ReflectedGrandBase>)) != std::string::npos);
+    REQUIRE(text.find("grandBaseValue=7") != std::string::npos);
+    REQUIRE(text.find("baseValue=11") != std::string::npos);
+    REQUIRE(text.find("sideValue=13") != std::string::npos);
+
+    const std::string inaccessible = Sora::ToString(PrivateDerived{});
+    REQUIRE(inaccessible.find("base[<inaccessible>]=<incomplete>") != std::string::npos);
+}
+
+TEST_CASE("DerefPrint uses virtual ToString and diagnoses incomplete static pointer views", "[Sora.Core.ToString]") {
+    const VirtualStringDerived complete;
+    const NonVirtualStringDerived incomplete;
+    const NonPolymorphicDerived indeterminate;
+    const std::string text = Sora::ToString(
+        PolymorphicPointers{.complete = &complete, .incomplete = &incomplete, .indeterminate = &indeterminate});
+
+    REQUIRE(text.find("complete=virtual-derived") != std::string::npos);
+    REQUIRE(text.find("incomplete: dynamic object rendered through non-virtual") != std::string::npos);
+    REQUIRE(text.find("possibly incomplete: dynamic type is not observable") != std::string::npos);
+    REQUIRE(Sora::ToString(IncompletePointer{}) ==
+            std::format("{} {{value=nullptr}}", Sora::Traits::TypeName<IncompletePointer>));
 }
 
 TEST_CASE("Meta ToString renders reflected named variables as diagnostic bindings", "[Sora.Core.ToString]") {
