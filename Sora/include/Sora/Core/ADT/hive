@@ -647,7 +647,7 @@ namespace std {
 
         template<std::compatible_range<element_type> range_type>
         hive(std::from_range_t, range_type&& rg, const allocator_type& alloc = allocator_type())
-            : hive(std::from_range, std::move(rg), block_capacity_default_limits(), alloc) {}
+            : hive(std::from_range, std::forward<range_type>(rg), block_capacity_default_limits(), alloc) {}
 
         // Everything else:
 
@@ -907,7 +907,7 @@ namespace std {
         template<typename pointer_type, class el_type>
         constexpr void construct_element(const pointer_type location, el_type&& element) {
             std::allocator_traits<allocator_type>::construct(*this, pointer_cast<pointer>(location),
-                                                             std::move(element));
+                                                             std::forward<el_type>(element));
         }
 
         template<typename pointer_type, typename... arguments>
@@ -2040,7 +2040,8 @@ namespace std {
                         destroy_group(current, iterator2.element_pointer);
                     }
 
-                    if ((total_size -= current.group_pointer->size) != 0) // ie. hive is not empty
+                    total_size -= current.group_pointer->size;
+                    if (total_size != 0) // ie. hive is not empty
                     {
                         if (current.group_pointer->free_list_head != std::numeric_limits<skipfield_type>::max()) {
                             remove_from_groups_with_erasures_list(current.group_pointer);
@@ -2253,7 +2254,8 @@ namespace std {
                                 ++total_size;
                             }
 
-                            if ((size -= skipblock_length) == 0) {
+                            size -= skipblock_length;
+                            if (size == 0) {
                                 if constexpr (!std::is_trivially_destructible<element_type>::value) {
                                     check_iterator_end_of_block(next_element);
                                     destroy_remainder(next_element);
@@ -2568,7 +2570,7 @@ namespace std {
                           std::allocator_traits<allocator_type>::is_always_equal::
                               value) { // Note: we need this to be constexpr to avoid warning errors on the
                                        // potentially-throwing section further down.
-                move_assign(std::move(source));
+                (void)move_assign(std::move(source));
             } else if (static_cast<allocator_type&>(*this) == static_cast<allocator_type&>(source)) {
                 move_assign(std::move(source));
             } else // Allocator isn't propagatable so move/copy elements from source and deallocate the source's blocks
@@ -3250,9 +3252,11 @@ namespace std {
                 if (compare(*current, *previous)) {
                     const size_type original_count = ++count;
                     const_iterator last = current;
+                    last++;
 
-                    while (++last != end && compare(*last, *previous)) {
+                    while (last != end && compare(*last, *previous)) {
                         ++count;
+                        ++last;
                     }
 
                     if (count != original_count) {
@@ -4084,9 +4088,11 @@ namespace std {
             if (predicate(*current)) {
                 const size_type original_count = ++count;
                 const_iterator last = current;
+                last++;
 
-                while (++last != end && predicate(*last)) {
+                while (last != end && predicate(*last)) {
                     ++count;
+                    ++last;
                 }
 
                 if (count != original_count) {

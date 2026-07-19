@@ -7,9 +7,9 @@
 
 #include <Sora/Core/PAL/Module.h>
 #include <Sora/Core/PAL/File.h>
-#include <Sora/Core/PAL/Path.h>
 #include <Sora/Core/PAL/SystemAPI.h>
 
+#include <Sora/Core/Path.h>
 #include <Sora/Core/Wire.h>
 #include <Sora/ErrorCode.h>
 #include <Sora/Platform.h>
@@ -54,6 +54,25 @@ namespace Sora::PAL {
             }
         }
 
+        /** @brief Shared-library suffixes accepted while generating portable module candidates. */
+        inline constexpr std::array kSharedLibrarySuffixes{std::string_view{".dll"}, std::string_view{".so"},
+                                                           std::string_view{".dylib"}};
+
+        /** @brief Find a terminal or versioned shared-library suffix without allocating. */
+        [[nodiscard]] constexpr size_t FindSharedLibrarySuffix(std::string_view name) noexcept {
+            for (std::string_view suffix : kSharedLibrarySuffixes) {
+                size_t position = name.find(suffix);
+                while (position != std::string_view::npos) {
+                    const size_t end = position + suffix.size();
+                    if (end == name.size() || (end < name.size() && name[end] == '.')) {
+                        return position;
+                    }
+                    position = name.find(suffix, position + 1);
+                }
+            }
+            return std::string_view::npos;
+        }
+
         /** @brief Generate decorated filename candidates for one spelling without applying search roots. */
         [[nodiscard]] std::vector<std::string> DecorateName(std::string_view name, ModuleLoadOptions options) {
             // 1. Preserve the caller-provided spelling as the highest-priority candidate.
@@ -64,27 +83,27 @@ namespace Sora::PAL {
             }
 
             // 2. Split path and filename so decoration never alters the directory component.
-            const bool pathLike = HasPathSeparator(name);
-            if (options.nameKind == ModuleNameKind::ExactPath && pathLike && HasSharedLibrarySuffix(name)) {
+            const bool pathLike = Sora::HasPathSeparator(name);
+            if (options.nameKind == ModuleNameKind::ExactPath && pathLike &&
+                FindSharedLibrarySuffix(name) != std::string_view::npos) {
                 return decorated;
             }
 
-            auto [directory, filename] = SplitDirectory(name);
-            std::string stem =
-                options.nameKind == ModuleNameKind::Stem ? std::string{filename} : RemoveSharedLibrarySuffix(filename);
+            auto [directory, filename] = Sora::SplitDirectory(name);
+            std::string stem{filename};
+            const size_t suffixPosition = FindSharedLibrarySuffix(filename);
+            const bool filenameHasSuffix = suffixPosition != std::string_view::npos;
+            if (options.nameKind != ModuleNameKind::Stem && filenameHasSuffix) {
+                stem.resize(suffixPosition);
+            }
             std::array prefixes{std::string_view{}, std::string_view{"lib"}};
-            std::array suffixes{std::string_view{}, Sora::Platform::kSharedLibrarySuffix, std::string_view{".dll"},
-                                std::string_view{".so"}, std::string_view{".dylib"}};
 
             // 3. Combine portable prefixes and suffixes while retaining first-seen priority.
             for (std::string_view prefix : prefixes) {
                 if (!prefix.empty() && stem.starts_with(prefix)) {
                     continue;
                 }
-                for (std::string_view suffix : suffixes) {
-                    if (suffix.empty() && HasSharedLibrarySuffix(filename)) {
-                        continue;
-                    }
+                const auto appendCandidate = [&](std::string_view suffix) {
                     std::string candidate;
                     candidate.reserve(directory.size() + prefix.size() + stem.size() + suffix.size());
                     candidate += directory;
@@ -92,6 +111,15 @@ namespace Sora::PAL {
                     candidate += stem;
                     candidate += suffix;
                     AddCandidate(decorated, std::move(candidate));
+                };
+                for (std::string_view suffix : std::array{std::string_view{}, Sora::Platform::kSharedLibrarySuffix}) {
+                    if (suffix.empty() && filenameHasSuffix) {
+                        continue;
+                    }
+                    appendCandidate(suffix);
+                }
+                for (std::string_view suffix : kSharedLibrarySuffixes) {
+                    appendCandidate(suffix);
                 }
             }
             return decorated;
@@ -621,7 +649,7 @@ namespace Sora::PAL {
         // 2. Decorate each name and apply roots only to non-exact spellings.
         for (std::string_view name : names) {
             std::vector<std::string> decorated = DecorateName(name, options);
-            const bool exact = options.nameKind == ModuleNameKind::ExactPath || HasPathSeparator(name);
+            const bool exact = options.nameKind == ModuleNameKind::ExactPath || Sora::HasPathSeparator(name);
             for (const std::string& candidate : decorated) {
                 const std::u8string utf8Candidate{candidate.begin(), candidate.end()};
                 const std::filesystem::path nativeCandidate{utf8Candidate};

@@ -20,11 +20,6 @@ namespace Sora::PAL {
 
         std::atomic<std::uint64_t> gTemporarySequence = 0;
 
-        [[nodiscard]] std::uint64_t ProcessDiscriminator() noexcept {
-            const auto process = CurrentProcessId();
-            return process.value_or(0);
-        }
-
         void DeleteNativeFile(const std::filesystem::path& path) noexcept {
             if (path.empty()) {
                 return;
@@ -44,15 +39,17 @@ namespace Sora::PAL {
         [[nodiscard]] VoidResult SyncDirectory(const std::filesystem::path& directoryPath) noexcept {
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             const FileSystemAPI& api = LoadFileSystemAPI();
-            if (api.open == nullptr || api.close == nullptr || api.sync == nullptr) {
+            if (!EnsureSystemAPIs(api.open, api.close, api.sync)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
+            // 1. Open the directory itself so its metadata can be synchronized.
             const int directory =
                 api.open(directoryPath.c_str(),
                          PosixSystem::kOpenReadOnly | PosixSystem::kOpenCloseOnExec | PosixSystem::kOpenDirectory);
             if (directory < 0) {
                 return std::unexpected{ErrorCode::IoError};
             }
+            // 2. Retry an interrupted synchronization, then close the directory handle.
             int synced = 0;
             do {
                 synced = api.sync(directory);
@@ -76,6 +73,8 @@ namespace Sora::PAL {
             const FileSystemAPI& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
             const WindowsSystem::DWord replaceFlags = options.durable ? WindowsSystem::kReplaceWriteThrough : 0;
+
+            // 1. Prefer ReplaceFile when the destination already exists.
             if (EnsureSystemAPIs(api.replaceFileWide)) {
                 if (api.replaceFileWide(destination.c_str(), replacement.c_str(), nullptr, replaceFlags, nullptr,
                                         nullptr) != WindowsSystem::kFalse) {
@@ -86,6 +85,8 @@ namespace Sora::PAL {
                     return {.result = std::unexpected{ErrorCode::IoError}, .published = false};
                 }
             }
+
+            // 2. Fall back to MoveFileEx for a missing destination.
             if (!EnsureSystemAPIs(api.moveFileWide)) {
                 return {.result = std::unexpected{ErrorCode::NotSupported}, .published = false};
             }
@@ -98,7 +99,8 @@ namespace Sora::PAL {
             }
             return {.result = VoidResult{}, .published = published};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-            if (api.rename == nullptr) {
+            // 1. Atomically publish the replacement with rename.
+            if (!EnsureSystemAPIs(api.rename)) {
                 return {.result = std::unexpected{ErrorCode::NotSupported}, .published = false};
             }
             if (api.rename(replacement.c_str(), destination.c_str()) != 0) {
@@ -107,6 +109,7 @@ namespace Sora::PAL {
             if (!options.durable) {
                 return {.result = {}, .published = true};
             }
+            // 2. Synchronize affected directories so the rename survives a crash.
             const std::filesystem::path sourceParent =
                 replacement.has_parent_path() ? replacement.parent_path() : std::filesystem::path{"."};
             const std::filesystem::path destinationParent =
@@ -134,6 +137,7 @@ namespace Sora::PAL {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
         try {
+            // 1. Flush and close the replacement before publishing it when durability is requested.
             if (options.durable) {
                 auto file = File::Open(replacement, FileOpenOptions{
                                                         .access = FileAccess::Write,
@@ -149,6 +153,7 @@ namespace Sora::PAL {
                     return closed;
                 }
             }
+            // 2. Atomically publish the prepared replacement.
             return ReplaceNativeFile(replacement, destination, options).result;
         } catch (const std::bad_alloc&) {
             return std::unexpected{ErrorCode::OutOfMemory};
@@ -191,8 +196,8 @@ namespace Sora::PAL {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
         try {
-            const FileSystemAPI& api = LoadFileSystemAPI();
             const std::uint64_t process = CurrentProcessId().value_or(0);
+            // 1. Generate bounded, process-specific candidate names beside the destination.
             for (std::uint32_t attempt = 0; attempt < 128; ++attempt) {
                 const std::uint64_t sequence = gTemporarySequence.fetch_add(1, std::memory_order_relaxed);
                 std::filesystem::path temporary = destination;
@@ -201,11 +206,13 @@ namespace Sora::PAL {
 #else
                 temporary += std::format(".sora-tmp-{}-{}", process, sequence);
 #endif
+                // 2. Create exclusively so concurrent writers cannot claim the same temporary file.
                 auto file = File::Open(temporary, FileOpenOptions{
                                                       .access = FileAccess::Read | FileAccess::Write,
                                                       .creation = FileCreation::CreateNew,
                                                       .flags = FileOpenFlag::Positional,
                                                   });
+                // 3. Return the writer after recording all state required for publication.
                 if (file) {
                     AtomicFileWriter writer;
                     writer.file_ = std::move(*file);
@@ -231,6 +238,7 @@ namespace Sora::PAL {
             return std::unexpected{ErrorCode::InvalidState};
         }
         try {
+            // 1. Flush if requested and close the temporary file exactly once before publication.
             if (!prepared_) {
                 if (options_.durable) {
                     if (auto flushed = file_.Flush(); !flushed) {
@@ -242,7 +250,9 @@ namespace Sora::PAL {
                 }
                 prepared_ = true;
             }
+            // 2. Publish atomically; preserve state when publication itself did not occur so it can be retried.
             ReplaceOutcome replaced = ReplaceNativeFile(temporary_, destination_, options_);
+            // 3. Disarm cleanup once the temporary path has become the destination.
             if (replaced.published) {
                 temporary_.clear();
                 destination_.clear();

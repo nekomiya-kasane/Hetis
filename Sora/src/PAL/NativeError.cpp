@@ -5,20 +5,14 @@
  */
 
 #include <Sora/Core/PAL/NativeError.h>
+#include <Sora/Core/PAL/SystemAPI.h>
 #include <Sora/Core/StringUtils.h>
 #include <Sora/Core/Unicode.h>
 #include <Sora/Platform.h>
 
-#include <cerrno>
 #include <format>
 #include <memory>
 #include <string>
-
-#ifdef PLATFORM_WINDOWS
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <windows.h>
-#endif
 
 namespace Sora::PAL {
 
@@ -29,7 +23,10 @@ namespace Sora::PAL {
         struct LocalMemoryDeleter {
             void operator()(wchar_t* memory) const noexcept {
                 if (memory != nullptr) {
-                    ::LocalFree(memory);
+                    const NativeErrorSystemAPI& api = LoadNativeErrorSystemAPI();
+                    if (api.localFree != nullptr) {
+                        api.localFree(memory);
+                    }
                 }
             }
         };
@@ -37,10 +34,16 @@ namespace Sora::PAL {
         /** @brief Return a UTF-8 message for one Win32 system-category error. */
         [[nodiscard]] std::string WindowsMessage(int value) {
             wchar_t* buffer = nullptr;
-            constexpr DWORD flags =
-                FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
-            const DWORD size = ::FormatMessageW(flags, nullptr, static_cast<DWORD>(value), 0,
-                                                reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
+            const NativeErrorSystemAPI& api = LoadNativeErrorSystemAPI();
+            if (api.formatMessageWide == nullptr || api.localFree == nullptr) {
+                return {};
+            }
+            constexpr WindowsSystem::DWord flags = WindowsSystem::kFormatMessageAllocateBuffer |
+                                                   WindowsSystem::kFormatMessageFromSystem |
+                                                   WindowsSystem::kFormatMessageIgnoreInserts;
+            const WindowsSystem::DWord size =
+                api.formatMessageWide(flags, nullptr, static_cast<WindowsSystem::DWord>(value), 0,
+                                      reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
             if (size == 0 || buffer == nullptr) {
                 return {};
             }
@@ -85,15 +88,12 @@ namespace Sora::PAL {
         if (!code_) {
             return "Success";
         }
-        return std::format("{}[{}:{}]", Message(), CategoryName(), Value());
+        return std::format("{}[{}:{}]", Message(), Category().name(), Value());
     }
 
     NativeError CaptureLastNativeError() noexcept {
-#ifdef PLATFORM_WINDOWS
-        return NativeError::FromSystem(static_cast<int>(::GetLastError()));
-#else
-        return NativeError::FromErrno(errno);
-#endif
+        return Platform::kIsWindows ? NativeError::FromSystem(CaptureLastSystemError())
+                                    : NativeError::FromErrno(CaptureLastSystemError());
     }
 
     std::system_error MakeSystemError(NativeError error, std::string_view context) {
