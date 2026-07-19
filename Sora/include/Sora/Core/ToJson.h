@@ -136,9 +136,9 @@ namespace Sora {
                     }
                 }
             }
-            for (std::size_t i = 1; i < selected.size(); ++i) {
+            for (size_t i = 1; i < selected.size(); ++i) {
                 auto current = selected[i];
-                std::size_t j = i;
+                size_t j = i;
                 while (j > 0 && JsonMemberOrderOf(selected[j - 1]) > JsonMemberOrderOf(current)) {
                     selected[j] = selected[j - 1];
                     --j;
@@ -334,9 +334,9 @@ namespace Sora {
             std::string_view sv{text};
             if constexpr (Sora::Concept::BitfieldEnum<E>) {
                 U acc{};
-                std::size_t pos = 0;
+                size_t pos = 0;
                 while (pos <= sv.size()) {
-                    std::size_t bar = sv.find('|', pos);
+                    size_t bar = sv.find('|', pos);
                     if (bar == std::string_view::npos) {
                         bar = sv.size();
                     }
@@ -488,7 +488,7 @@ namespace Sora {
             }
         }
 
-        template<std::size_t I = 0, typename Variant>
+        template<size_t I = 0, typename Variant>
         [[nodiscard]] bool TryVariantFromJson(const Sora::Json& input, Variant& output) {
             if constexpr (I == std::variant_size_v<Variant>) {
                 return false;
@@ -639,7 +639,7 @@ namespace Sora {
                 if (!input.is_array() || input.size() != std::tuple_size_v<U>) {
                     throw nlohmann::json::type_error::create(302, "expected fixed-size JSON array for tuple", &input);
                 }
-                [&]<std::size_t... I>(std::index_sequence<I...>) {
+                [&]<size_t... I>(std::index_sequence<I...>) {
                     (FromJsonImpl(input[I], std::get<I>(output)), ...);
                 }(std::make_index_sequence<std::tuple_size_v<U>>{});
             } else if constexpr (std::ranges::range<U>) {

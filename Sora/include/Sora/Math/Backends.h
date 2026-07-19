@@ -290,18 +290,18 @@ namespace Sora {
             namespace Concept {
 
                 /** @brief Fixed-width arithmetic SIMD carrier containing exactly @p N lanes. */
-                template<typename T, std::size_t N>
+                template<typename T, size_t N>
                 concept FixedSimdValue = Simd::SimdVecType<std::remove_cvref_t<T>> &&
                                          Sora::Concept::NumericScalar<typename std::remove_cvref_t<T>::ValueType> &&
                                          std::remove_cvref_t<T>::kSize.value == N;
 
                 /** @brief Fixed-width floating-point SIMD carrier containing exactly @p N lanes. */
-                template<typename T, std::size_t N>
+                template<typename T, size_t N>
                 concept FixedSimdFloatingValue =
                     FixedSimdValue<T, N> && std::floating_point<typename std::remove_cvref_t<T>::ValueType>;
 
                 /** @brief Fixed-width signed arithmetic SIMD carrier containing exactly @p N lanes. */
-                template<typename T, std::size_t N>
+                template<typename T, size_t N>
                 concept FixedSimdSignedValue =
                     FixedSimdValue<T, N> && std::is_signed_v<typename std::remove_cvref_t<T>::ValueType>;
 
@@ -311,13 +311,13 @@ namespace Sora {
              * @brief CPU backend for arithmetic SIMD vectors with exactly @p N lanes.
              * @tparam N Compile-time lane count shared by every operand.
              */
-            template<std::size_t N>
+            template<size_t N>
             struct FixedSimdCPU {
                 static_assert(N > 0, "FixedSimdCPU requires at least one lane");
 
                 static constexpr bool kIsScalar = false; /**< This backend does not operate on scalar values. */
                 static constexpr bool kIsSimd = true;    /**< This backend operates on SIMD carriers. */
-                static constexpr std::size_t kSize = N;  /**< Number of lanes accepted by this specialization. */
+                static constexpr size_t kSize = N;       /**< Number of lanes accepted by this specialization. */
                 static constexpr int kPriority = 1;      /**< Priority used when joining heterogeneous backends. */
 
             private:
@@ -382,7 +382,7 @@ namespace Sora {
 
                 template<Concept::FixedSimdValue<N> V>
                 [[nodiscard]] static constexpr V Load(const typename V::ValueType* values) noexcept {
-                    return V([&](auto index) { return values[static_cast<std::size_t>(index)]; });
+                    return V([&](auto index) { return values[static_cast<size_t>(index)]; });
                 }
 
                 template<Concept::FixedSimdValue<N> V>
@@ -393,7 +393,7 @@ namespace Sora {
 
                 template<Concept::FixedSimdValue<N> V>
                 static constexpr void Store(typename V::ValueType* values, const V& value) noexcept {
-                    for (std::size_t index = 0; index < N; ++index) {
+                    for (size_t index = 0; index < N; ++index) {
                         values[index] = value[index];
                     }
                 }
@@ -653,7 +653,7 @@ namespace Sora {
 
                 if constexpr (has_template_arguments(carrier) &&
                               template_of(carrier) == ^^Sora::Math::Simd::BasicVector) {
-                    constexpr std::size_t width = static_cast<std::size_t>(Carrier::kSize.value);
+                    constexpr size_t width = static_cast<size_t>(Carrier::kSize.value);
                     return substitute(^^Backend::FixedSimdCPU, {reflect_constant(width)});
                 }
 

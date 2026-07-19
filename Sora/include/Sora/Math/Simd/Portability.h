@@ -70,7 +70,7 @@ namespace Sora::Math::Simd::Detail {
 
     struct InvalidInteger {};
 
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     [[nodiscard]] consteval auto IntegerTypeForSize() {
         if constexpr (sizeof(signed char) == Bytes) {
             return std::type_identity<signed char>{};
@@ -85,10 +85,10 @@ namespace Sora::Math::Simd::Detail {
         }
     }
 
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     using IntegerForSize = typename decltype(IntegerTypeForSize<Bytes>())::type;
 
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     [[nodiscard]] consteval auto FloatTypeForSize() {
         if constexpr (sizeof(double) == Bytes) {
             return std::type_identity<double>{};
@@ -99,19 +99,19 @@ namespace Sora::Math::Simd::Detail {
         }
     }
 
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     using FloatForSize = typename decltype(FloatTypeForSize<Bytes>())::type;
 
     template<typename Range>
     concept StaticSizedRange = std::ranges::sized_range<Range> && requires(Range& range) {
-        static_cast<char (*)[std::size_t(std::ranges::size(range) >= 0)]>(nullptr);
+        static_cast<char (*)[size_t(std::ranges::size(range) >= 0)]>(nullptr);
     };
 
     template<StaticSizedRange Range>
     [[nodiscard]] consteval auto StaticSize() -> std::ranges::range_size_t<Range> {
         auto conjure = [](Range& range) {
-            if constexpr (std::ranges::size(range) <= std::size_t(-1)) {
-                return std::integral_constant<std::size_t, std::size_t(std::ranges::size(range))>{};
+            if constexpr (std::ranges::size(range) <= size_t(-1)) {
+                return std::integral_constant<size_t, size_t(std::ranges::size(range))>{};
             } else {
                 return std::integral_constant<std::ranges::range_size_t<Range>, std::ranges::size(range)>{};
             }
@@ -143,7 +143,7 @@ namespace Sora::Math::Simd::Detail {
 
     template<auto Size, typename T = decltype(Size), T... Indices>
     [[nodiscard]] consteval auto MakeIotaArray(std::integer_sequence<T, Indices...>) {
-        return std::array<T, std::size_t(Size)>{Indices...};
+        return std::array<T, size_t(Size)>{Indices...};
     }
 
     template<auto Size, typename T = decltype(Size)>
@@ -155,7 +155,7 @@ namespace Sora::Math::Simd::Detail {
     template<typename T, typename... Candidates>
     using IsOneOf = std::bool_constant<(std::same_as<T, Candidates> || ...)>;
 
-    template<std::size_t Alignment, typename T>
+    template<size_t Alignment, typename T>
     [[nodiscard]] constexpr bool IsSufficientlyAligned(const T* pointer) noexcept
         requires(Alignment != 0 && (Alignment & (Alignment - 1)) == 0)
     {

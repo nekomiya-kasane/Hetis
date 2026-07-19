@@ -59,7 +59,7 @@ namespace Sora::CLI {
         using RootType = Root;
         using CommandTreeType = CommandTree;
         using CommandVariantType = CommandVariantOf<CommandTree>;
-        inline static constexpr std::size_t kCommandDepth = CommandDepthOf<CommandTree>;
+        inline static constexpr size_t kCommandDepth = CommandDepthOf<CommandTree>;
         using ResultType = ParseResult<Root, CommandVariantType, kCommandDepth>;
         using ExpectedResult = ParseExpected<Root, CommandVariantType, kCommandDepth>;
 
@@ -75,7 +75,7 @@ namespace Sora::CLI {
             std::uint32_t operandIndex = 0;
             bool afterDelimiter = false;
 
-            for (std::size_t i = 0; i < argv.Size(); ++i) {
+            for (size_t i = 0; i < argv.Size(); ++i) {
                 const std::string_view token = argv[i];
                 const SourceRef source{.tokenIndex = i};
 
@@ -86,7 +86,7 @@ namespace Sora::CLI {
 
                 if (!afterDelimiter && token.starts_with("--") && token.size() > 2) {
                     const std::string_view body = token.substr(2);
-                    const std::size_t eq = body.find('=');
+                    const size_t eq = body.find('=');
                     const std::string_view name = eq == std::string_view::npos ? body : body.substr(0, eq);
                     std::optional<std::string_view> attached;
                     if (eq != std::string_view::npos) {
@@ -146,7 +146,7 @@ namespace Sora::CLI {
                 }
 
                 if (!afterDelimiter && token.starts_with("-") && token.size() > 1) {
-                    for (std::size_t j = 1; j < token.size(); ++j) {
+                    for (size_t j = 1; j < token.size(); ++j) {
                         const char shortName = token[j];
                         const OptionDesc* option = FindShortOption(current, shortName);
                         if (option == nullptr) {
@@ -444,8 +444,8 @@ namespace Sora::CLI {
         [[nodiscard]] static bool EmplaceVariant(std::variant<std::monostate, Ts...>& variant,
                                                  CommandTypeId typeId) {
             bool matched = false;
-            [&]<std::size_t... I>(std::index_sequence<I...>) {
-                auto emplaceOne = [&]<std::size_t Index> {
+            [&]<size_t... I>(std::index_sequence<I...>) {
+                auto emplaceOne = [&]<size_t Index> {
                     if (typeId == Index) {
                         variant.template emplace<Index + 1>();
                         matched = true;
@@ -460,8 +460,8 @@ namespace Sora::CLI {
         [[nodiscard]] static void* VariantObject(std::variant<std::monostate, Ts...>& variant,
                                                  CommandTypeId typeId) noexcept {
             void* result = nullptr;
-            [&]<std::size_t... I>(std::index_sequence<I...>) {
-                auto selectOne = [&]<std::size_t Index> {
+            [&]<size_t... I>(std::index_sequence<I...>) {
+                auto selectOne = [&]<size_t Index> {
                     if (typeId == Index) {
                         result = static_cast<void*>(std::addressof(std::get<Index + 1>(variant)));
                     }

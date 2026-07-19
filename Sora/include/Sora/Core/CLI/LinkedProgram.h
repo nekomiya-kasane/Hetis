@@ -99,7 +99,7 @@ namespace Sora::CLI {
             char shortName = '\0';
             OptionKind kind = OptionKind::Switch;
             ValueCardinality cardinality = ValueCardinality::None;
-            std::size_t presenceId = 0;
+            size_t presenceId = 0;
             std::uint32_t descriptorId = 0;
             bool required = false;
             bool global = false;
@@ -113,7 +113,7 @@ namespace Sora::CLI {
             std::string name;
             std::string about;
             ValueCardinality cardinality = ValueCardinality::One;
-            std::size_t presenceId = 0;
+            size_t presenceId = 0;
         };
 
         struct LinkedCommandNode {
@@ -246,7 +246,7 @@ namespace Sora::CLI {
         using RunResult = std::expected<int, LinkedProgramError>;
 
         LinkedProgram(const ProgramType& root, std::string programName, Policy policy,
-                      std::vector<Detail::LinkedCommandNode> nodes, std::size_t presenceCount)
+                      std::vector<Detail::LinkedCommandNode> nodes, size_t presenceCount)
             : root_(std::addressof(root)),
               programName_(std::move(programName)),
               policy_(policy),
@@ -257,13 +257,13 @@ namespace Sora::CLI {
         [[nodiscard]] std::string_view ProgramName() const noexcept { return programName_; }
 
         /** @brief Return the number of user-visible commands in the linked graph. */
-        [[nodiscard]] std::size_t CommandCount() const noexcept { return nodes_.empty() ? 0 : nodes_.size() - 1; }
+        [[nodiscard]] size_t CommandCount() const noexcept { return nodes_.empty() ? 0 : nodes_.size() - 1; }
 
         /** @brief Return true when @p path identifies one linked command. */
         [[nodiscard]] bool ContainsCommand(std::string_view path) const noexcept {
             std::uint32_t current = 0;
             while (!path.empty()) {
-                const std::size_t separator = path.find(' ');
+                const size_t separator = path.find(' ');
                 const std::string_view segment = path.substr(0, separator);
                 current = Detail::FindChild(nodes_, current, segment);
                 if (current == kInvalidCommandId) {
@@ -421,7 +421,7 @@ namespace Sora::CLI {
                 presence[option.presenceId] = true;
             };
 
-            for (std::size_t index = 0; index < argv.Size(); ++index) {
+            for (size_t index = 0; index < argv.Size(); ++index) {
                 const std::string_view token = argv[index];
                 if (!afterDelimiter && token == "--") {
                     afterDelimiter = true;
@@ -431,7 +431,7 @@ namespace Sora::CLI {
 
                 if (!afterDelimiter && token.starts_with("--") && token.size() > 2) {
                     const std::string_view body = token.substr(2);
-                    const std::size_t equals = body.find('=');
+                    const size_t equals = body.find('=');
                     const std::string_view name = equals == std::string_view::npos ? body : body.substr(0, equals);
                     const std::optional<std::string_view> attached =
                         equals == std::string_view::npos ? std::nullopt
@@ -478,7 +478,7 @@ namespace Sora::CLI {
                 }
 
                 if (!afterDelimiter && token.starts_with('-') && token.size() > 1) {
-                    for (std::size_t shortIndex = 1; shortIndex < token.size(); ++shortIndex) {
+                    for (size_t shortIndex = 1; shortIndex < token.size(); ++shortIndex) {
                         const Detail::LinkedOption* option =
                             Detail::FindShortOption(nodes_, current, policy_, token[shortIndex]);
                         if (option == nullptr) {
@@ -606,7 +606,7 @@ namespace Sora::CLI {
         std::string programName_;
         Policy policy_ = Policy::None;
         std::vector<Detail::LinkedCommandNode> nodes_;
-        std::size_t presenceCount_ = 0;
+        size_t presenceCount_ = 0;
     };
 
     namespace Detail {
@@ -643,7 +643,7 @@ namespace Sora::CLI {
                                      .detail = "fragment root cannot own user-visible options"};
                 }
             }
-            for (std::size_t index = 0; index < description.commands.size(); ++index) {
+            for (size_t index = 0; index < description.commands.size(); ++index) {
                 const FragmentCommand& command = description.commands[index];
                 if (command.commandId != index ||
                     (index == 0 ? command.parentCommandId != kInvalidCommandId
@@ -714,7 +714,7 @@ namespace Sora::CLI {
         }
 
         std::vector<Detail::LinkedCommandNode> nodes(root.schema.commands.size());
-        std::size_t presenceCount = 0;
+        size_t presenceCount = 0;
         for (const CommandDesc& command : root.schema.commands) {
             auto& node = nodes[command.commandId];
             node.name = std::string{root.schema.NameText(command.name)};
@@ -777,7 +777,7 @@ namespace Sora::CLI {
             pending.push_back(std::move(item));
         }
 
-        std::size_t remaining = pending.size();
+        size_t remaining = pending.size();
         while (remaining != 0) {
             bool progress = false;
             for (Detail::PendingFragment& item : pending) {
@@ -795,7 +795,7 @@ namespace Sora::CLI {
 
                 std::vector<std::uint32_t> rewrite(item.description.commands.size(), kInvalidCommandId);
                 rewrite[0] = mount;
-                for (std::size_t localId = 1; localId < item.description.commands.size(); ++localId) {
+                for (size_t localId = 1; localId < item.description.commands.size(); ++localId) {
                     const FragmentCommand& command = item.description.commands[localId];
                     const std::uint32_t parent = rewrite[command.parentCommandId];
                     if (parent == kInvalidCommandId) {

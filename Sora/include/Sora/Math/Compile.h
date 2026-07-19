@@ -22,11 +22,11 @@ namespace Sora::Math {
         template<typename T>
         concept StagedExpression = requires { requires std::remove_cvref_t<T>::kIsStagedExpression; };
 
-        template<std::size_t Index>
+        template<size_t Index>
         struct StagedInput {
             static constexpr bool kIsStagedExpression = true;
             static constexpr bool kStoresState = false;
-            static constexpr std::size_t kIndex = Index;
+            static constexpr size_t kIndex = Index;
         };
 
         template<typename T>
@@ -37,10 +37,10 @@ namespace Sora::Math {
             T value;
         };
 
-        template<std::size_t Position, StagedExpression E, bool Omit = !E::kStoresState>
+        template<size_t Position, StagedExpression E, bool Omit = !E::kStoresState>
         struct StagedOperand;
 
-        template<std::size_t Position, StagedExpression E>
+        template<size_t Position, StagedExpression E>
         struct StagedOperand<Position, E, false> {
             E value;
 
@@ -50,7 +50,7 @@ namespace Sora::Math {
             [[nodiscard]] constexpr const E& Get() const noexcept { return value; }
         };
 
-        template<std::size_t Position, StagedExpression E>
+        template<size_t Position, StagedExpression E>
         struct StagedOperand<Position, E, true> {
             constexpr StagedOperand() = default;
             constexpr explicit StagedOperand(E) noexcept {}
@@ -343,7 +343,7 @@ namespace Sora::Math {
             return StagedNormalizer<E>::Apply(expression);
         }
 
-        template<std::size_t Index>
+        template<size_t Index>
         struct StagedNormalizer<StagedInput<Index>> {
             [[nodiscard]] static constexpr StagedInput<Index> Apply(StagedInput<Index> expression) noexcept {
                 return expression;
@@ -423,7 +423,7 @@ namespace Sora::Math {
             return StagedEvaluator<E>::Evaluate(expression, args...);
         }
 
-        template<std::size_t Index>
+        template<size_t Index>
         struct StagedEvaluator<StagedInput<Index>> {
             template<typename... Args>
                 requires(Index < sizeof...(Args))
@@ -493,11 +493,11 @@ namespace Sora::Math {
             }
         };
 
-        template<std::size_t Arity>
+        template<size_t Arity>
         [[nodiscard]] consteval std::meta::info StagedInputTuple() {
             std::vector<std::meta::info> inputs;
             inputs.reserve(Arity);
-            for (std::size_t index = 0; index < Arity; ++index) {
+            for (size_t index = 0; index < Arity; ++index) {
                 inputs.push_back(std::meta::substitute(^^StagedInput, {std::meta::reflect_constant(index)}));
             }
             return std::meta::substitute(^^std::tuple, inputs);
@@ -677,10 +677,10 @@ namespace Sora::Math {
     } // namespace Hook
 
     /** @brief Stateless evaluator for one staged mathematical expression. */
-    template<Detail::StagedExpression E, std::size_t Arity>
+    template<Detail::StagedExpression E, size_t Arity>
     class CompiledKernel {
     public:
-        static constexpr std::size_t kArity = Arity;
+        static constexpr size_t kArity = Arity;
 
         constexpr explicit CompiledKernel(E expression) noexcept(std::is_nothrow_move_constructible_v<E>)
             : expression_(std::move(expression)) {}
@@ -701,7 +701,7 @@ namespace Sora::Math {
      * @details The function must express its mathematics through the public Math CPOs. Staging is opt-in and may
      * replace local multiply-add/subtract patterns with explicitly fused primitives, changing intermediate rounding.
      */
-    template<std::size_t Arity, typename Function>
+    template<size_t Arity, typename Function>
     [[nodiscard]] consteval auto Compile(Function&& function) {
         using Inputs = [:Detail::StagedInputTuple<Arity>():];
         auto expression = Detail::Normalize(Detail::Stage(std::apply(std::forward<Function>(function), Inputs{})));

@@ -156,13 +156,13 @@ namespace Sora::Meta::ABI {
          * @param[in,out] out Destination string.
          * @param[in] n Value to append.
          */
-        constexpr void AppendDecimal(std::string& out, std::size_t n) {
+        constexpr void AppendDecimal(std::string& out, size_t n) {
             if (n == 0) {
                 out += '0';
                 return;
             }
             char buf[24];
-            std::size_t i = 0;
+            size_t i = 0;
             while (n > 0) {
                 buf[i++] = static_cast<char>('0' + n % 10);
                 n /= 10;
@@ -177,14 +177,14 @@ namespace Sora::Meta::ABI {
          * @param[in,out] out Destination string.
          * @param[in] n Value to append.
          */
-        constexpr void AppendBase36(std::string& out, std::size_t n) {
+        constexpr void AppendBase36(std::string& out, size_t n) {
             constexpr char kDigits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             if (n == 0) {
                 out += '0';
                 return;
             }
             char buf[16];
-            std::size_t i = 0;
+            size_t i = 0;
             while (n > 0) {
                 buf[i++] = kDigits[n % 36];
                 n /= 36;

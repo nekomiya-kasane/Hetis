@@ -23,7 +23,7 @@
 
 namespace Sora {
 
-    template<typename Sig, std::size_t Cap = 64>
+    template<typename Sig, size_t Cap = 64>
     class InlineFunction;
 
     namespace Detail {
@@ -86,7 +86,7 @@ namespace Sora {
          * @tparam Cap Inline storage capacity in bytes.
          * @tparam Args Callable argument types.
          */
-        template<bool Noexcept, typename R, std::size_t Cap, typename... Args>
+        template<bool Noexcept, typename R, size_t Cap, typename... Args>
         class InlineFunctionImpl {
             static_assert(Cap >= sizeof(void*), "InlineFunction capacity must be at least pointer-sized.");
             static_assert(Cap % alignof(std::max_align_t) == 0,
@@ -217,7 +217,7 @@ namespace Sora {
 
     } // namespace Detail
     /** @brief Fixed-capacity owning callable wrapper for a potentially throwing function signature. */
-    template<typename R, typename... Args, std::size_t Cap>
+    template<typename R, typename... Args, size_t Cap>
     class InlineFunction<R(Args...), Cap> : private Detail::InlineFunctionImpl<false, R, Cap, Args...> {
         using Base = Detail::InlineFunctionImpl<false, R, Cap, Args...>;
 
@@ -256,7 +256,7 @@ namespace Sora {
     };
 
     /** @brief Fixed-capacity owning callable wrapper for a non-throwing function signature. */
-    template<typename R, typename... Args, std::size_t Cap>
+    template<typename R, typename... Args, size_t Cap>
     class InlineFunction<R(Args...) noexcept, Cap> : private Detail::InlineFunctionImpl<true, R, Cap, Args...> {
         using Base = Detail::InlineFunctionImpl<true, R, Cap, Args...>;
 

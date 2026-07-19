@@ -29,7 +29,7 @@ namespace Sora {
         std::array<T, N> data{};
 
         /** @brief Number of currently stored elements. */
-        std::size_t count = 0;
+        size_t count = 0;
 
     public:
         /** @brief Compile-time capacity constant. */
@@ -39,13 +39,13 @@ namespace Sora {
          * @brief Returns the maximum number of elements.
          * @return Container capacity.
          */
-        [[nodiscard]] static constexpr auto capacity() noexcept -> std::size_t { return N; }
+        [[nodiscard]] static constexpr auto capacity() noexcept -> size_t { return N; }
 
         /**
          * @brief Returns the current number of elements.
          * @return Current size.
          */
-        [[nodiscard]] constexpr auto size() const noexcept -> std::size_t { return count; }
+        [[nodiscard]] constexpr auto size() const noexcept -> size_t { return count; }
 
         /**
          * @brief Checks whether the container has no elements.
@@ -171,7 +171,7 @@ namespace Sora {
          * @return Reference to element at index.
          * @throws compile-time static string if index is out of range.
          */
-        [[nodiscard]] constexpr auto at(std::size_t index) -> T& {
+        [[nodiscard]] constexpr auto at(size_t index) -> T& {
             if (index >= count) {
                 throw "FixedCapacityVector: index out of range.";
             }
@@ -179,7 +179,7 @@ namespace Sora {
         }
 
         /** @brief Returns reference to the element at a given index with bounds checking. */
-        [[nodiscard]] constexpr auto at(std::size_t index) const -> T const& {
+        [[nodiscard]] constexpr auto at(size_t index) const -> T const& {
             if (index >= count) {
                 throw "FixedCapacityVector: index out of range.";
             }
@@ -221,10 +221,10 @@ namespace Sora {
          * @param index Element index.
          * @return Reference to element at index.
          */
-        [[nodiscard]] constexpr auto operator[](std::size_t index) noexcept -> T& { return data[index]; }
+        [[nodiscard]] constexpr auto operator[](size_t index) noexcept -> T& { return data[index]; }
 
         /** @brief Returns reference to the element at index without bounds checking. */
-        [[nodiscard]] constexpr auto operator[](std::size_t index) const noexcept -> T const& { return data[index]; }
+        [[nodiscard]] constexpr auto operator[](size_t index) const noexcept -> T const& { return data[index]; }
     };
 
 } // namespace Sora

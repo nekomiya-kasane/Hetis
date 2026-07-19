@@ -22,7 +22,7 @@
 namespace Sora::CLI {
 
     inline constexpr std::uint32_t kCommandFragmentFormat = 2;
-    inline constexpr std::size_t kMaxLinkedCommands = 4096;
+    inline constexpr size_t kMaxLinkedCommands = 4096;
 
     /** @brief Origin of a command visible in a linked program. */
     enum class CommandSource : std::uint8_t {
@@ -223,10 +223,10 @@ namespace Sora::CLI {
         struct TopLevelCommandCount;
 
         template<typename... Nodes>
-        struct TopLevelCommandCount<Commands<Nodes...>> : std::integral_constant<std::size_t, sizeof...(Nodes)> {};
+        struct TopLevelCommandCount<Commands<Nodes...>> : std::integral_constant<size_t, sizeof...(Nodes)> {};
 
         template<typename CommandsList>
-        inline constexpr std::size_t TopLevelCommandCountV = TopLevelCommandCount<CommandsList>::value;
+        inline constexpr size_t TopLevelCommandCountV = TopLevelCommandCount<CommandsList>::value;
 
         /** @brief Copy a normalized schema into binder-independent fragment metadata. */
         [[nodiscard]] inline bool DescribeSchema(const NormalizedSchema& schema, FragmentDescription& output) noexcept {
@@ -248,7 +248,7 @@ namespace Sora::CLI {
                                                .operandBegin = command.operandBegin,
                                                .operandCount = command.operandCount});
                 }
-                for (std::size_t index = 0; index < schema.options.size(); ++index) {
+                for (size_t index = 0; index < schema.options.size(); ++index) {
                     const OptionDesc& option = schema.options[index];
                     output.options.push_back({.descriptorId = static_cast<std::uint32_t>(index),
                                               .longName = schema.NameText(option.longName),
@@ -342,7 +342,7 @@ namespace Sora::CLI {
     template<Concept::ProgramRoot Declaration>
     consteval auto CompileSubprogram() {
         using CommandTree = CommandTreeOf<Declaration>;
-        constexpr std::size_t commandCount = Detail::TopLevelCommandCountV<CommandTree>;
+        constexpr size_t commandCount = Detail::TopLevelCommandCountV<CommandTree>;
 
         SchemaBuilder<Declaration> builder;
         builder.AllowExternalOptionOverrides();

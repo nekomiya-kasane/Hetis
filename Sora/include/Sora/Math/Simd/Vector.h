@@ -189,7 +189,7 @@ namespace Sora::Math::Simd {
         template<typename, typename>
         friend class BasicVector;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class BasicMask;
 
         static constexpr int kStorageSize = Ap::kStorageSize;
@@ -702,10 +702,10 @@ namespace Sora::Math::Simd {
          * @param n Read no more than @p n values from memory; inactive lanes are zero-initialized.
          */
         template<typename Up, ArchTraits Traits = {}>
-        static inline BasicVector PartialLoad(const Up* mem, std::size_t n) {
+        static inline BasicVector PartialLoad(const Up* mem, size_t n) {
             if constexpr (kIsScalar) {
                 return n == 0 ? BasicVector() : BasicVector(static_cast<ValueType>(*mem));
-            } else if (IsConstKnownEqualTo(n >= std::size_t(kStorageSize), true)) {
+            } else if (IsConstKnownEqualTo(n >= size_t(kStorageSize), true)) {
                 return BasicVector(LoadCtorTag(), mem);
             } else if constexpr (!ConvertsTrivially<Up, ValueType>) {
                 return static_cast<BasicVector>(Rebind<Up, BasicVector>::PartialLoad(mem, n));
@@ -716,7 +716,7 @@ namespace Sora::Math::Simd {
                     return MaskedLoad(mem, MaskType::PartialMaskOfN(int(n)));
                 }
 #endif
-                if (n >= std::size_t(kStorageSize)) [[unlikely]] {
+                if (n >= size_t(kStorageSize)) [[unlikely]] {
                     return BasicVector(LoadCtorTag(), mem);
                 }
                 else if constexpr (kStorageSize > 4) {
@@ -806,7 +806,7 @@ namespace Sora::Math::Simd {
          * long.
          */
         template<typename Up, ArchTraits Traits = {}>
-        static inline void PartialStore(const BasicVector v, Up* mem, std::size_t n) {
+        static inline void PartialStore(const BasicVector v, Up* mem, size_t n) {
             if (IsConstKnownEqualTo(n >= kStorageSize, true)) {
                 v.Store(mem);
             }
@@ -1528,7 +1528,7 @@ namespace Sora::Math::Simd {
         template<typename, typename>
         friend class BasicVector;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class BasicMask;
 
         static constexpr int kStorageSize = Ap::kStorageSize;
@@ -1736,7 +1736,7 @@ namespace Sora::Math::Simd {
 
         template<typename Up>
         [[gnu::always_inline]]
-        static inline BasicVector PartialLoad(const Up* mem, std::size_t n) {
+        static inline BasicVector PartialLoad(const Up* mem, size_t n) {
             if (n >= kN0) {
                 return Init(DataType0(LoadCtorTag(), mem), DataType1::PartialLoad(mem + kN0, n - kN0));
             } else {
@@ -1758,7 +1758,7 @@ namespace Sora::Math::Simd {
 
         template<typename Up>
         [[gnu::always_inline]]
-        static inline void PartialStore(const BasicVector& v, Up* mem, std::size_t n) {
+        static inline void PartialStore(const BasicVector& v, Up* mem, size_t n) {
             if (n >= kN0) {
                 v.data0.Store(mem);
                 DataType1::PartialStore(v.data1, mem + kN0, n - kN0);
@@ -1995,7 +1995,7 @@ namespace Sora::Math::Simd {
                                                          static_cast<SimdSizeType>(decltype(std::span(r))::extent)>>;
 #endif
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     BasicVector(BasicMask<Bytes, Ap>)
         -> BasicVector<Detail::IntegerForSize<Bytes>,
                        decltype(AbiRebind<Detail::IntegerForSize<Bytes>, BasicMask<Bytes, Ap>::kSize.value, Ap>())>;

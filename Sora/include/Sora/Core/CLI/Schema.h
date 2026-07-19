@@ -136,7 +136,7 @@ namespace Sora::CLI {
         template<typename T>
         concept SwitchField = std::same_as<T, bool> || (std::integral<T> && !std::same_as<T, bool>);
 
-        template<std::size_t N>
+        template<size_t N>
         [[nodiscard]] consteval FixedString<N> FixedText(std::string_view text, const char* error) {
             if (text.size() > N) {
                 throw error;
@@ -153,7 +153,7 @@ namespace Sora::CLI {
                 return kInvalidNameId;
             }
 
-            for (std::size_t index = 0; index < schema.names.size(); ++index) {
+            for (size_t index = 0; index < schema.names.size(); ++index) {
                 if (schema.names[index].Text() == text) {
                     return static_cast<NameId>(index);
                 }
@@ -231,12 +231,12 @@ namespace Sora::CLI {
         }
 
         template<std::meta::info Member>
-        [[nodiscard]] consteval std::size_t MemberBindingDiscriminator() {
+        [[nodiscard]] consteval size_t MemberBindingDiscriminator() {
             constexpr auto owner = Sora::Meta::ParentScopeOf(Member);
-            std::size_t ordinal = 0;
+            size_t ordinal = 0;
             for (auto member : std::meta::nonstatic_data_members_of(owner, std::meta::access_context::unchecked())) {
                 if (member == Member) {
-                    return static_cast<std::size_t>(std::meta::offset_of(Member).total_bits()) * 131u + ordinal;
+                    return static_cast<size_t>(std::meta::offset_of(Member).total_bits()) * 131u + ordinal;
                 }
                 ++ordinal;
             }
@@ -244,7 +244,7 @@ namespace Sora::CLI {
         }
 
         template<std::meta::info Member>
-        using MemberBindingToken = std::integral_constant<std::size_t, MemberBindingDiscriminator<Member>()>;
+        using MemberBindingToken = std::integral_constant<size_t, MemberBindingDiscriminator<Member>()>;
 
         template<typename CommandType, std::meta::info Member, typename = MemberBindingToken<Member>>
         [[nodiscard]] bool BindValue(void* object, std::string_view value) noexcept {
@@ -314,8 +314,8 @@ namespace Sora::CLI {
 
         template<typename... Nodes>
         struct CommandDepth<Commands<Nodes...>> {
-            static constexpr std::size_t value = [] {
-                std::size_t depth = 0;
+            static constexpr size_t value = [] {
+                size_t depth = 0;
                 ((depth = depth < CommandDepth<Nodes>::value ? CommandDepth<Nodes>::value : depth), ...);
                 return depth;
             }();
@@ -328,7 +328,7 @@ namespace Sora::CLI {
 
         template<typename T, typename Children>
         struct CommandDepth<Command<T, Children>>
-            : std::integral_constant<std::size_t, 1 + CommandDepth<Children>::value> {};
+            : std::integral_constant<size_t, 1 + CommandDepth<Children>::value> {};
 
         template<>
         struct CommandTypes<Commands<>> {
@@ -336,7 +336,7 @@ namespace Sora::CLI {
         };
 
         template<>
-        struct CommandDepth<Commands<>> : std::integral_constant<std::size_t, 0> {};
+        struct CommandDepth<Commands<>> : std::integral_constant<size_t, 0> {};
 
         template<typename List>
         struct VariantOf;
@@ -442,7 +442,7 @@ namespace Sora::CLI {
                         desc.bindSwitch = &BindSwitch<CommandType, member>;
                     }
 
-                    for (std::size_t i = command.optionBegin; i < schema.options.size(); ++i) {
+                    for (size_t i = command.optionBegin; i < schema.options.size(); ++i) {
                         const OptionDesc& existing = schema.options[i];
                         if (existing.longName == desc.longName) {
                             if (existing.kind == OptionKind::Help) {
@@ -489,7 +489,7 @@ namespace Sora::CLI {
             command.operandCount = static_cast<std::uint32_t>(schema.operands.size() - command.operandBegin);
 
             bool sawOptional = false;
-            for (std::size_t i = command.operandBegin; i < schema.operands.size(); ++i) {
+            for (size_t i = command.operandBegin; i < schema.operands.size(); ++i) {
                 const auto cardinality = schema.operands[i].cardinality;
                 if (cardinality == ValueCardinality::ZeroOrMore || cardinality == ValueCardinality::OneOrMore) {
                     if (i + 1 != schema.operands.size()) {
@@ -540,12 +540,12 @@ namespace Sora::CLI {
         template<typename... Nodes, typename Root>
         consteval void AppendChildren(SchemaStorage& schema, const SchemaBuilder<Root>& builder, CommandId parent,
                                       CommandTypeId& nextType, Commands<Nodes...>) {
-            constexpr std::size_t count = sizeof...(Nodes);
+            constexpr size_t count = sizeof...(Nodes);
             auto& parentDesc = schema.commands[parent];
             parentDesc.childBegin = static_cast<std::uint32_t>(schema.edges.size());
 
             std::array<CommandId, count> childIds{};
-            [&]<std::size_t... I>(std::index_sequence<I...>) {
+            [&]<size_t... I>(std::index_sequence<I...>) {
                 ((childIds[I] = ReserveCommand<Nodes>(schema, builder, parent, nextType++),
                   schema.edges.push_back(CommandEdge{.parentCommandId = parent,
                                                      .name = schema.commands[childIds[I]].name,
@@ -554,8 +554,8 @@ namespace Sora::CLI {
             }(std::make_index_sequence<count>{});
 
             parentDesc.childCount = static_cast<std::uint32_t>(count);
-            for (std::size_t i = parentDesc.childBegin; i < schema.edges.size(); ++i) {
-                for (std::size_t j = i + 1; j < schema.edges.size(); ++j) {
+            for (size_t i = parentDesc.childBegin; i < schema.edges.size(); ++i) {
+                for (size_t j = i + 1; j < schema.edges.size(); ++j) {
                     if (schema.edges[i].parentCommandId == parent && schema.edges[j].parentCommandId == parent &&
                         schema.edges[i].name == schema.edges[j].name) {
                         throw "Duplicate Sora CLI child command name in one command scope.";
@@ -563,7 +563,7 @@ namespace Sora::CLI {
                 }
             }
 
-            [&]<std::size_t... I>(std::index_sequence<I...>) {
+            [&]<size_t... I>(std::index_sequence<I...>) {
                 (FillCommand<Nodes>(schema, builder, childIds[I], nextType), ...);
             }(std::make_index_sequence<count>{});
         }
@@ -612,7 +612,7 @@ namespace Sora::CLI {
 
         consteval void ValidateGlobalOptionConflicts(const SchemaStorage& schema, bool allowExternalOverrides) {
             const CommandDesc& root = schema.commands[0];
-            for (std::size_t commandIndex = 1; commandIndex < schema.commands.size(); ++commandIndex) {
+            for (size_t commandIndex = 1; commandIndex < schema.commands.size(); ++commandIndex) {
                 const CommandDesc& command = schema.commands[commandIndex];
                 for (std::uint32_t localIndex = 0; localIndex < command.optionCount; ++localIndex) {
                     const OptionDesc& local = schema.options[command.optionBegin + localIndex];
@@ -815,7 +815,7 @@ namespace Sora::CLI {
     using CommandVariantOf = typename Detail::VariantOf<CommandTypeListOf<CommandsList>>::Type;
 
     template<typename CommandsList>
-    inline constexpr std::size_t CommandDepthOf = Detail::CommandDepth<CommandsList>::value;
+    inline constexpr size_t CommandDepthOf = Detail::CommandDepth<CommandsList>::value;
 
 } // namespace Sora::CLI
 

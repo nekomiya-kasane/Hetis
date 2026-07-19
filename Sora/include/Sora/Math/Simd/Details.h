@@ -39,7 +39,7 @@
 namespace Sora::Math::Simd {
 
     /** @brief Default upper bound, in bytes, for a throughput-oriented SIMD register. */
-    inline constexpr std::size_t kDefaultPreferredVectorBytes = 32;
+    inline constexpr size_t kDefaultPreferredVectorBytes = 32;
 
     template<typename Tp>
     inline constexpr Tp kIota = [] { static_assert(false, "invalid kIota specialization"); }();
@@ -93,7 +93,7 @@ namespace Sora::Math::Simd {
     /** @internal
      * Alias for an unsigned integer type T such that sizeof(T) equals Bytes.
      */
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     using UInt = std::make_unsigned_t<Detail::IntegerForSize<Bytes>>;
 
     /** @internal
@@ -276,7 +276,7 @@ namespace Sora::Math::Simd {
             }
         }());
 
-        template<std::size_t Bytes>
+        template<size_t Bytes>
         using MaskDataType = decltype([] {
             static_assert(kNreg == 1 || Bytes != Bytes);
             if constexpr (kStorageSize == 1) {
@@ -602,7 +602,7 @@ namespace Sora::Math::Simd {
      * @tparam Tp Vectorizable element type.
      * @tparam MaximumBytes Maximum effective arithmetic width in bytes; must be a non-zero power of two.
      */
-    template<typename Tp, std::size_t MaximumBytes = kDefaultPreferredVectorBytes, ArchTraits Traits = {}>
+    template<typename Tp, size_t MaximumBytes = kDefaultPreferredVectorBytes, ArchTraits Traits = {}>
         requires(std::has_single_bit(MaximumBytes))
     consteval auto PreferredAbi() {
         constexpr int adjustedSize = sizeof(Tp) * (1 + std::is_same_v<Tp, _Float16>);
@@ -615,11 +615,11 @@ namespace Sora::Math::Simd {
             return AbiT<complexSize, 1, underlying.kVariant, AbiVariant::kCxIleav>();
         } else {
             constexpr auto native = Sora::Math::Simd::NativeAbi<Tp, Traits>();
-            constexpr std::size_t nativeBytes = std::size_t(native.kStorageSize) * adjustedSize;
+            constexpr size_t nativeBytes = size_t(native.kStorageSize) * adjustedSize;
             if constexpr (MaximumBytes >= nativeBytes) {
                 return native;
             } else {
-                constexpr int preferredSize = MaximumBytes < std::size_t(adjustedSize)
+                constexpr int preferredSize = MaximumBytes < size_t(adjustedSize)
                                                   ? 1
                                                   : static_cast<int>(MaximumBytes / adjustedSize);
                 if constexpr (preferredSize == 1) {
@@ -656,7 +656,7 @@ namespace Sora::Math::Simd {
     }
 
     /** @brief Select the scalar fallback ABI on targets without a SIMD implementation. */
-    template<typename Tp, std::size_t MaximumBytes = kDefaultPreferredVectorBytes, ArchTraits = {}>
+    template<typename Tp, size_t MaximumBytes = kDefaultPreferredVectorBytes, ArchTraits = {}>
         requires(std::has_single_bit(MaximumBytes))
     consteval auto PreferredAbi() {
         return Sora::Math::Simd::NativeAbi<Tp>();
@@ -685,7 +685,7 @@ namespace Sora::Math::Simd {
      * @tparam Tp Vectorizable element type.
      * @tparam MaximumBytes Maximum effective arithmetic width in bytes.
      */
-    template<typename Tp, std::size_t MaximumBytes = kDefaultPreferredVectorBytes>
+    template<typename Tp, size_t MaximumBytes = kDefaultPreferredVectorBytes>
     using PreferredAbiT = decltype(Sora::Math::Simd::PreferredAbi<Tp, MaximumBytes>());
 
     /**
@@ -786,7 +786,7 @@ namespace Sora::Math::Simd {
      * That's why this overload has the additional @p IsOnlyResize parameter, which tells us that the
      * value-type doesn't change.
      */
-    template<std::size_t Bytes, int Np, AbiTag A0, bool IsOnlyResize, ArchTraits Traits = {}>
+    template<size_t Bytes, int Np, AbiTag A0, bool IsOnlyResize, ArchTraits Traits = {}>
     consteval auto AbiRebind() {
         constexpr bool fromCx = A0::kIsCxCtgus || A0::kIsCxIleav;
 
@@ -843,7 +843,7 @@ namespace Sora::Math::Simd {
      *   makes the conversion behavior dependent on compiler Flags. Probably not what we want.
      */
     template<typename To, typename From>
-    consteval bool IsMaskConversionExplicit([[maybe_unused]] std::size_t b0, [[maybe_unused]] std::size_t b1) {
+    consteval bool IsMaskConversionExplicit([[maybe_unused]] size_t b0, [[maybe_unused]] size_t b1) {
         constexpr int n = To::kStorageSize;
         static_assert(n == From::kStorageSize);
 #ifndef SORA_SIMD_COND_EXPLICIT_MASK_CONVERSION
@@ -904,7 +904,7 @@ namespace Sora::Math::Simd {
     template<typename Tp, SimdSizeType Np = NativeAbiT<Tp>::kStorageSize>
     using Vector = BasicVector<Tp, DeduceAbiT<Tp, Np>>;
 
-    template<std::size_t Bytes, typename Ap = NativeAbiT<Detail::IntegerForSize<Bytes>>>
+    template<size_t Bytes, typename Ap = NativeAbiT<Detail::IntegerForSize<Bytes>>>
     class BasicMask;
 
     template<typename Tp, SimdSizeType Np = NativeAbiT<Tp>::kStorageSize>
@@ -912,7 +912,7 @@ namespace Sora::Math::Simd {
 
     // [simd.ctor] load constructor constraints
     template<typename Rg>
-    consteval std::size_t StaticRangeSize(Rg& r) {
+    consteval size_t StaticRangeSize(Rg& r) {
         if constexpr (Detail::StaticSizedRange<Rg>) {
             return std::ranges::size(r);
         } else {
@@ -1018,10 +1018,10 @@ namespace Sora::Math::Simd {
      * C++26 [simd.expos.defn]
      */
     template<typename Tp>
-    constexpr std::size_t kMaskElementSize = 0;
+    constexpr size_t kMaskElementSize = 0;
 
-    template<std::size_t Bytes, AbiTag Ap>
-    constexpr std::size_t kMaskElementSize<BasicMask<Bytes, Ap>> = Bytes;
+    template<size_t Bytes, AbiTag Ap>
+    constexpr size_t kMaskElementSize<BasicMask<Bytes, Ap>> = Bytes;
 
     // [simd.expos]
     template<typename Vp>
@@ -1089,11 +1089,11 @@ namespace Sora::Math::Simd {
     template<Vectorizable Tp, SimdSizeType Np, AbiTag Ap>
     using SimilarMask = BasicMask<sizeof(Tp), decltype(AbiRebind<Tp, Np, Ap>())>;
 
-    template<std::size_t Bytes, AbiTag Ap>
+    template<size_t Bytes, AbiTag Ap>
     using ComponentMaskForIleav =
         BasicMask<Bytes / 2, decltype(AbiRebind<Detail::FloatForSize<Bytes / 2>, Ap::kStorageSize * 2, Ap>())>;
 
-    template<std::size_t Bytes, AbiTag Ap>
+    template<size_t Bytes, AbiTag Ap>
     using ComponentMaskForCtgus =
         BasicMask<Bytes / 2, decltype(AbiRebind<Detail::FloatForSize<Bytes / 2>, Ap::kStorageSize, Ap>())>;
 
@@ -1102,7 +1102,7 @@ namespace Sora::Math::Simd {
     using SimilarVec = BasicVector<Tp, decltype(AbiRebind<Tp, Np, Ap>())>;
 
     // LWG4470 [simd.expos]
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     using SimdVecFromMaskT = SimilarVec<Detail::IntegerForSize<Bytes>, Ap::kStorageSize, Ap>;
 
 #if SORA_SIMD_THROW_ON_BAD_VALUE // used for unit tests (also see P3844)
@@ -1175,11 +1175,11 @@ namespace Sora::Math::Simd {
      * @param  src    The source pointer.
      * @param  n      Thu number of chunks that need to be copied.
      */
-    template<std::size_t Chunk, std::size_t Max>
-    inline void MemcpyChunks(std::byte* __restrict__ dst, const std::byte* __restrict__ src, std::size_t n) {
+    template<size_t Chunk, size_t Max>
+    inline void MemcpyChunks(std::byte* __restrict__ dst, const std::byte* __restrict__ src, size_t n) {
         static_assert(Max <= 64);
         static_assert(std::has_single_bit(Chunk) && Chunk <= 8);
-        std::size_t bytes = Chunk * n;
+        size_t bytes = Chunk * n;
         if (__builtin_constant_p(
                 bytes)) { // If n is known via constant propagation use a single memcpy call. Since this is still
             // a fixed-size memcpy to the compiler, this leaves more room for optimization.

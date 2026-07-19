@@ -17,10 +17,10 @@ namespace Sora::Math::Simd {
     struct Alignment {};
 
     template<typename Tp, typename Ap, Vectorizable Up>
-    struct Alignment<BasicVector<Tp, Ap>, Up> : std::integral_constant<std::size_t, alignof(BasicVector<Tp, Ap>)> {};
+    struct Alignment<BasicVector<Tp, Ap>, Up> : std::integral_constant<size_t, alignof(BasicVector<Tp, Ap>)> {};
 
     template<typename Tp, typename Up = typename Tp::value_type>
-    constexpr std::size_t kAlignment = Alignment<Tp, Up>::value;
+    constexpr size_t kAlignment = Alignment<Tp, Up>::value;
 
     // [simd.Flags] -------------------------------------------------------------
     struct LoadStoreTag {};
@@ -46,13 +46,13 @@ namespace Sora::Math::Simd {
     };
 
     /** @internal
-     * `template<std::size_t N> struct overaligned-flag`
+     * `template<size_t N> struct overaligned-flag`
      *
      * @tparam Np  Alignment in bytes
      *
      * C++26 [simd.expos] / [simd.Flags]
      */
-    template<std::size_t Np>
+    template<size_t Np>
     struct OveralignedFlag : LoadStoreTag {
         static_assert(std::has_single_bit(Np));
 
@@ -123,7 +123,7 @@ namespace Sora::Math::Simd {
 
     inline constexpr Flags<AlignedFlag> kAlignedFlag{};
 
-    template<std::size_t Np>
+    template<size_t Np>
         requires(std::has_single_bit(Np))
     inline constexpr Flags<OveralignedFlag<Np>> kOveralignedFlag{};
 

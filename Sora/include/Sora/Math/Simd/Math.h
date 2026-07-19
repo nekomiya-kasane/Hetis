@@ -20,7 +20,7 @@ namespace Sora::Math::Simd {
         [[gnu::always_inline]] constexpr V ElementwiseUnary(const V& x, ScalarFunction scalarFunction,
                                                             VectorFunction vectorFunction) noexcept {
             if consteval {
-                return V([&](std::size_t i) { return scalarFunction(x[i]); });
+                return V([&](size_t i) { return scalarFunction(x[i]); });
             } else {
                 if constexpr (V::AbiType::kNreg == 1) {
                     return V::Init(vectorFunction(x.Get()));
@@ -35,7 +35,7 @@ namespace Sora::Math::Simd {
         [[gnu::always_inline]] constexpr V ElementwiseBinary(const V& x, const V& y, ScalarFunction scalarFunction,
                                                              VectorFunction vectorFunction) noexcept {
             if consteval {
-                return V([&](std::size_t i) { return scalarFunction(x[i], y[i]); });
+                return V([&](size_t i) { return scalarFunction(x[i], y[i]); });
             } else {
                 if constexpr (V::AbiType::kNreg == 1) {
                     return V::Init(vectorFunction(x.Get(), y.Get()));
@@ -51,7 +51,7 @@ namespace Sora::Math::Simd {
                                                               ScalarFunction scalarFunction,
                                                               VectorFunction vectorFunction) noexcept {
             if consteval {
-                return V([&](std::size_t i) { return scalarFunction(x[i], y[i], z[i]); });
+                return V([&](size_t i) { return scalarFunction(x[i], y[i], z[i]); });
             } else {
                 if constexpr (V::AbiType::kNreg == 1) {
                     return V::Init(vectorFunction(x.Get(), y.Get(), z.Get()));
@@ -227,7 +227,7 @@ namespace Sora::Math::Simd {
 
         const auto special = real.Isinf() || imag.Isinf() || real.Isnan() || imag.Isnan();
         if (special.AnyOf()) {
-            const R standardResult([&](std::size_t i) { return std::abs(std::complex<T>(x[i])); });
+            const R standardResult([&](size_t i) { return std::abs(std::complex<T>(x[i])); });
             result = SelectImpl(special, standardResult, result);
         }
         return result;

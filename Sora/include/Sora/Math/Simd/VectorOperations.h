@@ -20,7 +20,7 @@ namespace Sora::Math::Simd {
     /**
      * Alias for a vector builtin with given value type and total sizeof.
      */
-    template<Vectorizable Tp, std::size_t Bytes>
+    template<Vectorizable Tp, size_t Bytes>
         requires(std::has_single_bit(Bytes))
     using VecBuiltinTypeBytes [[gnu::vector_size(Bytes)]] = Tp;
 
@@ -200,7 +200,7 @@ namespace Sora::Math::Simd {
      *
      * Use this function when you need two objects of the same size (e.g. for VecConcat).
      */
-    template<std::size_t Bytes, VecBuiltin TV>
+    template<size_t Bytes, VecBuiltin TV>
     [[gnu::always_inline]]
     constexpr auto VecZeroPadTo(TV x) {
         if constexpr (sizeof(TV) == Bytes) {

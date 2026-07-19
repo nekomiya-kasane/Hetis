@@ -42,7 +42,7 @@ namespace Sora::Math::Simd {
         return c ? a : b;
     }
 
-    template<std::size_t Bytes, typename Ap, typename Tp, typename Up>
+    template<size_t Bytes, typename Ap, typename Tp, typename Up>
     [[gnu::always_inline]]
     constexpr auto Select(const BasicMask<Bytes, Ap>& c, const Tp& a, const Up& b) noexcept
         -> decltype(SelectImpl(c, a, b)) {

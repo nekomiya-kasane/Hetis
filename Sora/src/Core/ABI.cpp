@@ -28,7 +28,7 @@ namespace Sora::Meta::ABI {
     namespace {
 
         /** @brief Signature of the Itanium ABI demangler exported by libc++abi/libstdc++ runtimes. */
-        using CxaDemangleFn = char*(const char*, char*, std::size_t*, int*);
+        using CxaDemangleFn = char*(const char*, char*, size_t*, int*);
 
         /** @brief A loaded module kept alive with a resolved function pointer. */
         template<typename Fn>

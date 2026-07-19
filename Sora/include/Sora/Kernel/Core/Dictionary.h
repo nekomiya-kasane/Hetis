@@ -95,10 +95,10 @@
 //     struct ModuleRecord {
 //         std::filesystem::path path{};
 //         RecordStatus status{RecordStatus::Declared};
-//         std::size_t metaClassCount{};
-//         std::size_t provideCount{};
-//         std::size_t factoryCount{};
-//         std::size_t libraryCount{};
+//         size_t metaClassCount{};
+//         size_t provideCount{};
+//         size_t factoryCount{};
+//         size_t libraryCount{};
 //         void* nativeHandle{};
 //     };
 
@@ -145,10 +145,10 @@
 //         [[nodiscard]] std::expected<ModuleImage, CoreErrorCode> ScanModuleFile(const std::filesystem::path& path) const;
 
 //         /** @brief Scan explicit directories for DLLs with a Core section and fold the records found. */
-//         [[nodiscard]] std::expected<std::size_t, CoreErrorCode> ScanPath(std::span<const std::filesystem::path> paths);
+//         [[nodiscard]] std::expected<size_t, CoreErrorCode> ScanPath(std::span<const std::filesystem::path> paths);
 
 //         /** @brief Scan directories from the process PATH environment variable. */
-//         [[nodiscard]] std::expected<std::size_t, CoreErrorCode> ScanPath();
+//         [[nodiscard]] std::expected<size_t, CoreErrorCode> ScanPath();
 
 //         /** @brief Load a previously scanned module by absolute path without rescanning unrelated PATH entries. */
 //         [[nodiscard]] DictResult RealizeModule(const std::filesystem::path& path);

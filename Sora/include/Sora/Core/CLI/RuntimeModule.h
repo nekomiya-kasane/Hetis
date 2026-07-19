@@ -26,11 +26,11 @@ namespace Sora::CLI {
     inline constexpr std::uint32_t kRuntimeModuleMagic = 0x494C4353;
     inline constexpr std::uint16_t kRuntimeModuleAbiMajor = 2;
     inline constexpr std::uint16_t kRuntimeModuleAbiMinor = 0;
-    inline constexpr std::size_t kMaxRuntimeModuleCommands = 1024;
-    inline constexpr std::size_t kMaxRuntimeModuleOptions = 4096;
-    inline constexpr std::size_t kMaxRuntimeModuleOperands = 4096;
-    inline constexpr std::size_t kMaxRuntimeInvocationTokens = 1u << 20;
-    inline constexpr std::size_t kMaxRuntimeDiagnosticBytes = 1u << 20;
+    inline constexpr size_t kMaxRuntimeModuleCommands = 1024;
+    inline constexpr size_t kMaxRuntimeModuleOptions = 4096;
+    inline constexpr size_t kMaxRuntimeModuleOperands = 4096;
+    inline constexpr size_t kMaxRuntimeInvocationTokens = 1u << 20;
+    inline constexpr size_t kMaxRuntimeDiagnosticBytes = 1u << 20;
     inline constexpr std::string_view kRuntimeModuleEntryName = "SoraCliRuntimeModule";
 
     /** @brief C-compatible non-owning UTF-8 string view used by the runtime module ABI. */
@@ -161,11 +161,11 @@ namespace Sora::CLI {
     namespace Detail {
 
         [[nodiscard]] inline bool ValidRuntimeString(RuntimeStringView text) noexcept {
-            return text.size <= std::numeric_limits<std::size_t>::max() && (text.size == 0 || text.data != nullptr);
+            return text.size <= std::numeric_limits<size_t>::max() && (text.size == 0 || text.data != nullptr);
         }
 
         [[nodiscard]] inline std::string CopyRuntimeString(RuntimeStringView text) {
-            return text.size == 0 ? std::string{} : std::string{text.data, static_cast<std::size_t>(text.size)};
+            return text.size == 0 ? std::string{} : std::string{text.data, static_cast<size_t>(text.size)};
         }
 
         [[nodiscard]] constexpr RuntimeInvocationStatus ToRuntimeStatus(InvocationStatus status) noexcept {
@@ -238,7 +238,7 @@ namespace Sora::CLI {
                                                    .operandBegin = command.operandBegin,
                                                    .operandCount = command.operandCount});
                     }
-                    for (std::size_t index = 0; index < self.options.size(); ++index) {
+                    for (size_t index = 0; index < self.options.size(); ++index) {
                         const OptionStorage& option = self.options[index];
                         output.options.push_back({.descriptorId = static_cast<std::uint32_t>(index),
                                                   .longName = option.longName,
@@ -275,7 +275,7 @@ namespace Sora::CLI {
                 std::vector<RuntimeStringView> tokens;
                 try {
                     tokens.reserve(invocation.argv.Size());
-                    for (std::size_t index = 0; index < invocation.argv.Size(); ++index) {
+                    for (size_t index = 0; index < invocation.argv.Size(); ++index) {
                         tokens.push_back(RuntimeString(invocation.argv[index]));
                     }
                 } catch (...) {
@@ -311,8 +311,8 @@ namespace Sora::CLI {
     } // namespace Detail
 
     /** @brief Producer-side static runtime module image with complete command-tree metadata. */
-    template<typename Declaration, typename CommandTree, std::size_t CommandCount, std::size_t OptionCount,
-             std::size_t OperandCount>
+    template<typename Declaration, typename CommandTree, size_t CommandCount, size_t OptionCount,
+             size_t OperandCount>
     struct StaticRuntimeModule {
         using SubprogramType = StaticSubprogram<Declaration, CommandTree>;
 
@@ -352,7 +352,7 @@ namespace Sora::CLI {
             const OptionDesc& option = schema.options[descriptorId];
             const std::string_view text = value.size == 0
                                               ? std::string_view{}
-                                              : std::string_view{value.data, static_cast<std::size_t>(value.size)};
+                                              : std::string_view{value.data, static_cast<size_t>(value.size)};
             return option.validateValue != nullptr && option.validateValue(text);
         }
 
@@ -415,13 +415,13 @@ namespace Sora::CLI {
         }
 
         constexpr auto subprogram = CompileSubprogram<Declaration>();
-        constexpr std::size_t commandCount = subprogram.program.schema.commands.size();
-        constexpr std::size_t optionCount = subprogram.program.schema.options.size();
-        constexpr std::size_t operandCount = subprogram.program.schema.operands.size();
+        constexpr size_t commandCount = subprogram.program.schema.commands.size();
+        constexpr size_t optionCount = subprogram.program.schema.options.size();
+        constexpr size_t operandCount = subprogram.program.schema.operands.size();
         StaticRuntimeModule<Declaration, CommandTree, commandCount, optionCount, operandCount> result{
             .provider = FixedString<64>{provider}, .subprogram = subprogram};
 
-        for (std::size_t index = 0; index < commandCount; ++index) {
+        for (size_t index = 0; index < commandCount; ++index) {
             const CommandDesc& command = subprogram.program.schema.commands[index];
             result.commands[index] = {.commandId = command.commandId,
                                       .parentCommandId = command.parentCommandId,
@@ -432,7 +432,7 @@ namespace Sora::CLI {
                                       .operandBegin = command.operandBegin,
                                       .operandCount = command.operandCount};
         }
-        for (std::size_t index = 0; index < optionCount; ++index) {
+        for (size_t index = 0; index < optionCount; ++index) {
             const OptionDesc& option = subprogram.program.schema.options[index];
             result.options[index] = {.longName = RuntimeString(subprogram.program.schema.NameText(option.longName)),
                                      .valueName = RuntimeString(subprogram.program.schema.NameText(option.valueName)),
@@ -444,7 +444,7 @@ namespace Sora::CLI {
                                      .global = option.global,
                                      .overridesGlobal = option.overridesGlobal};
         }
-        for (std::size_t index = 0; index < operandCount; ++index) {
+        for (size_t index = 0; index < operandCount; ++index) {
             const OperandDesc& operand = subprogram.program.schema.operands[index];
             result.operands[index] = {.name = RuntimeString(subprogram.program.schema.NameText(operand.name)),
                                       .about = RuntimeString(subprogram.program.schema.NameText(operand.about)),
@@ -540,7 +540,7 @@ namespace Sora::CLI {
                 (kind == OptionKind::Switch && cardinality == ValueCardinality::None && option.valueName.size == 0) ||
                 (kind == OptionKind::Parameter && cardinality == ValueCardinality::One) ||
                 (kind == OptionKind::Help && cardinality == ValueCardinality::None &&
-                 std::string_view{option.longName.data, static_cast<std::size_t>(option.longName.size)} ==
+                 std::string_view{option.longName.data, static_cast<size_t>(option.longName.size)} ==
                      kHelpOptionName &&
                  option.shortName == kHelpOptionShortName && option.valueName.size == 0 && option.required == 0 &&
                  option.overridesGlobal == 0);

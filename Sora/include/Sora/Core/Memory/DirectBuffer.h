@@ -37,14 +37,14 @@ namespace Sora {
          * @brief Allocate @p size uninitialized bytes with at least @p alignment.
          * @return The buffer, or @ref ErrorCode::OutOfMemory when allocation fails.
          */
-        [[nodiscard]] static Result<DirectBuffer> Allocate(std::size_t size, Align alignment) noexcept;
+        [[nodiscard]] static Result<DirectBuffer> Allocate(size_t size, Align alignment) noexcept;
 
         /**
          * @brief Validate a runtime alignment and allocate @p size uninitialized bytes.
          * @return The buffer, @ref ErrorCode::InvalidArgument for a non-power-of-two alignment, or
          * @ref ErrorCode::OutOfMemory when allocation fails.
          */
-        [[nodiscard]] static Result<DirectBuffer> Allocate(std::size_t size, std::size_t alignment) noexcept;
+        [[nodiscard]] static Result<DirectBuffer> Allocate(size_t size, size_t alignment) noexcept;
 
         /** @brief Return the first mutable byte, or @c nullptr when empty. */
         [[nodiscard]] constexpr std::byte* Data() noexcept { return data_; }
@@ -59,7 +59,7 @@ namespace Sora {
         [[nodiscard]] constexpr std::span<const std::byte> Bytes() const noexcept { return {data_, size_}; }
 
         /** @brief Return the storage size in bytes. */
-        [[nodiscard]] constexpr std::size_t Size() const noexcept { return size_; }
+        [[nodiscard]] constexpr size_t Size() const noexcept { return size_; }
 
         /** @brief Return whether the buffer contains no bytes. */
         [[nodiscard]] constexpr bool Empty() const noexcept { return size_ == 0; }
@@ -77,11 +77,11 @@ namespace Sora {
         friend void swap(DirectBuffer& left, DirectBuffer& right) noexcept { left.Swap(right); }
 
     private:
-        constexpr DirectBuffer(std::byte* data, std::size_t size, Align alignment) noexcept
+        constexpr DirectBuffer(std::byte* data, size_t size, Align alignment) noexcept
             : data_{data}, size_{size}, alignment_{alignment} {}
 
         std::byte* data_ = nullptr;
-        std::size_t size_ = 0;
+        size_t size_ = 0;
         Align alignment_{};
     };
 

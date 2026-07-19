@@ -31,7 +31,7 @@ namespace Sora::Math::Simd {
         }
     };
 
-    template<std::size_t Np, std::size_t Mp>
+    template<size_t Np, size_t Mp>
     constexpr auto BitsetSplit(const std::bitset<Mp>& b) {
         constexpr auto bitsPerWord = __CHAR_BIT__ * __SIZEOF_LONG__;
         if constexpr (Np % bitsPerWord == 0) {
@@ -149,7 +149,7 @@ namespace Sora::Math::Simd {
         return Chunk<Resize<Np, BasicVector<Tp, Ap>>>(x);
     }
 
-    template<SimdSizeType Np, std::size_t Bytes, typename Ap>
+    template<SimdSizeType Np, size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr auto Chunk(const BasicMask<Bytes, Ap>& x) noexcept
         -> decltype(Chunk<Resize<Np, BasicMask<Bytes, Ap>>>(x)) {
@@ -164,7 +164,7 @@ namespace Sora::Math::Simd {
     }
 
     // LWG???? (reported 2025-11-25)
-    template<std::size_t Bytes, typename A0, typename... Abis>
+    template<size_t Bytes, typename A0, typename... Abis>
     constexpr Resize<(A0::kStorageSize + ... + Abis::kStorageSize), BasicMask<Bytes, A0>>
     Cat(const BasicMask<Bytes, A0>& x0, const BasicMask<Bytes, Abis>&... xs) noexcept {
         return Resize<(A0::kStorageSize + ... + Abis::kStorageSize), BasicMask<Bytes, A0>>::Concat(x0, xs...);
@@ -356,7 +356,7 @@ namespace Sora::Math::Simd {
     }
 
     // [simd.Mask] --------------------------------------------------------------
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     class BasicMask {
     public:
         using ValueType = bool;
@@ -378,7 +378,7 @@ namespace Sora::Math::Simd {
 #undef SORA_SIMD_DELETE
     };
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     class MaskBase {
         using Mp = BasicMask<Bytes, Ap>;
 
@@ -407,7 +407,7 @@ namespace Sora::Math::Simd {
         MaskBase() = default;
 
         // LWG issue from 2026-03-04 / P4042R0
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
             requires(Ap::kStorageSize != UAbi::kStorageSize)
         explicit MaskBase(const BasicMask<UBytes, UAbi>&) = delete ("size mismatch");
 
@@ -420,7 +420,7 @@ namespace Sora::Math::Simd {
         operator BasicVector<Up, UAbi>() const = delete ("size mismatch");
     };
 
-    template<std::size_t Bytes, AbiTag Ap>
+    template<size_t Bytes, AbiTag Ap>
         requires(Ap::kNreg == 1) && (FilterAbiVariant(Ap::kVariant, AbiVariant::kCxVariants) == AbiVariant() ||
                                      Ap::kStorageSize == 1) // Abi<1, 1, CxIleav> and Abi<1, 1, CxCtgus> go here
     class BasicMask<Bytes, Ap> : public MaskBase<Bytes, Ap> {
@@ -428,7 +428,7 @@ namespace Sora::Math::Simd {
 
         using VecType = Base::VecType;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class BasicMask;
 
         template<typename, typename>
@@ -471,7 +471,7 @@ namespace Sora::Math::Simd {
 
         // Actual padding bytes, not padding elements.
         // => kPaddingBytes is 0 even if kIsPartial is true.
-        static constexpr std::size_t kPaddingBytes = 0;
+        static constexpr size_t kPaddingBytes = 0;
 
         DataType data;
 
@@ -534,7 +534,7 @@ namespace Sora::Math::Simd {
          * This is necessary for kNreg > 1 where the last element can be bool or when the sizeof
          * doesn't match because of different Alignment requirements of the sub-masks.
          */
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
         [[gnu::always_inline]]
         static constexpr BasicMask RecursiveBitCast(const BasicMask<UBytes, UAbi>& x) {
             return __builtin_bit_cast(BasicMask, x.ConcatData());
@@ -668,7 +668,7 @@ namespace Sora::Math::Simd {
             : data(x ? kImplicitMask : DataType()) {}
 
         // [simd.Mask.ctor] conversion constructor ------------------------------
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
             requires(kStorageSize == UAbi::kStorageSize)
         [[gnu::always_inline]] constexpr explicit(IsMaskConversionExplicit<Ap, UAbi>(Bytes, UBytes))
             BasicMask(const BasicMask<UBytes, UAbi>& x) noexcept
@@ -1226,14 +1226,14 @@ namespace Sora::Math::Simd {
         }
     };
 
-    template<std::size_t Bytes, AbiTag Ap>
+    template<size_t Bytes, AbiTag Ap>
         requires(Ap::kNreg > 1) && (FilterAbiVariant(Ap::kVariant, AbiVariant::kCxVariants) == AbiVariant())
     class BasicMask<Bytes, Ap> : public MaskBase<Bytes, Ap> {
         using Base = MaskBase<Bytes, Ap>;
 
         using VecType = Base::VecType;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class BasicMask;
 
         template<typename, typename>
@@ -1281,7 +1281,7 @@ namespace Sora::Math::Simd {
         // by construction N0 >= N1
         // => sizeof(Mask0) >= sizeof(Mask1)
         //    and __alignof__(Mask0) >= __alignof__(Mask1)
-        static constexpr std::size_t kPaddingBytes =
+        static constexpr size_t kPaddingBytes =
             (__alignof__(Mask0) == __alignof__(Mask1) ? 0 : __alignof__(Mask0) - (sizeof(Mask1) % __alignof__(Mask0))) +
             Mask1::kPaddingBytes;
 
@@ -1330,7 +1330,7 @@ namespace Sora::Math::Simd {
             return data1;
         }
 
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
         [[gnu::always_inline]]
         static constexpr BasicMask RecursiveBitCast(const BasicMask<UBytes, UAbi>& x) {
             using Mp = BasicMask<UBytes, UAbi>;
@@ -1445,7 +1445,7 @@ namespace Sora::Math::Simd {
             : data0(x), data1(x) {}
 
         // [simd.Mask.ctor] conversion constructor ------------------------------
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
             requires(kStorageSize == UAbi::kStorageSize) && (UAbi::kIsCxCtgus)
         [[gnu::always_inline]]
         constexpr explicit(IsMaskConversionExplicit<Ap, UAbi>(Bytes, UBytes))
@@ -1453,7 +1453,7 @@ namespace Sora::Math::Simd {
             : BasicMask(x.data) // unwrap CxCtgus BasicMask partial specialization
         {}
 
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
             requires(kStorageSize == UAbi::kStorageSize) && (!UAbi::kIsCxCtgus)
         [[gnu::always_inline]]
         constexpr explicit(IsMaskConversionExplicit<Ap, UAbi>(Bytes, UBytes))

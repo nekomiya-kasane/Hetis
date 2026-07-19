@@ -17,19 +17,19 @@
 
 namespace Sora::Math {
 
-    template<DifferentiableValue P, std::size_t Capacity>
+    template<DifferentiableValue P, size_t Capacity>
     class ReverseTape;
 
     namespace Detail {
 
-        template<std::size_t Capacity>
+        template<size_t Capacity>
         using ReverseIndex = std::conditional_t<(Capacity <= std::numeric_limits<std::uint32_t>::max()), std::uint32_t,
                                                 std::uint64_t>;
 
-        template<DifferentiableValue P, std::size_t Capacity, bool CompactScalar = (alignof(P) <= alignof(void*))>
+        template<DifferentiableValue P, size_t Capacity, bool CompactScalar = (alignof(P) <= alignof(void*))>
         struct ReverseStorage;
 
-        template<DifferentiableValue P, std::size_t Capacity>
+        template<DifferentiableValue P, size_t Capacity>
         struct ReverseStorage<P, Capacity, true> {
             using IndexType = ReverseIndex<Capacity>;
             using TapeType = ReverseTape<P, Capacity>;
@@ -42,7 +42,7 @@ namespace Sora::Math {
                 : tape(owner), primal(std::move(value)), node(index) {}
         };
 
-        template<DifferentiableValue P, std::size_t Capacity>
+        template<DifferentiableValue P, size_t Capacity>
         struct ReverseStorage<P, Capacity, false> {
             using IndexType = ReverseIndex<Capacity>;
             using TapeType = ReverseTape<P, Capacity>;
@@ -58,7 +58,7 @@ namespace Sora::Math {
     } // namespace Detail
 
     /** @brief A primal value and node reference into a fixed-capacity reverse tape. */
-    template<DifferentiableValue P, std::size_t Capacity>
+    template<DifferentiableValue P, size_t Capacity>
     struct Reverse : Detail::ReverseStorage<P, Capacity> {
         using Storage = Detail::ReverseStorage<P, Capacity>;
         using PrimalType = P;
@@ -66,7 +66,7 @@ namespace Sora::Math {
         using IndexType = Detail::ReverseIndex<Capacity>;
 
         static constexpr bool kIsReverse = true;
-        static constexpr std::size_t kCapacity = Capacity;
+        static constexpr size_t kCapacity = Capacity;
 
         constexpr Reverse(P primal, TapeType* tape, IndexType node) noexcept
             : Storage(std::move(primal), tape, node) {}
@@ -80,7 +80,7 @@ namespace Sora::Math {
     };
 
     /** @brief Static reverse-mode graph whose construction and sweep perform no dynamic allocation. */
-    template<DifferentiableValue P, std::size_t Capacity>
+    template<DifferentiableValue P, size_t Capacity>
     class ReverseTape {
     public:
         using ValueType = Reverse<P, Capacity>;
@@ -193,11 +193,11 @@ namespace Sora::Math {
             if (output.tape != this || output.node == kNoNode || output.node >= size_) {
                 throw std::invalid_argument("ReverseTape::Backward requires a recorded value from this tape");
             }
-            for (std::size_t i = 0; i < size_; ++i) {
+            for (size_t i = 0; i < size_; ++i) {
                 adjoints_[i] = Zero();
             }
             adjoints_[output.node] = std::move(seed);
-            for (std::size_t i = size_; i-- > 0;) {
+            for (size_t i = size_; i-- > 0;) {
                 const Node& node = nodes_[i];
                 if (node.left != kNoNode) {
                     adjoints_[node.left] = Math::Fma(adjoints_[i], node.leftWeight, adjoints_[node.left]);
@@ -219,19 +219,19 @@ namespace Sora::Math {
             return adjoints_[variable.node];
         }
 
-        [[nodiscard]] constexpr std::size_t Size() const noexcept { return static_cast<std::size_t>(size_); }
+        [[nodiscard]] constexpr size_t Size() const noexcept { return static_cast<size_t>(size_); }
     };
 
     namespace Backend {
 
-        template<std::size_t Capacity>
+        template<size_t Capacity>
         struct ReverseAD;
 
     } // namespace Backend
 
     namespace Hook {
 
-        template<DifferentiableValue P, std::size_t Capacity>
+        template<DifferentiableValue P, size_t Capacity>
         struct Backend<Reverse<P, Capacity>> {
             using Type = Sora::Math::Backend::ReverseAD<Capacity>;
         };
@@ -241,7 +241,7 @@ namespace Sora::Math {
     namespace Backend {
 
         /** @brief Primitive VJP recorder for fixed-capacity reverse values. */
-        template<std::size_t Capacity>
+        template<size_t Capacity>
         struct ReverseAD {
             static constexpr bool kIsScalar = false;
             static constexpr bool kIsSimd = false;

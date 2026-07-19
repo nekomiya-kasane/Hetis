@@ -10,25 +10,25 @@
 // [simd.Mask.reductions] -----------------------------------------------------
 namespace Sora::Math::Simd {
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr bool AllOf(const BasicMask<Bytes, Ap>& k) noexcept {
         return k.AllOf();
     }
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr bool AnyOf(const BasicMask<Bytes, Ap>& k) noexcept {
         return k.AnyOf();
     }
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr bool NoneOf(const BasicMask<Bytes, Ap>& k) noexcept {
         return k.NoneOf();
     }
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr SimdSizeType ReduceCount(const BasicMask<Bytes, Ap>& k) noexcept {
         if constexpr (Ap::kStorageSize == 1) {
@@ -40,13 +40,13 @@ namespace Sora::Math::Simd {
         }
     }
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr SimdSizeType ReduceMinIndex(const BasicMask<Bytes, Ap>& k) {
         return k.ReduceMinIndex();
     }
 
-    template<std::size_t Bytes, typename Ap>
+    template<size_t Bytes, typename Ap>
     [[gnu::always_inline]]
     constexpr SimdSizeType ReduceMaxIndex(const BasicMask<Bytes, Ap>& k) {
         return k.ReduceMaxIndex();

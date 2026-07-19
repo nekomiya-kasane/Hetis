@@ -17,7 +17,7 @@ namespace Sora::Math::Simd {
      * @note If the resulting Mask type has size 1, then it will actually Store a single bool, rather
      * than the given Mask object.
      */
-    template<std::size_t Bytes, typename Ap,
+    template<size_t Bytes, typename Ap,
              AbiTag Aret = decltype(AbiRebind<std::complex<Detail::FloatForSize<Bytes>>, Ap::kStorageSize / 2, Ap>())>
     [[gnu::always_inline]]
     constexpr BasicMask<Bytes * 2, Aret> ToCxIleav(const BasicMask<Bytes, Ap>& k) {
@@ -57,10 +57,10 @@ namespace Sora::Math::Simd {
         return x;
     }
 
-    template<std::size_t Np, typename T0, typename T1>
+    template<size_t Np, typename T0, typename T1>
     constexpr std::bitset<Np> UnwrapPairsToBitset(const TrivialPair<T0, T1>& p) {
-        constexpr std::size_t n0 = std::bit_floor(Np);
-        constexpr std::size_t n1 = Np - n0;
+        constexpr size_t n0 = std::bit_floor(Np);
+        constexpr size_t n1 = Np - n0;
         static_assert(n0 % 64 == 0);
         struct Tmp {
             std::bitset<std::bit_floor(Np)> lo;
@@ -71,10 +71,10 @@ namespace Sora::Math::Simd {
         return __builtin_bit_cast(std::bitset<Np>, tmp);
     }
 
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     consteval auto TreeOfUlong() {
-        static constexpr std::size_t kN0 = std::bit_floor(Bytes - 1);
-        static constexpr std::size_t kN1 = Bytes - kN0;
+        static constexpr size_t kN0 = std::bit_floor(Bytes - 1);
+        static constexpr size_t kN1 = Bytes - kN0;
         if constexpr (Bytes <= sizeof(unsigned long)) {
             return 0ul;
         } else {
@@ -82,15 +82,15 @@ namespace Sora::Math::Simd {
         }
     }
 
-    template<std::size_t Bytes>
+    template<size_t Bytes>
     using TreeOfUlongT = decltype(TreeOfUlong<Bytes>());
 
-    template<std::size_t Np>
+    template<size_t Np>
     constexpr auto BitsetToPairs(const std::bitset<Np>& b) noexcept {
         if constexpr (Np <= 64) {
             return b.ToUllong();
         } else {
-            return __builtin_bit_cast(TreeOfUlongT<DivCeil(Np, std::size_t(__CHAR_BIT__))>, b);
+            return __builtin_bit_cast(TreeOfUlongT<DivCeil(Np, size_t(__CHAR_BIT__))>, b);
         }
     }
 
@@ -268,14 +268,14 @@ namespace Sora::Math::Simd {
         }
     } // namespace Cxileav
 
-    template<std::size_t Bytes, AbiTag Ap>
+    template<size_t Bytes, AbiTag Ap>
         requires Ap::kIsCxIleav && (Ap::kStorageSize >= 2) // size 1 is in simd_mask.h
     class BasicMask<Bytes, Ap> : public MaskBase<Bytes, Ap> {
         using Base = MaskBase<Bytes, Ap>;
 
         using VecType = Base::VecType;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class BasicMask;
 
         template<typename, typename>
@@ -295,7 +295,7 @@ namespace Sora::Math::Simd {
 
         static constexpr bool kHasBoolMember = DataType::kHasBoolMember;
 
-        static constexpr std::size_t kPaddingBytes = DataType::kPaddingBytes;
+        static constexpr size_t kPaddingBytes = DataType::kPaddingBytes;
 
         DataType data;
 
@@ -404,7 +404,7 @@ namespace Sora::Math::Simd {
             : data(x) {}
 
         // [simd.Mask.ctor] conversion constructor ------------------------------
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
             requires(kStorageSize == UAbi::kStorageSize)
         [[gnu::always_inline]]
         constexpr explicit(IsMaskConversionExplicit<Ap, UAbi>(Bytes, UBytes))
@@ -458,7 +458,7 @@ namespace Sora::Math::Simd {
                   // neighboring elements
                   const auto& [... indices] = Detail::kIotaArray<kStorageSize>;
                   bool tmp[kStorageSize] = {gen(kSimdSizeC<indices>)...};
-                  return DataType([&] [[gnu::always_inline]] (std::size_t i) { return tmp[i / 2]; });
+                  return DataType([&] [[gnu::always_inline]] (size_t i) { return tmp[i / 2]; });
               }()) {}
 
         // [simd.Mask.ctor] std::bitset constructor ----------------------------------
@@ -818,7 +818,7 @@ namespace Sora::Math::Simd {
 
         template<typename Up>
         [[gnu::always_inline]]
-        static inline BasicVector PartialLoad(const Up* mem, std::size_t n) {
+        static inline BasicVector PartialLoad(const Up* mem, size_t n) {
             if constexpr (ComplexLike<Up>) {
                 return Init(TSimd::PartialLoad(reinterpret_cast<const typename Up::value_type*>(mem), n * 2));
             } else {
@@ -844,7 +844,7 @@ namespace Sora::Math::Simd {
 
         template<typename Up>
         [[gnu::always_inline]]
-        static inline void PartialStore(const BasicVector& v, Up* mem, std::size_t n) {
+        static inline void PartialStore(const BasicVector& v, Up* mem, size_t n) {
             static_assert(ComplexLike<Up>);
             TSimd::PartialStore(v.data, reinterpret_cast<typename Up::value_type*>(mem), n * 2);
         }
@@ -1193,14 +1193,14 @@ namespace Sora::Math::Simd {
         }
     } // namespace Cxctgus
 
-    template<std::size_t Bytes, AbiTag Ap>
+    template<size_t Bytes, AbiTag Ap>
         requires Ap::kIsCxCtgus && (Ap::kStorageSize >= 2) // size 1 is in simd_mask.h
     class BasicMask<Bytes, Ap> : public MaskBase<Bytes, Ap> {
         using Base = MaskBase<Bytes, Ap>;
 
         using VecType = Base::VecType;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class BasicMask;
 
         template<typename, typename>
@@ -1222,7 +1222,7 @@ namespace Sora::Math::Simd {
 
         static constexpr bool kHasBoolMember = DataType::kHasBoolMember;
 
-        static constexpr std::size_t kPaddingBytes = DataType::kPaddingBytes;
+        static constexpr size_t kPaddingBytes = DataType::kPaddingBytes;
 
         DataType data;
 
@@ -1327,7 +1327,7 @@ namespace Sora::Math::Simd {
             : data(x) {}
 
         // [simd.Mask.ctor] conversion constructor ------------------------------
-        template<std::size_t UBytes, typename UAbi>
+        template<size_t UBytes, typename UAbi>
             requires(kStorageSize == UAbi::kStorageSize)
         [[gnu::always_inline]]
         constexpr explicit(IsMaskConversionExplicit<Ap, UAbi>(Bytes, UBytes))
@@ -1734,10 +1734,10 @@ namespace Sora::Math::Simd {
          */
         template<typename Up>
         [[gnu::always_inline]]
-        static inline BasicVector PartialLoad(const Up* mem, std::size_t n) {
+        static inline BasicVector PartialLoad(const Up* mem, size_t n) {
             if constexpr (ComplexLike<Up>) {
-                return BasicVector(RealSimd([&](std::size_t i) -> T0 { return i < n ? mem[i].Real() : T0(); }),
-                                   RealSimd([&](std::size_t i) -> T0 { return i < n ? mem[i].Imag() : T0(); }));
+                return BasicVector(RealSimd([&](size_t i) -> T0 { return i < n ? mem[i].Real() : T0(); }),
+                                   RealSimd([&](size_t i) -> T0 { return i < n ? mem[i].Imag() : T0(); }));
             } else {
                 return BasicVector(RealSimd::PartialLoad(mem, n));
             }
@@ -1769,9 +1769,9 @@ namespace Sora::Math::Simd {
 
         template<typename Up>
         [[gnu::always_inline]]
-        static inline void PartialStore(const BasicVector& v, Up* mem, std::size_t n) {
+        static inline void PartialStore(const BasicVector& v, Up* mem, size_t n) {
             static_assert(ComplexLike<Up>);
-            for (std::size_t i = 0; i < std::min(n, std::size_t(kStorageSize)); ++i) {
+            for (size_t i = 0; i < std::min(n, size_t(kStorageSize)); ++i) {
                 mem[i].Real(v.realData[i]);
                 mem[i].Imag(v.imagData[i]);
             }

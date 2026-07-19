@@ -39,7 +39,7 @@ namespace Sora::Math::Simd {
                       "'kConvertFlag' must be used for conversions that are not value-preserving");
 
         constexpr bool allowOutOfBounds = f.Test(kAllowPartialLoadstore);
-        constexpr std::size_t staticSize = StaticRangeSize(r);
+        constexpr size_t staticSize = StaticRangeSize(r);
 
         if constexpr (!allowOutOfBounds && Detail::StaticSizedRange<Rg>) {
             static_assert(std::ranges::size(r) >= RV::kSize(), "given range must have sufficient size");
@@ -53,7 +53,7 @@ namespace Sora::Math::Simd {
         }
 
         if consteval {
-            return RV([&](std::size_t i) -> Rp {
+            return RV([&](size_t i) -> Rp {
                 if (i >= rgSize) {
                     return Rp();
                 } else if constexpr (ComplexLike<Rp> && !ComplexLike<Tp>) {
@@ -63,7 +63,7 @@ namespace Sora::Math::Simd {
                 }
             });
         } else {
-            if constexpr ((staticSize != std::dynamic_extent && staticSize >= std::size_t(RV::kSize())) ||
+            if constexpr ((staticSize != std::dynamic_extent && staticSize >= size_t(RV::kSize())) ||
                           !allowOutOfBounds) {
                 return RV(LoadCtorTag(), ptr);
             } else {
@@ -94,13 +94,13 @@ namespace Sora::Math::Simd {
         const auto* ptr = f.template AdjustPointer<RV>(std::ranges::data(r));
 
         if constexpr (!allowOutOfBounds) {
-            SORA_SIMD_PRECONDITION(std::ranges::size(r) >= std::size_t(RV::kSize()),
+            SORA_SIMD_PRECONDITION(std::ranges::size(r) >= size_t(RV::kSize()),
                                    "Input range is too small. Did you mean to use 'PartialLoad'?");
         }
 
-        const std::size_t rgSize = std::ranges::size(r);
+        const size_t rgSize = std::ranges::size(r);
         if consteval {
-            return RV([&](std::size_t i) -> Rp {
+            return RV([&](size_t i) -> Rp {
                 if (i >= rgSize || !mask[int(i)]) {
                     return Rp();
                 } else if constexpr (ComplexLike<Rp> && !ComplexLike<Tp>) {
@@ -111,10 +111,10 @@ namespace Sora::Math::Simd {
             });
         } else {
             constexpr bool noSizeCheck =
-                !allowOutOfBounds || (staticSize != std::dynamic_extent && staticSize >= std::size_t(RV::kSize.value));
+                !allowOutOfBounds || (staticSize != std::dynamic_extent && staticSize >= size_t(RV::kSize.value));
             if constexpr (RV::kSize() == 1) {
                 return mask[0] && (noSizeCheck || rgSize > 0) ? RV(LoadCtorTag(), ptr) : RV();
-            } else if constexpr (noSizeCheck || rgSize >= std::size_t(RV::kSize())) {
+            } else if constexpr (noSizeCheck || rgSize >= size_t(RV::kSize())) {
                 return RV::MaskedLoad(ptr, mask);
             } else if (rgSize > 0) {
                 return RV::MaskedLoad(ptr, mask && RV::MaskType::PartialMaskOfN(int(rgSize)));
@@ -244,19 +244,19 @@ namespace Sora::Math::Simd {
         auto* ptr = f.template AdjustPointer<TV>(std::ranges::data(r));
 
         if constexpr (!allowOutOfBounds) {
-            SORA_SIMD_PRECONDITION(std::ranges::size(r) >= std::size_t(TV::kSize()),
+            SORA_SIMD_PRECONDITION(std::ranges::size(r) >= size_t(TV::kSize()),
                                    "output range is too small. Did you mean to use 'PartialStore'?");
         }
 
-        const std::size_t rgSize = std::ranges::size(r);
+        const size_t rgSize = std::ranges::size(r);
         if consteval {
             for (int i = 0; i < TV::kSize(); ++i) {
-                if (mask[i] && (!allowOutOfBounds || std::size_t(i) < rgSize)) {
+                if (mask[i] && (!allowOutOfBounds || size_t(i) < rgSize)) {
                     ptr[i] = static_cast<std::ranges::range_value_t<Rg>>(v[i]);
                 }
             }
         } else {
-            if (allowOutOfBounds && rgSize < std::size_t(TV::kSize())) {
+            if (allowOutOfBounds && rgSize < size_t(TV::kSize())) {
                 TV::MaskedStore(v, ptr, mask && TV::MaskType::PartialMaskOfN(int(rgSize)));
             } else {
                 TV::MaskedStore(v, ptr, mask);

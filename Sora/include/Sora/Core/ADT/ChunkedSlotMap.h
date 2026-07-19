@@ -82,12 +82,12 @@ namespace Sora {
         inline static constexpr auto kName = Name;                          /**< Compile-time diagnostic name. */
         inline static constexpr std::uint32_t kChunkBits = ChunkBits;       /**< Sparse chunk size exponent. */
         inline static constexpr std::uint32_t kChunkSize = 1U << ChunkBits; /**< Sparse slots per chunk. */
-        inline static constexpr std::size_t kDenseStride = sizeof(T);       /**< Byte stride of dense values. */
-        inline static constexpr std::size_t kMaximumSlotCount =             /**< Handle-representable count. */
-            std::numeric_limits<std::uint32_t>::max() - std::size_t{1};
-        inline static constexpr std::size_t kBatchCompactionNumerator = 3;   /**< Compaction threshold numerator. */
-        inline static constexpr std::size_t kBatchCompactionDenominator = 4; /**< Compaction threshold denominator. */
-        inline static constexpr std::size_t kPrefetchDistance = 8;           /**< Sparse batch lookup look-ahead. */
+        inline static constexpr size_t kDenseStride = sizeof(T);       /**< Byte stride of dense values. */
+        inline static constexpr size_t kMaximumSlotCount =             /**< Handle-representable count. */
+            std::numeric_limits<std::uint32_t>::max() - size_t{1};
+        inline static constexpr size_t kBatchCompactionNumerator = 3;   /**< Compaction threshold numerator. */
+        inline static constexpr size_t kBatchCompactionDenominator = 4; /**< Compaction threshold denominator. */
+        inline static constexpr size_t kPrefetchDistance = 8;           /**< Sparse batch lookup look-ahead. */
 
     private:
         inline static constexpr std::uint32_t kChunkMask = kChunkSize - 1;
@@ -168,37 +168,37 @@ namespace Sora {
         /** @name Capacity @{ ------------------------------------------------------------------------------- */
 
         /** @brief Return the number of live values. */
-        [[nodiscard]] std::size_t Size() const noexcept { return values_.size(); }
+        [[nodiscard]] size_t Size() const noexcept { return values_.size(); }
 
         /** @brief Return whether the map contains no live values. */
         [[nodiscard]] bool Empty() const noexcept { return values_.empty(); }
 
         /** @brief Return the number of sparse slots currently backed by allocated chunks. */
-        [[nodiscard]] std::size_t Capacity() const noexcept {
+        [[nodiscard]] size_t Capacity() const noexcept {
             if (chunks_.empty()) {
                 return 0;
             }
-            const std::size_t capacity = chunks_.size() * std::size_t{kChunkSize} - 1;
+            const size_t capacity = chunks_.size() * size_t{kChunkSize} - 1;
             return capacity < kMaximumSlotCount ? capacity : kMaximumSlotCount;
         }
 
         /** @brief Return the number of values insertable without growing either dense array. */
-        [[nodiscard]] std::size_t DenseCapacity() const noexcept {
+        [[nodiscard]] size_t DenseCapacity() const noexcept {
             return values_.capacity() < denseToSparse_.capacity() ? values_.capacity() : denseToSparse_.capacity();
         }
 
         /** @brief Return the maximum live count representable by handles and the underlying vectors. */
-        [[nodiscard]] std::size_t MaxSize() const noexcept {
-            std::size_t result = kMaximumSlotCount;
+        [[nodiscard]] size_t MaxSize() const noexcept {
+            size_t result = kMaximumSlotCount;
             if (values_.max_size() < result) {
                 result = values_.max_size();
             }
             if (denseToSparse_.max_size() < result) {
                 result = denseToSparse_.max_size();
             }
-            const std::size_t maximumChunks = (kMaximumSlotCount + 1 + kChunkSize - 1) / kChunkSize;
+            const size_t maximumChunks = (kMaximumSlotCount + 1 + kChunkSize - 1) / kChunkSize;
             if (chunks_.max_size() < maximumChunks) {
-                const std::size_t sparseLimit = chunks_.max_size() * std::size_t{kChunkSize} - 1;
+                const size_t sparseLimit = chunks_.max_size() * size_t{kChunkSize} - 1;
                 if (sparseLimit < result) {
                     result = sparseLimit;
                 }
@@ -207,13 +207,13 @@ namespace Sora {
         }
 
         /** @brief Return the number of allocated sparse chunks. */
-        [[nodiscard]] std::size_t ChunkCount() const noexcept { return chunks_.size(); }
+        [[nodiscard]] size_t ChunkCount() const noexcept { return chunks_.size(); }
 
         /**
          * @brief Preallocate sparse and dense storage for at least @p count live values.
          * @param[in] count Expected maximum number of simultaneously live values.
          */
-        void Reserve(std::size_t count) {
+        void Reserve(size_t count) {
             ReserveDense(count);
             ReserveSparse(count);
         }
@@ -222,7 +222,7 @@ namespace Sora {
          * @brief Preallocate both dense arrays without allocating sparse chunks.
          * @param[in] count Expected maximum number of simultaneously live values.
          */
-        void ReserveDense(std::size_t count) {
+        void ReserveDense(size_t count) {
             ValidateCapacity(count);
             values_.reserve(count);
             denseToSparse_.reserve(count);
@@ -232,9 +232,9 @@ namespace Sora {
          * @brief Preallocate sparse metadata without reserving dense values.
          * @param[in] count Number of usable sparse slots to back with storage.
          */
-        void ReserveSparse(std::size_t count) {
+        void ReserveSparse(size_t count) {
             ValidateCapacity(count);
-            const std::size_t requiredChunks = RequiredChunkCount(count);
+            const size_t requiredChunks = RequiredChunkCount(count);
             if (chunks_.size() < requiredChunks) {
                 chunks_.resize(requiredChunks);
             }
@@ -299,7 +299,7 @@ namespace Sora {
         [[nodiscard]] std::vector<SlotHandle> EmplaceRange(Range&& range) {
             std::vector<SlotHandle> handles;
             if constexpr (std::ranges::sized_range<Range>) {
-                const std::size_t count = static_cast<std::size_t>(std::ranges::size(range));
+                const size_t count = static_cast<size_t>(std::ranges::size(range));
                 if (count > MaxSize() - values_.size()) [[unlikely]] {
                     throw std::length_error("ChunkedSlotMap range exceeds the remaining capacity");
                 }
@@ -364,15 +364,15 @@ namespace Sora {
          * @param[in] handles Handles to remove.
          * @return Number of distinct live values removed.
          */
-        [[nodiscard]] std::size_t FreeBatch(std::span<const SlotHandle> handles) {
+        [[nodiscard]] size_t FreeBatch(std::span<const SlotHandle> handles) {
             if (handles.empty() || values_.empty()) {
                 return 0;
             }
-            const std::size_t compactionThreshold =
+            const size_t compactionThreshold =
                 (values_.size() * kBatchCompactionNumerator + kBatchCompactionDenominator - 1) /
                 kBatchCompactionDenominator;
             if (handles.size() < compactionThreshold) {
-                std::size_t removed = 0;
+                size_t removed = 0;
                 for (const SlotHandle handle : handles) {
                     removed += Free(handle) ? 1U : 0U;
                 }
@@ -380,7 +380,7 @@ namespace Sora {
             }
 
             std::vector<std::uint8_t> eraseFlags(values_.size(), std::uint8_t{0});
-            std::size_t removed = 0;
+            size_t removed = 0;
             for (const SlotHandle handle : handles) {
                 const std::uint32_t denseIndex = ResolveDenseIndex(handle);
                 if (denseIndex != kInvalidDenseIndex && eraseFlags[denseIndex] == 0) {
@@ -392,8 +392,8 @@ namespace Sora {
                 return 0;
             }
 
-            std::size_t writeIndex = 0;
-            for (std::size_t readIndex = 0; readIndex < values_.size(); ++readIndex) {
+            size_t writeIndex = 0;
+            for (size_t readIndex = 0; readIndex < values_.size(); ++readIndex) {
                 const std::uint32_t sparseIndex = denseToSparse_[readIndex];
                 if (eraseFlags[readIndex] != 0) {
                     SparseSlot& slot = SparseSlotAt(sparseIndex);
@@ -476,10 +476,10 @@ namespace Sora {
          * @return Number of live handles resolved.
          * @throws std::invalid_argument when @p output is smaller than @p handles.
          */
-        [[nodiscard]] std::size_t GetBatch(std::span<const SlotHandle> handles, std::span<T*> output) {
+        [[nodiscard]] size_t GetBatch(std::span<const SlotHandle> handles, std::span<T*> output) {
             ValidateBatchOutput(handles.size(), output.size());
-            std::size_t resolved = 0;
-            for (std::size_t index = 0; index < handles.size(); ++index) {
+            size_t resolved = 0;
+            for (size_t index = 0; index < handles.size(); ++index) {
                 if (index + kPrefetchDistance < handles.size()) {
                     Prefetch(handles[index + kPrefetchDistance]);
                 }
@@ -490,10 +490,10 @@ namespace Sora {
         }
 
         /** @brief Resolve a batch of handles through a const map. */
-        [[nodiscard]] std::size_t GetBatch(std::span<const SlotHandle> handles, std::span<const T*> output) const {
+        [[nodiscard]] size_t GetBatch(std::span<const SlotHandle> handles, std::span<const T*> output) const {
             ValidateBatchOutput(handles.size(), output.size());
-            std::size_t resolved = 0;
-            for (std::size_t index = 0; index < handles.size(); ++index) {
+            size_t resolved = 0;
+            for (size_t index = 0; index < handles.size(); ++index) {
                 if (index + kPrefetchDistance < handles.size()) {
                     Prefetch(handles[index + kPrefetchDistance]);
                 }
@@ -543,7 +543,7 @@ namespace Sora {
             requires(std::invocable<Function&, SlotHandle, T&> || std::invocable<Function&, T&>)
         void ForEach(Function&& function) {
             auto& callable = function;
-            for (std::size_t denseIndex = 0; denseIndex < values_.size(); ++denseIndex) {
+            for (size_t denseIndex = 0; denseIndex < values_.size(); ++denseIndex) {
                 if constexpr (std::invocable<Function&, SlotHandle, T&>) {
                     const std::uint32_t sparseIndex = denseToSparse_[denseIndex];
                     const SparseSlot& slot = SparseSlotAt(sparseIndex);
@@ -560,7 +560,7 @@ namespace Sora {
             requires(std::invocable<Function&, SlotHandle, const T&> || std::invocable<Function&, const T&>)
         void ForEach(Function&& function) const {
             auto& callable = function;
-            for (std::size_t denseIndex = 0; denseIndex < values_.size(); ++denseIndex) {
+            for (size_t denseIndex = 0; denseIndex < values_.size(); ++denseIndex) {
                 if constexpr (std::invocable<Function&, SlotHandle, const T&>) {
                     const std::uint32_t sparseIndex = denseToSparse_[denseIndex];
                     const SparseSlot& slot = SparseSlotAt(sparseIndex);
@@ -575,24 +575,24 @@ namespace Sora {
         /** @} ----------------------------------------------------------------------------------------------- */
 
     private:
-        [[nodiscard]] static constexpr std::size_t RequiredChunkCount(std::size_t count) noexcept {
+        [[nodiscard]] static constexpr size_t RequiredChunkCount(size_t count) noexcept {
             return count == 0 ? 0 : (count + 1 + kChunkSize - 1) / kChunkSize;
         }
 
-        void ValidateCapacity(std::size_t count) const {
+        void ValidateCapacity(size_t count) const {
             if (count > MaxSize()) [[unlikely]] {
                 throw std::length_error("ChunkedSlotMap capacity exceeds the handle representation");
             }
         }
 
-        static void ValidateBatchOutput(std::size_t inputSize, std::size_t outputSize) {
+        static void ValidateBatchOutput(size_t inputSize, size_t outputSize) {
             if (outputSize < inputSize) [[unlikely]] {
                 throw std::invalid_argument("ChunkedSlotMap batch output is smaller than the input");
             }
         }
 
         void EnsureSparseSlot(std::uint32_t index) {
-            const std::size_t requiredChunkCount = (index >> ChunkBits) + 1;
+            const size_t requiredChunkCount = (index >> ChunkBits) + 1;
             if (chunks_.size() < requiredChunkCount) {
                 chunks_.resize(requiredChunkCount);
             }

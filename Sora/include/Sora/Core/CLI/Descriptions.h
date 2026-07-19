@@ -22,12 +22,12 @@ namespace Sora::CLI {
     using CommandId = std::uint32_t;
     using CommandTypeId = std::uint32_t;
 
-    inline constexpr std::size_t kMaxSchemaNames = 1024;
-    inline constexpr std::size_t kMaxSchemaCommands = 1024;
-    inline constexpr std::size_t kMaxSchemaOptions = 1024;
-    inline constexpr std::size_t kMaxSchemaOperands = 1024;
-    inline constexpr std::size_t kMaxSchemaEdges = 1024;
-    inline constexpr std::size_t kMaxSchemaPresences = kMaxSchemaOptions + kMaxSchemaOperands;
+    inline constexpr size_t kMaxSchemaNames = 1024;
+    inline constexpr size_t kMaxSchemaCommands = 1024;
+    inline constexpr size_t kMaxSchemaOptions = 1024;
+    inline constexpr size_t kMaxSchemaOperands = 1024;
+    inline constexpr size_t kMaxSchemaEdges = 1024;
+    inline constexpr size_t kMaxSchemaPresences = kMaxSchemaOptions + kMaxSchemaOperands;
 
     inline constexpr NameId kInvalidNameId = std::numeric_limits<NameId>::max();
     inline constexpr CommandId kInvalidCommandId = std::numeric_limits<CommandId>::max();

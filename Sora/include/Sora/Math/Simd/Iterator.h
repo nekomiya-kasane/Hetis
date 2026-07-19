@@ -21,7 +21,7 @@ namespace Sora::Math::Simd {
         template<typename, typename>
         friend class VecBase;
 
-        template<std::size_t, typename>
+        template<size_t, typename>
         friend class MaskBase;
 
         Vp* data = nullptr;

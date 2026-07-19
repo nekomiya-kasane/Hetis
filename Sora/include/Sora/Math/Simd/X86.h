@@ -13,7 +13,7 @@
 
 namespace Sora::Math::Simd {
 
-    static constexpr std::size_t kX86MaxGeneralRegisterSize
+    static constexpr size_t kX86MaxGeneralRegisterSize
 #ifdef __x86_64__
         = 8;
 #else

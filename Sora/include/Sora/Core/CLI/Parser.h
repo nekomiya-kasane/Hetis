@@ -24,12 +24,12 @@ namespace Sora::CLI {
         char const* const* argv = nullptr;          /**< Raw argv values, usually excluding executable name. */
 
         /** @brief Return the number of visible tokens. */
-        [[nodiscard]] constexpr std::size_t Size() const noexcept {
-            return tokens.empty() ? static_cast<std::size_t>(argc) : tokens.size();
+        [[nodiscard]] constexpr size_t Size() const noexcept {
+            return tokens.empty() ? static_cast<size_t>(argc) : tokens.size();
         }
 
         /** @brief Return token @p index. */
-        [[nodiscard]] constexpr std::string_view operator[](std::size_t index) const noexcept {
+        [[nodiscard]] constexpr std::string_view operator[](size_t index) const noexcept {
             if (!tokens.empty()) {
                 return tokens[index];
             }
@@ -46,7 +46,7 @@ namespace Sora::CLI {
     }
 
     /** @brief Typed parse result carrying root-scope options and command objects along the selected path. */
-    template<typename Root, typename CommandVariant, std::size_t MaxDepth>
+    template<typename Root, typename CommandVariant, size_t MaxDepth>
     struct ParseResult {
         using RootType = Root;
         using CommandVariantType = CommandVariant;
@@ -91,7 +91,7 @@ namespace Sora::CLI {
         }
     };
 
-    template<typename Root, typename CommandVariant, std::size_t MaxDepth>
+    template<typename Root, typename CommandVariant, size_t MaxDepth>
     using ParseExpected = std::expected<ParseResult<Root, CommandVariant, MaxDepth>, ParseError>;
 
 } // namespace Sora::CLI
