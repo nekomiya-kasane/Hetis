@@ -55,20 +55,53 @@ namespace Sora {
             return std::define_static_array(std::meta::enumerators_of(std::meta::dealias(iMeta)));
         }
 
+        /**
+         * @brief Return the reflection of the enumerator with the given name in @p iMeta.
+         * @param[in] iMeta Reflection of an enum type.
+         * @param[in] name Name of the enumerator to find.
+         * @return Reflection of the matching enumerator.
+         */
+        consteval auto GetEnumeratorMetaByNameOf(std::meta::info iMeta, std::string_view name) {
+            for (std::meta::info enumerator : EnumeratorsOf(iMeta)) {
+                if (std::meta::identifier_of(enumerator) == name) {
+                    return enumerator;
+                }
+            }
+            throw std::define_static_string(
+                "Sora::Meta::GetEnumeratorMetaByNameOf: no enumerator with the given name exists.");
+        }
+
+        /**
+         * @brief Return the reflection of the enumerator with the given value in @p iMeta.
+         * @param[in] iMeta Reflection of an enum type.
+         * @param[in] value Value of the enumerator to find.
+         * @return Reflection of the matching enumerator.
+         */
+        template<Sora::Concept::Enum E>
+        consteval std::meta::info GetEnumeratorMetaOf(E value) {
+            for (std::meta::info enumerator : EnumeratorsOf(^^E)) {
+                if (std::meta::extract<E>(enumerator) == value) {
+                    return enumerator;
+                }
+            }
+            throw std::define_static_string(
+                "Sora::Meta::GetEnumeratorMetaOf: no enumerator with the given value exists.");
+        }
+
     } // namespace Meta
 
     namespace Traits {
 
         /** @brief Number of enumerators in @p T. */
         template<Concept::Enum T>
-        inline constexpr size_t EnumeratorsCount = Meta::EnumeratorsOf(^^T).size();
+        inline constexpr size_t EnumeratorsCountOf = Meta::EnumeratorsOf(^^T).size();
 
         /** @brief Static array containing every enumerator value of @p T in declaration order. */
         template<Concept::Enum T>
-        inline constexpr std::array<T, Traits::EnumeratorsCount<T>> EnumeratorsArr = [] consteval {
+        inline constexpr std::array<T, Traits::EnumeratorsCountOf<T>> EnumeratorsArrOf = [] consteval {
             return []<size_t... I>(std::index_sequence<I...>) {
                 return std::array<T, sizeof...(I)>{std::meta::extract<T>(Meta::EnumeratorsOf(^^T)[I])...};
-            }(std::make_index_sequence<Traits::EnumeratorsCount<T>>{});
+            }(std::make_index_sequence<Traits::EnumeratorsCountOf<T>>{});
         }();
 
     } // namespace Traits
@@ -110,7 +143,7 @@ namespace Sora {
 
         /** @brief Enum whose ordinary enumerators are all zero or single-bit values. */
         template<typename T>
-        concept BitfieldEnum = Enum<T> && Traits::EnumeratorsCount<T> > 0 && [] consteval {
+        concept BitfieldEnum = Enum<T> && Traits::EnumeratorsCountOf<T> > 0 && [] consteval {
             using U = std::make_unsigned_t<std::underlying_type_t<T>>;
             template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
                 if (std::meta::identifier_of(e) == "All" || std::meta::identifier_of(e) == "None") {
@@ -129,7 +162,7 @@ namespace Sora {
 
         /** @brief Enum whose ordinary enumerators have unique underlying values. */
         template<typename T>
-        concept SequentialEnum = Enum<T> && Traits::EnumeratorsCount<T> > 0 && [] consteval {
+        concept SequentialEnum = Enum<T> && Traits::EnumeratorsCountOf<T> > 0 && [] consteval {
             using U = std::underlying_type_t<T>;
             std::set<U> values;
             template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
@@ -164,7 +197,7 @@ namespace Sora {
 
         /** @brief Static array containing every enumerator value of @p E in declaration order. */
         template<Concept::Enum E>
-        inline constexpr auto EnumValues = EnumeratorsArr<E>;
+        inline constexpr auto EnumValues = EnumeratorsArrOf<E>;
 
         /** @brief Static array containing every enumerator source identifier of @p E in declaration order. */
         template<Concept::Enum E>
@@ -172,7 +205,7 @@ namespace Sora {
             return []<size_t... I>(std::index_sequence<I...>) {
                 return std::array<std::string_view, sizeof...(I)>{
                     std::meta::identifier_of(Meta::EnumeratorsOf(^^E)[I])...};
-            }(std::make_index_sequence<Traits::EnumeratorsCount<E>>{});
+            }(std::make_index_sequence<Traits::EnumeratorsCountOf<E>>{});
         }();
 
         /** @brief Return the source identifier of @p value, or an empty view when no exact enumerator exists. */

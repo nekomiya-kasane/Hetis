@@ -100,7 +100,8 @@ namespace Sora {
         try {
             // 1. create a buffer for this very thread
             auto buffer = std::make_unique<ThreadBuffer>();
-            buffer->threadId = PAL::CurrentNativeThreadId();
+            auto threadId = PAL::CurrentNativeThreadId();
+            buffer->threadId = threadId ? *threadId : 0;
             if (auto name = PAL::CurrentThreadName(); name) {
                 buffer->threadName = *name;
             }

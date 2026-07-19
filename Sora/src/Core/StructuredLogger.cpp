@@ -4,8 +4,10 @@
  * @ingroup Core
  */
 
-#include "Sora/Core/StructuredLogger.h"
-#include "Sora/Core/ToJson.h"
+#include <Sora/Core/StructuredLogger.h>
+#include <Sora/Core/PAL/Path.h>
+#include <Sora/Core/PAL/Thread.h>
+#include <Sora/Core/ToJson.h>
 
 #include <algorithm>
 #include <array>
@@ -20,27 +22,22 @@ namespace Sora {
         /** @brief Return the built-in default threshold for @p category. */
         [[nodiscard]] constexpr LogLevel DefaultCategoryLevel(LogCategory category) noexcept {
             switch (category) {
-            case LogCategory::Core:
-            case LogCategory::Kernel:
-            case LogCategory::Resource:
-            case LogCategory::Render:
-            case LogCategory::Audio:
-            case LogCategory::Network:
-                return LogLevel::Info;
-            case LogCategory::Scene:
-            case LogCategory::Input:
-            case LogCategory::Script:
-            case LogCategory::Editor:
-                return LogLevel::Debug;
-            case LogCategory::App:
-                return LogLevel::Trace;
+                case LogCategory::Core:
+                case LogCategory::Kernel:
+                case LogCategory::Resource:
+                case LogCategory::Render:
+                case LogCategory::Audio:
+                case LogCategory::Network:
+                    return LogLevel::Info;
+                case LogCategory::Scene:
+                case LogCategory::Input:
+                case LogCategory::Script:
+                case LogCategory::Editor:
+                    return LogLevel::Debug;
+                case LogCategory::App:
+                    return LogLevel::Trace;
             }
             return LogLevel::Trace;
-        }
-
-        /** @brief Stable small integer representation of the current thread id. */
-        [[nodiscard]] uint64_t CurrentThreadId() noexcept {
-            return static_cast<uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
         }
 
         /** @brief Format @p time as local wall-clock time with millisecond precision. */
@@ -127,7 +124,7 @@ namespace Sora {
 
     /** @brief Single-producer/single-consumer byte ring used by one producer thread and the logger drain thread. */
     struct StructuredLogger::ThreadRing {
-        static constexpr size_t kCapacity = 64 * 1024;
+        static constexpr size_t kCapacity = size_t{64} * 1024;
 
         [[nodiscard]] bool TryWrite(std::span<const std::byte> payload) noexcept {
             const size_t totalSize = sizeof(uint32_t) + payload.size_bytes();
@@ -198,8 +195,7 @@ namespace Sora {
     };
 
     std::string_view SourceLocation::FileName() const noexcept {
-        const size_t pos = file.find_last_of("\\/");
-        return pos == std::string_view::npos ? file : file.substr(pos + 1);
+        return PAL::FileName(file);
     }
 
     void ConsoleLogSink::Write(const LogRecord& record) {
@@ -372,11 +368,12 @@ namespace Sora {
             return;
         }
 
+        auto threadId = PAL::CurrentNativeThreadId();
         LogRecord record{.level = level,
                          .category = category,
                          .source = source,
                          .timestamp = std::chrono::system_clock::now(),
-                         .threadId = CurrentThreadId(),
+                         .threadId = threadId ? *threadId : 0,
                          .message = std::move(message)};
         WriteToRing(record);
     }
@@ -393,8 +390,7 @@ namespace Sora {
                                          .fileSize = static_cast<uint32_t>(record.source.file.size()),
                                          .functionSize = static_cast<uint32_t>(record.source.function.size()),
                                          .messageSize = static_cast<uint32_t>(record.message.size())};
-        const size_t payloadSize =
-            sizeof(header) + header.fileSize + header.functionSize + header.messageSize;
+        const size_t payloadSize = sizeof(header) + header.fileSize + header.functionSize + header.messageSize;
         thread_local std::vector<std::byte> payload;
         payload.resize(payloadSize);
 
@@ -443,14 +439,15 @@ namespace Sora {
         cursor += header.functionSize;
         std::string message{cursor, header.messageSize};
 
-        LogRecord record{.level = static_cast<LogLevel>(header.level),
-                         .category = static_cast<LogCategory>(header.category),
-                         .source = {.file = file, .function = function, .line = header.line, .column = header.column},
-                         .timestamp = std::chrono::system_clock::time_point{
-                             std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                                 std::chrono::nanoseconds{static_cast<int64_t>(header.timestampNs)})},
-                         .threadId = header.threadId,
-                         .message = std::move(message)};
+        LogRecord record{
+            .level = static_cast<LogLevel>(header.level),
+            .category = static_cast<LogCategory>(header.category),
+            .source = {.file = file, .function = function, .line = header.line, .column = header.column},
+            .timestamp =
+                std::chrono::system_clock::time_point{std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                    std::chrono::nanoseconds{static_cast<int64_t>(header.timestampNs)})},
+            .threadId = header.threadId,
+            .message = std::move(message)};
         DispatchToSinks(record);
     }
 
@@ -466,9 +463,8 @@ namespace Sora {
         std::lock_guard lock(ringsMutex_);
         for (RegisteredRing& registration : rings_) {
             if (registration.ring != nullptr) {
-                total += registration.ring->ReadAll([this](std::span<const std::byte> payload) {
-                    DispatchSerialized(payload);
-                });
+                total += registration.ring->ReadAll(
+                    [this](std::span<const std::byte> payload) { DispatchSerialized(payload); });
             }
         }
         return total;
@@ -509,11 +505,21 @@ namespace Sora {
         struct RingGuard {
             ThreadRing ring{};
 
-            ~RingGuard() {
-                StructuredLogger& logger = StructuredLogger::Default();
-                std::lock_guard lock(logger.ringsMutex_);
-                ring.ReadAll([&logger](std::span<const std::byte> payload) { logger.DispatchSerialized(payload); });
-                std::erase_if(logger.rings_, [this](const RegisteredRing& r) { return r.ring == &ring; });
+            ~RingGuard() noexcept {
+                try {
+                    StructuredLogger& logger = StructuredLogger::Default();
+                    std::lock_guard lock(logger.ringsMutex_);
+                    std::erase_if(logger.rings_,
+                                  [this](const RegisteredRing& registration) { return registration.ring == &ring; });
+                    try {
+                        ring.ReadAll(
+                            [&logger](std::span<const std::byte> payload) { logger.DispatchSerialized(payload); });
+                    } catch (...) {
+                        logger.droppedCount_.fetch_add(1, std::memory_order_relaxed);
+                    }
+                } catch (...) {
+                    return;
+                }
             }
         };
 
@@ -523,7 +529,8 @@ namespace Sora {
             registered = true;
             StructuredLogger& logger = StructuredLogger::Default();
             std::lock_guard lock(logger.ringsMutex_);
-            logger.rings_.push_back({.ring = &guard.ring, .threadId = CurrentThreadId()});
+            auto threadId = PAL::CurrentNativeThreadId();
+            logger.rings_.push_back({.ring = &guard.ring, .threadId = threadId ? *threadId : 0});
         }
         return guard.ring;
     }

@@ -75,13 +75,13 @@ namespace Sora::Kernel {
             if (!state) {
                 return {};
             }
-            BaseUnknown* nucleus = state->weak.Get();
+            ComPtr<BaseUnknown> nucleus = state->weak.Lock();
             if (!nucleus) {
                 return {};
             }
 
             using Holder = ComPtr<BaseUnknown>;
-            auto holder = std::make_shared<Holder>(nucleus);
+            auto holder = std::make_shared<Holder>(std::move(nucleus));
             std::shared_ptr<void> lease{std::move(holder), lifetime.Object()};
             return Sora::EventObjectLease::Owned(std::move(lease));
         }
@@ -94,6 +94,17 @@ namespace Sora::Kernel {
         auto* extension = QueryInterface<Sora::Kernel::ComAdaptor<Sora::EventPort>>(object);
         assert(extension != nullptr && "ComAdaptor<EventPort> must be available as a DataExtension.");
         return extension->Object();
+    }
+
+    /**
+     * @brief Return the already materialized event port of @p object without creating its DataExtension.
+     * @return The existing event port, or null when @p object has not used the event protocol.
+     */
+    [[nodiscard]] inline Sora::EventPort* TryEventPortOf(BaseUnknown& object) noexcept {
+        using Adaptor = Sora::Kernel::ComAdaptor<Sora::EventPort>;
+        BaseUnknown* extension =
+            Detail::BaseUnknownInternal::FindExtensionNode(object.Nucleus(), Traits::IidOf<Adaptor>);
+        return extension ? std::addressof(static_cast<Adaptor*>(extension)->Object()) : nullptr;
     }
 
     /** @brief ADL adaptor that models a BaseUnknown nucleus lifetime without extending it at connection time. */
