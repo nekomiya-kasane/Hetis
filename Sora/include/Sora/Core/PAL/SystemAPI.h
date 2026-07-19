@@ -63,8 +63,10 @@ namespace Sora::PAL {
             Type type = Type::Serial;
         };
 
+        /** @brief Associate a function-table entry with one exact native symbol that it exposes or delegates to. */
         struct Syscall {
-            FixedString<256> name = "";
+            FixedString<256> name = ""; /**< Case-sensitive export name passed to the native symbol resolver. */
+            Platform::OperatingSystem os = Platform::kOperatingSystem; /**< Operating system that exports the symbol. */
         };
 
     } // namespace $
@@ -134,14 +136,28 @@ namespace Sora::PAL {
             uint16_t processorRevision;
         };
 
-        /** @brief ABI-compatible Win32 storage information used for direct-I/O alignment. */
+        /**
+         * @brief ABI-compatible Win32 storage information used for direct-I/O alignment.
+         *
+         * All size and offset fields are measured in bytes. For example, a typical 512e disk may report @c
+         * logicalBytesPerSector as 512 and the physical-sector fields as 4096; direct-I/O buffers, offsets, and
+         * transfer sizes should then respect the effective physical-sector size and any additional alignment offsets
+         * reported below.
+         */
         struct FileStorageInfo {
+            /** Bytes in a logical sector exposed to software; commonly 512 or 4096. */
             uint32_t logicalBytesPerSector;
+            /** Smallest physical unit written atomically; for example, 4096 on a 512e disk. */
             uint32_t physicalBytesPerSectorForAtomicity;
+            /** Preferred physical transfer unit for best performance; commonly 4096. */
             uint32_t physicalBytesPerSectorForPerformance;
+            /** Atomicity unit enforced by the file system; for example, 4096 bytes. */
             uint32_t fileSystemEffectivePhysicalBytesPerSectorForAtomicity;
+            /** Win32 storage-property bit flags describing alignment and partitioning support. */
             DWord flags;
+            /** Byte adjustment needed to align a file offset to a sector boundary; often 0. */
             DWord byteOffsetForSectorAlignment;
+            /** Byte adjustment needed to align storage to the partition boundary; often 0. */
             DWord byteOffsetForPartitionAlignment;
         };
 
@@ -414,9 +430,13 @@ namespace Sora::PAL {
         using FormatMessageWideFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const void*, WindowsSystem::DWord, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord, std::va_list*);
         using LocalFreeFunction         = void*(__stdcall*)(void*);
 
+        [[= $::Syscall{"GetLastError"}]]
         GetLastErrorFunction      getLastError      = nullptr;
+        [[= $::Syscall{"SetLastError"}]]
         SetLastErrorFunction      setLastError      = nullptr;
+        [[= $::Syscall{"FormatMessageW"}]]
         FormatMessageWideFunction formatMessageWide = nullptr;
+        [[= $::Syscall{"LocalFree"}]]
         LocalFreeFunction         localFree         = nullptr;
         // clang-format on
     };
@@ -431,11 +451,17 @@ namespace Sora::PAL {
         using GetEnvironmentStringsWideFunction  = wchar_t*(__stdcall*)();
         using FreeEnvironmentStringsWideFunction = WindowsSystem::Bool(__stdcall*)(wchar_t*);
 
+        [[= $::Syscall{"GetLastError"}]]
         GetLastErrorFunction                    getLastError                    = nullptr;
+        [[= $::Syscall{"SetLastError"}]]
         SetLastErrorFunction                    setLastError                    = nullptr;
+        [[= $::Syscall{"GetEnvironmentVariableW"}]]
         GetEnvironmentVariableWideFunction      getEnvironmentVariableWide      = nullptr;
+        [[= $::Syscall{"SetEnvironmentVariableW"}]]
         SetEnvironmentVariableWideFunction      setEnvironmentVariableWide      = nullptr;
+        [[= $::Syscall{"GetEnvironmentStringsW"}]]
         GetEnvironmentStringsWideFunction       getEnvironmentStringsWide       = nullptr;
+        [[= $::Syscall{"FreeEnvironmentStringsW"}]]
         FreeEnvironmentStringsWideFunction      freeEnvironmentStringsWide      = nullptr;
         // clang-format on
     };
@@ -448,9 +474,13 @@ namespace Sora::PAL {
         using FindSymbolFunction             = void* (*)(WindowsSystem::Handle, const char*) noexcept;
         using FreeLibraryFunction            = WindowsSystem::Bool (*)(WindowsSystem::Handle) noexcept;
 
+        [[= $::Syscall{"LoadLibraryW"}]]
         LoadLibraryWideFunction     loadLibraryWide     = nullptr;
+        [[= $::Syscall{"GetModuleHandleW"}]]
         GetModuleHandleWideFunction getModuleHandleWide = nullptr;
+        [[= $::Syscall{"GetProcAddress"}]]
         FindSymbolFunction           findSymbol          = nullptr;
+        [[= $::Syscall{"FreeLibrary"}]]
         FreeLibraryFunction          freeLibrary         = nullptr;
         // clang-format on
     };
@@ -472,17 +502,29 @@ namespace Sora::PAL {
         using QueryParentProcessIdFunction          = bool (*)(WindowsSystem::DWord*) noexcept;
         using CaptureUsageFunction                  = bool (*)(ProcessUsageCounters*) noexcept;
 
+        [[= $::Syscall{"GetCurrentProcessId"}]]
         GetCurrentProcessIdFunction           getCurrentProcessId           = nullptr;
+        [[= $::Syscall{"GetCurrentProcess"}]]
         GetCurrentProcessFunction             getCurrentProcess             = nullptr;
+        [[= $::Syscall{"CreateToolhelp32Snapshot"}]]
         CreateProcessSnapshotFunction         createProcessSnapshot         = nullptr;
+        [[= $::Syscall{"Process32FirstW"}]]
         ReadProcessEntryFunction              firstProcess                  = nullptr;
+        [[= $::Syscall{"Process32NextW"}]]
         ReadProcessEntryFunction              nextProcess                   = nullptr;
+        [[= $::Syscall{"CloseHandle"}]]
         CloseHandleFunction                   closeHandle                    = nullptr;
+        [[= $::Syscall{"QueryFullProcessImageNameW"}]]
         QueryFullProcessImageNameWideFunction queryFullProcessImageNameWide = nullptr;
+        [[= $::Syscall{"GetCommandLineW"}]]
         GetCommandLineWideFunction            getCommandLineWide            = nullptr;
+        [[= $::Syscall{"CommandLineToArgvW"}]]
         CommandLineToArgvWideFunction         commandLineToArgvWide         = nullptr;
+        [[= $::Syscall{"LocalFree"}]]
         LocalFreeFunction                     localFree                     = nullptr;
+        [[= $::Syscall{"GetProcessTimes"}]]
         GetProcessTimesFunction               getProcessTimes               = nullptr;
+        [[= $::Syscall{"K32GetProcessMemoryInfo"}]]
         GetProcessMemoryInfoFunction          getProcessMemoryInfo          = nullptr;
         QueryParentProcessIdFunction          queryParentProcessId          = nullptr;
         CaptureUsageFunction                  captureUsage                  = nullptr;
@@ -500,12 +542,19 @@ namespace Sora::PAL {
         using GetCurrentProcessorNumberExFunction = void(__stdcall*)(WindowsSystem::ProcessorNumber*);
         using GetCurrentThreadStackLimitsFunction = void(__stdcall*)(uintptr_t*, uintptr_t*);
 
+        [[= $::Syscall{"GetCurrentThreadId"}]]
         GetCurrentThreadIdFunction          getCurrentThreadId          = nullptr;
+        [[= $::Syscall{"GetCurrentThread"}]]
         GetCurrentThreadFunction            getCurrentThread            = nullptr;
+        [[= $::Syscall{"SetThreadDescription"}]]
         SetThreadDescriptionFunction        setThreadDescription        = nullptr;
+        [[= $::Syscall{"GetThreadDescription"}]]
         GetThreadDescriptionFunction        getThreadDescription        = nullptr;
+        [[= $::Syscall{"LocalFree"}]]
         LocalFreeFunction                   localFree                   = nullptr;
+        [[= $::Syscall{"GetCurrentProcessorNumberEx"}]]
         GetCurrentProcessorNumberExFunction getCurrentProcessorNumberEx = nullptr;
+        [[= $::Syscall{"GetCurrentThreadStackLimits"}]]
         GetCurrentThreadStackLimitsFunction getCurrentThreadStackLimits = nullptr;
         // clang-format on
     };
@@ -519,10 +568,15 @@ namespace Sora::PAL {
         using GlobalUnlockFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::GlobalMemory);
         using GlobalSizeFunction     = WindowsSystem::Size(__stdcall*)(WindowsSystem::GlobalMemory);
 
+        [[= $::Syscall{"GlobalAlloc"}]]
         GlobalAllocateFunction globalAllocate = nullptr;
+        [[= $::Syscall{"GlobalFree"}]]
         GlobalFreeFunction     globalFree     = nullptr;
+        [[= $::Syscall{"GlobalLock"}]]
         GlobalLockFunction     globalLock     = nullptr;
+        [[= $::Syscall{"GlobalUnlock"}]]
         GlobalUnlockFunction   globalUnlock   = nullptr;
+        [[= $::Syscall{"GlobalSize"}]]
         GlobalSizeFunction     globalSize     = nullptr;
         // clang-format on
     };
@@ -537,11 +591,17 @@ namespace Sora::PAL {
         using SetClipboardDataFunction           = WindowsSystem::Handle(__stdcall*)(WindowsSystem::UInt, WindowsSystem::Handle);
         using IsClipboardFormatAvailableFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::UInt);
 
+        [[= $::Syscall{"OpenClipboard"}]]
         OpenClipboardFunction              openClipboard              = nullptr;
+        [[= $::Syscall{"CloseClipboard"}]]
         CloseClipboardFunction             closeClipboard             = nullptr;
+        [[= $::Syscall{"EmptyClipboard"}]]
         EmptyClipboardFunction             emptyClipboard             = nullptr;
+        [[= $::Syscall{"GetClipboardData"}]]
         GetClipboardDataFunction           getClipboardData           = nullptr;
+        [[= $::Syscall{"SetClipboardData"}]]
         SetClipboardDataFunction           setClipboardData           = nullptr;
+        [[= $::Syscall{"IsClipboardFormatAvailable"}]]
         IsClipboardFormatAvailableFunction isClipboardFormatAvailable = nullptr;
         // clang-format on
     };
@@ -576,30 +636,55 @@ namespace Sora::PAL {
         using GetCurrentProcessFunction     = WindowsSystem::Handle(__stdcall*)();
         using DuplicateHandleFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
 
+        [[= $::Syscall{"GetStdHandle"}]]
         GetStandardHandleFunction     getStandardHandle     = nullptr;
+        [[= $::Syscall{"CreateFileW"}]]
         CreateFileWideFunction        createFileWide        = nullptr;
+        [[= $::Syscall{"CloseHandle"}]]
         CloseHandleFunction           closeHandle           = nullptr;
+        [[= $::Syscall{"WriteFile"}]]
         WriteFileFunction             writeFile             = nullptr;
+        [[= $::Syscall{"FlushFileBuffers"}]]
         FlushFileBuffersFunction      flushFileBuffers      = nullptr;
+        [[= $::Syscall{"ReadFile"}]]
         ReadFileFunction              readFile              = nullptr;
+        [[= $::Syscall{"GetFileSizeEx"}]]
         GetFileSizeFunction           getFileSize           = nullptr;
+        [[= $::Syscall{"SetFileInformationByHandle"}]]
         SetFileInformationFunction    setFileInformation    = nullptr;
+        [[= $::Syscall{"GetFileInformationByHandleEx"}]]
         GetFileInformationFunction    getFileInformation    = nullptr;
+        [[= $::Syscall{"CreateFileMappingW"}]]
         CreateFileMappingWideFunction createFileMappingWide = nullptr;
+        [[= $::Syscall{"MapViewOfFile"}]]
         MapViewOfFileFunction         mapViewOfFile         = nullptr;
+        [[= $::Syscall{"UnmapViewOfFile"}]]
         UnmapViewOfFileFunction       unmapViewOfFile       = nullptr;
+        [[= $::Syscall{"FlushViewOfFile"}]]
         FlushViewOfFileFunction       flushViewOfFile       = nullptr;
+        [[= $::Syscall{"ReplaceFileW"}]]
         ReplaceFileWideFunction       replaceFileWide       = nullptr;
+        [[= $::Syscall{"MoveFileExW"}]]
         MoveFileWideFunction          moveFileWide          = nullptr;
+        [[= $::Syscall{"DeleteFileW"}]]
         DeleteFileWideFunction        deleteFileWide        = nullptr;
+        [[= $::Syscall{"CreateEventW"}]]
         CreateEventWideFunction       createEventWide       = nullptr;
+        [[= $::Syscall{"ResetEvent"}]]
         ResetEventFunction            resetEvent            = nullptr;
+        [[= $::Syscall{"WaitForSingleObject"}]]
         WaitForSingleObjectFunction   waitForSingleObject   = nullptr;
+        [[= $::Syscall{"GetOverlappedResult"}]]
         GetOverlappedResultFunction   getOverlappedResult   = nullptr;
+        [[= $::Syscall{"CancelIoEx"}]]
         CancelIoFunction              cancelIo              = nullptr;
+        [[= $::Syscall{"ReadDirectoryChangesW"}]]
         ReadDirectoryChangesFunction  readDirectoryChanges  = nullptr;
+        [[= $::Syscall{"GetSystemInfo"}]]
         GetSystemInfoFunction         getSystemInfo         = nullptr;
+        [[= $::Syscall{"GetCurrentProcess"}]]
         GetCurrentProcessFunction     getCurrentProcess     = nullptr;
+        [[= $::Syscall{"DuplicateHandle"}]]
         DuplicateHandleFunction       duplicateHandle       = nullptr;
         // clang-format on
     };
@@ -615,11 +700,17 @@ namespace Sora::PAL {
         using WerGetFlagsFunction                  = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
         using WerSetFlagsFunction                  = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord);
 
+        [[= $::Syscall{"SetUnhandledExceptionFilter"}]]
         SetUnhandledExceptionFilterFunction  setUnhandledExceptionFilter  = nullptr;
+        [[= $::Syscall{"GetErrorMode"}]]
         GetErrorModeFunction                 getErrorMode                 = nullptr;
+        [[= $::Syscall{"SetErrorMode"}]]
         SetErrorModeFunction                 setErrorMode                 = nullptr;
+        [[= $::Syscall{"GetCurrentProcess"}]]
         GetCurrentProcessFunction            getCurrentProcess            = nullptr;
+        [[= $::Syscall{"WerGetFlags"}]]
         WerGetFlagsFunction                  werGetFlags                  = nullptr;
+        [[= $::Syscall{"WerSetFlags"}]]
         WerSetFlagsFunction                  werSetFlags                  = nullptr;
         // clang-format on
     };
@@ -634,11 +725,17 @@ namespace Sora::PAL {
         using SymGetModuleInfoFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, ::_IMAGEHLP_MODULE64*);
         using UndecorateSymbolNameFunction    = WindowsSystem::DWord(__stdcall*)(const char*, char*, WindowsSystem::DWord, WindowsSystem::DWord);
 
+        [[= $::Syscall{"SymSetOptions"}]]
         SymSetOptionsFunction         symSetOptions         = nullptr;
+        [[= $::Syscall{"SymInitialize"}]]
         SymInitializeFunction         symInitialize         = nullptr;
+        [[= $::Syscall{"SymFromAddr"}]]
         SymFromAddressFunction        symFromAddress        = nullptr;
+        [[= $::Syscall{"SymGetLineFromAddr64"}]]
         SymGetLineFromAddressFunction symGetLineFromAddress = nullptr;
+        [[= $::Syscall{"SymGetModuleInfo64"}]]
         SymGetModuleInfoFunction      symGetModuleInfo      = nullptr;
+        [[= $::Syscall{"UnDecorateSymbolName"}]]
         UndecorateSymbolNameFunction  undecorateSymbolName  = nullptr;
         // clang-format on
     };
@@ -649,7 +746,9 @@ namespace Sora::PAL {
         using CaptureStackBackTraceFunction = uint16_t(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, void**, WindowsSystem::DWord*);
         using GetCurrentProcessFunction     = WindowsSystem::Handle(__stdcall*)();
 
+        [[= $::Syscall{"RtlCaptureStackBackTrace"}]]
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
+        [[= $::Syscall{"GetCurrentProcess"}]]
         GetCurrentProcessFunction     getCurrentProcess     = nullptr;
         // clang-format on
     };
@@ -845,8 +944,11 @@ namespace Sora::PAL {
         using SetFunction    = int (*)(const char*, const char*, int);
         using RemoveFunction = int (*)(const char*);
 
+        [[= $::Syscall{"getenv"}]]
         GetFunction    get    = nullptr;
+        [[= $::Syscall{"setenv"}]]
         SetFunction    set    = nullptr;
+        [[= $::Syscall{"unsetenv"}]]
         RemoveFunction remove = nullptr;
         // clang-format on
     };
@@ -858,8 +960,11 @@ namespace Sora::PAL {
         using CloseFunction  = int (*)(void*) noexcept;
         using FindSymbolFunction = void* (*)(void*, const char*) noexcept;
 
+        [[= $::Syscall{"dlopen"}]]
         OpenFunction        open        = nullptr;
+        [[= $::Syscall{"dlclose"}]]
         CloseFunction       close       = nullptr;
+        [[= $::Syscall{"dlsym"}]]
         FindSymbolFunction  findSymbol  = nullptr;
         // clang-format on
     };
@@ -872,9 +977,22 @@ namespace Sora::PAL {
         using GetResourceUsageFunction   = int (*)(int, ::rusage*);
         using CaptureUsageFunction       = bool (*)(ProcessUsageCounters*) noexcept;
 
+        [[= $::Syscall{"getpid"}]]
         GetProcessIdFunction       getProcessId       = nullptr;
+        [[= $::Syscall{"getppid"}]]
         GetParentProcessIdFunction getParentProcessId = nullptr;
+        [[= $::Syscall{"getrusage"}]]
         GetResourceUsageFunction   getResourceUsage   = nullptr;
+        [[= $::Syscall{"getrusage"}]]
+#    if defined(PLATFORM_LINUX)
+        [[= $::Syscall{"sysconf"}]]
+        [[= $::Syscall{"open"}]]
+        [[= $::Syscall{"read"}]]
+        [[= $::Syscall{"close"}]]
+#    else
+        [[= $::Syscall{"getpid"}]]
+        [[= $::Syscall{"proc_pid_rusage"}]]
+#    endif
         CaptureUsageFunction       captureUsage       = nullptr;
         
 #    if defined(PLATFORM_MACOS)
@@ -883,9 +1001,13 @@ namespace Sora::PAL {
         using GetArgumentVectorFunction      = char*** (*)();
         using ProcessResourceUsageFunction   = int (*)(int, int, PosixSystem::ResourceUsageInfo*);
         
+        [[= $::Syscall{"_NSGetExecutablePath"}]]
         GetExecutablePathFunction      getExecutablePath      = nullptr;
+        [[= $::Syscall{"_NSGetArgc"}]]
         GetArgumentCountFunction       getArgumentCount       = nullptr;
+        [[= $::Syscall{"_NSGetArgv"}]]
         GetArgumentVectorFunction      getArgumentVector      = nullptr;
+        [[= $::Syscall{"proc_pid_rusage"}]]
         ProcessResourceUsageFunction   processResourceUsage   = nullptr;
 #    endif
         // clang-format on
@@ -896,7 +1018,9 @@ namespace Sora::PAL {
         using PthreadSelfFunction    = PosixSystem::ThreadId (*)();
         using PthreadGetNameFunction = int (*)(PosixSystem::ThreadId, char*, size_t);
 
+        [[= $::Syscall{"pthread_self"}]]
         PthreadSelfFunction    pthreadSelf    = nullptr;
+        [[= $::Syscall{"pthread_getname_np"}]]
         PthreadGetNameFunction pthreadGetName = nullptr;
 
 #    if defined(PLATFORM_LINUX)
@@ -907,11 +1031,17 @@ namespace Sora::PAL {
         using PthreadDestroyAttributesFunction = int (*)(PosixSystem::ThreadAttributes*);
         using PthreadGetStackFunction          = int (*)(const PosixSystem::ThreadAttributes*, void**, size_t*);
 
+        [[= $::Syscall{"syscall"}]]
         SystemCallFunction               systemCall               = nullptr;
+        [[= $::Syscall{"sched_getcpu"}]]
         ScheduleGetCpuFunction           scheduleGetCpu           = nullptr;
+        [[= $::Syscall{"pthread_setname_np"}]]
         PthreadSetNameFunction           pthreadSetName           = nullptr;
+        [[= $::Syscall{"pthread_getattr_np"}]]
         PthreadGetAttributesFunction     pthreadGetAttributes     = nullptr;
+        [[= $::Syscall{"pthread_attr_destroy"}]]
         PthreadDestroyAttributesFunction pthreadDestroyAttributes = nullptr;
+        [[= $::Syscall{"pthread_attr_getstack"}]]
         PthreadGetStackFunction          pthreadGetStack          = nullptr;
 #    else
         using PthreadThreadIdFunction          = int (*)(PosixSystem::ThreadId, uint64_t*);
@@ -919,9 +1049,13 @@ namespace Sora::PAL {
         using PthreadGetStackAddressFunction   = void* (*)(PosixSystem::ThreadId);
         using PthreadGetStackSizeFunction      = size_t (*)(PosixSystem::ThreadId);
         
+        [[= $::Syscall{"pthread_threadid_np"}]]
         PthreadThreadIdFunction          pthreadThreadId          = nullptr;
+        [[= $::Syscall{"pthread_setname_np"}]]
         PthreadSetNameFunction           pthreadSetName           = nullptr;
+        [[= $::Syscall{"pthread_get_stackaddr_np"}]]
         PthreadGetStackAddressFunction   pthreadGetStackAddress   = nullptr;
+        [[= $::Syscall{"pthread_get_stacksize_np"}]]
         PthreadGetStackSizeFunction      pthreadGetStackSize      = nullptr;
 #    endif
         // clang-format on
@@ -958,26 +1092,47 @@ namespace Sora::PAL {
         using DuplicateFunction           = int (*)(int);
         using AdviseFileFunction          = int (*)(int, PosixSystem::FileOffset, PosixSystem::FileOffset, int);
 
+        [[= $::Syscall{"open"}]]
         OpenFunction                open                = nullptr;
+        [[= $::Syscall{"close"}]]
         CloseFunction               close               = nullptr;
+        [[= $::Syscall{"read"}]]
         ReadFunction                read                = nullptr;
+        [[= $::Syscall{"write"}]]
         WriteFunction               write               = nullptr;
+        [[= $::Syscall{"pread"}]]
         ReadAtFunction              readAt              = nullptr;
+        [[= $::Syscall{"pwrite"}]]
         WriteAtFunction             writeAt             = nullptr;
+        [[= $::Syscall{"fsync"}]]
         SyncFunction                sync                = nullptr;
+        [[= $::Syscall{"ftruncate"}]]
         ResizeFunction              resize              = nullptr;
+        [[= $::Syscall{"fstat"}]]
         StatFunction                stat                = nullptr;
+        [[= $::Syscall{"mmap"}]]
         MapFunction                 map                 = nullptr;
+        [[= $::Syscall{"munmap"}]]
         UnmapFunction               unmap               = nullptr;
+        [[= $::Syscall{"msync"}]]
         SyncMapFunction             syncMap             = nullptr;
+        [[= $::Syscall{"madvise"}]]
         AdviseMapFunction           adviseMap           = nullptr;
+        [[= $::Syscall{"rename"}]]
         RenameFunction              rename              = nullptr;
+        [[= $::Syscall{"unlink"}]]
         UnlinkFunction              unlink              = nullptr;
+        [[= $::Syscall{"fcntl"}]]
         ControlFunction             control             = nullptr;
+        [[= $::Syscall{"sysconf"}]]
         SystemConfigurationFunction systemConfiguration = nullptr;
+        [[= $::Syscall{"fstat"}]]
         QueryFileBlockSizeFunction  queryFileBlockSize  = nullptr;
+        [[= $::Syscall{"fstat"}]]
         QueryFileSizeFunction       queryFileSize       = nullptr;
+        [[= $::Syscall{"dup"}]]
         DuplicateFunction           duplicate           = nullptr;
+        [[= $::Syscall{"posix_fadvise"}]]
         AdviseFileFunction          adviseFile          = nullptr;
 
 #    if defined(PLATFORM_LINUX)
@@ -986,15 +1141,21 @@ namespace Sora::PAL {
         using RemoveNotifyFunction     = int (*)(int, int);
         using PollFunction             = int (*)(struct pollfd*, PosixSystem::PollCount, int);
 
+        [[= $::Syscall{"inotify_init1"}]]
         InitializeNotifyFunction initializeNotify = nullptr;
+        [[= $::Syscall{"inotify_add_watch"}]]
         AddNotifyFunction        addNotify        = nullptr;
+        [[= $::Syscall{"inotify_rm_watch"}]]
         RemoveNotifyFunction     removeNotify     = nullptr;
+        [[= $::Syscall{"poll"}]]
         PollFunction             poll             = nullptr;
 #    elif defined(PLATFORM_MACOS)
         using CreateQueueFunction = int (*)();
         using QueueEventFunction  = int (*)(int, const struct kevent*, int, struct kevent*, int, const struct timespec*);
 
+        [[= $::Syscall{"kqueue"}]]
         CreateQueueFunction createQueue = nullptr;
+        [[= $::Syscall{"kevent"}]]
         QueueEventFunction  queueEvent  = nullptr;
 #    endif
         // clang-format on
@@ -1008,9 +1169,13 @@ namespace Sora::PAL {
         using RaiseSignalFunction    = int (*)(int);
         using ImmediateExitFunction  = void (*)(int);
 
+        [[= $::Syscall{"sigaction"}]]
         SignalActionFunction   signalAction   = nullptr;
+        [[= $::Syscall{"sigemptyset"}]]
         EmptySignalSetFunction emptySignalSet = nullptr;
+        [[= $::Syscall{"raise"}]]
         RaiseSignalFunction    raiseSignal    = nullptr;
+        [[= $::Syscall{"_exit"}]]
         ImmediateExitFunction  immediateExit  = nullptr;
         // clang-format on
     };
@@ -1024,7 +1189,9 @@ namespace Sora::PAL {
         using CaptureStackBackTraceFunction = int (*)(void**, int);
         using FindDynamicSymbolFunction     = int (*)(const void*, void*);
 
+        [[= $::Syscall{"backtrace"}]]
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
+        [[= $::Syscall{"dladdr"}]]
         FindDynamicSymbolFunction     findDynamicSymbol     = nullptr;
         // clang-format on
     };
@@ -1043,7 +1210,9 @@ namespace Sora::PAL {
         using CaptureStackBackTraceFunction = int (*)(void**, int);
         using FindDynamicSymbolFunction     = int (*)(const void*, DynamicSymbolInfo*);
 
+        [[= $::Syscall{"backtrace"}]]
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
+        [[= $::Syscall{"dladdr"}]]
         FindDynamicSymbolFunction     findDynamicSymbol     = nullptr;
         // clang-format on
     };
