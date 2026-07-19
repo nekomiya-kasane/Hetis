@@ -139,19 +139,19 @@ namespace Sora {
 
         /** @brief Count annotations of types @p As on @p T. */
         template<typename T, typename... As>
-        consteval std::size_t Count() {
+        consteval size_t Count() {
             return (... + std::meta::annotations_of(^^T, ^^As).size());
         }
 
         /** @brief Count annotations of types @p As on reflected entity @p ent. */
         template<typename... As>
-        consteval std::size_t Count(std::meta::info ent) {
+        consteval size_t Count(std::meta::info ent) {
             return (... + std::meta::annotations_of(ent, ^^As).size());
         }
 
         /** @brief Count annotations listed in @p annotations on reflected entity @p ent. */
-        consteval std::size_t Count(std::meta::info ent, std::initializer_list<std::meta::info> annotations) {
-            std::size_t count = 0;
+        consteval size_t Count(std::meta::info ent, std::initializer_list<std::meta::info> annotations) {
+            size_t count = 0;
             for (auto a : annotations) {
                 count += std::meta::annotations_of(ent, a).size();
             }
@@ -159,7 +159,7 @@ namespace Sora {
         }
 
         /** @brief Count annotations of reflected annotation type @p annotation on reflected entity @p ent. */
-        consteval std::size_t Count(std::meta::info ent, std::meta::info annotation) {
+        consteval size_t Count(std::meta::info ent, std::meta::info annotation) {
             return std::meta::annotations_of(ent, annotation).size();
         }
 
@@ -293,7 +293,7 @@ namespace Sora {
         template<typename... As>
         consteval MultiAnnoVariant<As...> GetSingle(std::meta::info ent) {
             std::optional<MultiAnnoVariant<As...>> result;
-            std::size_t count = 0;
+            size_t count = 0;
             auto collect = [&]<typename A> {
                 auto annots = std::meta::annotations_of(ent, ^^A);
                 count += annots.size();
@@ -325,7 +325,7 @@ namespace Sora {
         consteval auto GetSingleOptional(std::meta::info ent)
             -> std::optional<MultiAnnoVariant<Meta::InfoType<As>...>> {
             std::optional<MultiAnnoVariant<Meta::InfoType<As>...>> result;
-            std::size_t count = 0;
+            size_t count = 0;
             auto collect = [&]<std::meta::info A> {
                 using AnnotationType = Meta::InfoType<A>;
                 auto annots = std::meta::annotations_of(ent, A);
@@ -348,7 +348,7 @@ namespace Sora {
         template<typename... As>
         consteval std::optional<MultiAnnoVariant<As...>> GetSingleOptional(std::meta::info ent) {
             std::optional<MultiAnnoVariant<As...>> result;
-            std::size_t count = 0;
+            size_t count = 0;
             auto collect = [&]<typename A> {
                 auto annots = std::meta::annotations_of(ent, ^^A);
                 count += annots.size();

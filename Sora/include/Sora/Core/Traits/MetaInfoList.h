@@ -14,13 +14,13 @@ namespace Sora::Meta {
      */
     struct InfoList {
         const std::meta::info* first{}; /**< First reflected type in static storage, or null for empty. */
-        std::size_t count{};            /**< Number of reflected types in @ref first. */
+        size_t count{};                 /**< Number of reflected types in @ref first. */
 
         /** @brief Construct an empty type-reflection list. */
         consteval InfoList() noexcept = default;
 
         /** @brief Adopt an existing static array of type reflections. */
-        template<std::size_t N>
+        template<size_t N>
         consteval InfoList(const std::meta::info (&items)[N]) noexcept : first{items}, count{N} {}
 
         /** @brief Promote an inline braced list of type reflections into static storage. */
@@ -35,16 +35,16 @@ namespace Sora::Meta {
         [[nodiscard]] consteval const std::meta::info* end() const noexcept { return first + count; }
 
         /** @brief Return the number of reflected types. */
-        [[nodiscard]] consteval std::size_t size() const noexcept { return count; }
+        [[nodiscard]] consteval size_t size() const noexcept { return count; }
 
         /** @brief Return whether the list is empty. */
         [[nodiscard]] consteval bool empty() const noexcept { return count == 0; }
 
         /** @brief Return the reflected type at the specified index. */
-        [[nodiscard]] consteval const std::meta::info& operator[](std::size_t i) const noexcept { return first[i]; }
+        [[nodiscard]] consteval const std::meta::info& operator[](size_t i) const noexcept { return first[i]; }
 
         /** @brief Return the reflected type at the specified index, with bounds checking. */
-        [[nodiscard]] consteval const std::meta::info& at(std::size_t i) const {
+        [[nodiscard]] consteval const std::meta::info& at(size_t i) const {
             if (i >= count) {
                 throw std::out_of_range("Sora::Meta::InfoList index out of range");
             }

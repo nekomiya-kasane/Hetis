@@ -670,7 +670,7 @@ namespace Sora::PAL {
         using FileMode = std::conditional_t<Platform::kIsLinux, uint32_t, uint16_t>;
 
         /** @brief POSIX poll descriptor-count ABI type without including @c poll.h. */
-        using PollCount = std::size_t;
+        using PollCount = size_t;
 
         /** @brief Opaque Darwin process-accounting buffer pointer used by @c proc_pid_rusage. */
         using ResourceUsageInfo = void*;

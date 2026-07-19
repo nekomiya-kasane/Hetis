@@ -37,9 +37,9 @@ namespace {
                 phase, value.frequency, temperature, value.source};
     }
 
-    inline constexpr std::size_t kElementCount = 1U << 18U;
-    inline constexpr std::size_t kSampleCount = 11;
-    inline constexpr std::size_t kRepetitionsPerSample = 4;
+    inline constexpr size_t kElementCount = 1U << 18U;
+    inline constexpr size_t kSampleCount = 11;
+    inline constexpr size_t kRepetitionsPerSample = 4;
     inline constexpr float kDeltaTime = 1.0F / 120.0F;
 
 } // namespace
@@ -52,7 +52,7 @@ namespace {
 
     [[gnu::noinline]] void RunAoS(std::span<Particle> output, std::span<const Particle> input) noexcept {
 #pragma clang loop vectorize(disable) interleave(disable)
-        for (std::size_t index = 0; index < input.size(); ++index) {
+        for (size_t index = 0; index < input.size(); ++index) {
             output[index] = Step(input[index], kDeltaTime);
         }
     }
@@ -67,7 +67,7 @@ namespace {
 
     [[gnu::noinline]] void RunSoAManualSimd(ParticleSoA& output, const ParticleSoA& input) noexcept {
 #pragma clang loop vectorize(enable) interleave(enable)
-        for (std::size_t index = 0; index < kElementCount; ++index) {
+        for (size_t index = 0; index < kElementCount; ++index) {
             const float positionInput = input.position[index];
             const float velocityInput = input.velocity[index];
             const float accelerationInput = input.acceleration[index];
@@ -94,13 +94,13 @@ namespace {
     template<typename Function>
     [[nodiscard]] double MedianNanosecondsPerElement(Function&& function) {
         std::array<double, kSampleCount> samples{};
-        for (std::size_t warmup = 0; warmup < 3; ++warmup) {
+        for (size_t warmup = 0; warmup < 3; ++warmup) {
             function();
         }
 
         for (double& sample : samples) {
             const auto begin = std::chrono::steady_clock::now();
-            for (std::size_t repetition = 0; repetition < kRepetitionsPerSample; ++repetition) {
+            for (size_t repetition = 0; repetition < kRepetitionsPerSample; ++repetition) {
                 function();
             }
             const auto end = std::chrono::steady_clock::now();
@@ -123,14 +123,14 @@ namespace {
         std::array<double, kSampleCount> adaptedSamples{};
         std::array<double, kSampleCount> manualSamples{};
         std::array<double, kSampleCount> ratioSamples{};
-        for (std::size_t warmup = 0; warmup < 3; ++warmup) {
+        for (size_t warmup = 0; warmup < 3; ++warmup) {
             adapted();
             manual();
         }
 
         const auto measure = [](auto&& function) {
             const auto begin = std::chrono::steady_clock::now();
-            for (std::size_t repetition = 0; repetition < kRepetitionsPerSample; ++repetition) {
+            for (size_t repetition = 0; repetition < kRepetitionsPerSample; ++repetition) {
                 function();
             }
             const auto end = std::chrono::steady_clock::now();
@@ -138,7 +138,7 @@ namespace {
                    static_cast<double>(kElementCount * kRepetitionsPerSample);
         };
 
-        for (std::size_t sample = 0; sample < kSampleCount; ++sample) {
+        for (size_t sample = 0; sample < kSampleCount; ++sample) {
             if (sample % 2 == 0) {
                 adaptedSamples[sample] = measure(adapted);
                 manualSamples[sample] = measure(manual);
@@ -163,7 +163,7 @@ namespace {
 
     [[nodiscard]] float MaxRelativeError(std::span<const Particle> expected, const ParticleSoA& actual) {
         float result = 0.0F;
-        for (std::size_t index = 0; index < expected.size(); ++index) {
+        for (size_t index = 0; index < expected.size(); ++index) {
             const Particle value = Sora::SoA::Gather(actual, index);
             result = std::max({result, RelativeError(expected[index].position, value.position),
                                RelativeError(expected[index].velocity, value.velocity),
@@ -187,7 +187,7 @@ int main() {
     auto soaSimdOutput = std::make_unique<ParticleSoA>();
     auto soaManualSimdOutput = std::make_unique<ParticleSoA>();
 
-    for (std::size_t index = 0; index < kElementCount; ++index) {
+    for (size_t index = 0; index < kElementCount; ++index) {
         const float unit = static_cast<float>(index % 1024U) / 1024.0F;
         const Particle value{unit * 10.0F, 1.0F + unit, 0.25F + unit * 0.5F, 0.05F + unit * 0.1F,
                              unit,         0.5F + unit, 290.0F + unit * 20.0F, 0.1F + unit * 0.2F};

@@ -76,13 +76,13 @@ namespace Sora {
          * @param[in] context Reflection access context used for member and base discovery.
          */
         template<typename Visit>
-        consteval void WalkHierarchyMembers(
-            std::meta::info root, Visit&& visit,
-            std::meta::access_context context = std::meta::access_context::unchecked()) {
+        consteval void
+        WalkHierarchyMembers(std::meta::info root, Visit&& visit,
+                             std::meta::access_context context = std::meta::access_context::unchecked()) {
             root = std::meta::dealias(root);
-            std::vector<std::pair<std::meta::info, std::size_t>> queue{{root, 0}};
+            std::vector<std::pair<std::meta::info, size_t>> queue{{root, 0}};
             std::vector<std::meta::info> seen{root};
-            for (std::size_t i = 0; i < queue.size(); ++i) {
+            for (size_t i = 0; i < queue.size(); ++i) {
                 const auto [type, depth] = queue[i];
                 for (auto m : std::meta::members_of(type, context)) {
                     visit(depth, m);
@@ -104,9 +104,9 @@ namespace Sora {
          * @param[in] context Access context whose visible direct bases are compared with unchecked discovery.
          * @return True when at least one direct base is inaccessible from @p context.
          */
-        consteval bool HasInaccessibleDirectBases(
-            std::meta::info type,
-            std::meta::access_context context = std::meta::access_context::unprivileged()) {
+        consteval bool
+        HasInaccessibleDirectBases(std::meta::info type,
+                                   std::meta::access_context context = std::meta::access_context::unprivileged()) {
             return BasesOf(type, std::meta::access_context::unchecked()).size() != BasesOf(type, context).size();
         }
 
@@ -119,12 +119,12 @@ namespace Sora {
          * @return True when a matching virtual member function is found in @p type or a recursively reachable base.
          */
         consteval bool HasVirtualMemberFunctionInHierarchy(
-            std::meta::info type, std::string_view identifier, std::size_t parameterCount,
+            std::meta::info type, std::string_view identifier, size_t parameterCount,
             std::meta::access_context context = std::meta::access_context::unchecked()) {
             bool found = false;
             WalkHierarchyMembers(
                 type,
-                [&](std::size_t, std::meta::info member) {
+                [&](size_t, std::meta::info member) {
                     if (!found && std::meta::is_function(member) && std::meta::is_virtual(member) &&
                         std::meta::has_identifier(member) && std::meta::identifier_of(member) == identifier &&
                         std::meta::parameters_of(member).size() == parameterCount) {
@@ -160,18 +160,18 @@ namespace Sora {
 
         /** @brief Number of direct bases of @p T. */
         template<typename T>
-        inline constexpr std::size_t DirectBasesCount = Meta::DirectBaseTypesOf(^^T).size();
+        inline constexpr size_t DirectBasesCount = Meta::DirectBaseTypesOf(^^T).size();
 
         /** @brief Number of recursively reachable bases of @p T. */
         template<typename T>
-        inline constexpr std::size_t RecursiveBasesCount = Meta::RecursiveBaseTypesOf(^^T).size();
+        inline constexpr size_t RecursiveBasesCount = Meta::RecursiveBaseTypesOf(^^T).size();
 
         /**
          * @brief Type of @p T's @p I-th direct base.
          * @tparam T Reflectable class type.
          * @tparam I Zero-based direct-base index. Must be less than @ref DirectBasesCount for @p T.
          */
-        template<typename T, std::size_t I>
+        template<typename T, size_t I>
             requires std::is_class_v<T>
         using DirectBaseType = typename [:[] consteval {
             auto bases = Meta::DirectBaseTypesOf(^^T);
@@ -318,7 +318,7 @@ namespace Sora {
 
         /** @brief Number of types in @p T's single-inheritance chain, including @p T itself. */
         template<Concept::SingleInheritanceChainClass T>
-        inline constexpr std::size_t InheritanceDepth = Meta::InheritanceChainOf(^^T).size();
+        inline constexpr size_t InheritanceDepth = Meta::InheritanceChainOf(^^T).size();
 
         /** @brief Dot-separated reflection identifiers for @p T's single-inheritance chain. */
         template<Concept::SingleInheritanceChainClass T>
