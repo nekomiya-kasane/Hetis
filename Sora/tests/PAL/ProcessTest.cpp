@@ -22,7 +22,8 @@ TEST_CASE("Current process identity is stable and has a parent", "[Sora.PAL.Proc
     const auto parent = Sora::PAL::ParentProcessId();
 
     REQUIRE(first.has_value());
-    REQUIRE(second == first);
+    REQUIRE(second.has_value());
+    REQUIRE(*second == *first);
     REQUIRE(*first != 0);
     REQUIRE(parent.has_value());
     REQUIRE(*parent != *first);

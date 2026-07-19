@@ -63,6 +63,10 @@ namespace Sora::PAL {
             Type type = Type::Serial;
         };
 
+        struct Syscall {
+            FixedString<256> name = "";
+        };
+
     } // namespace $
 
     /** @brief Platform-normalized counters produced by native process-accounting adapters. */
