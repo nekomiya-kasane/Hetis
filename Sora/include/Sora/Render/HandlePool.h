@@ -319,6 +319,7 @@ namespace Sora::Render {
             if (!handle.IsValid()) {
                 return false;
             }
+
             std::scoped_lock lock{mutex_};
             Slot* slot = FindLiveSlotUnlocked(handle);
             if (slot == nullptr) {

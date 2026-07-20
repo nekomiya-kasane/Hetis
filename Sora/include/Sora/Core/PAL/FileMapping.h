@@ -74,7 +74,7 @@ namespace Sora::PAL {
         [[nodiscard]] static Result<FileMapping> Map(const File& file, FileMappingOptions options = {}) noexcept;
 
         /** @brief Return whether this object represents a successfully created mapping, including an empty mapping. */
-        [[nodiscard]] explicit operator bool() const noexcept { return api_ != nullptr; }
+        [[nodiscard]] explicit operator bool() const noexcept { return active_; }
 
         /** @brief Return the exact requested bytes. */
         [[nodiscard]] std::span<const std::byte> Bytes() const noexcept { return {data_, size_}; }
@@ -107,8 +107,8 @@ namespace Sora::PAL {
         size_t size_ = 0;
         uint64_t offset_ = 0;
         File file_{};
-        const FileSystemAPI* api_ = nullptr;
         FileMappingAccess access_ = FileMappingAccess::Read;
+        bool active_ = false;
     };
 
 } // namespace Sora::PAL

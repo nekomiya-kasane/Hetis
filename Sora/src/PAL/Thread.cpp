@@ -116,26 +116,20 @@ namespace Sora::PAL {
             return std::unexpected(ErrorCode::InvalidNativeThreadText);
         }
         return std::move(*utf8);
-#elif defined(PLATFORM_LINUX)
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
         const ThreadSystemAPI& api = LoadThreadSystemAPI();
         if (api.pthreadSelf == nullptr || api.pthreadGetName == nullptr) {
             return std::unexpected(ErrorCode::NotSupported);
         }
-        std::array<char, 16> name{};
+        std::array<char, Sora::kIsLinux ? 16 : 64> name{};
         if (api.pthreadGetName(api.pthreadSelf(), name.data(), name.size()) != 0) {
             return std::unexpected(ErrorCode::ThreadNativeFailure);
         }
-        return ValidateThreadName(name.data());
-#elif defined(PLATFORM_MACOS)
-        const ThreadSystemAPI& api = LoadThreadSystemAPI();
-        if (api.pthreadSelf == nullptr || api.pthreadGetName == nullptr) {
-            return std::unexpected(ErrorCode::NotSupported);
+        std::string result{name.data()};
+        if (auto valid = ValidateThreadName(result); !valid) {
+            return std::unexpected(valid.error());
         }
-        std::array<char, 64> name{};
-        if (api.pthreadGetName(api.pthreadSelf(), name.data(), name.size()) != 0) {
-            return std::unexpected(ErrorCode::ThreadNativeFailure);
-        }
-        return ValidateThreadName(name.data());
+        return result;
 #else
         return std::unexpected(ErrorCode::NotSupported);
 #endif

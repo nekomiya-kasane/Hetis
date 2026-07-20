@@ -208,6 +208,25 @@ namespace Sora {
             }(std::make_index_sequence<Traits::EnumeratorsCountOf<E>>{});
         }();
 
+        /**
+         * @brief Return whether @p value is an enumerator declared by @p E.
+         * @details The check is exact: a value whose underlying representation is not declared by the enum is
+         * invalid, even when its underlying integer happens to be within an apparent range. Bitmask combinations
+         * therefore require a separate bitfield validation policy.
+         * @tparam E Enum type to inspect.
+         * @param[in] value Enum value to validate.
+         * @return @c true when @p value exactly equals one declared enumerator; otherwise @c false.
+         */
+        template<Concept::Enum E>
+        [[nodiscard]] constexpr bool IsValidEnumValue(E value) noexcept {
+            template for (constexpr auto enumerator : Meta::EnumeratorsOf(^^E)) {
+                if ([:enumerator:] == value) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /** @brief Return the source identifier of @p value, or an empty view when no exact enumerator exists. */
         template<Concept::Enum E>
         [[nodiscard]] constexpr std::string_view EnumIdentifier(E value) noexcept {

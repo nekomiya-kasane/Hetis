@@ -43,7 +43,6 @@
 
 namespace Sora::PAL {
 
-    struct FileSystemAPI;
     class FileMapping;
     class FileWatcher;
     class OwnedNativeCrashStream;
@@ -114,13 +113,13 @@ namespace Sora::PAL {
         [[nodiscard]] bool Accepts(const void* buffer, std::uint64_t offset, size_t size) const noexcept;
     };
 
-    /** @brief Trivially copyable non-owning view over an open file and its pre-resolved native API table. */
+    /** @brief Trivially copyable non-owning view over an open sequential file handle. */
     class BorrowedFile {
     public:
         /** @brief Construct an invalid view. */
         constexpr BorrowedFile() noexcept = default;
 
-        /** @brief Return whether this view has a valid handle and API table. */
+        /** @brief Return whether this view has a valid native handle. */
         [[nodiscard]] explicit operator bool() const noexcept;
 
         /** @brief Write every byte using the shared native file cursor, retrying partial and interruptible writes. */
@@ -141,7 +140,7 @@ namespace Sora::PAL {
         friend class OwnedNativeCrashStream;
         friend BorrowedFile NativeStandardErrorFile() noexcept;
 
-        constexpr BorrowedFile(NativeFileHandle handle, const FileSystemAPI* api) noexcept : handle_{handle} {}
+        explicit constexpr BorrowedFile(NativeFileHandle handle) noexcept : handle_{handle} {}
 
         NativeFileHandle handle_ = kInvalidNativeFileHandle;
     };
@@ -173,7 +172,7 @@ namespace Sora::PAL {
 
         /** @brief Return a non-owning view valid until close, move, or destruction. */
         [[nodiscard]] BorrowedFile Borrow() const noexcept {
-            return positional_ ? BorrowedFile{} : BorrowedFile{handle_, api_};
+            return positional_ ? BorrowedFile{} : BorrowedFile{handle_};
         }
 
         /** @brief Read up to @p destination.size() bytes at absolute @p offset; zero bytes denotes end-of-file. */

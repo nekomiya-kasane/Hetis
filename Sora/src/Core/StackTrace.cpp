@@ -9,7 +9,7 @@
 #include "Sora/Core/StackTrace.h"
 
 #include "Sora/Core/ABI.h"
-#include "Sora/Core/PAL/Path.h"
+#include "Sora/Core/Path.h"
 #include "Sora/Core/PAL/SystemAPI.h"
 #include "Sora/Core/StringUtils.h"
 #include "Sora/Core/ToStyledString.h"
@@ -117,7 +117,7 @@ namespace Sora {
                 IMAGEHLP_MODULE64 module{};
                 module.SizeOfStruct = sizeof(module);
                 if (dbgHelp->symGetModuleInfo(process, address, &module) != FALSE && module.ImageName[0] != '\0') {
-                    frame.module = PAL::FileName(module.ImageName);
+                    frame.module = Sora::FileName(module.ImageName);
                 }
 
                 frames.push_back(std::move(frame));
@@ -157,7 +157,7 @@ namespace Sora {
                     frame.offset = frame.address >= symbolAddress ? frame.address - symbolAddress : 0;
                 }
                 if (info.fileName != nullptr) {
-                    frame.module = PAL::FileName(info.fileName);
+                    frame.module = Sora::FileName(info.fileName);
                 }
             }
             frames.push_back(std::move(frame));
@@ -169,7 +169,7 @@ namespace Sora {
     std::string StackTrace::FormatFrame(const StackFrame& frame, size_t index) {
         const std::string symbol = Ascii::String::Truncate(frame.DisplaySymbol(), 120);
         if (!frame.sourceFile.empty()) {
-            return std::format("#{:<2} {} ({}:{} +0x{:X})", index, symbol, PAL::FileName(frame.sourceFile),
+            return std::format("#{:<2} {} ({}:{} +0x{:X})", index, symbol, Sora::FileName(frame.sourceFile),
                                frame.sourceLine, frame.offset);
         }
         if (!frame.module.empty()) {
@@ -205,7 +205,7 @@ namespace Sora {
                          Ascii::String::Truncate(frame.DisplaySymbol(), 120));
             if (!frame.sourceFile.empty()) {
                 builder.Raw(Styled::StyledRole::Plain, " (");
-                builder.Text(Styled::StyledRole::String, PAL::FileName(frame.sourceFile));
+                builder.Text(Styled::StyledRole::String, Sora::FileName(frame.sourceFile));
                 builder.Raw(Styled::StyledRole::Punctuation, ":");
                 builder.Text(Styled::StyledRole::Number, std::format("{}", frame.sourceLine));
                 builder.Raw(Styled::StyledRole::Plain, std::format(" +0x{:X})", frame.offset));

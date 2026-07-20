@@ -4,9 +4,10 @@
  * @ingroup PAL
  *
  * @details Use @ref OwnedNativeCrashStream only during normal startup to open an emergency file, then pass its
- * non-owning @ref NativeCrashStream view into a crash runtime. The view stores an already resolved system function
- * table, so @ref NativeCrashStream::Write and @ref NativeCrashStream::Flush perform no allocation, locking, dynamic
- * loading, path lookup, locale processing, or C++ stream buffering.
+ * non-owning @ref NativeCrashStream view into a crash runtime. Creating the owner initializes the process-lifetime
+ * native function table before the view is published. The view itself stores only the handle, so
+ * @ref NativeCrashStream::Write and @ref NativeCrashStream::Flush perform no allocation, dynamic loading, path lookup,
+ * locale processing, or C++ stream buffering.
  *
  * @code{.cpp}
  * auto emergency = Sora::PAL::OwnedNativeCrashStream::OpenTruncated("crash-emergency.txt");
@@ -37,7 +38,7 @@ namespace Sora::PAL {
         /** @brief Construct an invalid stream. */
         constexpr NativeCrashStream() noexcept = default;
 
-        /** @brief Return whether this view has a valid handle and pre-resolved system API table. */
+        /** @brief Return whether this view has a valid native handle. */
         [[nodiscard]] explicit operator bool() const noexcept;
 
         /** @brief Write every byte in @p text, retrying interruptible and partial native writes. */
