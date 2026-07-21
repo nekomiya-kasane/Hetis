@@ -238,6 +238,9 @@ namespace Sora::Resources {
             if (name == "Config") {
                 return {ResourceType::Config, "config", ".ini"};
             }
+            if (name == "Settings") {
+                return {ResourceType::Settings, "settings", ".json"};
+            }
             if (name == "Audio") {
                 return {ResourceType::Audio, "audio", ".bin"};
             }

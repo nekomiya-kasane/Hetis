@@ -5,6 +5,7 @@
  */
 
 #include "Sora/Core/Resources/ResourceRegistry.h"
+#include "Sora/Core/Resources/Settings.h"
 
 #include <algorithm>
 #include <array>
@@ -255,11 +256,11 @@ namespace Sora::Resources {
     }
 
     Result<ResourceBlob> ResourceRegistry::Open(std::string_view uri) {
-        auto resourceUri = ParseResourceUri(uri);
-        if (!resourceUri) {
-            return std::unexpected(ErrorCode::InvalidArgument);
+        auto normalized = NormalizeResourceOrSettingsUri(uri);
+        if (!normalized) {
+            return std::unexpected(normalized.error());
         }
-        return Open(resourceUri->Hash());
+        return Open(HashUri(*normalized));
     }
 
     VoidResult ResourceRegistry::MountPak(std::string name, std::vector<std::byte> bytes, int32_t priority) {
@@ -484,10 +485,11 @@ namespace Sora::Resources {
                 if (!bytes) {
                     return std::unexpected(bytes.error());
                 }
+                std::vector<std::byte> owned{bytes->begin(), bytes->end()};
                 return ResourceBlob{ResourceId{.hash = entry.semanticHash,
                                                .type = static_cast<ResourceType>(entry.type),
                                                .uri = std::string_view{entry.uri, entry.uriSize}},
-                                    *bytes, source.owner};
+                                    std::move(owned), source.owner};
             }
         }
         return std::unexpected(ErrorCode::InvalidState);

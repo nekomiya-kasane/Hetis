@@ -86,6 +86,7 @@ namespace Sora::Resources {
         Config = 11,
         Audio = 12,
         Data = 13,
+        Settings = 14,
         Max = std::numeric_limits<uint16_t>::max()
     };
 
@@ -109,7 +110,7 @@ namespace Sora::Resources {
     /** @brief Return whether @p type is a stable, currently supported resource type. */
     [[nodiscard]] constexpr bool IsKnownResourceType(ResourceType type) noexcept {
         return type != ResourceType::Unknown &&
-               static_cast<uint16_t>(type) <= static_cast<uint16_t>(ResourceType::Data);
+               static_cast<uint16_t>(type) <= static_cast<uint16_t>(ResourceType::Settings);
     }
 
     /** @brief Return whether @p type is a stable, currently supported encoded resource type. */

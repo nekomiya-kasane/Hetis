@@ -223,7 +223,15 @@ namespace Sora {
 
             Json traceEvents = Json::array();
             for (const CpuProfileEvent& event : events) {
-                traceEvents.push_back(ToJson(event));
+                traceEvents.push_back(Json::object({
+                    {"name", std::string(event.name)},
+                    {"cat", ToString(event.category)},
+                    {"ph", "X"},
+                    {"ts", static_cast<double>(event.startNanoseconds) / 1'000.0},
+                    {"dur", static_cast<double>(event.endNanoseconds - event.startNanoseconds) / 1'000.0},
+                    {"tid", event.threadId},
+                    {"args", Json::object({{"depth", event.depth}})},
+                }));
             }
 
             const Json trace = Json::object({

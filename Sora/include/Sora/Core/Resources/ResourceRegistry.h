@@ -96,7 +96,7 @@ namespace Sora::Resources {
         /** @brief Open a resource by semantic hash, lazily indexing pending modules if needed. */
         [[nodiscard]] Result<ResourceBlob> Open(uint64_t hash);
 
-        /** @brief Open a resource by canonical URI, lazily indexing pending modules if needed. */
+        /** @brief Open a resource by canonical URI or settings:// alias, lazily indexing pending modules if needed. */
         [[nodiscard]] Result<ResourceBlob> Open(std::string_view uri);
 
         /** @brief Mount an owned `.lpak` byte vector directly into this registry. */
