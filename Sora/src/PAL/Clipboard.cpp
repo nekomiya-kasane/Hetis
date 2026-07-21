@@ -5,6 +5,7 @@
  */
 
 #include <Sora/Core/PAL/Clipboard.h>
+#include <Sora/Core/PAL/GlobalMemory.h>
 #include <Sora/Core/PAL/SystemAPI.h>
 #include <Sora/Core/Unicode.h>
 #include <Sora/Platform.h>
@@ -43,7 +44,7 @@ namespace Sora::PAL::Clipboard {
             /** @brief Open the clipboard with bounded backoff for ordinary cross-process contention. */
             [[nodiscard]] static Result<ClipboardSession> Open() {
                 const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
-                if (api.openClipboard == nullptr || api.closeClipboard == nullptr) {
+                if (!EnsureSystemAPIs(api.openClipboard, api.closeClipboard)) {
                     return std::unexpected(ErrorCode::NotSupported);
                 }
 
@@ -70,7 +71,7 @@ namespace Sora::PAL::Clipboard {
                     return {};
                 }
                 const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
-                if (api.closeClipboard == nullptr || api.closeClipboard() == 0) {
+                if (!EnsureSystemAPIs(api.closeClipboard) || api.closeClipboard() == 0) {
                     return std::unexpected(ErrorCode::ClipboardNativeFailure);
                 }
                 open_ = false;
@@ -84,7 +85,7 @@ namespace Sora::PAL::Clipboard {
                 }
 
                 open_ = false;
-                if (const ClipboardSystemAPI& api = LoadClipboardSystemAPI(); api.closeClipboard) {
+                if (const ClipboardSystemAPI& api = LoadClipboardSystemAPI(); EnsureSystemAPIs(api.closeClipboard)) {
                     api.closeClipboard();
                 }
             }
@@ -92,136 +93,6 @@ namespace Sora::PAL::Clipboard {
             bool open_ = false;
         };
 
-        /** @brief Movable global-memory allocation that frees storage until ownership transfers to the clipboard. */
-        class OwnedGlobalMemory {
-        public:
-            explicit OwnedGlobalMemory(WindowsSystem::GlobalMemory handle) noexcept : handle_{handle} {}
-            OwnedGlobalMemory(const OwnedGlobalMemory&) = delete;
-            OwnedGlobalMemory& operator=(const OwnedGlobalMemory&) = delete;
-
-            OwnedGlobalMemory(OwnedGlobalMemory&& other) noexcept : handle_{std::exchange(other.handle_, nullptr)} {}
-
-            OwnedGlobalMemory& operator=(OwnedGlobalMemory&& other) noexcept {
-                if (this != &other) {
-                    Reset();
-                    handle_ = std::exchange(other.handle_, nullptr);
-                }
-                return *this;
-            }
-
-            ~OwnedGlobalMemory() { Reset(); }
-
-            [[nodiscard]] WindowsSystem::GlobalMemory Get() const noexcept { return handle_; }
-            [[nodiscard]] WindowsSystem::GlobalMemory Release() noexcept { return std::exchange(handle_, nullptr); }
-
-        private:
-            void Reset() noexcept {
-                if (!handle_) {
-                    return;
-                }
-
-                if (const GlobalMemorySystemAPI& api = LoadGlobalMemorySystemAPI(); api.globalFree) {
-                    api.globalFree(handle_);
-                }
-                handle_ = nullptr;
-            }
-
-            WindowsSystem::GlobalMemory handle_ = nullptr;
-        };
-
-        /** @brief Locked view of global memory with checked explicit unlock and destructor fallback. */
-        class GlobalMemoryLock {
-        public:
-            GlobalMemoryLock(const GlobalMemoryLock&) = delete;
-            GlobalMemoryLock& operator=(const GlobalMemoryLock&) = delete;
-
-            GlobalMemoryLock(GlobalMemoryLock&& other) noexcept
-                : handle_{std::exchange(other.handle_, nullptr)}, data_{std::exchange(other.data_, nullptr)} {}
-
-            GlobalMemoryLock& operator=(GlobalMemoryLock&& other) noexcept {
-                if (this != &other) {
-                    UnlockIgnoringError();
-                    handle_ = std::exchange(other.handle_, nullptr);
-                    data_ = std::exchange(other.data_, nullptr);
-                }
-                return *this;
-            }
-
-            ~GlobalMemoryLock() { UnlockIgnoringError(); }
-
-            /** @brief Lock @p handle and report failure without retaining platform diagnostics. */
-            [[nodiscard]] static Result<GlobalMemoryLock> Lock(WindowsSystem::GlobalMemory handle) {
-                const GlobalMemorySystemAPI& memory = LoadGlobalMemorySystemAPI();
-                const NativeErrorSystemAPI& error = LoadNativeErrorSystemAPI();
-                if (memory.globalLock == nullptr || memory.globalUnlock == nullptr || error.setLastError == nullptr ||
-                    error.getLastError == nullptr) {
-                    return std::unexpected(ErrorCode::NotSupported);
-                }
-                void* data = memory.globalLock(handle);
-                if (data == nullptr) {
-                    return std::unexpected(ErrorCode::ClipboardNativeFailure);
-                }
-                return GlobalMemoryLock{handle, LockedData{data}};
-            }
-
-            [[nodiscard]] void* Data() const noexcept { return data_; }
-
-            /** @brief Unlock storage while distinguishing zero lock count from a native failure. */
-            [[nodiscard]] VoidResult Unlock() noexcept {
-                if (data_ == nullptr) {
-                    return {};
-                }
-                const GlobalMemorySystemAPI& memory = LoadGlobalMemorySystemAPI();
-                const NativeErrorSystemAPI& error = LoadNativeErrorSystemAPI();
-                error.setLastError(WindowsSystem::kErrorSuccess);
-                if (memory.globalUnlock(handle_) == 0 && error.getLastError() != WindowsSystem::kErrorSuccess) {
-                    return std::unexpected(ErrorCode::ClipboardNativeFailure);
-                }
-                data_ = nullptr;
-                handle_ = nullptr;
-                return {};
-            }
-
-        private:
-            struct LockedData {
-                void* value;
-            };
-
-            GlobalMemoryLock(WindowsSystem::GlobalMemory handle, LockedData data) noexcept
-                : handle_{handle}, data_{data.value} {}
-
-            void UnlockIgnoringError() noexcept {
-                if (data_ != nullptr) {
-                    data_ = nullptr;
-                    const GlobalMemorySystemAPI& api = LoadGlobalMemorySystemAPI();
-                    if (api.globalUnlock != nullptr) {
-                        api.globalUnlock(handle_);
-                    }
-                    handle_ = nullptr;
-                }
-            }
-
-            WindowsSystem::GlobalMemory handle_ = nullptr;
-            void* data_ = nullptr;
-        };
-
-        /** @brief Return the bounded byte size of a clipboard global-memory object. */
-        [[nodiscard]] Result<WindowsSystem::Size> GlobalMemorySize(WindowsSystem::GlobalMemory handle) {
-            const GlobalMemorySystemAPI& memory = LoadGlobalMemorySystemAPI();
-            const NativeErrorSystemAPI& error = LoadNativeErrorSystemAPI();
-            if (memory.globalSize == nullptr || error.setLastError == nullptr || error.getLastError == nullptr) {
-                return std::unexpected(ErrorCode::NotSupported);
-            }
-            error.setLastError(WindowsSystem::kErrorSuccess);
-            const WindowsSystem::Size size = memory.globalSize(handle);
-            if (size != 0) {
-                return size;
-            }
-            if (error.getLastError() != WindowsSystem::kErrorSuccess) {
-                return std::unexpected(ErrorCode::ClipboardNativeFailure);
-            }
-            return std::unexpected(ErrorCode::InvalidClipboardData);
-        }
 #endif
 
     } // namespace
@@ -229,39 +100,44 @@ namespace Sora::PAL::Clipboard {
     Result<std::optional<std::string>> ReadText() {
 #ifdef PLATFORM_WINDOWS
         const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
-        if (api.isClipboardFormatAvailable == nullptr || api.getClipboardData == nullptr) {
+        if (!EnsureSystemAPIs(api.isClipboardFormatAvailable, api.getClipboardData)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
+
+        // 1. Acquire the process-global clipboard and handle the absent-format case explicitly.
         auto opened = ClipboardSession::Open();
         if (!opened) {
             return std::unexpected(opened.error());
         }
         ClipboardSession session = std::move(*opened);
 
-        if (api.isClipboardFormatAvailable(WindowsSystem::kUnicodeTextClipboardFormat) == 0) {
+        if (!api.isClipboardFormatAvailable(WindowsSystem::kUnicodeTextClipboardFormat)) {
             if (auto closed = session.Close(); !closed) {
                 return std::unexpected(closed.error());
             }
             return std::optional<std::string>{};
         }
 
-        WindowsSystem::GlobalMemory handle = api.getClipboardData(WindowsSystem::kUnicodeTextClipboardFormat);
-        if (handle == nullptr) {
+        // 2. Validate the clipboard-owned allocation before exposing its contents.
+        const GlobalMemoryView memory = GlobalMemoryView::Borrow(
+            static_cast<GlobalMemoryHandle>(api.getClipboardData(WindowsSystem::kUnicodeTextClipboardFormat)));
+        if (!memory) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
-        auto byteSize = GlobalMemorySize(handle);
+        auto byteSize = memory.Size();
         if (!byteSize) {
             return std::unexpected(byteSize.error());
         }
-        if (*byteSize % sizeof(wchar_t) != 0) {
+        if (*byteSize == 0 || *byteSize % sizeof(wchar_t) != 0) {
             return std::unexpected(ErrorCode::InvalidClipboardData);
         }
 
-        auto locked = GlobalMemoryLock::Lock(handle);
+        // 3. Lock, bound the terminator search by allocation size, and convert the exact text payload.
+        auto locked = memory.Lock();
         if (!locked) {
             return std::unexpected(locked.error());
         }
-        const auto* begin = static_cast<const wchar_t*>(locked->Data());
+        const auto* begin = reinterpret_cast<const wchar_t*>(locked->Data());
         const size_t capacity = *byteSize / sizeof(wchar_t);
         const auto* terminator = std::find(begin, begin + capacity, L'\0');
         if (terminator == begin + capacity) {
@@ -271,6 +147,8 @@ namespace Sora::PAL::Clipboard {
         if (!text) {
             return std::unexpected(text.error());
         }
+
+        // 4. Report explicit release failures on the success path.
         if (auto unlocked = locked->Unlock(); !unlocked) {
             return std::unexpected(unlocked.error());
         }
@@ -287,11 +165,10 @@ namespace Sora::PAL::Clipboard {
 #ifdef PLATFORM_WINDOWS
         static_assert(sizeof(wchar_t) == sizeof(uint16_t));
         const ClipboardSystemAPI& api = LoadClipboardSystemAPI();
-        const GlobalMemorySystemAPI& memoryAPI = LoadGlobalMemorySystemAPI();
-        if (memoryAPI.globalAllocate == nullptr || memoryAPI.globalFree == nullptr || api.emptyClipboard == nullptr ||
-            api.setClipboardData == nullptr) {
+        if (!EnsureSystemAPIs(api.emptyClipboard, api.setClipboardData)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
+        // 1. Convert and validate the complete native allocation size before allocating.
         auto wide = Unicode::Utf8ToWide(text);
         if (!wide) {
             return std::unexpected(wide.error());
@@ -301,22 +178,24 @@ namespace Sora::PAL::Clipboard {
             return std::unexpected(ErrorCode::ClipboardTextTooLarge);
         }
 
+        // 2. Populate a movable allocation while retaining cleanup ownership locally.
         const WindowsSystem::Size byteSize = (wide->size() + 1) * sizeof(wchar_t);
-        WindowsSystem::GlobalMemory rawMemory = memoryAPI.globalAllocate(WindowsSystem::kMovableGlobalMemory, byteSize);
-        if (rawMemory == nullptr) {
-            return std::unexpected(ErrorCode::OutOfMemory);
+        auto allocated = OwnedGlobalMemory::Allocate(byteSize);
+        if (!allocated) {
+            return std::unexpected{allocated.error()};
         }
-        OwnedGlobalMemory memory{rawMemory};
-        auto locked = GlobalMemoryLock::Lock(memory.Get());
+        OwnedGlobalMemory memory = std::move(*allocated);
+        auto locked = memory.Lock();
         if (!locked) {
             return std::unexpected(locked.error());
         }
         std::memcpy(locked->Data(), wide->data(), wide->size() * sizeof(wchar_t));
-        static_cast<wchar_t*>(locked->Data())[wide->size()] = L'\0';
+        reinterpret_cast<wchar_t*>(locked->Data())[wide->size()] = L'\0';
         if (auto unlocked = locked->Unlock(); !unlocked) {
             return std::unexpected(unlocked.error());
         }
 
+        // 3. Publish under an exclusive session, transferring allocation ownership only after success.
         auto opened = ClipboardSession::Open();
         if (!opened) {
             return std::unexpected(opened.error());
@@ -325,7 +204,7 @@ namespace Sora::PAL::Clipboard {
         if (api.emptyClipboard() == 0) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
-        if (api.setClipboardData(WindowsSystem::kUnicodeTextClipboardFormat, memory.Get()) == nullptr) {
+        if (api.setClipboardData(WindowsSystem::kUnicodeTextClipboardFormat, memory.NativeHandle()) == nullptr) {
             return std::unexpected(ErrorCode::ClipboardNativeFailure);
         }
         static_cast<void>(memory.Release());

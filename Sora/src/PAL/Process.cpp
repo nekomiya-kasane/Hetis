@@ -25,11 +25,14 @@ namespace Sora::PAL {
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
         [[nodiscard]] Result<std::string> ReadProcessPseudoFile(const std::filesystem::path& path) {
             constexpr size_t kMaximumBytes = 16 * 1024 * 1024;
+
+            // 1. Open the pseudo-file through PAL so native access remains centralized in File.
             auto opened = File::Open(path);
             if (!opened) {
                 return std::unexpected(ErrorCode::ProcessNativeFailure);
             }
 
+            // 2. Read bounded chunks until EOF while enforcing a hard snapshot-size limit.
             std::string result;
             std::array<char, 4096> chunk{};
             uint64_t offset = 0;
@@ -50,6 +53,7 @@ namespace Sora::PAL {
         }
 
         [[nodiscard]] Result<std::vector<std::string>> ParseNullSeparatedArguments(std::string_view bytes) {
+            // 1. Validate the native record framing before producing any arguments.
             if (bytes.empty()) {
                 return std::vector<std::string>{};
             }
@@ -57,6 +61,7 @@ namespace Sora::PAL {
                 return std::unexpected(ErrorCode::InvalidNativeProcessText);
             }
 
+            // 2. Split each record and validate native text before committing it to the result.
             std::vector<std::string> arguments;
             size_t begin = 0;
             while (begin < bytes.size()) {
@@ -128,6 +133,7 @@ namespace Sora::PAL {
             return std::unexpected(ErrorCode::NotSupported);
         }
 
+        // 1. Grow the native buffer geometrically until the complete executable path fits.
         std::wstring path(512, L'\0');
         while (path.size() <= 32'768) {
             WindowsSystem::DWord size = static_cast<WindowsSystem::DWord>(path.size());
@@ -150,6 +156,8 @@ namespace Sora::PAL {
         if (api.getExecutablePath == nullptr) {
             return std::unexpected(ErrorCode::NotSupported);
         }
+
+        // 1. Try a common-case buffer, then resize once to the exact size reported by Darwin.
         std::vector<char> path(1024);
         uint32_t size = static_cast<uint32_t>(path.size());
         if (api.getExecutablePath(path.data(), &size) != 0) {
@@ -174,6 +182,7 @@ namespace Sora::PAL {
             return std::unexpected(ErrorCode::NotSupported);
         }
 
+        // 1. Parse the process-owned command line into a scoped native argument array.
         const wchar_t* commandLine = api.getCommandLineWide();
         if (commandLine == nullptr) {
             return std::unexpected(ErrorCode::ProcessNativeFailure);
@@ -187,7 +196,7 @@ namespace Sora::PAL {
 
         Sora::ScopeExit releaseArguments{[&api, nativeArguments] noexcept { api.localFree(nativeArguments); }};
 
-        // Convert each argument to UTF-8 and validate the result.
+        // 2. Convert each argument to UTF-8 and reject malformed native text atomically.
         std::vector<std::string> arguments;
         arguments.reserve(static_cast<size_t>(count));
         for (int index = 0; index < count; ++index) {

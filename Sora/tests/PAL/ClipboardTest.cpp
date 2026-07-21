@@ -1,4 +1,6 @@
 #include <Sora/Core/PAL/Clipboard.h>
+#include <Sora/Core/PAL/Module.h>
+#include <Sora/Core/PAL/SystemAPI.h>
 #include <Sora/Core/Unicode.h>
 #include <Sora/Platform.h>
 
@@ -7,13 +9,32 @@
 #include <optional>
 #include <string>
 
-#ifdef _WIN32
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <windows.h>
-#endif
-
 namespace Clipboard = Sora::PAL::Clipboard;
+
+TEST_CASE("Clipboard backend resolves independent native capability tables", "[Sora.PAL.Clipboard]") {
+#if defined(PLATFORM_WINDOWS)
+    const Sora::PAL::NativeErrorSystemAPI& error = Sora::PAL::LoadNativeErrorSystemAPI();
+    REQUIRE(error.getLastError != nullptr);
+    REQUIRE(error.setLastError != nullptr);
+
+    const Sora::PAL::GlobalMemorySystemAPI& memory = Sora::PAL::LoadGlobalMemorySystemAPI();
+    REQUIRE(memory.globalAllocate != nullptr);
+    REQUIRE(memory.globalFree != nullptr);
+    REQUIRE(memory.globalLock != nullptr);
+    REQUIRE(memory.globalUnlock != nullptr);
+    REQUIRE(memory.globalSize != nullptr);
+
+    const Sora::PAL::ClipboardSystemAPI& clipboard = Sora::PAL::LoadClipboardSystemAPI();
+    REQUIRE(clipboard.openClipboard != nullptr);
+    REQUIRE(clipboard.closeClipboard != nullptr);
+    REQUIRE(clipboard.emptyClipboard != nullptr);
+    REQUIRE(clipboard.getClipboardData != nullptr);
+    REQUIRE(clipboard.setClipboardData != nullptr);
+    REQUIRE(clipboard.isClipboardFormatAvailable != nullptr);
+#else
+    SUCCEED("The native clipboard backend is unavailable on this platform.");
+#endif
+}
 
 TEST_CASE("Clipboard rejects malformed UTF-8 before touching the native service", "[Sora.PAL.Clipboard]") {
     const auto written = Clipboard::WriteText("\xF0\x28\x8C\x28");
@@ -48,12 +69,27 @@ TEST_CASE("Clipboard round-trips Unicode text and distinguishes empty text from 
 #ifndef _WIN32
     SKIP("No native clipboard backend exists for this target.");
 #else
-    ::SetLastError(ERROR_SUCCESS);
-    const int initialFormatCount = ::CountClipboardFormats();
+    using CountClipboardFormatsFunction = int(__stdcall*)();
+    constexpr Sora::PAL::ModuleLoadOptions options{
+        .nameKind = Sora::PAL::ModuleNameKind::ExactPath,
+        .candidatePolicy = Sora::PAL::ModuleCandidatePolicy::ExactOnly,
+        .cachePolicy = Sora::PAL::ModuleCachePolicy::Private,
+    };
+    const Sora::Result<Sora::PAL::ModulePtr> user = Sora::PAL::LoadModule({"user32.dll"}, options);
+    REQUIRE(user.has_value());
+    const auto countClipboardFormats =
+        (*user)->TryFindFunction<CountClipboardFormatsFunction>("CountClipboardFormats");
+    REQUIRE(countClipboardFormats != nullptr);
+
+    const Sora::PAL::NativeErrorSystemAPI& error = Sora::PAL::LoadNativeErrorSystemAPI();
+    REQUIRE(error.setLastError != nullptr);
+    REQUIRE(error.getLastError != nullptr);
+    error.setLastError(Sora::PAL::WindowsSystem::kErrorSuccess);
+    const int initialFormatCount = countClipboardFormats();
     if (initialFormatCount != 0) {
         SKIP("The live test requires an initially empty clipboard so it cannot destroy user-owned formats.");
     }
-    if (::GetLastError() != ERROR_SUCCESS) {
+    if (error.getLastError() != Sora::PAL::WindowsSystem::kErrorSuccess) {
         SKIP("The current desktop session does not expose a testable clipboard.");
     }
 

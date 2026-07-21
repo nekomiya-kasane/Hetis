@@ -26,7 +26,6 @@ namespace Sora::PAL {
 
         std::filesystem::path root;
         FileWatchOptions options{};
-        const FileSystemAPI* api = nullptr;
         alignas(std::max_align_t) std::array<std::byte, kBufferSize> buffer{};
 #if defined(PLATFORM_WINDOWS)
         WindowsSystem::Handle directory = nullptr;
@@ -40,26 +39,25 @@ namespace Sora::PAL {
 #endif
 
         ~State() {
-            if (api == nullptr) {
-                return;
-            }
+            const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-            if (directory != nullptr && !WindowsSystem::IsInvalidHandle(directory) && api->closeHandle != nullptr) {
-                static_cast<void>(api->closeHandle(directory));
+            if (directory != nullptr && !WindowsSystem::IsInvalidHandle(directory) &&
+                EnsureSystemAPIs(api.closeHandle)) {
+                static_cast<void>(api.closeHandle(directory));
             }
-            if (event != nullptr && api->closeHandle != nullptr) {
-                static_cast<void>(api->closeHandle(event));
+            if (event != nullptr && EnsureSystemAPIs(api.closeHandle)) {
+                static_cast<void>(api.closeHandle(event));
             }
 #elif defined(PLATFORM_LINUX)
-            if (notify >= 0 && api->close != nullptr) {
-                static_cast<void>(api->close(notify));
+            if (notify >= 0 && EnsureSystemAPIs(api.close)) {
+                static_cast<void>(api.close(notify));
             }
 #elif defined(PLATFORM_MACOS)
-            if (directory >= 0 && api->close != nullptr) {
-                static_cast<void>(api->close(directory));
+            if (directory >= 0 && EnsureSystemAPIs(api.close)) {
+                static_cast<void>(api.close(directory));
             }
-            if (queue >= 0 && api->close != nullptr) {
-                static_cast<void>(api->close(queue));
+            if (queue >= 0 && EnsureSystemAPIs(api.close)) {
+                static_cast<void>(api.close(queue));
             }
 #endif
         }
@@ -133,11 +131,11 @@ namespace Sora::PAL {
         }
 
         template<typename State>
-        void CancelWindowsRead(State& state, WindowsSystem::Overlapped& overlapped) noexcept {
+        void CancelWindowsRead(State& state, const FileSystemAPI& api, WindowsSystem::Overlapped& overlapped) noexcept {
             WindowsSystem::DWord ignored = 0;
             auto* native = reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped);
-            static_cast<void>(state.api->cancelIo(state.directory, native));
-            static_cast<void>(state.api->getOverlappedResult(state.directory, native, &ignored, true));
+            static_cast<void>(api.cancelIo(state.directory, native));
+            static_cast<void>(api.getOverlappedResult(state.directory, native, &ignored, true));
         }
 #elif defined(PLATFORM_LINUX)
         [[nodiscard]] uint32_t LinuxWatchMask(FileWatchFilter filter) noexcept {
@@ -157,9 +155,9 @@ namespace Sora::PAL {
         }
 
         template<typename State>
-        [[nodiscard]] bool AddLinuxWatch(State& state, const std::filesystem::path& directory) {
-            const int descriptor =
-                state.api->addNotify(state.notify, directory.c_str(), LinuxWatchMask(state.options.filter));
+        [[nodiscard]] bool AddLinuxWatch(State& state, const FileSystemAPI& api,
+                                         const std::filesystem::path& directory) {
+            const int descriptor = api.addNotify(state.notify, directory.c_str(), LinuxWatchMask(state.options.filter));
             if (descriptor < 0) {
                 return false;
             }
@@ -168,8 +166,9 @@ namespace Sora::PAL {
         }
 
         template<typename State>
-        [[nodiscard]] bool AddLinuxTree(State& state, const std::filesystem::path& directory) {
-            if (!AddLinuxWatch(state, directory)) {
+        [[nodiscard]] bool AddLinuxTree(State& state, const FileSystemAPI& api,
+                                        const std::filesystem::path& directory) {
+            if (!AddLinuxWatch(state, api, directory)) {
                 return false;
             }
             if (!state.options.recursive) {
@@ -180,7 +179,7 @@ namespace Sora::PAL {
             std::filesystem::recursive_directory_iterator iterator{directory, options, error};
             const std::filesystem::recursive_directory_iterator end;
             while (!error && iterator != end) {
-                if (iterator->is_directory(error) && !error && !AddLinuxWatch(state, iterator->path())) {
+                if (iterator->is_directory(error) && !error && !AddLinuxWatch(state, api, iterator->path())) {
                     return false;
                 }
                 iterator.increment(error);
@@ -207,22 +206,22 @@ namespace Sora::PAL {
         }
 
         template<typename State>
-        void RemoveLinuxTree(State& state, const std::filesystem::path& directory) {
+        void RemoveLinuxTree(State& state, const FileSystemAPI& api, const std::filesystem::path& directory) {
             for (auto watch = state.roots.begin(); watch != state.roots.end();) {
                 if (!IsPathWithin(watch->second, directory)) {
                     ++watch;
                     continue;
                 }
-                if (state.api->removeNotify != nullptr) {
-                    static_cast<void>(state.api->removeNotify(state.notify, watch->first));
+                if (api.removeNotify != nullptr) {
+                    static_cast<void>(api.removeNotify(state.notify, watch->first));
                 }
                 watch = state.roots.erase(watch);
             }
         }
 
         template<typename State>
-        void ParseLinuxChanges(State& state, size_t byteCount, PendingLinuxRenames& oldRenames,
-                               std::vector<FileChange>& changes) {
+        void ParseLinuxChanges(State& state, const FileSystemAPI& api, size_t byteCount,
+                               PendingLinuxRenames& oldRenames, std::vector<FileChange>& changes) {
             size_t offset = 0;
             constexpr size_t kHeaderSize = sizeof(PosixSystem::InotifyEventHeader);
             while (offset + kHeaderSize <= byteCount) {
@@ -256,7 +255,7 @@ namespace Sora::PAL {
                         oldRenames.insert_or_assign(event->cookie, std::pair{path, directory});
                     } else if ((event->mask & PosixSystem::kEventMovedTo) != 0) {
                         auto old = oldRenames.find(event->cookie);
-                        if (directory && state.options.recursive && !AddLinuxTree(state, path)) {
+                        if (directory && state.options.recursive && !AddLinuxTree(state, api, path)) {
                             changes.push_back({.kind = FileChangeKind::RescanRequired, .path = state.root});
                         }
                         if (WantsName(state.options.filter, directory)) {
@@ -271,7 +270,7 @@ namespace Sora::PAL {
                             oldRenames.erase(old);
                         }
                     } else if ((event->mask & PosixSystem::kEventCreate) != 0) {
-                        if (directory && state.options.recursive && !AddLinuxTree(state, path)) {
+                        if (directory && state.options.recursive && !AddLinuxTree(state, api, path)) {
                             changes.push_back({.kind = FileChangeKind::RescanRequired, .path = state.root});
                         }
                         if (WantsName(state.options.filter, directory)) {
@@ -298,20 +297,23 @@ namespace Sora::PAL {
     FileWatcher& FileWatcher::operator=(FileWatcher&& other) noexcept = default;
 
     Result<FileWatcher> FileWatcher::Open(const std::filesystem::path& directory, FileWatchOptions options) noexcept {
+        // 1. Validate the portable watch contract before allocating backend state.
         if (directory.empty() || IsEmpty(options.filter) || !IsValidFlagSet(options.filter)) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
+
         try {
+            const auto& api = LoadFileSystemAPI();
             auto state = std::make_unique<State>();
             state->root = directory;
             state->options = options;
-            state->api = &LoadFileSystemAPI();
+
+            // 2. Create the native monitor and retain only its resource handles in State.
 #if defined(PLATFORM_WINDOWS)
-            if (state->api->createFileWide == nullptr || state->api->closeHandle == nullptr ||
-                state->api->createEventWide == nullptr || state->api->readDirectoryChanges == nullptr) {
+            if (!EnsureSystemAPIs(api.createFileWide, api.closeHandle, api.createEventWide, api.readDirectoryChanges)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
-            state->directory = state->api->createFileWide(
+            state->directory = api.createFileWide(
                 directory.c_str(), WindowsSystem::kFileListDirectory,
                 WindowsSystem::kFileShareRead | WindowsSystem::kFileShareWrite | WindowsSystem::kFileShareDelete,
                 nullptr, WindowsSystem::kOpenExisting,
@@ -319,27 +321,24 @@ namespace Sora::PAL {
             if (WindowsSystem::IsInvalidHandle(state->directory)) {
                 return std::unexpected{ErrorCode::IoError};
             }
-            state->event = state->api->createEventWide(nullptr, true, false, nullptr);
+            state->event = api.createEventWide(nullptr, true, false, nullptr);
             if (state->event == nullptr) {
                 return std::unexpected{ErrorCode::IoError};
             }
 #elif defined(PLATFORM_LINUX)
-            if (state->api->initializeNotify == nullptr || state->api->addNotify == nullptr ||
-                state->api->poll == nullptr || state->api->read == nullptr) {
+            if (!EnsureSystemAPIs(api.initializeNotify, api.addNotify, api.poll, api.read)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
-            state->notify = state->api->initializeNotify(PosixSystem::kOpenNonBlocking | PosixSystem::kOpenCloseOnExec);
-            if (state->notify < 0 || !AddLinuxTree(*state, directory)) {
+            state->notify = api.initializeNotify(PosixSystem::kOpenNonBlocking | PosixSystem::kOpenCloseOnExec);
+            if (state->notify < 0 || !AddLinuxTree(*state, api, directory)) {
                 return std::unexpected{ErrorCode::IoError};
             }
 #elif defined(PLATFORM_MACOS)
-            if (options.recursive || state->api->createQueue == nullptr || state->api->queueEvent == nullptr ||
-                state->api->open == nullptr) {
+            if (options.recursive || !EnsureSystemAPIs(api.createQueue, api.queueEvent, api.open)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
-            state->directory =
-                state->api->open(directory.c_str(), PosixSystem::kOpenEventOnly | PosixSystem::kOpenCloseOnExec);
-            state->queue = state->api->createQueue();
+            state->directory = api.open(directory.c_str(), PosixSystem::kOpenEventOnly | PosixSystem::kOpenCloseOnExec);
+            state->queue = api.createQueue();
             if (state->directory < 0 || state->queue < 0) {
                 return std::unexpected{ErrorCode::IoError};
             }
@@ -357,8 +356,8 @@ namespace Sora::PAL {
             event.filter = PosixSystem::kFilterVnode;
             event.flags = PosixSystem::kEventAdd | PosixSystem::kEventClear;
             event.filterFlags = nativeFilter;
-            if (state->api->queueEvent(state->queue, nullptr, 0,
-                                       reinterpret_cast<PosixSystem::NativeKernelEvent*>(&event), 1, nullptr) < 0) {
+            if (api.queueEvent(state->queue, nullptr, 0, reinterpret_cast<PosixSystem::NativeKernelEvent*>(&event), 1,
+                               nullptr) < 0) {
                 return std::unexpected{ErrorCode::IoError};
             }
 #else
@@ -376,52 +375,59 @@ namespace Sora::PAL {
         if (state_ == nullptr || timeout.count() < 0) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
+
         try {
+            const auto& api = LoadFileSystemAPI();
             std::vector<FileChange> changes;
 #if defined(PLATFORM_WINDOWS)
-            if (state_->api->resetEvent == nullptr || state_->api->waitForSingleObject == nullptr ||
-                state_->api->getOverlappedResult == nullptr || state_->api->cancelIo == nullptr) {
+            if (!EnsureSystemAPIs(api.resetEvent, api.waitForSingleObject, api.getOverlappedResult, api.cancelIo)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
+
+            // 1. Submit one overlapped directory read into the watcher's bounded buffer.
             static_assert(State::kBufferSize <= std::numeric_limits<WindowsSystem::DWord>::max());
             WindowsSystem::Overlapped overlapped{};
             overlapped.event = state_->event;
-            if (state_->api->resetEvent(state_->event) == WindowsSystem::kFalse) {
+            if (api.resetEvent(state_->event) == WindowsSystem::kFalse) {
                 return std::unexpected{ErrorCode::IoError};
             }
             WindowsSystem::DWord byteCount = 0;
-            const auto issued = state_->api->readDirectoryChanges(
+            const auto issued = api.readDirectoryChanges(
                 state_->directory, state_->buffer.data(), static_cast<WindowsSystem::DWord>(state_->buffer.size()),
                 state_->options.recursive, WindowsWatchMask(state_->options.filter), nullptr,
                 reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped), nullptr);
             if (issued == WindowsSystem::kFalse && CaptureLastSystemError() != WindowsSystem::kErrorIoPending) {
                 return std::unexpected{ErrorCode::IoError};
             }
+
+            // 2. Wait for completion, canceling and draining timed-out or failed requests.
             const auto milliseconds = timeout == std::chrono::milliseconds::max()
                                           ? WindowsSystem::kInfinite
                                           : static_cast<WindowsSystem::DWord>(
                                                 std::min<std::int64_t>(timeout.count(), WindowsSystem::kInfinite - 1));
-            const WindowsSystem::DWord waited = state_->api->waitForSingleObject(state_->event, milliseconds);
+            const WindowsSystem::DWord waited = api.waitForSingleObject(state_->event, milliseconds);
             if (waited == WindowsSystem::kWaitTimeout) {
-                CancelWindowsRead(*state_, overlapped);
+                CancelWindowsRead(*state_, api, overlapped);
                 return changes;
             }
             if (waited != WindowsSystem::kWaitObject) {
-                CancelWindowsRead(*state_, overlapped);
+                CancelWindowsRead(*state_, api, overlapped);
                 return std::unexpected{ErrorCode::IoError};
             }
-            if (state_->api->getOverlappedResult(state_->directory,
-                                                 reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped),
-                                                 &byteCount, false) == WindowsSystem::kFalse) {
-                CancelWindowsRead(*state_, overlapped);
+            if (api.getOverlappedResult(state_->directory,
+                                        reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped), &byteCount,
+                                        false) == WindowsSystem::kFalse) {
+                CancelWindowsRead(*state_, api, overlapped);
                 return std::unexpected{ErrorCode::IoError};
             }
+            // 3. Normalize the completed native batch, preserving overflow as an explicit rescan request.
             if (byteCount == 0) {
                 changes.push_back({.kind = FileChangeKind::RescanRequired, .path = state_->root});
             } else {
                 ParseWindowsChanges(*state_, byteCount, changes);
             }
 #elif defined(PLATFORM_LINUX)
+            // 1. Wait for inotify readability without blocking beyond the requested timeout.
             PosixSystem::PollDescriptor descriptor{
                 .descriptor = state_->notify, .events = PosixSystem::kPollInput, .revents = 0};
             const int milliseconds = timeout == std::chrono::milliseconds::max()
@@ -429,8 +435,7 @@ namespace Sora::PAL {
                                          : static_cast<int>(std::min<std::int64_t>(timeout.count(), INT_MAX));
             int polled = 0;
             do {
-                polled = state_->api->poll(reinterpret_cast<PosixSystem::NativePollDescriptor*>(&descriptor), 1,
-                                           milliseconds);
+                polled = api.poll(reinterpret_cast<PosixSystem::NativePollDescriptor*>(&descriptor), 1, milliseconds);
             } while (polled < 0 && errno == EINTR);
             if (polled == 0) {
                 return changes;
@@ -442,14 +447,16 @@ namespace Sora::PAL {
                  (PosixSystem::kPollError | PosixSystem::kPollHangup | PosixSystem::kPollInvalid)) != 0) {
                 return std::unexpected{ErrorCode::IoError};
             }
+
+            // 2. Drain all currently available records and normalize each bounded batch.
             PendingLinuxRenames oldRenames;
             for (;;) {
                 Sora::ssize_t bytes = 0;
                 do {
-                    bytes = state_->api->read(state_->notify, state_->buffer.data(), state_->buffer.size());
+                    bytes = api.read(state_->notify, state_->buffer.data(), state_->buffer.size());
                 } while (bytes < 0 && errno == EINTR);
                 if (bytes > 0) {
-                    ParseLinuxChanges(*state_, static_cast<size_t>(bytes), oldRenames, changes);
+                    ParseLinuxChanges(*state_, api, static_cast<size_t>(bytes), oldRenames, changes);
                     continue;
                 }
                 if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -457,10 +464,11 @@ namespace Sora::PAL {
                 }
                 break;
             }
+            // 3. Emit unmatched rename sources and retire watches for moved recursive subtrees.
             for (auto& [cookie, old] : oldRenames) {
                 static_cast<void>(cookie);
                 if (old.second && state_->options.recursive) {
-                    RemoveLinuxTree(*state_, old.first);
+                    RemoveLinuxTree(*state_, api, old.first);
                 }
                 if (WantsName(state_->options.filter, old.second)) {
                     changes.push_back({
@@ -471,6 +479,7 @@ namespace Sora::PAL {
                 }
             }
 #elif defined(PLATFORM_MACOS)
+            // 1. Convert the portable timeout and wait for one vnode event.
             PosixSystem::TimeSpec nativeTimeout{};
             const PosixSystem::NativeTimeSpec* timeoutPointer = nullptr;
             if (timeout != std::chrono::milliseconds::max()) {
@@ -480,8 +489,8 @@ namespace Sora::PAL {
             }
             PosixSystem::KernelEvent event{};
             const int count =
-                state_->api->queueEvent(state_->queue, nullptr, 0,
-                                        reinterpret_cast<PosixSystem::NativeKernelEvent*>(&event), 1, timeoutPointer);
+                api.queueEvent(state_->queue, nullptr, 0, reinterpret_cast<PosixSystem::NativeKernelEvent*>(&event), 1,
+                               timeoutPointer);
             if (count < 0) {
                 return std::unexpected{ErrorCode::IoError};
             }

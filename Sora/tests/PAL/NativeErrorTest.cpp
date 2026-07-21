@@ -1,5 +1,6 @@
 #include <Sora/Core/PAL/NativeError.h>
 #include <Sora/Core/PAL/Module.h>
+#include <Sora/Core/PAL/SystemAPI.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -7,12 +8,6 @@
 #include <string>
 #include <system_error>
 #include <type_traits>
-
-#ifdef _WIN32
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <windows.h>
-#endif
 
 static_assert(sizeof(Sora::PAL::NativeError) == sizeof(std::error_code));
 static_assert(std::is_trivially_copyable_v<Sora::PAL::NativeError>);
@@ -25,14 +20,17 @@ TEST_CASE("NativeError preserves category, value, and normalized messages", "[So
     REQUIRE(&missing.Category() == &std::generic_category());
     REQUIRE_FALSE(missing.Message().empty());
     REQUIRE(missing.ToString().contains(missing.Message()));
-    REQUIRE(missing.ToString().contains(missing.CategoryName()));
+    REQUIRE(missing.ToString().contains(missing.Category().name()));
 }
 
 TEST_CASE("NativeError captures the calling thread native error slot", "[Sora.PAL.NativeError]") {
 #ifdef _WIN32
-    ::SetLastError(ERROR_ACCESS_DENIED);
+    constexpr Sora::PAL::WindowsSystem::DWord kAccessDenied = 5;
+    const Sora::PAL::NativeErrorSystemAPI& api = Sora::PAL::LoadNativeErrorSystemAPI();
+    REQUIRE(api.setLastError != nullptr);
+    api.setLastError(kAccessDenied);
     const Sora::PAL::NativeError captured = Sora::PAL::CaptureLastNativeError();
-    REQUIRE(captured.Value() == ERROR_ACCESS_DENIED);
+    REQUIRE(captured.Value() == kAccessDenied);
     REQUIRE(&captured.Category() == &std::system_category());
 #else
     errno = EACCES;
@@ -54,7 +52,7 @@ TEST_CASE("NativeError bridges to std::system_error without duplicating the nati
     REQUIRE(message.contains(error.Message()));
 }
 
-TEST_CASE("ModuleLoader reports structured diagnostics for every failed candidate", "[Sora.PAL.NativeError]") {
+TEST_CASE("ModuleLoader reports the common module-load error", "[Sora.PAL.Module]") {
     constexpr std::string_view missing = "sora-native-error-test-module-that-does-not-exist";
     const Sora::PAL::ModuleLoadOptions options{
         .nameKind = Sora::PAL::ModuleNameKind::ExactPath,
@@ -62,11 +60,7 @@ TEST_CASE("ModuleLoader reports structured diagnostics for every failed candidat
         .cachePolicy = Sora::PAL::ModuleCachePolicy::Private,
     };
 
-    const Sora::PAL::ModuleLoadResult loaded = Sora::PAL::LoadModule({missing}, options);
+    const Sora::Result<Sora::PAL::ModulePtr> loaded = Sora::PAL::LoadModule({missing}, options);
     REQUIRE_FALSE(loaded.has_value());
-    REQUIRE(loaded.error().Code() == Sora::ErrorCode::ModuleLoadFailed);
-    REQUIRE(loaded.error().attempts.size() == 1);
-    REQUIRE(loaded.error().attempts.front().candidate == missing);
-    REQUIRE_FALSE(loaded.error().attempts.front().Message().empty());
-    REQUIRE(loaded.error().Message().contains(missing));
+    REQUIRE(loaded.error() == Sora::ErrorCode::ModuleLoadFailed);
 }

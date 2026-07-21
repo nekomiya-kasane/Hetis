@@ -31,6 +31,7 @@
 #pragma once
 
 #include <Sora/Core/StringUtils.h>
+#include <Sora/Core/Unicode.h>
 #include <Sora/ErrorCode.h>
 #include <Sora/Platform.h>
 
@@ -38,12 +39,36 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace Sora::PAL {
+
+    /**
+     * @brief Validate one process-environment variable name.
+     * @return Success, or @ref ErrorCode::InvalidEnvironmentName when @p name is empty, contains @c '=' or NUL, or is
+     * not valid UTF-8.
+     */
+    [[nodiscard]] constexpr VoidResult ValidateEnvironmentName(std::string_view name) noexcept {
+        if (name.empty() || name.contains('=') || name.contains('\0') || !Unicode::ValidateUtf8(name)) {
+            return std::unexpected{ErrorCode::InvalidEnvironmentName};
+        }
+        return {};
+    }
+
+    /**
+     * @brief Validate one process-environment variable value.
+     * @return Success, or @ref ErrorCode::InvalidEnvironmentValue when @p value contains NUL or is not valid UTF-8.
+     */
+    [[nodiscard]] constexpr VoidResult ValidateEnvironmentValue(std::string_view value) noexcept {
+        if (value.contains('\0') || !Unicode::ValidateUtf8(value)) {
+            return std::unexpected{ErrorCode::InvalidEnvironmentValue};
+        }
+        return {};
+    }
 
     /** @brief Compare native names using the target platform's environment-name case semantics. */
     [[nodiscard]] constexpr std::strong_ordering CompareEnvironmentNames(std::string_view lhs,
@@ -91,6 +116,24 @@ namespace Sora::PAL {
 
         /** @brief Return the contiguous range of names beginning with @p prefix. */
         [[nodiscard]] EnvironmentIndexRange PrefixRange(std::string_view prefix) const noexcept;
+
+        /**
+         * @brief Lazily project @p range to its immutable entries.
+         * @pre @p range is contained by @c [0,Size()].
+         * @return A random-access view borrowing this snapshot.
+         */
+        [[nodiscard]] auto Entries(EnvironmentIndexRange range) const noexcept {
+            return std::views::iota(range.begin, range.end) |
+                   std::views::transform([this](size_t index) noexcept { return (*this)[index]; });
+        }
+
+        /**
+         * @brief Lazily project every captured variable in native-name order.
+         * @return A random-access view borrowing this snapshot.
+         */
+        [[nodiscard]] auto Entries() const noexcept {
+            return Entries(EnvironmentIndexRange{.begin = 0, .end = entries_.size()});
+        }
 
     private:
         struct StoredEntry {

@@ -6,6 +6,7 @@
 
 #include <Sora/Core/PAL/Environment.h>
 #include <Sora/Core/PAL/SystemAPI.h>
+#include <Sora/Core/UniqueResource.h>
 #include <Sora/Core/Unicode.h>
 #include <Sora/Platform.h>
 
@@ -13,65 +14,43 @@
 #include <mutex>
 #include <utility>
 
-#if !defined(PLATFORM_WINDOWS)
-extern char** environ;
-#endif
-
 namespace Sora::PAL {
 
     namespace {
 
         std::mutex gEnvironmentMutex;
 
-        [[nodiscard]] constexpr bool HasEmbeddedNull(std::string_view text) noexcept {
-            return text.find('\0') != std::string_view::npos;
-        }
-
         [[nodiscard]] constexpr std::string_view StoredView(const std::string& storage, uint32_t offset,
                                                             uint32_t size) noexcept {
             return {storage.data() + offset, size};
         }
 
-        [[nodiscard]] Result<void> ValidateName(std::string_view name) {
-            if (name.empty() || name.contains('=') || HasEmbeddedNull(name) || !Unicode::ValidateUtf8(name)) {
-                return std::unexpected(ErrorCode::InvalidEnvironmentName);
-            }
-            return {};
-        }
-
-        [[nodiscard]] Result<void> ValidateValue(std::string_view value) {
-            if (HasEmbeddedNull(value) || !Unicode::ValidateUtf8(value)) {
-                return std::unexpected(ErrorCode::InvalidEnvironmentValue);
-            }
-            return {};
-        }
-
 #ifdef PLATFORM_WINDOWS
-        [[nodiscard]] Result<std::wstring> ToNative(std::string_view text, ErrorCode errorCode) {
-            auto wide = Unicode::Utf8ToWide(text);
-            if (!wide) {
-                return std::unexpected(errorCode);
+        [[nodiscard]] Result<std::wstring> EncodeNativeEnvironmentText(std::string_view text, ErrorCode failure) {
+            auto native = Unicode::Utf8ToWide(text);
+            if (!native) {
+                return std::unexpected{failure};
             }
-            return std::move(*wide);
+            return std::move(*native);
         }
 #endif
 
         [[nodiscard]] Result<std::optional<std::string>> GetUnlocked(std::string_view name) {
 #ifdef PLATFORM_WINDOWS
             const EnvironmentSystemAPI& api = LoadEnvironmentSystemAPI();
-            if (api.setLastError == nullptr || api.getLastError == nullptr ||
-                api.getEnvironmentVariableWide == nullptr) {
+            const NativeErrorSystemAPI& error = LoadNativeErrorSystemAPI();
+            if (!EnsureSystemAPIs(error.setLastError, error.getLastError, api.getEnvironmentVariableWide)) {
                 return std::unexpected(ErrorCode::NotSupported);
             }
-            auto wideName = ToNative(name, ErrorCode::InvalidEnvironmentName);
+            auto wideName = EncodeNativeEnvironmentText(name, ErrorCode::InvalidEnvironmentName);
             if (!wideName) {
-                return std::unexpected(wideName.error());
+                return std::unexpected{wideName.error()};
             }
             for (int attempt = 0; attempt < 4; ++attempt) {
-                api.setLastError(WindowsSystem::kErrorSuccess);
+                error.setLastError(WindowsSystem::kErrorSuccess);
                 const WindowsSystem::DWord required = api.getEnvironmentVariableWide(wideName->c_str(), nullptr, 0);
                 if (required == 0) {
-                    const WindowsSystem::DWord native = api.getLastError();
+                    const WindowsSystem::DWord native = error.getLastError();
                     if (native == WindowsSystem::kErrorEnvironmentVariableNotFound) {
                         return std::optional<std::string>{};
                     }
@@ -115,19 +94,19 @@ namespace Sora::PAL {
         [[nodiscard]] Result<void> SetUnlocked(std::string_view name, std::optional<std::string_view> value) {
 #ifdef PLATFORM_WINDOWS
             const EnvironmentSystemAPI& api = LoadEnvironmentSystemAPI();
-            if (api.setEnvironmentVariableWide == nullptr) {
+            if (!EnsureSystemAPIs(api.setEnvironmentVariableWide)) {
                 return std::unexpected(ErrorCode::NotSupported);
             }
-            auto wideName = ToNative(name, ErrorCode::InvalidEnvironmentName);
+            auto wideName = EncodeNativeEnvironmentText(name, ErrorCode::InvalidEnvironmentName);
             if (!wideName) {
-                return std::unexpected(wideName.error());
+                return std::unexpected{wideName.error()};
             }
             std::wstring wideValue;
             const wchar_t* nativeValue = nullptr;
             if (value) {
-                auto converted = ToNative(*value, ErrorCode::InvalidEnvironmentValue);
+                auto converted = EncodeNativeEnvironmentText(*value, ErrorCode::InvalidEnvironmentValue);
                 if (!converted) {
-                    return std::unexpected(converted.error());
+                    return std::unexpected{converted.error()};
                 }
                 wideValue = std::move(*converted);
                 nativeValue = wideValue.c_str();
@@ -196,7 +175,7 @@ namespace Sora::PAL {
     }
 
     Result<std::optional<std::string>> ReadEnvironmentVariable(std::string_view name) {
-        if (auto valid = ValidateName(name); !valid) {
+        if (auto valid = ValidateEnvironmentName(name); !valid) {
             return std::unexpected(valid.error());
         }
         const std::scoped_lock lock{gEnvironmentMutex};
@@ -204,18 +183,48 @@ namespace Sora::PAL {
     }
 
     Result<bool> HasEnvironmentVariable(std::string_view name) {
-        auto value = ReadEnvironmentVariable(name);
-        if (!value) {
-            return std::unexpected(value.error());
+        if (auto valid = ValidateEnvironmentName(name); !valid) {
+            return std::unexpected(valid.error());
         }
-        return value->has_value();
+        const std::scoped_lock lock{gEnvironmentMutex};
+#ifdef PLATFORM_WINDOWS
+        const EnvironmentSystemAPI& api = LoadEnvironmentSystemAPI();
+        const NativeErrorSystemAPI& error = LoadNativeErrorSystemAPI();
+        if (!EnsureSystemAPIs(error.setLastError, error.getLastError, api.getEnvironmentVariableWide)) {
+            return std::unexpected{ErrorCode::NotSupported};
+        }
+        auto wideName = EncodeNativeEnvironmentText(name, ErrorCode::InvalidEnvironmentName);
+        if (!wideName) {
+            return std::unexpected{wideName.error()};
+        }
+
+        error.setLastError(WindowsSystem::kErrorSuccess);
+        if (api.getEnvironmentVariableWide(wideName->c_str(), nullptr, 0) != 0) {
+            return true;
+        }
+        const WindowsSystem::DWord native = error.getLastError();
+        if (native == WindowsSystem::kErrorEnvironmentVariableNotFound) {
+            return false;
+        }
+        if (native == WindowsSystem::kErrorSuccess) {
+            return true;
+        }
+        return std::unexpected{ErrorCode::EnvironmentNativeFailure};
+#else
+        const EnvironmentSystemAPI& api = LoadEnvironmentSystemAPI();
+        if (!EnsureSystemAPIs(api.get)) {
+            return std::unexpected{ErrorCode::NotSupported};
+        }
+        const std::string ownedName{name};
+        return api.get(ownedName.c_str()) != nullptr;
+#endif
     }
 
     Result<void> WriteEnvironmentVariable(std::string_view name, std::string_view value) {
-        if (auto valid = ValidateName(name); !valid) {
+        if (auto valid = ValidateEnvironmentName(name); !valid) {
             return std::unexpected(valid.error());
         }
-        if (auto valid = ValidateValue(value); !valid) {
+        if (auto valid = ValidateEnvironmentValue(value); !valid) {
             return std::unexpected(valid.error());
         }
         const std::scoped_lock lock{gEnvironmentMutex};
@@ -223,7 +232,7 @@ namespace Sora::PAL {
     }
 
     Result<void> RemoveEnvironmentVariable(std::string_view name) {
-        if (auto valid = ValidateName(name); !valid) {
+        if (auto valid = ValidateEnvironmentName(name); !valid) {
             return std::unexpected(valid.error());
         }
         const std::scoped_lock lock{gEnvironmentMutex};
@@ -232,6 +241,8 @@ namespace Sora::PAL {
 
     Result<EnvironmentSnapshot> CaptureEnvironment() {
         const std::scoped_lock lock{gEnvironmentMutex};
+
+        // 1. Acquire a coherent process-environment view while holding the mutation lock.
         EnvironmentSnapshot snapshot;
 
         auto append = [&snapshot](std::string_view name, std::string_view value) {
@@ -248,20 +259,18 @@ namespace Sora::PAL {
 
 #ifdef PLATFORM_WINDOWS
         const EnvironmentSystemAPI& api = LoadEnvironmentSystemAPI();
-        if (api.getEnvironmentStringsWide == nullptr || api.freeEnvironmentStringsWide == nullptr) {
+        if (!EnsureSystemAPIs(api.getEnvironmentStringsWide, api.freeEnvironmentStringsWide)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
-        wchar_t* block = api.getEnvironmentStringsWide();
-        if (block == nullptr) {
+        wchar_t* nativeBlock = api.getEnvironmentStringsWide();
+        if (nativeBlock == nullptr) {
             return std::unexpected(ErrorCode::EnvironmentNativeFailure);
         }
-        struct BlockGuard {
-            wchar_t* value;
-            EnvironmentSystemAPI::FreeEnvironmentStringsWideFunction free;
-            ~BlockGuard() { free(value); }
-        } guard{block, api.freeEnvironmentStringsWide};
+        auto block = MakeUniqueResourceChecked(
+            nativeBlock, nullptr,
+            [release = api.freeEnvironmentStringsWide](wchar_t* value) noexcept { static_cast<void>(release(value)); });
 
-        for (const wchar_t* current = block; *current != L'\0';) {
+        for (const wchar_t* current = block.Get(); *current != L'\0';) {
             const std::wstring_view line{current};
             current += line.size() + 1;
             if (line.starts_with(L'=')) {
@@ -279,7 +288,15 @@ namespace Sora::PAL {
             append(*name, *value);
         }
 #else
-        for (char** current = environ; current != nullptr && *current != nullptr; ++current) {
+        const EnvironmentSystemAPI& api = LoadEnvironmentSystemAPI();
+        if (api.environment == nullptr && api.getEnvironment == nullptr) {
+            return std::unexpected{ErrorCode::NotSupported};
+        }
+        char** environment = api.EnvironmentEntries();
+        if (environment == nullptr) {
+            return std::unexpected{ErrorCode::EnvironmentNativeFailure};
+        }
+        for (char** current = environment; *current != nullptr; ++current) {
             const std::string_view line{*current};
             const size_t separator = line.find('=');
             if (separator == std::string_view::npos || separator == 0) {
@@ -294,6 +311,7 @@ namespace Sora::PAL {
         }
 #endif
 
+        // 2. Sort offset records without moving packed text so lookup remains contiguous and stable.
         std::ranges::sort(snapshot.entries_, [&snapshot](const EnvironmentSnapshot::StoredEntry& lhs,
                                                          const EnvironmentSnapshot::StoredEntry& rhs) {
             return CompareEnvironmentNames(StoredView(snapshot.storage_, lhs.nameOffset, lhs.nameSize),
@@ -303,11 +321,12 @@ namespace Sora::PAL {
     }
 
     Result<void> ApplyEnvironmentMutations(std::span<const EnvironmentMutation> mutations) {
+        // 1. Validate the complete batch and reject ambiguous duplicate writes before taking the lock.
         for (size_t index = 0; index < mutations.size(); ++index) {
-            if (auto valid = ValidateName(mutations[index].name); !valid) {
+            if (auto valid = ValidateEnvironmentName(mutations[index].name); !valid) {
                 return std::unexpected(valid.error());
             }
-            if (auto valid = ValidateValue(mutations[index].value.value_or(std::string_view{})); !valid) {
+            if (auto valid = ValidateEnvironmentValue(mutations[index].value.value_or(std::string_view{})); !valid) {
                 return std::unexpected(valid.error());
             }
             for (size_t previous = 0; previous < index; ++previous) {
@@ -317,6 +336,7 @@ namespace Sora::PAL {
             }
         }
 
+        // 2. Snapshot every original value while holding the same lock used by mutation operations.
         const std::scoped_lock lock{gEnvironmentMutex};
         std::vector<std::optional<std::string>> originals;
         originals.reserve(mutations.size());
@@ -328,6 +348,7 @@ namespace Sora::PAL {
             originals.push_back(std::move(*original));
         }
 
+        // 3. Apply in order; on failure, restore the successfully changed prefix in reverse order.
         for (size_t index = 0; index < mutations.size(); ++index) {
             if (auto applied = SetUnlocked(mutations[index].name, mutations[index].value); !applied) {
                 for (size_t rollback = index; rollback-- > 0;) {

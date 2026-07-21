@@ -68,6 +68,12 @@ namespace Sora::PAL {
             Platform::OperatingSystem os = Platform::kOperatingSystem; /**< Operating system that exports the symbol. */
         };
 
+        /** @brief Associate a function-table entry with one exact native variable that it exposes or delegates to. */
+        struct Var {
+            FixedString<256> name = ""; /**< Case-sensitive export name passed to the native symbol resolver. */
+            Platform::OperatingSystem os = Platform::kOperatingSystem; /**< Operating system that exports the symbol. */
+        };
+
     } // namespace $
 
     /** @brief Platform-normalized counters produced by native process-accounting adapters. */
@@ -927,17 +933,29 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved POSIX process-environment entry points. */
     struct EnvironmentSystemAPI {
         // clang-format off
-        using GetFunction    = char* (*)(const char*);
-        using SetFunction    = int (*)(const char*, const char*, int);
-        using RemoveFunction = int (*)(const char*);
+        using EnvironmentPointer     = char***;
+        using GetEnvironmentFunction = EnvironmentPointer (*)();
+        using GetFunction            = char* (*)(const char*);
+        using SetFunction            = int (*)(const char*, const char*, int);
+        using RemoveFunction         = int (*)(const char*);
 
         [[= $::Syscall{"getenv"}]]
-        GetFunction    get    = nullptr;
+        GetFunction            get            = nullptr;
         [[= $::Syscall{"setenv"}]]
-        SetFunction    set    = nullptr;
+        SetFunction            set            = nullptr;
         [[= $::Syscall{"unsetenv"}]]
-        RemoveFunction remove = nullptr;
+        RemoveFunction         remove         = nullptr;
+        [[= $::Var{"environ"}]]
+        EnvironmentPointer     environment    = nullptr;
+        [[= $::Syscall{"_NSGetEnviron"}]]
+        GetEnvironmentFunction getEnvironment = nullptr;
         // clang-format on
+
+        /** @brief Return the current native environment-entry array through the available platform ABI. */
+        [[nodiscard]] char** EnvironmentEntries() const noexcept {
+            EnvironmentPointer pointer = getEnvironment != nullptr ? getEnvironment() : environment;
+            return pointer != nullptr ? *pointer : nullptr;
+        }
     };
 
     /** @brief Dynamically resolved module-loader operations with normalized POSIX handle semantics. */

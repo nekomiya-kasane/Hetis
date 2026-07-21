@@ -1066,9 +1066,11 @@ namespace Sora::PAL {
             // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             // clang-format off
-            loaded.get    = module->TryFindFunction<API::GetFunction>("getenv");
-            loaded.set    = module->TryFindFunction<API::SetFunction>("setenv");
-            loaded.remove = module->TryFindFunction<API::RemoveFunction>("unsetenv");
+            loaded.get            = module->TryFindFunction<API::GetFunction>("getenv");
+            loaded.set            = module->TryFindFunction<API::SetFunction>("setenv");
+            loaded.remove         = module->TryFindFunction<API::RemoveFunction>("unsetenv");
+            loaded.environment    = module->TryFindSymbol<char**>("environ");
+            loaded.getEnvironment = module->TryFindFunction<API::GetEnvironmentFunction>("_NSGetEnviron");
             // clang-format on
 #endif
             return loaded;

@@ -46,7 +46,6 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadThreadSystemAPI() == &PAL::LoadThreadSystemAPI());
     REQUIRE(&PAL::LoadGlobalMemorySystemAPI() == &PAL::LoadGlobalMemorySystemAPI());
     REQUIRE(&PAL::LoadClipboardSystemAPI() == &PAL::LoadClipboardSystemAPI());
-    REQUIRE(&PAL::LoadCrashSystemAPI() == &PAL::LoadCrashSystemAPI());
     REQUIRE(&PAL::LoadStackTraceSystemAPI() == &PAL::LoadStackTraceSystemAPI());
 }
 
@@ -67,8 +66,7 @@ TEST_CASE("ModuleLoader preserves UTF-8 spellings and native Unicode search root
     REQUIRE(kernel.has_value());
     const auto getCurrentProcessId = (*kernel)->TryFindFunction<GetCurrentProcessIdFunction>("GetCurrentProcessId");
     REQUIRE(getCurrentProcessId != nullptr);
-    const auto getModuleFileName =
-        (*kernel)->TryFindFunction<GetModuleFileNameWideFunction>("GetModuleFileNameW");
+    const auto getModuleFileName = (*kernel)->TryFindFunction<GetModuleFileNameWideFunction>("GetModuleFileNameW");
     REQUIRE(getModuleFileName != nullptr);
     const auto copyFile = (*kernel)->TryFindFunction<CopyFileWideFunction>("CopyFileW");
     REQUIRE(copyFile != nullptr);
@@ -249,9 +247,6 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(file.writeFile != nullptr);
     REQUIRE(file.flushFileBuffers != nullptr);
 
-    const PAL::CrashSystemAPI& crash = PAL::LoadCrashSystemAPI();
-    REQUIRE(crash.setUnhandledExceptionFilter != nullptr);
-
     PAL::LockedDbgHelpSystemAPI dbgHelp = PAL::LockDbgHelpSystemAPI();
     REQUIRE(dbgHelp->symSetOptions != nullptr);
     REQUIRE(dbgHelp->symInitialize != nullptr);
@@ -259,21 +254,25 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(dbgHelp->symGetLineFromAddress != nullptr);
     REQUIRE(dbgHelp->symGetModuleInfo != nullptr);
     REQUIRE(dbgHelp->undecorateSymbolName != nullptr);
+    PAL::DbgHelpAddressInfo unresolved;
+    REQUIRE_FALSE(dbgHelp.ResolveAddress(nullptr, 0, unresolved));
 
     const PAL::StackTraceSystemAPI& stackTrace = PAL::LoadStackTraceSystemAPI();
     REQUIRE(stackTrace.captureStackBackTrace != nullptr);
-    REQUIRE(stackTrace.getCurrentProcess != nullptr);
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
     const PAL::EnvironmentSystemAPI& environment = PAL::LoadEnvironmentSystemAPI();
     REQUIRE(environment.get != nullptr);
     REQUIRE(environment.set != nullptr);
     REQUIRE(environment.remove != nullptr);
+    REQUIRE((environment.environment != nullptr || environment.getEnvironment != nullptr));
+    REQUIRE(environment.EnvironmentEntries() != nullptr);
 
     const PAL::ModuleSystemAPI& module = PAL::LoadModuleSystemAPI();
     REQUIRE(module.open != nullptr);
     REQUIRE(module.close != nullptr);
     REQUIRE(module.findSymbol != nullptr);
 
+    REQUIRE(module.queryAddress != nullptr);
     const PAL::ProcessSystemAPI& process = PAL::LoadProcessSystemAPI();
     REQUIRE(process.getProcessId != nullptr);
     REQUIRE(process.getParentProcessId != nullptr);
@@ -296,15 +295,8 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(file.write != nullptr);
     REQUIRE(file.sync != nullptr);
 
-    const PAL::CrashSystemAPI& crash = PAL::LoadCrashSystemAPI();
-    REQUIRE(crash.signalAction != nullptr);
-    REQUIRE(crash.emptySignalSet != nullptr);
-    REQUIRE(crash.raiseSignal != nullptr);
-    REQUIRE(crash.immediateExit != nullptr);
-
     const PAL::StackTraceSystemAPI& stackTrace = PAL::LoadStackTraceSystemAPI();
     REQUIRE(stackTrace.captureStackBackTrace != nullptr);
-    REQUIRE(stackTrace.findDynamicSymbol != nullptr);
 #else
     SUCCEED("The unsupported-platform tables intentionally contain no entry points.");
 #endif

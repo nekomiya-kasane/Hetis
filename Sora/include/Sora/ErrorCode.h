@@ -74,15 +74,16 @@ namespace Sora {
         ClipboardBusy = 0x0020,          ///< Another process retained exclusive clipboard access.
         InvalidClipboardData = 0x0021,   ///< Native clipboard text violates its storage or encoding invariants.
         ClipboardTextTooLarge = 0x0022,  ///< Clipboard text cannot fit the platform-native representation.
-        ClipboardNativeFailure = 0x0023, ///< A native clipboard or global-memory operation failed.
+        ClipboardNativeFailure = 0x0023, ///< A native clipboard operation failed.
 
-        InvalidThreadName = 0x0024,       ///< A thread name is not valid UTF-8 or contains an embedded null.
-        ThreadNameTooLong = 0x0025,       ///< A thread name exceeds the native platform limit.
-        ThreadNativeFailure = 0x0026,     ///< A native thread metadata or introspection operation failed.
-        InvalidNativeThreadText = 0x0027, ///< Native thread metadata is not valid Unicode text.
-        AlreadyExists = 0x0028,           ///< Atomic creation failed because the destination already exists.
-        ProcessNativeFailure = 0x0029,     ///< A native current-process introspection operation failed.
-        InvalidNativeProcessText = 0x002A, ///< Native process metadata is not valid Unicode text.
+        InvalidThreadName = 0x0024,         ///< A thread name is not valid UTF-8 or contains an embedded null.
+        ThreadNameTooLong = 0x0025,         ///< A thread name exceeds the native platform limit.
+        ThreadNativeFailure = 0x0026,       ///< A native thread metadata or introspection operation failed.
+        InvalidNativeThreadText = 0x0027,   ///< Native thread metadata is not valid Unicode text.
+        AlreadyExists = 0x0028,             ///< Atomic creation failed because the destination already exists.
+        ProcessNativeFailure = 0x0029,      ///< A native current-process introspection operation failed.
+        InvalidNativeProcessText = 0x002A,  ///< Native process metadata is not valid Unicode text.
+        GlobalMemoryNativeFailure = 0x002B, ///< A native movable-global-memory operation failed.
         /** @} */
 
         /** @name Core Rendering (0x1000 – 0x1FFF) @{ */

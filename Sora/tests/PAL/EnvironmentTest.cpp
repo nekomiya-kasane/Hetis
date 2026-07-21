@@ -5,6 +5,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <ranges>
 
 namespace PAL = Sora::PAL;
 
@@ -40,6 +41,9 @@ TEST_CASE("PAL environment distinguishes missing, empty, and populated values", 
     REQUIRE(PAL::RemoveEnvironmentVariable(name).has_value());
     const auto missing = PAL::ReadEnvironmentVariable(name);
     REQUIRE(missing.has_value());
+    const auto missingExists = PAL::HasEnvironmentVariable(name);
+    REQUIRE(missingExists.has_value());
+    REQUIRE_FALSE(*missingExists);
     REQUIRE_FALSE(missing->has_value());
 
     REQUIRE(PAL::WriteEnvironmentVariable(name, "").has_value());
@@ -47,12 +51,18 @@ TEST_CASE("PAL environment distinguishes missing, empty, and populated values", 
     REQUIRE(empty.has_value());
     REQUIRE(empty->has_value());
     REQUIRE(empty->value().empty());
+    const auto emptyExists = PAL::HasEnvironmentVariable(name);
+    REQUIRE(emptyExists.has_value());
+    REQUIRE(*emptyExists);
 
     REQUIRE(PAL::WriteEnvironmentVariable(name, "\xE4\xB8\xAD\xE6\x96\x87").has_value());
     const auto populated = PAL::ReadEnvironmentVariable(name);
     REQUIRE(populated.has_value());
     REQUIRE(populated->has_value());
     REQUIRE(**populated == "\xE4\xB8\xAD\xE6\x96\x87");
+    const auto populatedExists = PAL::HasEnvironmentVariable(name);
+    REQUIRE(populatedExists.has_value());
+    REQUIRE(*populatedExists);
 }
 
 TEST_CASE("PAL environment snapshots support sorted point and prefix lookup", "[Sora.PAL.Environment]") {
@@ -66,10 +76,31 @@ TEST_CASE("PAL environment snapshots support sorted point and prefix lookup", "[
     const auto snapshot = PAL::CaptureEnvironment();
     REQUIRE(snapshot.has_value());
     REQUIRE(snapshot->Find(first) == std::optional<std::string_view>{"1"});
-    REQUIRE(snapshot->PrefixRange("SORA_TEST__PAL_ENVIRONMENT__TREE__").Size() >= 2);
+    const PAL::EnvironmentIndexRange prefix = snapshot->PrefixRange("SORA_TEST__PAL_ENVIRONMENT__TREE__");
+    REQUIRE(prefix.Size() >= 2);
+
+    const auto entries = snapshot->Entries(prefix);
+    REQUIRE(static_cast<size_t>(std::ranges::distance(entries)) == prefix.Size());
+    for (const PAL::EnvironmentEntryView entry : entries) {
+        REQUIRE(PAL::EnvironmentNameStartsWith(entry.name, "SORA_TEST__PAL_ENVIRONMENT__TREE__"));
+    }
+    const auto allEntries = snapshot->Entries();
+    REQUIRE(static_cast<size_t>(std::ranges::distance(allEntries)) == snapshot->Size());
 }
 
 TEST_CASE("PAL environment rejects malformed and duplicate mutations before applying", "[Sora.PAL.Environment]") {
+    STATIC_REQUIRE(PAL::ValidateEnvironmentName("SORA_VALID_NAME").has_value());
+    STATIC_REQUIRE(PAL::ValidateEnvironmentValue("value=with=equals").has_value());
+    STATIC_REQUIRE(PAL::ValidateEnvironmentName("").error() == Sora::ErrorCode::InvalidEnvironmentName);
+    STATIC_REQUIRE(PAL::ValidateEnvironmentName("NAME=VALUE").error() == Sora::ErrorCode::InvalidEnvironmentName);
+    STATIC_REQUIRE(PAL::ValidateEnvironmentName("\xF0\x28\x8C\x28").error() == Sora::ErrorCode::InvalidEnvironmentName);
+    STATIC_REQUIRE(PAL::ValidateEnvironmentValue("\xF0\x28\x8C\x28").error() ==
+                   Sora::ErrorCode::InvalidEnvironmentValue);
+    constexpr std::string_view embeddedName{"NAME\0TAIL", 9};
+    constexpr std::string_view embeddedValue{"VALUE\0TAIL", 10};
+    STATIC_REQUIRE(PAL::ValidateEnvironmentName(embeddedName).error() == Sora::ErrorCode::InvalidEnvironmentName);
+    STATIC_REQUIRE(PAL::ValidateEnvironmentValue(embeddedValue).error() == Sora::ErrorCode::InvalidEnvironmentValue);
+
     REQUIRE(PAL::WriteEnvironmentVariable("", "value").error() == Sora::ErrorCode::InvalidEnvironmentName);
     REQUIRE(PAL::WriteEnvironmentVariable("SORA_TEST__PAL_ENVIRONMENT__INVALID", "\xF0\x28\x8C\x28").error() ==
             Sora::ErrorCode::InvalidEnvironmentValue);

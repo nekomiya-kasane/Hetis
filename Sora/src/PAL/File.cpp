@@ -6,6 +6,7 @@
 
 #include <Sora/Core/PAL/File.h>
 #include <Sora/Core/PAL/SystemAPI.h>
+#include <Sora/Core/Traits/EnumTraits.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -14,18 +15,6 @@
 namespace Sora::PAL {
 
     namespace {
-
-        [[nodiscard]] constexpr bool IsValidCreation(FileCreation creation) noexcept {
-            switch (creation) {
-                case FileCreation::OpenExisting:
-                case FileCreation::CreateNew:
-                case FileCreation::OpenOrCreate:
-                case FileCreation::CreateAlways:
-                case FileCreation::TruncateExisting:
-                    return true;
-            }
-            return false;
-        }
 
         [[nodiscard]] bool IsValidFileHandle(NativeFileHandle handle) noexcept {
 #if defined(PLATFORM_WINDOWS)
@@ -53,7 +42,7 @@ namespace Sora::PAL {
             return {.memoryAlignment = 4096, .offsetAlignment = 4096, .sizeAlignment = 4096};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             size_t blockSize = 0;
-            if (api.queryFileBlockSize != nullptr && api.queryFileBlockSize(handle, &blockSize)) {
+            if (EnsureSystemAPIs(api.queryFileBlockSize) && api.queryFileBlockSize(handle, &blockSize)) {
                 const size_t block = std::max<size_t>(blockSize, 512);
                 return {.memoryAlignment = block, .offsetAlignment = block, .sizeAlignment = block};
             }
@@ -69,15 +58,16 @@ namespace Sora::PAL {
         class ThreadIOEvent {
         public:
             ThreadIOEvent() noexcept {
-                if (EnsureSystemAPIs(LoadFileSystemAPI().createEventWide)) {
-                    handle_ = LoadFileSystemAPI().createEventWide(nullptr, WindowsSystem::kFalse, WindowsSystem::kFalse,
-                                                                  nullptr);
+                const auto& api = LoadFileSystemAPI();
+                if (EnsureSystemAPIs(api.createEventWide)) {
+                    handle_ = api.createEventWide(nullptr, WindowsSystem::kFalse, WindowsSystem::kFalse, nullptr);
                 }
             }
 
             ~ThreadIOEvent() {
-                if (IsValidFileHandle(handle_) && EnsureSystemAPIs(LoadFileSystemAPI().closeHandle)) {
-                    static_cast<void>(LoadFileSystemAPI().closeHandle(handle_));
+                const auto& api = LoadFileSystemAPI();
+                if (IsValidFileHandle(handle_) && EnsureSystemAPIs(api.closeHandle)) {
+                    static_cast<void>(api.closeHandle(handle_));
                 }
             }
 
@@ -85,8 +75,9 @@ namespace Sora::PAL {
             ThreadIOEvent& operator=(const ThreadIOEvent&) = delete;
 
             [[nodiscard]] NativeFileHandle Prepare() noexcept {
-                if (IsValidFileHandle(handle_) && EnsureSystemAPIs(LoadFileSystemAPI().resetEvent) &&
-                    LoadFileSystemAPI().resetEvent(handle_) != WindowsSystem::kFalse) {
+                const auto& api = LoadFileSystemAPI();
+                if (IsValidFileHandle(handle_) && EnsureSystemAPIs(api.resetEvent) &&
+                    api.resetEvent(handle_) != WindowsSystem::kFalse) {
                     return handle_;
                 }
                 return {};
@@ -123,28 +114,33 @@ namespace Sora::PAL {
         if (!*this) {
             return false;
         }
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        if (!EnsureSystemAPIs(LoadFileSystemAPI().writeFile)) {
+        if (!EnsureSystemAPIs(api.writeFile)) {
             return false;
         }
+
+        // 1. Bound each native request to the Win32 transfer-count width.
         while (!bytes.empty()) {
             const size_t request = std::min<size_t>(bytes.size(), std::numeric_limits<WindowsSystem::DWord>::max());
             WindowsSystem::DWord written = 0;
-            if (LoadFileSystemAPI().writeFile(handle_, bytes.data(), static_cast<WindowsSystem::DWord>(request),
-                                              &written, nullptr) == WindowsSystem::kFalse ||
+            if (api.writeFile(handle_, bytes.data(), static_cast<WindowsSystem::DWord>(request), &written, nullptr) ==
+                    WindowsSystem::kFalse ||
                 written == 0) {
                 return false;
             }
             bytes = bytes.subspan(written);
         }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (!EnsureSystemAPIs(LoadFileSystemAPI().write)) {
+        if (!EnsureSystemAPIs(api.write)) {
             return false;
         }
+
+        // 1. Complete partial writes and retry only interruptible failures.
         while (!bytes.empty()) {
             const size_t request =
                 std::min<size_t>(bytes.size(), static_cast<size_t>(std::numeric_limits<Sora::ssize_t>::max()));
-            const Sora::ssize_t written = LoadFileSystemAPI().write(handle_, bytes.data(), request);
+            const Sora::ssize_t written = api.write(handle_, bytes.data(), request);
             if (written > 0) {
                 bytes = bytes.subspan(static_cast<size_t>(written));
             } else if (written < 0 && errno == EINTR) {
@@ -164,13 +160,14 @@ namespace Sora::PAL {
         if (!*this) {
             return;
         }
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        if (EnsureSystemAPIs(LoadFileSystemAPI().flushFileBuffers)) {
-            static_cast<void>(LoadFileSystemAPI().flushFileBuffers(handle_));
+        if (EnsureSystemAPIs(api.flushFileBuffers)) {
+            static_cast<void>(api.flushFileBuffers(handle_));
         }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (LoadFileSystemAPI().sync != nullptr) {
-            while (LoadFileSystemAPI().sync(handle_) != 0 && errno == EINTR) {
+        if (EnsureSystemAPIs(api.sync)) {
+            while (api.sync(handle_) != 0 && errno == EINTR) {
             }
         }
 #endif
@@ -205,8 +202,8 @@ namespace Sora::PAL {
         const bool truncates =
             options.creation == FileCreation::CreateAlways || options.creation == FileCreation::TruncateExisting;
         if (path.empty() || IsEmpty(options.access) || !IsValidFlagSet(options.access) ||
-            !IsValidFlagSet(options.share) || !IsValidFlagSet(options.flags) || !IsValidCreation(options.creation) ||
-            (truncates && !HasAny(options.access, FileAccess::Write)) ||
+            !IsValidFlagSet(options.share) || !IsValidFlagSet(options.flags) ||
+            !Traits::IsValidEnumValue(options.creation) || (truncates && !HasAny(options.access, FileAccess::Write)) ||
             HasAll(options.flags, FileOpenFlag::Sequential | FileOpenFlag::Random)) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
@@ -341,16 +338,20 @@ namespace Sora::PAL {
     }
 
     Result<size_t> File::ReadAt(std::span<std::byte> destination, std::uint64_t offset) const noexcept {
+        // 1. Validate object state and the complete Direct I/O transfer contract.
         if (!*this || !ValidateTransfer(destination.data(), offset, destination.size())) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
         if (destination.empty()) {
             return 0;
         }
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        if (!positional_ || !EnsureSystemAPIs(LoadFileSystemAPI().readFile, LoadFileSystemAPI().getOverlappedResult)) {
+        if (!positional_ || !EnsureSystemAPIs(api.readFile, api.getOverlappedResult)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
+
+        // 2. Issue one bounded positional request with a reusable thread-local completion event.
         WindowsSystem::Overlapped overlapped{};
         overlapped.offset = static_cast<WindowsSystem::DWord>(offset);
         overlapped.offsetHigh = static_cast<WindowsSystem::DWord>(offset >> 32);
@@ -360,14 +361,14 @@ namespace Sora::PAL {
         }
         const size_t request = std::min<size_t>(destination.size(), std::numeric_limits<WindowsSystem::DWord>::max());
         WindowsSystem::DWord read = 0;
-        if (LoadFileSystemAPI().readFile(handle_, destination.data(), static_cast<WindowsSystem::DWord>(request), &read,
-                                         reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped)) ==
-            WindowsSystem::kFalse) {
+        if (api.readFile(handle_, destination.data(), static_cast<WindowsSystem::DWord>(request), &read,
+                         reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped)) == WindowsSystem::kFalse) {
+
+            // 3. Complete pending I/O synchronously and normalize end-of-file to a zero-byte read.
             const auto error = CaptureLastSystemError();
             if (error == WindowsSystem::kErrorIoPending) {
-                if (LoadFileSystemAPI().getOverlappedResult(
-                        handle_, reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped), &read, true) ==
-                    WindowsSystem::kFalse) {
+                if (api.getOverlappedResult(handle_, reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped),
+                                            &read, true) == WindowsSystem::kFalse) {
                     return CaptureLastSystemError() == WindowsSystem::kErrorHandleEof
                                ? Result<size_t>{0}
                                : Result<size_t>{std::unexpected{ErrorCode::IoError}};
@@ -380,16 +381,17 @@ namespace Sora::PAL {
         }
         return static_cast<size_t>(read);
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (!positional_ || !EnsureSystemAPIs(LoadFileSystemAPI().readAt) ||
+        if (!positional_ || !EnsureSystemAPIs(api.readAt) ||
             offset > static_cast<std::uint64_t>(std::numeric_limits<PosixSystem::FileOffset>::max())) {
             return std::unexpected{ErrorCode::NotSupported};
         }
+
+        // 2. Issue one bounded positional request and retry interrupted calls.
         const size_t request =
             std::min<size_t>(destination.size(), static_cast<size_t>(std::numeric_limits<Sora::ssize_t>::max()));
         Sora::ssize_t read = 0;
         do {
-            read = LoadFileSystemAPI().readAt(handle_, destination.data(), request,
-                                              static_cast<PosixSystem::FileOffset>(offset));
+            read = api.readAt(handle_, destination.data(), request, static_cast<PosixSystem::FileOffset>(offset));
         } while (read < 0 && errno == EINTR);
         return read < 0 ? Result<size_t>{std::unexpected{ErrorCode::IoError}}
                         : Result<size_t>{static_cast<size_t>(read)};
@@ -399,9 +401,12 @@ namespace Sora::PAL {
     }
 
     VoidResult File::ReadAllAt(std::span<std::byte> destination, std::uint64_t offset) const noexcept {
+        // 1. Reject ranges whose final absolute offset cannot be represented.
         if (destination.size() > std::numeric_limits<std::uint64_t>::max() - offset) {
             return std::unexpected{ErrorCode::OutOfRange};
         }
+
+        // 2. Consume partial native reads until the destination is full or end-of-file is observed.
         while (!destination.empty()) {
             auto read = ReadAt(destination, offset);
             if (!read) {
@@ -417,16 +422,20 @@ namespace Sora::PAL {
     }
 
     Result<size_t> File::WriteAt(std::span<const std::byte> source, std::uint64_t offset) const noexcept {
+        // 1. Validate object state and the complete Direct I/O transfer contract.
         if (!*this || !ValidateTransfer(source.data(), offset, source.size())) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
         if (source.empty()) {
             return 0;
         }
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        if (!positional_ || !EnsureSystemAPIs(LoadFileSystemAPI().writeFile, LoadFileSystemAPI().getOverlappedResult)) {
+        if (!positional_ || !EnsureSystemAPIs(api.writeFile, api.getOverlappedResult)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
+
+        // 2. Issue one bounded positional request with a reusable thread-local completion event.
         WindowsSystem::Overlapped overlapped{};
         overlapped.offset = static_cast<WindowsSystem::DWord>(offset);
         overlapped.offsetHigh = static_cast<WindowsSystem::DWord>(offset >> 32);
@@ -436,29 +445,31 @@ namespace Sora::PAL {
         }
         const size_t request = std::min<size_t>(source.size(), std::numeric_limits<WindowsSystem::DWord>::max());
         WindowsSystem::DWord written = 0;
-        if (LoadFileSystemAPI().writeFile(handle_, source.data(), static_cast<WindowsSystem::DWord>(request), &written,
-                                          reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped)) ==
-            WindowsSystem::kFalse) {
+        if (api.writeFile(handle_, source.data(), static_cast<WindowsSystem::DWord>(request), &written,
+                          reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped)) == WindowsSystem::kFalse) {
+
+            // 3. Complete pending I/O synchronously and report any terminal native failure.
             const auto error = CaptureLastSystemError();
             if (error != WindowsSystem::kErrorIoPending ||
-                LoadFileSystemAPI().getOverlappedResult(handle_,
-                                                        reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped),
-                                                        &written, true) == WindowsSystem::kFalse) {
+                api.getOverlappedResult(handle_, reinterpret_cast<WindowsSystem::NativeOverlapped*>(&overlapped),
+                                        &written, true) == WindowsSystem::kFalse) {
                 return std::unexpected{ErrorCode::IoError};
             }
         }
         return static_cast<size_t>(written);
+
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (!positional_ || !EnsureSystemAPIs(LoadFileSystemAPI().writeAt) ||
+        if (!positional_ || !EnsureSystemAPIs(api.writeAt) ||
             offset > static_cast<std::uint64_t>(std::numeric_limits<PosixSystem::FileOffset>::max())) {
             return std::unexpected{ErrorCode::NotSupported};
         }
+
+        // 2. Issue one bounded positional request and retry interrupted calls.
         const size_t request =
             std::min<size_t>(source.size(), static_cast<size_t>(std::numeric_limits<Sora::ssize_t>::max()));
         Sora::ssize_t written = 0;
         do {
-            written = LoadFileSystemAPI().writeAt(handle_, source.data(), request,
-                                                  static_cast<PosixSystem::FileOffset>(offset));
+            written = api.writeAt(handle_, source.data(), request, static_cast<PosixSystem::FileOffset>(offset));
         } while (written < 0 && errno == EINTR);
         return written < 0 ? Result<size_t>{std::unexpected{ErrorCode::IoError}}
                            : Result<size_t>{static_cast<size_t>(written)};
@@ -468,9 +479,12 @@ namespace Sora::PAL {
     }
 
     VoidResult File::WriteAllAt(std::span<const std::byte> source, std::uint64_t offset) const noexcept {
+        // 1. Reject ranges whose final absolute offset cannot be represented.
         if (source.size() > std::numeric_limits<std::uint64_t>::max() - offset) {
             return std::unexpected{ErrorCode::OutOfRange};
         }
+
+        // 2. Consume partial native writes until the source is exhausted.
         while (!source.empty()) {
             auto written = WriteAt(source, offset);
             if (!written) {
@@ -489,7 +503,7 @@ namespace Sora::PAL {
         if (!*this) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
-        auto api = LoadFileSystemAPI();
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
         if (!EnsureSystemAPIs(api.getFileSize)) {
             return std::unexpected{ErrorCode::NotSupported};
@@ -515,22 +529,22 @@ namespace Sora::PAL {
         if (!*this) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        auto api = LoadFileSystemAPI();
-        if (!EnsureSystemAPIs(api.setFileInformation) ||
-            size > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        if (!EnsureSystemAPIs(api.setFileInformation)) {
             return std::unexpected{ErrorCode::NotSupported};
+        }
+        if (size > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+            return std::unexpected{ErrorCode::OutOfRange};
         }
         WindowsSystem::FileEndOfFileInformation info{};
         info.endOfFile.quadPart = static_cast<std::int64_t>(size);
         if (api.setFileInformation(handle_, WindowsSystem::kFileEndOfFileInformation, &info, sizeof(info)) ==
             WindowsSystem::kFalse) {
             return VoidResult{std::unexpected{ErrorCode::IoError}};
-        } else {
-            return VoidResult{};
         }
+        return VoidResult{};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        auto api = LoadFileSystemAPI();
         if (!EnsureSystemAPIs(api.resize)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
@@ -550,29 +564,34 @@ namespace Sora::PAL {
         if (!*this) {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        return LoadFileSystemAPI().flushFileBuffers != nullptr &&
-                       LoadFileSystemAPI().flushFileBuffers(handle_) != WindowsSystem::kFalse
-                   ? VoidResult{}
-                   : VoidResult{std::unexpected{ErrorCode::IoError}};
+        if (!EnsureSystemAPIs(api.flushFileBuffers)) {
+            return std::unexpected{ErrorCode::NotSupported};
+        }
+        return api.flushFileBuffers(handle_) != WindowsSystem::kFalse ? VoidResult{}
+                                                                      : VoidResult{std::unexpected{ErrorCode::IoError}};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
 #    if defined(PLATFORM_MACOS)
-        if (LoadFileSystemAPI().control != nullptr) {
+        // 1. Prefer Darwin's full-device synchronization when available.
+        if (EnsureSystemAPIs(api.control)) {
             int result = 0;
             do {
-                result = LoadFileSystemAPI().control(handle_, PosixSystem::kFullSyncControl);
+                result = api.control(handle_, PosixSystem::kFullSyncControl);
             } while (result != 0 && errno == EINTR);
             if (result == 0) {
                 return {};
             }
         }
 #    endif
-        if (LoadFileSystemAPI().sync == nullptr) {
+
+        // 2. Fall back to the portable descriptor synchronization primitive.
+        if (!EnsureSystemAPIs(api.sync)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
         int result = 0;
         do {
-            result = LoadFileSystemAPI().sync(handle_);
+            result = api.sync(handle_);
         } while (result != 0 && errno == EINTR);
         return result == 0 ? VoidResult{} : VoidResult{std::unexpected{ErrorCode::IoError}};
 #else
@@ -584,17 +603,18 @@ namespace Sora::PAL {
         if (!*this) {
             return {};
         }
+        const auto& api = LoadFileSystemAPI();
         bool closed = false;
 #if defined(PLATFORM_WINDOWS)
-        closed = LoadFileSystemAPI().closeHandle != nullptr &&
-                 LoadFileSystemAPI().closeHandle(handle_) != WindowsSystem::kFalse;
+        closed = EnsureSystemAPIs(api.closeHandle) && api.closeHandle(handle_) != WindowsSystem::kFalse;
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (LoadFileSystemAPI().close != nullptr) {
-            closed = LoadFileSystemAPI().close(handle_) == 0;
+        if (EnsureSystemAPIs(api.close)) {
+            closed = api.close(handle_) == 0;
         }
 #endif
+
+        // 1. Disarm ownership even when native close reports failure; retrying an indeterminate handle is unsafe.
         handle_ = kInvalidNativeFileHandle;
-        api_ = nullptr;
         direct_ = false;
         positional_ = false;
         directRequirements_ = {};
@@ -606,14 +626,17 @@ namespace Sora::PAL {
     }
 
     BorrowedFile NativeStandardErrorFile() noexcept {
-        const FileSystemAPI& api = LoadFileSystemAPI();
+        const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
-        if (!EnsureSystemAPIs(api.getStandardHandle)) {
+        if (!EnsureSystemAPIs(api.getStandardHandle, api.writeFile, api.flushFileBuffers)) {
             return {};
         }
-        return BorrowedFile{api.getStandardHandle(WindowsSystem::kStandardErrorHandle), &api};
+        return BorrowedFile{api.getStandardHandle(WindowsSystem::kStandardErrorHandle)};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        return BorrowedFile{2, &api};
+        if (!EnsureSystemAPIs(api.write, api.sync)) {
+            return {};
+        }
+        return BorrowedFile{2};
 #else
         return {};
 #endif
