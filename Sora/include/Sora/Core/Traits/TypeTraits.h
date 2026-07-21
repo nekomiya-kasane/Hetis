@@ -24,6 +24,7 @@
 #include <ranges>
 #include <algorithm>
 
+#include "Sora/Core/Traits/ConstructionTraits.h"
 #include "Sora/Platform.h"
 
 namespace Sora {
