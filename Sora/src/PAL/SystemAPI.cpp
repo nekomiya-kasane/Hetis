@@ -7,6 +7,7 @@
 #include <Sora/Core/PAL/SystemAPI.h>
 #include <Sora/Core/PAL/Module.h>
 
+#include <atomic>
 #include <array>
 #include <cerrno>
 #include <charconv>
@@ -23,6 +24,7 @@
 #        define NOMINMAX
 #    endif
 #    include <Windows.h>
+#    include <werapi.h>
 #    include <DbgHelp.h>
 #    include <Psapi.h>
 #    include <Shellapi.h>
@@ -33,6 +35,7 @@
 #    include <execinfo.h>
 #    include <fcntl.h>
 #    include <poll.h>
+#    include <ucontext.h>
 #    include <pthread.h>
 #    include <signal.h>
 #    include <sys/mman.h>
@@ -113,15 +116,15 @@ namespace Sora::PAL {
                 return false;
             }
 
-            HANDLE snapshot = api.createProcessSnapshot(TH32CS_SNAPPROCESS, 0);
-            if (snapshot == INVALID_HANDLE_VALUE) {
+            WindowsSystem::Handle snapshot = api.createProcessSnapshot(TH32CS_SNAPPROCESS, 0);
+            if (WindowsSystem::IsInvalidHandle(snapshot)) {
                 return false;
             }
             PROCESSENTRY32W entry{};
             entry.dwSize = sizeof(entry);
-            const DWORD current = api.getCurrentProcessId();
+            const WindowsSystem::DWord current = api.getCurrentProcessId();
             bool result = false;
-            for (BOOL found = api.firstProcess(snapshot, &entry); found != FALSE;
+            for (WindowsSystem::Bool found = api.firstProcess(snapshot, &entry); found != WindowsSystem::kFalse;
                  found = api.nextProcess(snapshot, &entry)) {
                 if (entry.th32ProcessID == current) {
                     *parent = entry.th32ParentProcessID;
@@ -146,7 +149,7 @@ namespace Sora::PAL {
                 return false;
             }
 
-            HANDLE process = api.getCurrentProcess();
+            WindowsSystem::Handle process = api.getCurrentProcess();
             FILETIME created{}, exited{}, kernel{}, user{};
             PROCESS_MEMORY_COUNTERS memory{};
             memory.cb = sizeof(memory);
@@ -170,7 +173,6 @@ namespace Sora::PAL {
             };
             return true;
         }
-
         // clang-format off
         static_assert(sizeof(WindowsSystem::ProcessorNumber)                     == sizeof(PROCESSOR_NUMBER));
         static_assert(alignof(WindowsSystem::ProcessorNumber)                    == alignof(PROCESSOR_NUMBER));
@@ -212,6 +214,7 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<WindowsSystem::DWord64, DWORD64>);
         static_assert(std::is_same_v<WindowsSystem::UInt,    UINT>);
         static_assert(std::is_same_v<WindowsSystem::HResult, HRESULT>);
+        static_assert(std::is_same_v<WindowsSystem::Long,    LONG>);
 
         static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction,                   decltype(&::SymSetOptions)>);
         static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction,                   decltype(&::SymInitialize)>);
@@ -221,9 +224,7 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<DbgHelpSystemAPI::UndecorateSymbolNameFunction,            decltype(&::UnDecorateSymbolName)>);
        
         static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction,        decltype(&::RtlCaptureStackBackTrace)>);
-        static_assert(std::is_same_v<StackTraceSystemAPI::GetCurrentProcessFunction,            decltype(&::GetCurrentProcess)>);
 
-        static_assert(std::is_same_v<CrashSystemAPI::SetUnhandledExceptionFilterFunction,       decltype(&::SetUnhandledExceptionFilter)>);
 
         static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessIdFunction,             decltype(&::GetCurrentProcessId)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessFunction,               decltype(&::GetCurrentProcess)>);
@@ -279,43 +280,36 @@ namespace Sora::PAL {
             return ::dlsym(module, name);
         }
 
-        [[nodiscard]] const PosixStackTraceNativeAPI& PosixStackTraceAPI() noexcept {
-            static const PosixStackTraceNativeAPI api = [] {
-                PosixStackTraceNativeAPI loaded{};
+        using QueryPosixAddressNativeFunction = decltype(&::dladdr);
+
+        [[nodiscard]] QueryPosixAddressNativeFunction LoadPosixAddressQuery() noexcept {
+            static const QueryPosixAddressNativeFunction query = [] {
                 const ModulePtr& module = CurrentProcessModule();
                 if (module == nullptr) {
-                    return loaded;
+                    return static_cast<QueryPosixAddressNativeFunction>(nullptr);
                 }
-                // clang-format off
-                loaded.captureStackBackTrace = module->TryFindFunction<PosixStackTraceNativeAPI::CaptureStackBackTraceFunction>("backtrace");
-                loaded.findDynamicSymbol     = module->TryFindFunction<PosixStackTraceNativeAPI::FindDynamicSymbolFunction>("dladdr");
-                // clang-format on
-                return loaded;
+                return module->TryFindFunction<QueryPosixAddressNativeFunction>("dladdr");
             }();
-            return api;
+            return query;
         }
 
-        int CapturePosixStackBackTrace(void** frames, int count) {
-            const auto capture = PosixStackTraceAPI().captureStackBackTrace;
-            return capture != nullptr ? capture(frames, count) : 0;
-        }
-
-        int FindPosixDynamicSymbol(const void* address, DynamicSymbolInfo* info) {
-            const auto find = PosixStackTraceAPI().findDynamicSymbol;
-            if (find == nullptr || info == nullptr) {
-                return 0;
+        bool QueryPosixAddress(const void* address, ModuleAddressInfo* output) noexcept {
+            if (address == nullptr || output == nullptr) {
+                return false;
             }
+            *output = {};
             Dl_info nativeInfo{};
-            const int result = find(address, &nativeInfo);
-            if (result != 0) {
-                *info = {
-                    .fileName = nativeInfo.dli_fname,
-                    .fileBase = nativeInfo.dli_fbase,
-                    .symbolName = nativeInfo.dli_sname,
-                    .symbolAddress = nativeInfo.dli_saddr,
-                };
+            const QueryPosixAddressNativeFunction query = LoadPosixAddressQuery();
+            if (query == nullptr || query(address, &nativeInfo) == 0) {
+                return false;
             }
-            return result;
+            *output = {
+                .modulePath = nativeInfo.dli_fname,
+                .moduleBase = nativeInfo.dli_fbase,
+                .symbolName = nativeInfo.dli_sname,
+                .symbolAddress = nativeInfo.dli_saddr,
+            };
+            return true;
         }
 
         /** @brief Convert a native POSIX @c timeval to a checked nanosecond count. */
@@ -430,7 +424,6 @@ namespace Sora::PAL {
             };
             return true;
         }
-
         // clang-format off
         /** @brief Query a POSIX file's preferred block size through the native stat ABI. */
         [[nodiscard]] bool QueryPosixFileBlockSize(int descriptor, size_t* output) noexcept {
@@ -493,17 +486,12 @@ namespace Sora::PAL {
         static_assert(std::is_convertible_v<decltype(&::fcntl),         FileSystemAPI::ControlFunction>);
         static_assert(std::is_convertible_v<decltype(&::posix_fadvise), FileSystemAPI::AdviseFileFunction>);
 
-        static_assert(std::is_convertible_v<decltype(&::sigaction),     CrashSystemAPI::SignalActionFunction>);
-        static_assert(std::is_convertible_v<decltype(&::raise),         CrashSystemAPI::RaiseSignalFunction>);
-        static_assert(std::is_convertible_v<decltype(&::_exit),         CrashSystemAPI::ImmediateExitFunction>);
 
-        static_assert(sizeof(PosixSystem::SignalSet*)        == sizeof(sigset_t*));
         static_assert(sizeof(PosixSystem::ThreadId)          == sizeof(pthread_t));
         static_assert(sizeof(PosixSystem::ThreadAttributes*) == sizeof(pthread_attr_t*));
         static_assert(sizeof(PosixSystem::FileOffset)        == sizeof(off_t));
         static_assert(sizeof(PosixSystem::FileMode)          == sizeof(mode_t));
         static_assert(sizeof(PosixSystem::PollCount)         == sizeof(nfds_t));
-        static_assert(alignof(PosixSystem::SignalSet*)       == alignof(sigset_t*));
         static_assert(alignof(PosixSystem::ThreadId)         == alignof(pthread_t));
         static_assert(alignof(PosixSystem::FileOffset)       == alignof(off_t));
         static_assert(alignof(PosixSystem::FileMode)         == alignof(mode_t));
@@ -597,6 +585,430 @@ namespace Sora::PAL {
         // clang-format on
 #endif
 
+#if defined(PLATFORM_WINDOWS)
+        struct WindowsCrashNativeAPI {
+            // clang-format off
+            using SetUnhandledExceptionFilterFunction = decltype(&::SetUnhandledExceptionFilter);
+            using GetErrorModeFunction                = decltype(&::GetErrorMode);
+            using ExceptionFilterFunction             = decltype(::SetUnhandledExceptionFilter(nullptr));
+            using SetErrorModeFunction                = decltype(&::SetErrorMode);
+            using WerGetFlagsFunction                 = decltype(&::WerGetFlags);
+            using WerSetFlagsFunction                 = decltype(&::WerSetFlags);
+
+            SetUnhandledExceptionFilterFunction setUnhandledExceptionFilter = nullptr;
+            GetErrorModeFunction                getErrorMode                = nullptr;
+            SetErrorModeFunction                setErrorMode                = nullptr;
+            WerGetFlagsFunction                 werGetFlags                 = nullptr;
+            WerSetFlagsFunction                 werSetFlags                 = nullptr;
+            // clang-format on
+        };
+
+        [[nodiscard]] const WindowsCrashNativeAPI& LoadWindowsCrashNativeAPI() noexcept {
+            static const WindowsCrashNativeAPI api = [] {
+                WindowsCrashNativeAPI loaded{};
+                const ModulePtr& kernelModule = KernelModule();
+                if (kernelModule == nullptr) {
+                    return loaded;
+                }
+                // clang-format off
+                loaded.setUnhandledExceptionFilter = kernelModule->TryFindFunction<WindowsCrashNativeAPI::SetUnhandledExceptionFilterFunction>("SetUnhandledExceptionFilter");
+                loaded.getErrorMode                = kernelModule->TryFindFunction<WindowsCrashNativeAPI::GetErrorModeFunction>("GetErrorMode");
+                loaded.setErrorMode                = kernelModule->TryFindFunction<WindowsCrashNativeAPI::SetErrorModeFunction>("SetErrorMode");
+                loaded.werGetFlags                 = kernelModule->TryFindFunction<WindowsCrashNativeAPI::WerGetFlagsFunction>("WerGetFlags");
+                loaded.werSetFlags                 = kernelModule->TryFindFunction<WindowsCrashNativeAPI::WerSetFlagsFunction>("WerSetFlags");
+                // clang-format on
+                return loaded;
+            }();
+            return api;
+        }
+
+        inline constexpr WindowsSystem::DWord kSuppressedErrorModeFlags =
+            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
+        inline constexpr WindowsSystem::DWord kWerNoUiFlag = 32;
+        inline constexpr WindowsSystem::HResult kWerFlagsNotInitialized = -2147023728L;
+
+        struct WindowsCrashRegistration {
+            NativeCrashCallback callback = nullptr;
+            void* userData = nullptr;
+            WindowsCrashNativeAPI::ExceptionFilterFunction previousFilter = nullptr;
+            WindowsSystem::DWord addedErrorModeFlags = 0;
+            WindowsSystem::DWord addedWerFlags = 0;
+            WindowsSystem::Handle process = nullptr;
+            bool suppressDialogs = false;
+            bool nativeHandlerInstalled = false;
+        };
+
+        struct WindowsCrashRegistry {
+            std::mutex mutex;
+            WindowsCrashRegistration registration;
+            std::atomic<WindowsCrashRegistration*> active{nullptr};
+        };
+
+        WindowsCrashRegistry gNativeCrashRegistry;
+        static_assert(decltype(WindowsCrashRegistry::active)::is_always_lock_free);
+
+        [[nodiscard]] constexpr std::string_view ExceptionName(WindowsSystem::DWord code) noexcept {
+            switch (code) {
+                case EXCEPTION_ACCESS_VIOLATION:
+                    return "ACCESS_VIOLATION";
+                case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+                    return "ARRAY_BOUNDS_EXCEEDED";
+                case EXCEPTION_DATATYPE_MISALIGNMENT:
+                    return "DATATYPE_MISALIGNMENT";
+                case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+                    return "FLOAT_DIVIDE_BY_ZERO";
+                case EXCEPTION_FLT_INVALID_OPERATION:
+                    return "FLOAT_INVALID_OPERATION";
+                case EXCEPTION_ILLEGAL_INSTRUCTION:
+                    return "ILLEGAL_INSTRUCTION";
+                case EXCEPTION_IN_PAGE_ERROR:
+                    return "IN_PAGE_ERROR";
+                case EXCEPTION_INT_DIVIDE_BY_ZERO:
+                    return "INTEGER_DIVIDE_BY_ZERO";
+                case EXCEPTION_INT_OVERFLOW:
+                    return "INTEGER_OVERFLOW";
+                case EXCEPTION_STACK_OVERFLOW:
+                    return "STACK_OVERFLOW";
+                default:
+                    return "UNKNOWN_STRUCTURED_EXCEPTION";
+            }
+        }
+
+        [[nodiscard]] uintptr_t WindowsInstructionPointer(const CONTEXT* context) noexcept {
+            if (context == nullptr) {
+                return 0;
+            }
+#    if defined(_M_X64) || defined(__x86_64__)
+            return static_cast<uintptr_t>(context->Rip);
+#    elif defined(_M_IX86) || defined(__i386__)
+            return static_cast<uintptr_t>(context->Eip);
+#    elif defined(_M_ARM64) || defined(__aarch64__)
+            return static_cast<uintptr_t>(context->Pc);
+#    else
+            return 0;
+#    endif
+        }
+
+        WindowsSystem::Long __stdcall DispatchWindowsCrash(EXCEPTION_POINTERS* exception) noexcept {
+            WindowsCrashRegistration* registration = gNativeCrashRegistry.active.load(std::memory_order_acquire);
+            if (registration == nullptr || registration->callback == nullptr) {
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
+
+            const EXCEPTION_RECORD* record = exception != nullptr ? exception->ExceptionRecord : nullptr;
+            const WindowsSystem::DWord code = record != nullptr ? record->ExceptionCode : 0;
+            const NativeCrashContext context{
+                .reason = ExceptionName(code),
+                .code = code,
+                .faultAddress = record != nullptr ? reinterpret_cast<uintptr_t>(record->ExceptionAddress) : 0,
+                .instructionPointer =
+                    WindowsInstructionPointer(exception != nullptr ? exception->ContextRecord : nullptr),
+            };
+            registration->callback(context, registration->userData);
+
+            if (registration->suppressDialogs) {
+                return EXCEPTION_EXECUTE_HANDLER;
+            }
+            if (registration->previousFilter != nullptr) {
+                return registration->previousFilter(exception);
+            }
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        void RestoreWindowsCrashPolicy(WindowsCrashRegistration& registration,
+                                       const WindowsCrashNativeAPI& api) noexcept {
+            if (registration.addedErrorModeFlags != 0 && api.getErrorMode != nullptr && api.setErrorMode != nullptr) {
+                const WindowsSystem::DWord currentMode = api.getErrorMode();
+                api.setErrorMode(currentMode & ~registration.addedErrorModeFlags);
+            }
+            if (registration.addedWerFlags != 0 && registration.process != nullptr && api.werGetFlags != nullptr &&
+                api.werSetFlags != nullptr) {
+                WindowsSystem::DWord currentFlags = 0;
+                if (WindowsSystem::Succeeded(api.werGetFlags(registration.process, &currentFlags))) {
+                    api.werSetFlags(currentFlags & ~registration.addedWerFlags);
+                }
+            }
+            registration.addedErrorModeFlags = 0;
+            registration.addedWerFlags = 0;
+            registration.process = nullptr;
+        }
+
+        bool InstallNativeCrashHandlerImpl(NativeCrashCallback callback, void* userData,
+                                           bool suppressDialogs) noexcept {
+            if (callback == nullptr) {
+                return false;
+            }
+
+            std::lock_guard lock{gNativeCrashRegistry.mutex};
+            if (gNativeCrashRegistry.active.load(std::memory_order_relaxed) != nullptr) {
+                return false;
+            }
+
+            const WindowsCrashNativeAPI& api = LoadWindowsCrashNativeAPI();
+            if (api.setUnhandledExceptionFilter == nullptr) {
+                return false;
+            }
+
+            WindowsCrashRegistration& registration = gNativeCrashRegistry.registration;
+            registration = {
+                .callback = callback,
+                .userData = userData,
+                .suppressDialogs = suppressDialogs,
+            };
+
+            if (suppressDialogs) {
+                const ProcessSystemAPI& processAPI = LoadProcessSystemAPI();
+                if (!EnsureSystemAPIs(api.getErrorMode, api.setErrorMode, api.werGetFlags, api.werSetFlags,
+                                      processAPI.getCurrentProcess)) {
+                    registration = {};
+                    return false;
+                }
+
+                registration.process = processAPI.getCurrentProcess();
+                if (registration.process == nullptr) {
+                    registration = {};
+                    return false;
+                }
+
+                const WindowsSystem::DWord currentMode = api.getErrorMode();
+                registration.addedErrorModeFlags = kSuppressedErrorModeFlags & ~currentMode;
+                if (registration.addedErrorModeFlags != 0) {
+                    api.setErrorMode(currentMode | registration.addedErrorModeFlags);
+                }
+
+                WindowsSystem::DWord currentWerFlags = 0;
+                const WindowsSystem::HResult result = api.werGetFlags(registration.process, &currentWerFlags);
+                if (!WindowsSystem::Succeeded(result) && result != kWerFlagsNotInitialized) {
+                    RestoreWindowsCrashPolicy(registration, api);
+                    registration = {};
+                    return false;
+                }
+
+                registration.addedWerFlags = kWerNoUiFlag & ~currentWerFlags;
+                if (registration.addedWerFlags != 0 &&
+                    !WindowsSystem::Succeeded(api.werSetFlags(currentWerFlags | registration.addedWerFlags))) {
+                    RestoreWindowsCrashPolicy(registration, api);
+                    registration = {};
+                    return false;
+                }
+            }
+
+            gNativeCrashRegistry.active.store(&registration, std::memory_order_release);
+            registration.previousFilter = api.setUnhandledExceptionFilter(DispatchWindowsCrash);
+            registration.nativeHandlerInstalled = true;
+            return true;
+        }
+
+        void UninstallNativeCrashHandlerImpl() noexcept {
+            std::lock_guard lock{gNativeCrashRegistry.mutex};
+            WindowsCrashRegistration* registration =
+                gNativeCrashRegistry.active.exchange(nullptr, std::memory_order_acq_rel);
+            if (registration == nullptr) {
+                return;
+            }
+
+            const WindowsCrashNativeAPI& api = LoadWindowsCrashNativeAPI();
+            if (registration->nativeHandlerInstalled && api.setUnhandledExceptionFilter != nullptr) {
+                const auto displacedFilter = api.setUnhandledExceptionFilter(registration->previousFilter);
+                if (displacedFilter != DispatchWindowsCrash) {
+                    api.setUnhandledExceptionFilter(displacedFilter);
+                }
+            }
+            RestoreWindowsCrashPolicy(*registration, api);
+            *registration = {};
+        }
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+        struct PosixCrashNativeAPI {
+            // clang-format off
+            using SignalActionFunction   = decltype(&::sigaction);
+            using EmptySignalSetFunction = decltype(&::sigemptyset);
+            using RaiseSignalFunction    = decltype(&::raise);
+            using ImmediateExitFunction  = decltype(&::_exit);
+
+            SignalActionFunction   signalAction   = nullptr;
+            EmptySignalSetFunction emptySignalSet = nullptr;
+            RaiseSignalFunction    raiseSignal    = nullptr;
+            ImmediateExitFunction  immediateExit  = nullptr;
+            // clang-format on
+        };
+
+        [[nodiscard]] const PosixCrashNativeAPI& LoadPosixCrashNativeAPI() noexcept {
+            static const PosixCrashNativeAPI api = [] {
+                PosixCrashNativeAPI loaded{};
+                const ModulePtr& module = CurrentProcessModule();
+                if (module == nullptr) {
+                    return loaded;
+                }
+                // clang-format off
+                loaded.signalAction   = module->TryFindFunction<PosixCrashNativeAPI::SignalActionFunction>("sigaction");
+                loaded.emptySignalSet = module->TryFindFunction<PosixCrashNativeAPI::EmptySignalSetFunction>("sigemptyset");
+                loaded.raiseSignal    = module->TryFindFunction<PosixCrashNativeAPI::RaiseSignalFunction>("raise");
+                loaded.immediateExit  = module->TryFindFunction<PosixCrashNativeAPI::ImmediateExitFunction>("_exit");
+                // clang-format on
+                return loaded;
+            }();
+            return api;
+        }
+
+        inline constexpr auto kFatalSignals = std::to_array<int>({
+            SIGABRT,
+            SIGFPE,
+            SIGILL,
+            SIGSEGV,
+#    ifdef SIGBUS
+            SIGBUS,
+#    endif
+        });
+
+        struct PosixCrashRegistration {
+            NativeCrashCallback callback = nullptr;
+            void* userData = nullptr;
+            PosixCrashNativeAPI::RaiseSignalFunction raiseSignal = nullptr;
+            PosixCrashNativeAPI::ImmediateExitFunction immediateExit = nullptr;
+            std::array<struct sigaction, kFatalSignals.size()> previousActions{};
+            size_t installedCount = 0;
+        };
+
+        struct PosixCrashRegistry {
+            std::mutex mutex;
+            PosixCrashRegistration registration;
+            std::atomic<PosixCrashRegistration*> active{nullptr};
+        };
+
+        PosixCrashRegistry gNativeCrashRegistry;
+        static_assert(decltype(PosixCrashRegistry::active)::is_always_lock_free);
+
+        [[nodiscard]] constexpr std::string_view SignalName(int signalNumber) noexcept {
+            switch (signalNumber) {
+                case SIGABRT:
+                    return "SIGABRT";
+                case SIGFPE:
+                    return "SIGFPE";
+                case SIGILL:
+                    return "SIGILL";
+                case SIGSEGV:
+                    return "SIGSEGV";
+#    ifdef SIGBUS
+                case SIGBUS:
+                    return "SIGBUS";
+#    endif
+                default:
+                    return "UNKNOWN_SIGNAL";
+            }
+        }
+
+        [[nodiscard]] uintptr_t PosixInstructionPointer(const void* nativeContext) noexcept {
+            if (nativeContext == nullptr) {
+                return 0;
+            }
+            const auto* context = static_cast<const ucontext_t*>(nativeContext);
+#    if defined(PLATFORM_MACOS) && defined(__x86_64__)
+            return static_cast<uintptr_t>(context->uc_mcontext->__ss.__rip);
+#    elif defined(PLATFORM_MACOS) && defined(__aarch64__)
+            return static_cast<uintptr_t>(context->uc_mcontext->__ss.__pc);
+#    elif defined(__x86_64__) && defined(REG_RIP)
+            return static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_RIP]);
+#    elif defined(__i386__) && defined(REG_EIP)
+            return static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_EIP]);
+#    elif defined(__aarch64__)
+            return static_cast<uintptr_t>(context->uc_mcontext.pc);
+#    else
+            return 0;
+#    endif
+        }
+
+        void DispatchPosixCrash(int signalNumber, siginfo_t* signalInfo, void* nativeContext) noexcept {
+            PosixCrashRegistration* registration = gNativeCrashRegistry.active.load(std::memory_order_acquire);
+            if (registration == nullptr || registration->callback == nullptr) {
+                return;
+            }
+
+            const NativeCrashContext context{
+                .reason = SignalName(signalNumber),
+                .code = static_cast<uint32_t>(signalNumber),
+                .faultAddress = signalInfo != nullptr ? reinterpret_cast<uintptr_t>(signalInfo->si_addr) : 0,
+                .instructionPointer = PosixInstructionPointer(nativeContext),
+            };
+            registration->callback(context, registration->userData);
+            if (registration->raiseSignal(signalNumber) != 0) {
+                registration->immediateExit(128 + signalNumber);
+            }
+        }
+
+        bool InstallNativeCrashHandlerImpl(NativeCrashCallback callback, void* userData,
+                                           bool suppressDialogs) noexcept {
+            static_cast<void>(suppressDialogs);
+            if (callback == nullptr) {
+                return false;
+            }
+
+            std::lock_guard lock{gNativeCrashRegistry.mutex};
+            if (gNativeCrashRegistry.active.load(std::memory_order_relaxed) != nullptr) {
+                return false;
+            }
+
+            const PosixCrashNativeAPI& api = LoadPosixCrashNativeAPI();
+            if (!EnsureSystemAPIs(api.signalAction, api.emptySignalSet, api.raiseSignal, api.immediateExit)) {
+                return false;
+            }
+
+            PosixCrashRegistration& registration = gNativeCrashRegistry.registration;
+            registration = {
+                .callback = callback,
+                .userData = userData,
+                .raiseSignal = api.raiseSignal,
+                .immediateExit = api.immediateExit,
+            };
+
+            struct sigaction action{};
+            if (api.emptySignalSet(&action.sa_mask) != 0) {
+                registration = {};
+                return false;
+            }
+            action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+            action.sa_sigaction = DispatchPosixCrash;
+
+            gNativeCrashRegistry.active.store(&registration, std::memory_order_release);
+            for (int signalNumber : kFatalSignals) {
+                const size_t index = registration.installedCount;
+                if (api.signalAction(signalNumber, &action, &registration.previousActions[index]) != 0) {
+                    while (registration.installedCount != 0) {
+                        --registration.installedCount;
+                        api.signalAction(kFatalSignals[registration.installedCount],
+                                         &registration.previousActions[registration.installedCount], nullptr);
+                    }
+                    gNativeCrashRegistry.active.store(nullptr, std::memory_order_release);
+                    registration = {};
+                    return false;
+                }
+                ++registration.installedCount;
+            }
+            return true;
+        }
+
+        void UninstallNativeCrashHandlerImpl() noexcept {
+            std::lock_guard lock{gNativeCrashRegistry.mutex};
+            PosixCrashRegistration* registration =
+                gNativeCrashRegistry.active.exchange(nullptr, std::memory_order_acq_rel);
+            if (registration == nullptr) {
+                return;
+            }
+
+            const PosixCrashNativeAPI& api = LoadPosixCrashNativeAPI();
+            while (registration->installedCount != 0) {
+                --registration->installedCount;
+                api.signalAction(kFatalSignals[registration->installedCount],
+                                 &registration->previousActions[registration->installedCount], nullptr);
+            }
+            *registration = {};
+        }
+#else
+        bool InstallNativeCrashHandlerImpl(NativeCrashCallback, void*, bool) noexcept {
+            return false;
+        }
+
+        void UninstallNativeCrashHandlerImpl() noexcept {}
+#endif
     } // namespace
 
     SystemError CaptureLastSystemError() noexcept {
@@ -647,8 +1059,6 @@ namespace Sora::PAL {
 #endif
 #if defined(PLATFORM_WINDOWS)
             // clang-format off
-            loaded.getLastError                = module->TryFindFunction<API::GetLastErrorFunction>("GetLastError");
-            loaded.setLastError                = module->TryFindFunction<API::SetLastErrorFunction>("SetLastError");
             loaded.getEnvironmentVariableWide  = module->TryFindFunction<API::GetEnvironmentVariableWideFunction>("GetEnvironmentVariableW");
             loaded.setEnvironmentVariableWide  = module->TryFindFunction<API::SetEnvironmentVariableWideFunction>("SetEnvironmentVariableW");
             loaded.getEnvironmentStringsWide   = module->TryFindFunction<API::GetEnvironmentStringsWideFunction>("GetEnvironmentStringsW");
@@ -678,9 +1088,10 @@ namespace Sora::PAL {
             // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             // clang-format off
-            loaded.open       = OpenPosixModule;
-            loaded.close      = ClosePosixModule;
-            loaded.findSymbol = FindPosixSymbol;
+            loaded.open         = OpenPosixModule;
+            loaded.close        = ClosePosixModule;
+            loaded.findSymbol   = FindPosixSymbol;
+            loaded.queryAddress = QueryPosixAddress;
             // clang-format on
 #endif
             return loaded;
@@ -738,7 +1149,8 @@ namespace Sora::PAL {
                 // clang-format on
             }
 #    if defined(PLATFORM_LINUX)
-            if (EnsureSystemAPIs(loaded.getResourceUsage, LoadFileSystemAPI().systemConfiguration)) {
+            const auto& fileAPI = LoadFileSystemAPI();
+            if (EnsureSystemAPIs(loaded.getResourceUsage, fileAPI.systemConfiguration)) {
                 loaded.captureUsage = CapturePosixProcessUsage;
             }
 #    else
@@ -807,7 +1219,6 @@ namespace Sora::PAL {
             if (module == nullptr) {
                 return loaded;
             }
-
             // clang-format off
             loaded.globalAllocate = module->TryFindFunction<API::GlobalAllocateFunction>("GlobalAlloc");
             loaded.globalFree     = module->TryFindFunction<API::GlobalFreeFunction>("GlobalFree");
@@ -830,7 +1241,6 @@ namespace Sora::PAL {
             if (module == nullptr) {
                 return loaded;
             }
-
             // clang-format off
             loaded.openClipboard              = module->TryFindFunction<API::OpenClipboardFunction>("OpenClipboard");
             loaded.closeClipboard             = module->TryFindFunction<API::CloseClipboardFunction>("CloseClipboard");
@@ -884,7 +1294,6 @@ namespace Sora::PAL {
             loaded.cancelIo              = module->TryFindFunction<API::CancelIoFunction>("CancelIoEx");
             loaded.readDirectoryChanges  = module->TryFindFunction<API::ReadDirectoryChangesFunction>("ReadDirectoryChangesW");
             loaded.getSystemInfo         = module->TryFindFunction<API::GetSystemInfoFunction>("GetSystemInfo");
-            loaded.getCurrentProcess     = module->TryFindFunction<API::GetCurrentProcessFunction>("GetCurrentProcess");
             loaded.duplicateHandle       = module->TryFindFunction<API::DuplicateHandleFunction>("DuplicateHandle");
             // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
@@ -926,38 +1335,12 @@ namespace Sora::PAL {
         return api;
     }
 
-    const CrashSystemAPI& LoadCrashSystemAPI() noexcept {
-        static const CrashSystemAPI api = [] {
-            using API = CrashSystemAPI;
-            API loaded{};
-#if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
-#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-            const ModulePtr& module = CurrentProcessModule();
-#endif
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-            if (module == nullptr) {
-                return loaded;
-            }
-#endif
-            // clang-format off
-#if defined(PLATFORM_WINDOWS)
-            loaded.setUnhandledExceptionFilter = module->TryFindFunction<API::SetUnhandledExceptionFilterFunction>("SetUnhandledExceptionFilter");
-            loaded.getErrorMode                = module->TryFindFunction<API::GetErrorModeFunction>("GetErrorMode");
-            loaded.setErrorMode                = module->TryFindFunction<API::SetErrorModeFunction>("SetErrorMode");
-            loaded.getCurrentProcess           = module->TryFindFunction<API::GetCurrentProcessFunction>("GetCurrentProcess");
-            loaded.werGetFlags                 = module->TryFindFunction<API::WerGetFlagsFunction>("WerGetFlags");
-            loaded.werSetFlags                 = module->TryFindFunction<API::WerSetFlagsFunction>("WerSetFlags");
-#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-            loaded.signalAction   = module->TryFindFunction<API::SignalActionFunction>("sigaction");
-            loaded.emptySignalSet = module->TryFindFunction<API::EmptySignalSetFunction>("sigemptyset");
-            loaded.raiseSignal    = module->TryFindFunction<API::RaiseSignalFunction>("raise");
-            loaded.immediateExit  = module->TryFindFunction<API::ImmediateExitFunction>("_exit");
-#endif
-            // clang-format on
-            return loaded;
-        }();
-        return api;
+    bool InstallNativeCrashHandler(NativeCrashCallback callback, void* userData, bool suppressDialogs) noexcept {
+        return InstallNativeCrashHandlerImpl(callback, userData, suppressDialogs);
+    }
+
+    void UninstallNativeCrashHandler() noexcept {
+        UninstallNativeCrashHandlerImpl();
     }
 
     static const DbgHelpSystemAPI& LoadDbgHelpSystemAPI() noexcept {
@@ -988,6 +1371,57 @@ namespace Sora::PAL {
         return LockedDbgHelpSystemAPI{mutex, LoadDbgHelpSystemAPI()};
     }
 
+    bool LockedDbgHelpSystemAPI::ResolveAddress(void* process, uintptr_t address, DbgHelpAddressInfo& output) const {
+        output = {};
+#if defined(PLATFORM_WINDOWS)
+        if (process == nullptr || address == 0) {
+            return false;
+        }
+
+        bool resolved = false;
+        const auto nativeAddress = static_cast<WindowsSystem::DWord64>(address);
+
+        if (PAL::EnsureSystemAPIs(api_.symFromAddress)) {
+            alignas(SYMBOL_INFO) thread_local std::array<std::byte, sizeof(SYMBOL_INFO) + MAX_SYM_NAME> storage;
+            auto* symbol = reinterpret_cast<SYMBOL_INFO*>(storage.data());
+            symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+            symbol->MaxNameLen = MAX_SYM_NAME;
+            WindowsSystem::DWord64 displacement = 0;
+            if (api_.symFromAddress(process, nativeAddress, &displacement, symbol) != FALSE) {
+                output.symbol.assign(symbol->Name, symbol->NameLen);
+                output.offset = displacement;
+                resolved = true;
+            }
+        }
+
+        if (PAL::EnsureSystemAPIs(api_.symGetLineFromAddress)) {
+            IMAGEHLP_LINE64 line{};
+            line.SizeOfStruct = sizeof(line);
+            WindowsSystem::DWord displacement = 0;
+            if (api_.symGetLineFromAddress(process, nativeAddress, &displacement, &line) != FALSE &&
+                line.FileName != nullptr) {
+                output.sourceFile = line.FileName;
+                output.sourceLine = line.LineNumber;
+                resolved = true;
+            }
+        }
+
+        if (PAL::EnsureSystemAPIs(api_.symGetModuleInfo)) {
+            IMAGEHLP_MODULE64 module{};
+            module.SizeOfStruct = sizeof(module);
+            if (api_.symGetModuleInfo(process, nativeAddress, &module) != FALSE && module.ImageName[0] != 0) {
+                output.modulePath = module.ImageName;
+                resolved = true;
+            }
+        }
+        return resolved;
+#else
+        static_cast<void>(process);
+        static_cast<void>(address);
+        return false;
+#endif
+    }
+
     bool InitializeDbgHelpSystemAPI() noexcept {
 #if defined(PLATFORM_WINDOWS)
         static std::once_flag flag;
@@ -995,12 +1429,12 @@ namespace Sora::PAL {
         try {
             std::call_once(flag, [] {
                 LockedDbgHelpSystemAPI dbgHelp = LockDbgHelpSystemAPI();
-                const StackTraceSystemAPI& stackTrace = LoadStackTraceSystemAPI();
-                if (!EnsureSystemAPIs(dbgHelp->symSetOptions, dbgHelp->symInitialize, stackTrace.getCurrentProcess)) {
+                const ProcessSystemAPI& process = LoadProcessSystemAPI();
+                if (!EnsureSystemAPIs(dbgHelp->symSetOptions, dbgHelp->symInitialize, process.getCurrentProcess)) {
                     return;
                 }
                 dbgHelp->symSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
-                initialized = dbgHelp->symInitialize(stackTrace.getCurrentProcess(), nullptr, TRUE) != FALSE;
+                initialized = dbgHelp->symInitialize(process.getCurrentProcess(), nullptr, TRUE) != FALSE;
             });
         } catch (...) {
             return false;
@@ -1020,16 +1454,16 @@ namespace Sora::PAL {
             if (module == nullptr) {
                 return loaded;
             }
-
             // clang-format off
             loaded.captureStackBackTrace = module->TryFindFunction<API::CaptureStackBackTraceFunction>("RtlCaptureStackBackTrace");
-            loaded.getCurrentProcess     = module->TryFindFunction<API::GetCurrentProcessFunction>("GetCurrentProcess");
             // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-            const PosixStackTraceNativeAPI& native = PosixStackTraceAPI();
+            const ModulePtr& module = CurrentProcessModule();
+            if (module == nullptr) {
+                return loaded;
+            }
             // clang-format off
-            loaded.captureStackBackTrace = native.captureStackBackTrace != nullptr ? &CapturePosixStackBackTrace : nullptr;
-            loaded.findDynamicSymbol     = native.findDynamicSymbol != nullptr ? &FindPosixDynamicSymbol : nullptr;
+            loaded.captureStackBackTrace = module->TryFindFunction<API::CaptureStackBackTraceFunction>("backtrace");
             // clang-format on
 #endif
             return loaded;

@@ -16,35 +16,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <format>
 #include <limits>
 
-#ifdef PLATFORM_WINDOWS
-#    ifndef WIN32_LEAN_AND_MEAN
-#        define WIN32_LEAN_AND_MEAN
-#    endif
-#    ifndef NOMINMAX
-#        define NOMINMAX
-#    endif
-#    include <Windows.h>
-#    include <DbgHelp.h>
-#endif
-
 namespace Sora {
-
-    namespace {
-
-#ifdef PLATFORM_WINDOWS
-        /** @brief Return whether every DbgHelp entry point required for full frame symbolization is available. */
-        [[nodiscard]] bool HasRequiredDbgHelpAPI(const PAL::DbgHelpSystemAPI& api) noexcept {
-            return api.symSetOptions != nullptr && api.symInitialize != nullptr && api.symFromAddress != nullptr &&
-                   api.symGetLineFromAddress != nullptr && api.symGetModuleInfo != nullptr;
-        }
-
-#endif
-
-    } // namespace
 
     std::string_view StackFrame::DisplaySymbol() const noexcept {
         return symbol.empty() ? std::string_view{"<unknown>"} : std::string_view{symbol};
@@ -52,16 +27,13 @@ namespace Sora {
 
     StackTrace StackTrace::Capture(StackTraceCaptureOptions options) {
         const uint32_t skipFrames = options.skipFrames;
-        uint32_t maxFrames = options.maxFrames;
-        maxFrames = std::min<uint32_t>(maxFrames, static_cast<uint32_t>(StackTrace::kMaximumFrameCount));
-        if (maxFrames == 0) {
+        const uint32_t maxFrames =
+            std::min<uint32_t>(options.maxFrames, static_cast<uint32_t>(StackTrace::kMaximumFrameCount));
+        if (maxFrames == 0 || skipFrames == std::numeric_limits<uint32_t>::max()) {
             return {};
         }
 
 #ifdef PLATFORM_WINDOWS
-        if (skipFrames == std::numeric_limits<uint32_t>::max()) {
-            return {};
-        }
         const PAL::StackTraceSystemAPI& stackTrace = PAL::LoadStackTraceSystemAPI();
         if (stackTrace.captureStackBackTrace == nullptr) {
             return {};
@@ -72,55 +44,28 @@ namespace Sora {
             nativeSkipFrames, static_cast<PAL::WindowsSystem::DWord>(maxFrames), rawFrames.data(), nullptr);
         StackTrace::ContainerType frames;
         frames.reserve(captured);
-
-        if (!PAL::InitializeDbgHelpSystemAPI()) {
-            for (uint16_t i = 0; i < captured; ++i) {
-                frames.push_back({.address = reinterpret_cast<uintptr_t>(rawFrames[i])});
-            }
-            return StackTrace{std::move(frames)};
+        for (uint16_t index = 0; index < captured; ++index) {
+            frames.push_back({.address = reinterpret_cast<uintptr_t>(rawFrames[index])});
         }
 
-        {
-            PAL::LockedDbgHelpSystemAPI dbgHelp = PAL::LockDbgHelpSystemAPI();
-            if (!HasRequiredDbgHelpAPI(*dbgHelp)) {
-                for (uint16_t i = 0; i < captured; ++i) {
-                    frames.push_back({.address = reinterpret_cast<uintptr_t>(rawFrames[i])});
+        const PAL::ProcessSystemAPI& process = PAL::LoadProcessSystemAPI();
+        if (PAL::InitializeDbgHelpSystemAPI() && PAL::EnsureSystemAPIs(process.getCurrentProcess)) {
+            void* nativeProcess = process.getCurrentProcess();
+            if (nativeProcess != nullptr) {
+                PAL::LockedDbgHelpSystemAPI dbgHelp = PAL::LockDbgHelpSystemAPI();
+                for (StackFrame& frame : frames) {
+                    PAL::DbgHelpAddressInfo info;
+                    if (!dbgHelp.ResolveAddress(nativeProcess, frame.address, info)) {
+                        continue;
+                    }
+                    frame.symbol = std::move(info.symbol);
+                    frame.sourceFile = std::move(info.sourceFile);
+                    frame.sourceLine = info.sourceLine;
+                    frame.offset = info.offset;
+                    if (!info.modulePath.empty()) {
+                        frame.module = Sora::FileName(info.modulePath);
+                    }
                 }
-                return StackTrace{std::move(frames)};
-            }
-
-            PAL::WindowsSystem::Handle process = stackTrace.getCurrentProcess();
-            alignas(SYMBOL_INFO) std::array<char, sizeof(SYMBOL_INFO) + MAX_SYM_NAME> symbolBuffer{};
-            auto* symbol = reinterpret_cast<SYMBOL_INFO*>(symbolBuffer.data());
-            symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-            symbol->MaxNameLen = MAX_SYM_NAME;
-
-            for (uint16_t i = 0; i < captured; ++i) {
-                StackFrame frame{.address = reinterpret_cast<uintptr_t>(rawFrames[i])};
-                const auto address = static_cast<DWORD64>(frame.address);
-
-                DWORD64 displacement = 0;
-                if (dbgHelp->symFromAddress(process, address, &displacement, symbol) != FALSE) {
-                    frame.symbol.assign(symbol->Name, symbol->NameLen);
-                    frame.offset = static_cast<uint64_t>(displacement);
-                }
-
-                IMAGEHLP_LINE64 line{};
-                line.SizeOfStruct = sizeof(line);
-                PAL::WindowsSystem::DWord lineDisplacement = 0;
-                if (dbgHelp->symGetLineFromAddress(process, address, &lineDisplacement, &line) != FALSE &&
-                    line.FileName != nullptr) {
-                    frame.sourceFile = line.FileName;
-                    frame.sourceLine = line.LineNumber;
-                }
-
-                IMAGEHLP_MODULE64 module{};
-                module.SizeOfStruct = sizeof(module);
-                if (dbgHelp->symGetModuleInfo(process, address, &module) != FALSE && module.ImageName[0] != '\0') {
-                    frame.module = Sora::FileName(module.ImageName);
-                }
-
-                frames.push_back(std::move(frame));
             }
         }
         for (StackFrame& frame : frames) {
@@ -129,7 +74,7 @@ namespace Sora {
             }
         }
         return StackTrace{std::move(frames)};
-#else
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
         const PAL::StackTraceSystemAPI& stackTrace = PAL::LoadStackTraceSystemAPI();
         if (stackTrace.captureStackBackTrace == nullptr) {
             return {};
@@ -146,23 +91,25 @@ namespace Sora {
 
         StackTrace::ContainerType frames;
         frames.reserve(static_cast<size_t>(captured - start));
+        const PAL::ModuleSystemAPI& module = PAL::LoadModuleSystemAPI();
         for (int i = start; i < captured; ++i) {
             StackFrame frame{.address = reinterpret_cast<uintptr_t>(rawFrames[static_cast<size_t>(i)])};
-            PAL::DynamicSymbolInfo info{};
-            if (stackTrace.findDynamicSymbol != nullptr &&
-                stackTrace.findDynamicSymbol(rawFrames[static_cast<size_t>(i)], &info) != 0) {
+            PAL::ModuleAddressInfo info{};
+            if (module.queryAddress != nullptr && module.queryAddress(rawFrames[static_cast<size_t>(i)], &info)) {
                 if (info.symbolName != nullptr) {
                     frame.symbol = ABI::Demangle(info.symbolName);
                     const uintptr_t symbolAddress = reinterpret_cast<uintptr_t>(info.symbolAddress);
                     frame.offset = frame.address >= symbolAddress ? frame.address - symbolAddress : 0;
                 }
-                if (info.fileName != nullptr) {
-                    frame.module = Sora::FileName(info.fileName);
+                if (info.modulePath != nullptr) {
+                    frame.module = Sora::FileName(info.modulePath);
                 }
             }
             frames.push_back(std::move(frame));
         }
         return StackTrace{std::move(frames)};
+#else
+        return {};
 #endif
     }
 

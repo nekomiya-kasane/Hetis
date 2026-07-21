@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file SystemAPI.h
  * @brief Dynamically resolved operating-system entry points used by the platform abstraction layer.
  * @ingroup PAL
@@ -29,13 +29,13 @@
 #include <initializer_list>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
 struct kevent;
 struct pollfd;
 struct rusage;
-struct sigaction;
 struct stat;
 struct timespec;
 #endif
@@ -43,7 +43,6 @@ struct timespec;
 #if defined(PLATFORM_WINDOWS)
 struct _IMAGEHLP_LINE64;
 struct _IMAGEHLP_MODULE64;
-struct _EXCEPTION_POINTERS;
 struct _FILETIME;
 struct _PROCESS_MEMORY_COUNTERS;
 union _LARGE_INTEGER;
@@ -79,6 +78,34 @@ namespace Sora::PAL {
         uint64_t peakResidentMemoryBytes = 0;
     };
 
+    /** @brief Platform-normalized metadata delivered from a native fatal exception or signal. */
+    struct NativeCrashContext {
+        std::string_view reason{};        /**< Static native exception or signal name. */
+        uint32_t code = 0;                /**< Native exception code or signal number. */
+        uintptr_t faultAddress = 0;       /**< Faulting memory address when available. */
+        uintptr_t instructionPointer = 0; /**< Native instruction pointer when available. */
+    };
+
+    /** @brief Allocation-free callback invoked by the normalized native crash adapter. */
+    using NativeCrashCallback = void (*)(const NativeCrashContext& context, void* userData) noexcept;
+
+    /** @brief Platform-normalized module and symbol information for one native address. */
+    struct ModuleAddressInfo {
+        const char* modulePath = nullptr; /**< Native module path containing the address, when available. */
+        void* moduleBase = nullptr;       /**< Native load address of the containing module, when available. */
+        const char* symbolName = nullptr; /**< Native symbol spelling, when available. */
+        void* symbolAddress = nullptr;    /**< Native start address of the resolved symbol, when available. */
+    };
+
+    /** @brief Owned, platform-neutral result of resolving one address through Windows DbgHelp. */
+    struct DbgHelpAddressInfo {
+        std::string symbol;      /**< Native symbol spelling, or empty when unavailable. */
+        std::string modulePath;  /**< Native module image path, or empty when unavailable. */
+        std::string sourceFile;  /**< Source file path, or empty when unavailable. */
+        uint32_t sourceLine = 0; /**< One-based source line, or zero when unavailable. */
+        uint64_t offset = 0;     /**< Byte displacement from the resolved symbol start. */
+    };
+
 #if defined(PLATFORM_WINDOWS)
 
     namespace WindowsSystem {
@@ -87,6 +114,7 @@ namespace Sora::PAL {
         using DWord = unsigned long;
         using DWord64 = unsigned long long;
         using UInt = unsigned int;
+        using Long = long;
         using HResult = long;
         using Size = uintptr_t;
         using Handle = void*;
@@ -141,8 +169,8 @@ namespace Sora::PAL {
          *
          * All size and offset fields are measured in bytes. For example, a typical 512e disk may report @c
          * logicalBytesPerSector as 512 and the physical-sector fields as 4096; direct-I/O buffers, offsets, and
-         * transfer sizes should then respect the effective physical-sector size and any additional alignment offsets
-         * reported below.
+         * transfer sizes should then respect the effective physical-sector size and any additional alignment
+         * offsets reported below.
          */
         struct FileStorageInfo {
             /** Bytes in a logical sector exposed to software; commonly 512 or 4096. */
@@ -444,17 +472,11 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Win32 environment entry points. */
     struct EnvironmentSystemAPI {
         // clang-format off
-        using GetLastErrorFunction               = WindowsSystem::DWord(__stdcall*)();
-        using SetLastErrorFunction               = void(__stdcall*)(WindowsSystem::DWord);
         using GetEnvironmentVariableWideFunction = WindowsSystem::DWord(__stdcall*)(const wchar_t*, wchar_t*, WindowsSystem::DWord);
         using SetEnvironmentVariableWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*);
         using GetEnvironmentStringsWideFunction  = wchar_t*(__stdcall*)();
         using FreeEnvironmentStringsWideFunction = WindowsSystem::Bool(__stdcall*)(wchar_t*);
 
-        [[= $::Syscall{"GetLastError"}]]
-        GetLastErrorFunction                    getLastError                    = nullptr;
-        [[= $::Syscall{"SetLastError"}]]
-        SetLastErrorFunction                    setLastError                    = nullptr;
         [[= $::Syscall{"GetEnvironmentVariableW"}]]
         GetEnvironmentVariableWideFunction      getEnvironmentVariableWide      = nullptr;
         [[= $::Syscall{"SetEnvironmentVariableW"}]]
@@ -633,7 +655,6 @@ namespace Sora::PAL {
         using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
         using ReadDirectoryChangesFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*, DirectoryCompletionFunction);
         using GetSystemInfoFunction         = void(__stdcall*)(void*);
-        using GetCurrentProcessFunction     = WindowsSystem::Handle(__stdcall*)();
         using DuplicateHandleFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
 
         [[= $::Syscall{"GetStdHandle"}]]
@@ -682,36 +703,8 @@ namespace Sora::PAL {
         ReadDirectoryChangesFunction  readDirectoryChanges  = nullptr;
         [[= $::Syscall{"GetSystemInfo"}]]
         GetSystemInfoFunction         getSystemInfo         = nullptr;
-        [[= $::Syscall{"GetCurrentProcess"}]]
-        GetCurrentProcessFunction     getCurrentProcess     = nullptr;
         [[= $::Syscall{"DuplicateHandle"}]]
         DuplicateHandleFunction       duplicateHandle       = nullptr;
-        // clang-format on
-    };
-
-    /** @brief Dynamically resolved Win32 fatal-exception entry points. */
-    struct CrashSystemAPI {
-        // clang-format off
-        using ExceptionFilterFunction              = long(__stdcall*)(::_EXCEPTION_POINTERS*);
-        using SetUnhandledExceptionFilterFunction  = ExceptionFilterFunction(__stdcall*)(ExceptionFilterFunction);
-        using GetErrorModeFunction                 = WindowsSystem::DWord(__stdcall*)();
-        using SetErrorModeFunction                 = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
-        using GetCurrentProcessFunction            = WindowsSystem::Handle(__stdcall*)();
-        using WerGetFlagsFunction                  = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
-        using WerSetFlagsFunction                  = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord);
-
-        [[= $::Syscall{"SetUnhandledExceptionFilter"}]]
-        SetUnhandledExceptionFilterFunction  setUnhandledExceptionFilter  = nullptr;
-        [[= $::Syscall{"GetErrorMode"}]]
-        GetErrorModeFunction                 getErrorMode                 = nullptr;
-        [[= $::Syscall{"SetErrorMode"}]]
-        SetErrorModeFunction                 setErrorMode                 = nullptr;
-        [[= $::Syscall{"GetCurrentProcess"}]]
-        GetCurrentProcessFunction            getCurrentProcess            = nullptr;
-        [[= $::Syscall{"WerGetFlags"}]]
-        WerGetFlagsFunction                  werGetFlags                  = nullptr;
-        [[= $::Syscall{"WerSetFlags"}]]
-        WerSetFlagsFunction                  werSetFlags                  = nullptr;
         // clang-format on
     };
 
@@ -740,16 +733,13 @@ namespace Sora::PAL {
         // clang-format on
     };
 
-    /** @brief Dynamically resolved Windows stack-capture and process entry points. */
+    /** @brief Dynamically resolved Windows current-thread stack-capture entry point. */
     struct StackTraceSystemAPI {
         // clang-format off
         using CaptureStackBackTraceFunction = uint16_t(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, void**, WindowsSystem::DWord*);
-        using GetCurrentProcessFunction     = WindowsSystem::Handle(__stdcall*)();
 
         [[= $::Syscall{"RtlCaptureStackBackTrace"}]]
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
-        [[= $::Syscall{"GetCurrentProcess"}]]
-        GetCurrentProcessFunction     getCurrentProcess     = nullptr;
         // clang-format on
     };
 
@@ -762,9 +752,6 @@ namespace Sora::PAL {
 
         /** @brief Opaque POSIX thread-attribute object used by the dynamically loaded table. */
         struct ThreadAttributes;
-
-        /** @brief Opaque POSIX signal-set object used by the dynamically loaded table. */
-        struct SignalSet;
 
         /** @brief POSIX file offset ABI type without including @c sys/types.h. */
         using FileOffset = std::int64_t;
@@ -956,16 +943,19 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved module-loader operations with normalized POSIX handle semantics. */
     struct ModuleSystemAPI {
         // clang-format off
-        using OpenFunction   = void* (*)(const char*, int) noexcept;
-        using CloseFunction  = int (*)(void*) noexcept;
-        using FindSymbolFunction = void* (*)(void*, const char*) noexcept;
+        using OpenFunction         = void* (*)(const char*, int) noexcept;
+        using CloseFunction        = int (*)(void*) noexcept;
+        using FindSymbolFunction   = void* (*)(void*, const char*) noexcept;
+        using QueryAddressFunction = bool (*)(const void*, ModuleAddressInfo*) noexcept;
 
         [[= $::Syscall{"dlopen"}]]
-        OpenFunction        open        = nullptr;
+        OpenFunction         open         = nullptr;
         [[= $::Syscall{"dlclose"}]]
-        CloseFunction       close       = nullptr;
+        CloseFunction        close        = nullptr;
         [[= $::Syscall{"dlsym"}]]
-        FindSymbolFunction  findSymbol  = nullptr;
+        FindSymbolFunction   findSymbol   = nullptr;
+        [[= $::Syscall{"dladdr"}]]
+        QueryAddressFunction queryAddress = nullptr;
         // clang-format on
     };
 
@@ -1161,59 +1151,16 @@ namespace Sora::PAL {
         // clang-format on
     };
 
-    /** @brief Dynamically resolved POSIX fatal-signal entry points. */
-    struct CrashSystemAPI {
-        // clang-format off
-        using SignalActionFunction   = int (*)(int, const struct sigaction*, struct sigaction*);
-        using EmptySignalSetFunction = int (*)(PosixSystem::SignalSet*);
-        using RaiseSignalFunction    = int (*)(int);
-        using ImmediateExitFunction  = void (*)(int);
-
-        [[= $::Syscall{"sigaction"}]]
-        SignalActionFunction   signalAction   = nullptr;
-        [[= $::Syscall{"sigemptyset"}]]
-        EmptySignalSetFunction emptySignalSet = nullptr;
-        [[= $::Syscall{"raise"}]]
-        RaiseSignalFunction    raiseSignal    = nullptr;
-        [[= $::Syscall{"_exit"}]]
-        ImmediateExitFunction  immediateExit  = nullptr;
-        // clang-format on
-    };
-
     /** @brief DbgHelp is unavailable outside Windows. */
     struct DbgHelpSystemAPI {};
 
-    /** @brief Native POSIX stack-capture and dynamic-symbol entry points before PAL normalization. */
-    struct PosixStackTraceNativeAPI {
-        // clang-format off
-        using CaptureStackBackTraceFunction = int (*)(void**, int);
-        using FindDynamicSymbolFunction     = int (*)(const void*, void*);
-
-        [[= $::Syscall{"backtrace"}]]
-        CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
-        [[= $::Syscall{"dladdr"}]]
-        FindDynamicSymbolFunction     findDynamicSymbol     = nullptr;
-        // clang-format on
-    };
-
-    /** @brief ABI-compatible result returned by the POSIX @c dladdr function. */
-    struct DynamicSymbolInfo {
-        const char* fileName = nullptr;
-        void* fileBase = nullptr;
-        const char* symbolName = nullptr;
-        void* symbolAddress = nullptr;
-    };
-
-    /** @brief Dynamically resolved POSIX stack-capture and symbol-query entry points. */
+    /** @brief Dynamically resolved POSIX current-thread stack-capture entry point. */
     struct StackTraceSystemAPI {
         // clang-format off
         using CaptureStackBackTraceFunction = int (*)(void**, int);
-        using FindDynamicSymbolFunction     = int (*)(const void*, DynamicSymbolInfo*);
 
         [[= $::Syscall{"backtrace"}]]
         CaptureStackBackTraceFunction captureStackBackTrace = nullptr;
-        [[= $::Syscall{"dladdr"}]]
-        FindDynamicSymbolFunction     findDynamicSymbol     = nullptr;
         // clang-format on
     };
 
@@ -1227,7 +1174,6 @@ namespace Sora::PAL {
     struct GlobalMemorySystemAPI {};
     struct ClipboardSystemAPI {};
     struct FileSystemAPI {};
-    struct CrashSystemAPI {};
     struct DbgHelpSystemAPI {};
     struct StackTraceSystemAPI {};
 
@@ -1246,6 +1192,9 @@ namespace Sora::PAL {
 
         /** @brief Access DbgHelp entry points while this token owns the process-global lock. */
         [[nodiscard]] const DbgHelpSystemAPI* operator->() const noexcept { return &api_; }
+
+        /** @brief Resolve @p address in @p process into owned platform-neutral symbol information. */
+        [[nodiscard]] bool ResolveAddress(void* process, uintptr_t address, DbgHelpAddressInfo& output) const;
 
     private:
         friend LockedDbgHelpSystemAPI LockDbgHelpSystemAPI();
@@ -1280,8 +1229,18 @@ namespace Sora::PAL {
     /** @brief Load and return the immutable native file-system function table. */
     [[nodiscard]] const FileSystemAPI& LoadFileSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable crash-output function table. */
-    [[nodiscard]] const CrashSystemAPI& LoadCrashSystemAPI() noexcept;
+    /**
+     * @brief Install the process-global native crash adapter.
+     * @param callback Allocation-free callback invoked from the native fatal path.
+     * @param userData Opaque state passed unchanged to @p callback.
+     * @param suppressDialogs Suppress operating-system crash dialogs when supported.
+     * @return @c true if the adapter was installed; otherwise @c false.
+     */
+    [[nodiscard]] bool InstallNativeCrashHandler(NativeCrashCallback callback, void* userData,
+                                                 bool suppressDialogs) noexcept;
+
+    /** @brief Restore the native crash handlers and process policy replaced by Sora. */
+    void UninstallNativeCrashHandler() noexcept;
 
     /** @brief Lock and return exclusive access to the immutable Windows DbgHelp function table. */
     [[nodiscard]] LockedDbgHelpSystemAPI LockDbgHelpSystemAPI();

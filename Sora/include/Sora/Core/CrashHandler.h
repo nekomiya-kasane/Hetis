@@ -55,9 +55,9 @@ namespace Sora {
 
     /** @brief Configuration consumed synchronously while installing native crash handlers. */
     struct CrashHandlerOptions {
-        std::filesystem::path emergencyFile{}; /**< Optional eagerly opened emergency dump destination. */
-        CrashCallback callback = nullptr;      /**< Optional allocation-free application-state writer. */
-        bool mirrorToStandardError = true;     /**< Also emit the built-in record to native standard error. */
+        std::filesystem::path emergencyFile{};   /**< Optional eagerly opened emergency dump destination. */
+        CrashCallback callback = nullptr;        /**< Optional allocation-free application-state writer. */
+        bool mirrorToStandardError = true;       /**< Also emit the built-in record to native standard error. */
         bool suppressSystemErrorDialogs = false; /**< Suppress interactive OS error dialogs while installed. */
     };
 
@@ -66,9 +66,8 @@ namespace Sora {
      * @details Windows observes unhandled structured exceptions and preserves normal OS crash processing. POSIX
      * targets handle fatal synchronous signals and re-raise them with default disposition. Destruction restores every
      * handler that preceded installation and closes the emergency stream.
-     * @note Windows AddressSanitizer builds preserve the sanitizer's top-level exception filter. The registration still
-     * owns the configured system-error-dialog policy, but sanitizer output replaces this class's native crash record
-     * and callback.
+     * @note Sanitizer runs that need Sora's native crash record must configure the sanitizer runtime to pass native
+     * faults through, for example with @c ASAN_OPTIONS=handle_segv=0.
      * @warning Destroy only during orderly single-threaded shutdown, when no fatal handler can be executing.
      */
     class CrashHandler {

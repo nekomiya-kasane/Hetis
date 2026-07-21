@@ -8,7 +8,6 @@
 
 #include "Sora/Core/CrashHandler.h"
 #include "Sora/Core/PAL/SystemAPI.h"
-#include "Sora/Platform.h"
 
 #include <algorithm>
 #include <array>
@@ -18,56 +17,18 @@
 #include <string_view>
 #include <utility>
 
-#if defined(PLATFORM_WINDOWS)
-#    ifndef WIN32_LEAN_AND_MEAN
-#        define WIN32_LEAN_AND_MEAN
-#    endif
-#    ifndef NOMINMAX
-#        define NOMINMAX
-#    endif
-#    include <Windows.h>
-#else
-#    include <signal.h>
-#    include <unistd.h>
-#    include <ucontext.h>
-#endif
-
 namespace Sora {
 
     namespace {
 
-#if defined(PLATFORM_WINDOWS)
-        inline constexpr PAL::WindowsSystem::DWord kSuppressedErrorModeFlags =
-            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
-        inline constexpr PAL::WindowsSystem::DWord kWerNoUiFlag = 32;
-        inline constexpr PAL::WindowsSystem::HResult kWerFlagsNotInitialized =
-            static_cast<PAL::WindowsSystem::HResult>(-2147023728);
-#endif
-#    if defined(__clang__)
-#        if __has_feature(address_sanitizer)
-        inline constexpr bool kInstallUnhandledExceptionFilter = false;
-#        else
-        inline constexpr bool kInstallUnhandledExceptionFilter = true;
-#        endif
-#    else
-        inline constexpr bool kInstallUnhandledExceptionFilter = true;
-#    endif
-
         struct CrashRuntime {
-            const PAL::CrashSystemAPI* systemAPI = nullptr;
             CrashStream standardError{};
             CrashStream emergencyStream{};
             CrashCallback callback = nullptr;
             bool mirrorToStandardError = true;
-            bool suppressSystemErrorDialogs = false;
-#if defined(PLATFORM_WINDOWS)
-            PAL::CrashSystemAPI::ExceptionFilterFunction previousFilter = nullptr;
-#endif
         };
 
         std::atomic<bool> gCrashHandlerInstalled{false};
-        std::atomic<CrashRuntime*> gCrashRuntime{nullptr};
-        static_assert(std::atomic<CrashRuntime*>::is_always_lock_free);
 
         /** @brief Fixed-capacity emergency text builder suitable for a corrupted-process path. */
         class EmergencyBuffer {
@@ -151,169 +112,28 @@ namespace Sora {
             }
         }
 
-#if defined(PLATFORM_WINDOWS)
-        [[nodiscard]] constexpr std::string_view ExceptionName(DWORD code) noexcept {
-            switch (code) {
-                case EXCEPTION_ACCESS_VIOLATION:
-                    return "ACCESS_VIOLATION";
-                case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
-                    return "ARRAY_BOUNDS_EXCEEDED";
-                case EXCEPTION_DATATYPE_MISALIGNMENT:
-                    return "DATATYPE_MISALIGNMENT";
-                case EXCEPTION_FLT_DIVIDE_BY_ZERO:
-                    return "FLOAT_DIVIDE_BY_ZERO";
-                case EXCEPTION_FLT_INVALID_OPERATION:
-                    return "FLOAT_INVALID_OPERATION";
-                case EXCEPTION_ILLEGAL_INSTRUCTION:
-                    return "ILLEGAL_INSTRUCTION";
-                case EXCEPTION_IN_PAGE_ERROR:
-                    return "IN_PAGE_ERROR";
-                case EXCEPTION_INT_DIVIDE_BY_ZERO:
-                    return "INTEGER_DIVIDE_BY_ZERO";
-                case EXCEPTION_INT_OVERFLOW:
-                    return "INTEGER_OVERFLOW";
-                case EXCEPTION_STACK_OVERFLOW:
-                    return "STACK_OVERFLOW";
-                default:
-                    return "UNKNOWN_STRUCTURED_EXCEPTION";
-            }
-        }
-
-        [[nodiscard]] uintptr_t InstructionPointer(const CONTEXT* context) noexcept {
-            if (context == nullptr) {
-                return 0;
-            }
-#    if defined(_M_X64) || defined(__x86_64__)
-            return static_cast<uintptr_t>(context->Rip);
-#    elif defined(_M_IX86) || defined(__i386__)
-            return static_cast<uintptr_t>(context->Eip);
-#    elif defined(_M_ARM64) || defined(__aarch64__)
-            return static_cast<uintptr_t>(context->Pc);
-#    else
-            return 0;
-#    endif
-        }
-
-
-        LONG WINAPI HandleUnhandledException(EXCEPTION_POINTERS* exception) noexcept {
-            const EXCEPTION_RECORD* record = exception != nullptr ? exception->ExceptionRecord : nullptr;
-            const DWORD code = record != nullptr ? record->ExceptionCode : 0;
+        void HandleNativeCrash(const PAL::NativeCrashContext& nativeContext, void* userData) noexcept {
+            const auto* runtime = static_cast<const CrashRuntime*>(userData);
             const CrashContext context{
-                .reason = ExceptionName(code),
-                .code = code,
-                .faultAddress = record != nullptr ? reinterpret_cast<uintptr_t>(record->ExceptionAddress) : 0,
-                .instructionPointer = InstructionPointer(exception != nullptr ? exception->ContextRecord : nullptr)};
-            const CrashRuntime* runtime = gCrashRuntime.load(std::memory_order_acquire);
-            WriteRecord(context, runtime);
-            if (runtime != nullptr && runtime->suppressSystemErrorDialogs) {
-                return EXCEPTION_EXECUTE_HANDLER;
-            }
-            if (runtime != nullptr && runtime->previousFilter != nullptr) {
-                return runtime->previousFilter(exception);
-            }
-            return EXCEPTION_CONTINUE_SEARCH;
-        }
-#else
-        [[nodiscard]] constexpr std::string_view SignalName(int signalNumber) noexcept {
-            switch (signalNumber) {
-                case SIGABRT:
-                    return "SIGABRT";
-                case SIGFPE:
-                    return "SIGFPE";
-                case SIGILL:
-                    return "SIGILL";
-                case SIGSEGV:
-                    return "SIGSEGV";
-#    ifdef SIGBUS
-                case SIGBUS:
-                    return "SIGBUS";
-#    endif
-                default:
-                    return "UNKNOWN_SIGNAL";
-            }
-        }
-
-        [[nodiscard]] uintptr_t InstructionPointer(const void* nativeContext) noexcept {
-            if (nativeContext == nullptr) {
-                return 0;
-            }
-            const auto* context = static_cast<const ucontext_t*>(nativeContext);
-#    if defined(PLATFORM_MACOS) && defined(__x86_64__)
-            return static_cast<uintptr_t>(context->uc_mcontext->__ss.__rip);
-#    elif defined(PLATFORM_MACOS) && defined(__aarch64__)
-            return static_cast<uintptr_t>(context->uc_mcontext->__ss.__pc);
-#    elif defined(__x86_64__) && defined(REG_RIP)
-            return static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_RIP]);
-#    elif defined(__i386__) && defined(REG_EIP)
-            return static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_EIP]);
-#    elif defined(__aarch64__)
-            return static_cast<uintptr_t>(context->uc_mcontext.pc);
-#    else
-            return 0;
-#    endif
-        }
-
-        void HandleFatalSignal(int signalNumber, siginfo_t* signalInfo, void* nativeContext) noexcept {
-            const CrashContext context{
-                .reason = SignalName(signalNumber),
-                .code = static_cast<uint32_t>(signalNumber),
-                .faultAddress = signalInfo != nullptr ? reinterpret_cast<uintptr_t>(signalInfo->si_addr) : 0,
-                .instructionPointer = InstructionPointer(nativeContext),
+                .reason = nativeContext.reason,
+                .code = nativeContext.code,
+                .faultAddress = nativeContext.faultAddress,
+                .instructionPointer = nativeContext.instructionPointer,
             };
-            const CrashRuntime* runtime = gCrashRuntime.load(std::memory_order_acquire);
             WriteRecord(context, runtime);
-
-            if (runtime != nullptr && runtime->systemAPI != nullptr && runtime->systemAPI->raiseSignal != nullptr &&
-                runtime->systemAPI->immediateExit != nullptr && runtime->systemAPI->raiseSignal(signalNumber) != 0) {
-                runtime->systemAPI->immediateExit(128 + signalNumber);
-            }
         }
-#endif
 
     } // namespace
 
     struct CrashHandler::State {
         CrashRuntime runtime{};
         PAL::OwnedNativeCrashStream emergencyStream{};
-#if defined(PLATFORM_WINDOWS)
-        PAL::CrashSystemAPI::ExceptionFilterFunction previousFilter = nullptr;
         bool nativeHandlerInstalled = false;
-        PAL::WindowsSystem::DWord addedErrorModeFlags = 0;
-        PAL::WindowsSystem::DWord addedWerFlags = 0;
-#else
-        static constexpr size_t kSignalCapacity = 5;
-
-        std::array<int, kSignalCapacity> signals{};
-        std::array<struct sigaction, kSignalCapacity> previousActions{};
-        size_t installedCount = 0;
-#endif
 
         ~State() noexcept {
-#if defined(PLATFORM_WINDOWS)
-            if (nativeHandlerInstalled && runtime.systemAPI != nullptr &&
-                runtime.systemAPI->setUnhandledExceptionFilter != nullptr) {
-                runtime.systemAPI->setUnhandledExceptionFilter(previousFilter);
+            if (nativeHandlerInstalled) {
+                PAL::UninstallNativeCrashHandler();
             }
-            if (addedErrorModeFlags != 0 && runtime.systemAPI != nullptr &&
-                runtime.systemAPI->getErrorMode != nullptr && runtime.systemAPI->setErrorMode != nullptr) {
-                const PAL::WindowsSystem::DWord currentMode = runtime.systemAPI->getErrorMode();
-                runtime.systemAPI->setErrorMode(currentMode & ~addedErrorModeFlags);
-            }
-            if (addedWerFlags != 0 && runtime.systemAPI != nullptr && runtime.systemAPI->getCurrentProcess != nullptr &&
-                runtime.systemAPI->werGetFlags != nullptr && runtime.systemAPI->werSetFlags != nullptr) {
-                PAL::WindowsSystem::DWord currentFlags = 0;
-                if (PAL::WindowsSystem::Succeeded(
-                        runtime.systemAPI->werGetFlags(runtime.systemAPI->getCurrentProcess(), &currentFlags))) {
-                    runtime.systemAPI->werSetFlags(currentFlags & ~addedWerFlags);
-                }
-            }
-#else
-            while (installedCount != 0 && runtime.systemAPI != nullptr && runtime.systemAPI->signalAction != nullptr) {
-                --installedCount;
-                runtime.systemAPI->signalAction(signals[installedCount], &previousActions[installedCount], nullptr);
-            }
-#endif
-            gCrashRuntime.store(nullptr, std::memory_order_release);
             gCrashHandlerInstalled.store(false, std::memory_order_release);
         }
     };
@@ -336,12 +156,12 @@ namespace Sora {
             return std::unexpected(ErrorCode::OutOfMemory);
         }
 
+        // 1. Prepare immutable runtime state before publishing it to the native crash adapter.
         state->runtime.callback = options.callback;
         state->runtime.mirrorToStandardError = options.mirrorToStandardError;
-        const PAL::CrashSystemAPI& systemAPI = PAL::LoadCrashSystemAPI();
-        state->runtime.suppressSystemErrorDialogs = options.suppressSystemErrorDialogs;
-        state->runtime.systemAPI = &systemAPI;
         state->runtime.standardError = PAL::NativeStandardErrorStream();
+
+        // 2. Acquire optional output storage before publishing the native handler.
         if (!options.emergencyFile.empty()) {
             state->emergencyStream = PAL::OwnedNativeCrashStream::OpenTruncated(options.emergencyFile);
             if (!state->emergencyStream) {
@@ -349,69 +169,12 @@ namespace Sora {
             }
             state->runtime.emergencyStream = state->emergencyStream.View();
         }
-        gCrashRuntime.store(&state->runtime, std::memory_order_release);
 
-#if defined(PLATFORM_WINDOWS)
-        const bool nativeHandlerUnavailable =
-            kInstallUnhandledExceptionFilter && systemAPI.setUnhandledExceptionFilter == nullptr;
-        const bool dialogControlUnavailable =
-            options.suppressSystemErrorDialogs &&
-            (systemAPI.getErrorMode == nullptr || systemAPI.setErrorMode == nullptr ||
-             systemAPI.getCurrentProcess == nullptr || systemAPI.werGetFlags == nullptr ||
-             systemAPI.werSetFlags == nullptr);
-        if (nativeHandlerUnavailable || dialogControlUnavailable) {
+        // 3. Publish the fully initialized runtime through the platform-normalized crash adapter.
+        if (!PAL::InstallNativeCrashHandler(HandleNativeCrash, &state->runtime, options.suppressSystemErrorDialogs)) {
             return std::unexpected(ErrorCode::CrashHandlerInstallFailed);
         }
-        if (options.suppressSystemErrorDialogs) {
-            const PAL::WindowsSystem::DWord currentMode = systemAPI.getErrorMode();
-            state->addedErrorModeFlags = kSuppressedErrorModeFlags & ~currentMode;
-            if (state->addedErrorModeFlags != 0) {
-                systemAPI.setErrorMode(currentMode | state->addedErrorModeFlags);
-            }
-            PAL::WindowsSystem::DWord currentWerFlags = 0;
-            const PAL::WindowsSystem::HResult werGetResult =
-                systemAPI.werGetFlags(systemAPI.getCurrentProcess(), &currentWerFlags);
-            if (!PAL::WindowsSystem::Succeeded(werGetResult) && werGetResult != kWerFlagsNotInitialized) {
-                return std::unexpected(ErrorCode::CrashHandlerInstallFailed);
-            }
-            state->addedWerFlags = kWerNoUiFlag & ~currentWerFlags;
-            if (state->addedWerFlags != 0 &&
-                !PAL::WindowsSystem::Succeeded(systemAPI.werSetFlags(currentWerFlags | state->addedWerFlags))) {
-                return std::unexpected(ErrorCode::CrashHandlerInstallFailed);
-            }
-        }
-        if constexpr (kInstallUnhandledExceptionFilter) {
-            state->previousFilter = systemAPI.setUnhandledExceptionFilter(HandleUnhandledException);
-            state->runtime.previousFilter = state->previousFilter;
-            state->nativeHandlerInstalled = true;
-        }
-#else
-        constexpr std::array fatalSignals = {
-            SIGABRT, SIGFPE, SIGILL, SIGSEGV,
-#    ifdef SIGBUS
-            SIGBUS,
-#    endif
-        };
-
-        if (systemAPI.signalAction == nullptr || systemAPI.emptySignalSet == nullptr ||
-            systemAPI.raiseSignal == nullptr || systemAPI.immediateExit == nullptr) {
-            return std::unexpected(ErrorCode::CrashHandlerInstallFailed);
-        }
-        struct sigaction action{};
-        systemAPI.emptySignalSet(reinterpret_cast<PAL::PosixSystem::SignalSet*>(&action.sa_mask));
-        action.sa_flags = SA_SIGINFO | SA_RESETHAND;
-        action.sa_sigaction = HandleFatalSignal;
-
-        for (int signalNumber : fatalSignals) {
-            const size_t index = state->installedCount;
-            if (systemAPI.signalAction(signalNumber, &action, &state->previousActions[index]) != 0) {
-                state.reset();
-                return std::unexpected(ErrorCode::CrashHandlerInstallFailed);
-            }
-            state->signals[index] = signalNumber;
-            ++state->installedCount;
-        }
-#endif
+        state->nativeHandlerInstalled = true;
 
         return CrashHandler{std::move(state)};
     }

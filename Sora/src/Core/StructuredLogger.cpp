@@ -5,7 +5,7 @@
  */
 
 #include <Sora/Core/StructuredLogger.h>
-#include <Sora/Core/PAL/Path.h>
+#include <Sora/Core/Path.h>
 #include <Sora/Core/PAL/Thread.h>
 #include <Sora/Core/ToJson.h>
 
@@ -195,7 +195,7 @@ namespace Sora {
     };
 
     std::string_view SourceLocation::FileName() const noexcept {
-        return PAL::FileName(file);
+        return Sora::FileName(file);
     }
 
     void ConsoleLogSink::Write(const LogRecord& record) {
