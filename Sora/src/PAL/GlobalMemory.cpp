@@ -5,10 +5,9 @@
  */
 
 #include <Sora/Core/Assertion.h>
-#include <Sora/Core/Assertion.h>
 #include <Sora/Core/PAL/GlobalMemory.h>
-#include <Sora/Core/Traits/EnumTraits.h>
 #include <Sora/Core/PAL/SystemAPI.h>
+#include <Sora/Core/Traits/EnumTraits.h>
 #include <Sora/Platform.h>
 
 #include <utility>
