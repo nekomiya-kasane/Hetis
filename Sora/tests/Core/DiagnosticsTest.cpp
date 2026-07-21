@@ -1,11 +1,14 @@
 #include <Sora/Core/Assertion.h>
 #include <Sora/Core/CrashHandler.h>
 #include <Sora/Core/Debugging.h>
+#include <Sora/Core/StackTrace.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
+#include <limits>
 #include <string_view>
 
 namespace {
@@ -70,6 +73,65 @@ TEST_CASE("Sora crash-handler registration has exclusive RAII ownership", "[Sora
 
     auto reinstalled = Sora::CrashHandler::Install();
     REQUIRE(reinstalled.has_value());
+}
+
+TEST_CASE("Sora crash handler can suppress native error dialogs", "[Sora.Core.Diagnostics]") {
+    auto handler = Sora::CrashHandler::Install({.suppressSystemErrorDialogs = true});
+    REQUIRE(handler.has_value());
+}
+
+TEST_CASE("Sora crash handler eagerly owns and releases its emergency file", "[Sora.Core.Diagnostics]") {
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / L"sora-crash-handler-test.txt";
+    std::error_code cleanupError;
+    std::filesystem::remove(path, cleanupError);
+
+    {
+        const Sora::CrashHandlerOptions options{
+            .emergencyFile = path,
+            .callback = nullptr,
+            .mirrorToStandardError = false,
+        };
+        auto handler = Sora::CrashHandler::Install(options);
+        REQUIRE(handler.has_value());
+        REQUIRE(std::filesystem::exists(path));
+    }
+
+    REQUIRE(std::filesystem::remove(path));
+}
+
+TEST_CASE("Sora crash handler releases ownership after an invalid emergency path", "[Sora.Core.Diagnostics]") {
+    const std::filesystem::path missingDirectory =
+        std::filesystem::temp_directory_path() / L"sora-missing-crash-handler-directory";
+    std::error_code cleanupError;
+    std::filesystem::remove_all(missingDirectory, cleanupError);
+    const Sora::CrashHandlerOptions options{
+        .emergencyFile = missingDirectory / L"crash.txt",
+        .callback = nullptr,
+        .mirrorToStandardError = false,
+    };
+
+    auto failed = Sora::CrashHandler::Install(options);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error() == Sora::ErrorCode::EmergencyPathInvalid);
+    REQUIRE(Sora::CrashHandler::Install().has_value());
+}
+
+TEST_CASE("CrashStream rejects an invalid native stream without side effects", "[Sora.Core.Diagnostics]") {
+    const Sora::CrashStream stream{};
+    REQUIRE_FALSE(static_cast<bool>(stream));
+    REQUIRE_FALSE(stream.Write("unreachable"));
+    REQUIRE_FALSE(stream.WriteHex(0x1234));
+    REQUIRE_FALSE(stream.WriteUnsigned(42));
+    stream.Flush();
+}
+
+TEST_CASE("StackTrace clamps frame capacity and extreme skip values", "[Sora.Core.Diagnostics]") {
+    const Sora::StackTrace bounded = Sora::StackTrace::Capture({.maxFrames = std::numeric_limits<uint32_t>::max()});
+    REQUIRE(bounded.Size() <= Sora::StackTrace::kMaximumFrameCount);
+
+    const Sora::StackTrace skipped =
+        Sora::StackTrace::Capture({.skipFrames = std::numeric_limits<uint32_t>::max(), .maxFrames = 1});
+    REQUIRE(skipped.Empty());
 }
 
 TEST_CASE("Debugger detection is a side-effect-free query", "[Sora.Core.Diagnostics]") {

@@ -2,7 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
+#include <meta>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -114,6 +116,26 @@ namespace ToStringTest {
         [[= Sora::$::Serialization::DerefPrint{}]] const IncompletePointee* value = nullptr;
     };
 
+    consteval std::array<size_t, 4> ReflectedMemberDepths() {
+        std::array<size_t, 4> depths{};
+        Sora::Meta::WalkHierarchyMembers(^^ReflectedDerived, [&](size_t depth, std::meta::info member) {
+            if (!std::meta::is_nonstatic_data_member(member) || !std::meta::has_identifier(member)) {
+                return;
+            }
+            const auto identifier = std::meta::identifier_of(member);
+            if (identifier == "derivedValue") {
+                depths[0] = depth;
+            } else if (identifier == "baseValue") {
+                depths[1] = depth;
+            } else if (identifier == "sideValue") {
+                depths[2] = depth;
+            } else if (identifier == "grandBaseValue") {
+                depths[3] = depth;
+            }
+        });
+        return depths;
+    }
+
     [[nodiscard]] constexpr Sora::VoidResult FromString(Port& port, std::string_view text) {
         auto decoded = Sora::FromString(std::in_place_type<int>, text);
         if (!decoded) {
@@ -136,6 +158,10 @@ static_assert(Sora::Concept::CustomStringFormattable<Port>);
 static_assert(Sora::Concept::StringFormattable<CanonicalValue>);
 static_assert(Sora::Concept::StringDeserializable<CanonicalValue>);
 static_assert(Sora::Concept::StringViewable<Mode>);
+static_assert(ReflectedMemberDepths() == std::array<size_t, 4>{0, 1, 1, 2});
+static_assert(Sora::Meta::HasVirtualMemberFunctionInHierarchy(^^VirtualStringDerived, "ToString", 0));
+static_assert(!Sora::Meta::HasVirtualMemberFunctionInHierarchy(^^NonVirtualStringDerived, "ToString", 0));
+static_assert(Sora::Meta::HasInaccessibleDirectBases(^^PrivateDerived));
 
 TEST_CASE("FromString strictly deserializes canonical scalar values", "[Sora.Core.ToString]") {
     STATIC_REQUIRE(Sora::FromString(std::in_place_type<bool>, "yes") == true);

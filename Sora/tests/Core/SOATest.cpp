@@ -169,7 +169,7 @@ TEST_CASE("SoA adapts an original n-ary function directly to its generated stati
 
     SA state{};
     SA acceleration{};
-    for (std::size_t i = 0; i < 16; ++i) {
+    for (size_t i = 0; i < 16; ++i) {
         state.position[i] = static_cast<float>(i);
         state.velocity[i] = 1.0F + static_cast<float>(i);
         state.mass[i] = 2.0F;
@@ -179,7 +179,7 @@ TEST_CASE("SoA adapts an original n-ary function directly to its generated stati
     }
 
     const SA output = Sora::SoA::Adapt<&Integrate>(state, acceleration);
-    for (std::size_t i = 0; i < 16; ++i) {
+    for (size_t i = 0; i < 16; ++i) {
         REQUIRE(output.position[i] == std::fma(state.velocity[i], 2.0F, state.position[i]));
         REQUIRE(output.velocity[i] == state.velocity[i] + 0.5F);
         REQUIRE(output.mass[i] == 5.0F);
@@ -224,7 +224,7 @@ TEST_CASE("SoA operators preserve source unary and scalar-broadcast semantics", 
 TEST_CASE("SoA adapts a member function and broadcasts ordinary parameters", "[Sora.Core.SOA][Member]") {
     using SA = Sora::SoA::SoAType<Kinematic, 16>;
     SA state{};
-    for (std::size_t i = 0; i < 16; ++i) {
+    for (size_t i = 0; i < 16; ++i) {
         state.position[i] = static_cast<float>(i);
         state.velocity[i] = 2.0F;
         state.mass[i] = 3.0F;
@@ -274,7 +274,7 @@ TEST_CASE("SoA scalar and SIMD execution policies preserve identical element sem
     using SA = Sora::SoA::SoAType<Kinematic, 16>;
     SA state{};
     SA acceleration{};
-    for (std::size_t index = 0; index < 16; ++index) {
+    for (size_t index = 0; index < 16; ++index) {
         state.position[index] = static_cast<float>(index);
         state.velocity[index] = static_cast<float>(index) * 0.25F;
         state.mass[index] = 2.0F;
