@@ -90,6 +90,11 @@ namespace Sora::Math {
         std::array<T, N> values_{};
     };
 
+    /** @brief Canonical short name for a fixed-size free vector. */
+    template<ValueCarrier T, size_t N>
+        requires(N > 0)
+    using Vec = Vector<T, N>;
+
     namespace Detail {
 
         template<typename T, typename U>
