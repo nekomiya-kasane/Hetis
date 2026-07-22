@@ -20,7 +20,6 @@
 #include <format>
 #include <meta>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -41,6 +40,16 @@ namespace Sora {
         /** @brief An unscoped C-style enumeration. */
         template<typename T>
         concept UnscopedEnum = std::is_enum_v<T> && !std::is_scoped_enum_v<T>;
+
+        /**
+         * @brief Reflection of an enumerator reserved for aggregate or sentinel semantics.
+         * @tparam Info Enumerator reflection to classify.
+         */
+        template<std::meta::info Info>
+        concept SpecialEnumerator = std::meta::is_enumerator(Info) && [] consteval {
+            constexpr std::string_view name = std::meta::identifier_of(Info);
+            return name == "All" || name == "None" || name.contains("Mask");
+        }();
 
     } // namespace Concept
 
@@ -104,6 +113,31 @@ namespace Sora {
             }(std::make_index_sequence<Traits::EnumeratorsCountOf<T>>{});
         }();
 
+        /** @brief Number of enumerators excluding aggregate and sentinel enumerators. */
+        template<Concept::Enum T>
+        inline constexpr size_t OrdinaryEnumeratorsCountOf = [] consteval {
+            size_t count = 0;
+            template for (constexpr auto enumerator : Meta::EnumeratorsOf(^^T)) {
+                if constexpr (!Concept::SpecialEnumerator<enumerator>) {
+                    ++count;
+                }
+            }
+            return count;
+        }();
+
+        /** @brief Ordinary enumerator values in declaration order. */
+        template<Concept::Enum T>
+        inline constexpr std::array<T, OrdinaryEnumeratorsCountOf<T>> OrdinaryEnumeratorsArrOf = [] consteval {
+            std::array<T, OrdinaryEnumeratorsCountOf<T>> result{};
+            size_t index = 0;
+            template for (constexpr auto enumerator : Meta::EnumeratorsOf(^^T)) {
+                if constexpr (!Concept::SpecialEnumerator<enumerator>) {
+                    result[index++] = std::meta::extract<T>(enumerator);
+                }
+            }
+            return result;
+        }();
+
     } // namespace Traits
 
     namespace $ {
@@ -146,10 +180,7 @@ namespace Sora {
         concept BitfieldEnum = Enum<T> && Traits::EnumeratorsCountOf<T> > 0 && [] consteval {
             using U = std::make_unsigned_t<std::underlying_type_t<T>>;
             template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
-                if (std::meta::identifier_of(e) == "All" || std::meta::identifier_of(e) == "None") {
-                    continue;
-                }
-                if (std::meta::identifier_of(e).contains("Mask")) {
+                if constexpr (SpecialEnumerator<e>) {
                     continue;
                 }
                 const auto v = static_cast<U>([:e:]);
@@ -164,18 +195,34 @@ namespace Sora {
         template<typename T>
         concept SequentialEnum = Enum<T> && Traits::EnumeratorsCountOf<T> > 0 && [] consteval {
             using U = std::underlying_type_t<T>;
-            std::set<U> values;
+            std::array<U, Traits::OrdinaryEnumeratorsCountOf<T>> values{};
+            size_t count = 0;
             template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
-                if (std::meta::identifier_of(e) == "All" || std::meta::identifier_of(e) == "None") {
+                if constexpr (SpecialEnumerator<e>) {
                     continue;
                 }
-                if (std::meta::identifier_of(e).contains("Mask")) {
-                    continue;
-                }
-                if (values.contains(static_cast<U>([:e:]))) {
+                const U value = static_cast<U>([:e:]);
+                if (std::ranges::find(values.begin(), values.begin() + count, value) != values.begin() + count) {
                     return false;
                 }
-                values.insert(static_cast<U>([:e:]));
+                values[count++] = value;
+            }
+            return true;
+        }();
+
+        /** @brief Scoped sequential enum whose ordinary values are exactly zero-based declaration ordinals. */
+        template<typename T>
+        concept OrdinalEnum = SequentialEnum<T> && EnumClass<T> && [] consteval {
+            using U = std::underlying_type_t<T>;
+            size_t expected = 0;
+            template for (constexpr auto e : Meta::EnumeratorsOf(^^T)) {
+                if constexpr (SpecialEnumerator<e>) {
+                    continue;
+                }
+                if (static_cast<U>([:e:]) != static_cast<U>(expected)) {
+                    return false;
+                }
+                ++expected;
             }
             return true;
         }();
