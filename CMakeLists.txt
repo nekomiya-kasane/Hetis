@@ -38,6 +38,7 @@ set(CMAKE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 set(HETIS_DEBUGGER_VISUALIZERS
     "${CMAKE_CURRENT_SOURCE_DIR}/debug/visualizers/libcxx.natvis"
+    "${CMAKE_CURRENT_SOURCE_DIR}/debug/visualizers/sora.natvis"
     "${CMAKE_CURRENT_SOURCE_DIR}/debug/lldb/init.lldb"
     "${CMAKE_CURRENT_SOURCE_DIR}/debug/lldb/vulkan_lldb.py"
 )

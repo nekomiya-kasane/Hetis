@@ -205,7 +205,8 @@ namespace Sora {
                 if (std::ranges::find(values.begin(), values.begin() + count, value) != values.begin() + count) {
                     return false;
                 }
-                values[count++] = value;
+                values[count] = value;
+                count++;
             }
             return true;
         }();

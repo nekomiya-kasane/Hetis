@@ -51,6 +51,10 @@ namespace Sora {
 
     namespace Detail {}
 
+    namespace Settings {}
+
+    namespace ℹ️ = Settings;
+
     /** @brief Reference wrapper result type for operations that return a reference. */
     template<typename T>
     using Ref = std::reference_wrapper<T>;

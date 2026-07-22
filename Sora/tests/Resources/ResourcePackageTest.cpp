@@ -24,17 +24,6 @@ namespace {
         return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
     }
 
-    [[nodiscard]] constexpr auto ResourceView(uint64_t hash, ResourceType type, std::string_view uri,
-                                              const unsigned char* data, size_t size) -> ResourceBytesView {
-        ResourceBytesView view{};
-        view.hash = hash;
-        view.type = type;
-        view.uri = uri;
-        view.data = data;
-        view.size = size;
-        return view;
-    }
-
     [[nodiscard]] auto RewriteMetadataHash(std::vector<std::byte>& pak) -> Sora::VoidResult {
         size_t offset = 0;
         auto header = Sora::Wire::Read<FileHeader>(pak, offset);
@@ -266,22 +255,12 @@ TEST_CASE("PakBuilder and StaticPakImage share the canonical lpak writer", "[Sor
     REQUIRE(std::ranges::equal(*runtimePak, staticPak));
 }
 
-TEST_CASE("PakBuilder accepts borrowed resource byte views", "[Sora][Resources]") {
+TEST_CASE("PakBuilder accepts borrowed byte spans", "[Sora][Resources]") {
     static constexpr unsigned char kText[] = {'h', 'e', 'l', 'l', 'o'};
 
     PakBuilder builder;
-    REQUIRE(builder
-                .Add(ResourceView(HashUri("res://borrowed/text.txt"), ResourceType::Raw, "res://borrowed/text.txt",
-                                  kText, std::size(kText)))
-                .has_value());
-    REQUIRE(builder
-                .Add(ResourceView(HashUri("res://borrowed/empty.bin"), ResourceType::Raw, "res://borrowed/empty.bin",
-                                  nullptr, 0))
-                .has_value());
-    REQUIRE_FALSE(builder
-                      .Add(ResourceView(HashUri("res://borrowed/bad.bin"), ResourceType::Raw, "res://borrowed/bad.bin",
-                                        nullptr, 1))
-                      .has_value());
+    REQUIRE(builder.Add("res://borrowed/text.txt", ResourceType::Raw, std::as_bytes(std::span{kText})).has_value());
+    REQUIRE(builder.Add("res://borrowed/empty.bin", ResourceType::Raw, {}).has_value());
 
     auto pak = builder.Serialize();
     REQUIRE(pak.has_value());

@@ -75,6 +75,10 @@ option(VK_TP_BUILD_EFSW    "Build efsw filesystem watcher" ON)
 option(VK_TP_BUILD_CATCH2  "Build Catch2 test framework"   ON)
 option(VK_TP_BUILD_PERFETTO "Build Perfetto tracing SDK (amalgamated static library)" ON)
 option(VK_TP_ENABLE_PHYSX  "Expose NVIDIA PhysX SDK headers (native library build is isolated for now)" ON)
+option(VK_TP_ENABLE_EIGEN_MKL "Use Intel oneMKL for Eigen BLAS, LAPACK, and VML operations" ON)
+
+set(VK_TP_EIGEN_MKL_LINK "dynamic" CACHE STRING "oneMKL linkage for Eigen: static or dynamic")
+set_property(CACHE VK_TP_EIGEN_MKL_LINK PROPERTY STRINGS static dynamic)
 
 # -----------------------------------------------------------------------------
 # 1. VulkanMemoryAllocator (header-only)
@@ -366,6 +370,15 @@ set(JSON_Install    OFF CACHE BOOL "" FORCE)
 add_subdirectory(nlohmann_json)
 
 # -----------------------------------------------------------------------------
+# 21b. simdjson - runtime JSON parser plus C++26 compile-time JSON reflection.
+# -----------------------------------------------------------------------------
+set(SIMDJSON_STATIC_REFLECTION ON CACHE BOOL "" FORCE)
+set(SIMDJSON_INSTALL OFF CACHE BOOL "" FORCE)
+set(SIMDJSON_DEVELOPER_MODE OFF CACHE BOOL "" FORCE)
+set(SIMDJSON_ENABLE_THREADS OFF CACHE BOOL "" FORCE)
+add_subdirectory(simdjson)
+
+# -----------------------------------------------------------------------------
 # 22. EnTT (header-only ECS)
 # -----------------------------------------------------------------------------
 add_library(entt INTERFACE)
@@ -495,10 +508,101 @@ add_subdirectory(icetea)
 add_subdirectory(tapioca)
 
 # -----------------------------------------------------------------------------
-# 31c. Eigen — header-only linear algebra library (used as oracle in math tests)
+# 31c. Eigen — header-only linear algebra with an optional oneMKL BLAS/LAPACK/VML backend.
 # -----------------------------------------------------------------------------
 add_library(eigen INTERFACE)
 target_include_directories(eigen SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/eigen)
+
+if(VK_TP_ENABLE_EIGEN_MKL)
+    if(DEFINED MKL_INTERFACE AND NOT MKL_INTERFACE STREQUAL "lp64")
+        message(FATAL_ERROR "Eigen requires MKL_INTERFACE=lp64, but '${MKL_INTERFACE}' was requested.")
+    endif()
+
+    set(MKL_INTERFACE "lp64" CACHE STRING "oneMKL integer interface" FORCE)
+    set(MKL_LINK "${VK_TP_EIGEN_MKL_LINK}" CACHE STRING "oneMKL linkage" FORCE)
+    set(MKL_THREADING "sequential" CACHE STRING "oneMKL threading layer" FORCE)
+
+    set(_vk_tp_mkl_hints)
+    if(DEFINED MKL_ROOT)
+        list(APPEND _vk_tp_mkl_hints "${MKL_ROOT}" "${MKL_ROOT}/lib/cmake/mkl")
+    endif()
+    if(DEFINED ENV{MKLROOT})
+        list(APPEND _vk_tp_mkl_hints "$ENV{MKLROOT}" "$ENV{MKLROOT}/lib/cmake/mkl")
+    endif()
+    if(WIN32)
+        set(_vk_tp_mkl_default_root "C:/Program Files (x86)/Intel/oneAPI/mkl/latest")
+        list(APPEND _vk_tp_mkl_hints "${_vk_tp_mkl_default_root}"
+             "${_vk_tp_mkl_default_root}/lib/cmake/mkl")
+    endif()
+
+    if(NOT MKL_ROOT)
+        if(DEFINED ENV{MKLROOT})
+            set(MKL_ROOT "$ENV{MKLROOT}" CACHE PATH "Intel oneMKL root directory" FORCE)
+        elseif(DEFINED _vk_tp_mkl_default_root AND EXISTS "${_vk_tp_mkl_default_root}/include/mkl.h")
+            set(MKL_ROOT "${_vk_tp_mkl_default_root}" CACHE PATH "Intel oneMKL root directory" FORCE)
+        endif()
+    endif()
+    if(MKL_ROOT AND EXISTS "${MKL_ROOT}/include/mkl.h")
+        set(MKL_INCLUDE "${MKL_ROOT}/include" CACHE PATH "Intel oneMKL include directory" FORCE)
+    endif()
+
+    if(NOT MKL_DIR OR MKL_DIR MATCHES "-NOTFOUND$")
+        foreach(_vk_tp_mkl_hint IN LISTS _vk_tp_mkl_hints)
+            if(EXISTS "${_vk_tp_mkl_hint}/MKLConfig.cmake")
+                set(MKL_DIR "${_vk_tp_mkl_hint}" CACHE PATH "Directory containing MKLConfig.cmake" FORCE)
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    # COCA's Windows sysroot must not re-root the explicitly selected host oneMKL SDK.
+    set(_vk_tp_saved_find_library_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+    set(_vk_tp_saved_find_library_prefixes ${CMAKE_FIND_LIBRARY_PREFIXES})
+    set(_vk_tp_saved_find_root_path_mode_library ${CMAKE_FIND_ROOT_PATH_MODE_LIBRARY})
+    if(WIN32)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+        set(CMAKE_FIND_LIBRARY_PREFIXES "" ${CMAKE_FIND_LIBRARY_PREFIXES})
+        set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY NEVER)
+    endif()
+    find_package(MKL CONFIG REQUIRED HINTS ${_vk_tp_mkl_hints})
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_vk_tp_saved_find_library_suffixes})
+    set(CMAKE_FIND_LIBRARY_PREFIXES ${_vk_tp_saved_find_library_prefixes})
+    set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ${_vk_tp_saved_find_root_path_mode_library})
+
+    if(WIN32 AND NOT MKL_LINK STREQUAL "static")
+        # oneMKL loads ISA-specific kernels dynamically, so they are absent from PE import tables.
+        set(_vk_tp_mkl_dispatch_dlls)
+        set(_vk_tp_mkl_dispatch_stems
+            mkl_avx2
+            mkl_avx512
+            mkl_def
+            mkl_mc3
+            mkl_vml_avx2
+            mkl_vml_avx512
+            mkl_vml_cmpt
+            mkl_vml_def
+            mkl_vml_mc3
+        )
+        foreach(_vk_tp_mkl_dispatch_stem IN LISTS _vk_tp_mkl_dispatch_stems)
+            file(GLOB _vk_tp_mkl_dispatch_matches LIST_DIRECTORIES FALSE
+                 "${MKL_ROOT}/bin/${_vk_tp_mkl_dispatch_stem}.*.dll")
+            if(NOT _vk_tp_mkl_dispatch_matches)
+                message(FATAL_ERROR "Required oneMKL CPU-dispatch runtime is missing: "
+                                    "${_vk_tp_mkl_dispatch_stem}.*.dll")
+            endif()
+            list(SORT _vk_tp_mkl_dispatch_matches COMPARE NATURAL ORDER DESCENDING)
+            list(GET _vk_tp_mkl_dispatch_matches 0 _vk_tp_mkl_dispatch_dll)
+            list(APPEND _vk_tp_mkl_dispatch_dlls "${_vk_tp_mkl_dispatch_dll}")
+        endforeach()
+        set_property(TARGET eigen APPEND PROPERTY TRANSITIVE_LINK_PROPERTIES VK_TP_RUNTIME_DLLS)
+        set_property(TARGET eigen PROPERTY INTERFACE_VK_TP_RUNTIME_DLLS "${_vk_tp_mkl_dispatch_dlls}")
+    endif()
+
+    target_compile_definitions(eigen INTERFACE EIGEN_USE_MKL_ALL SORA_EIGEN_MKL_ENABLED=1)
+    target_link_libraries(eigen INTERFACE MKL::MKL)
+    message(STATUS "[vulkan/thirdparty] Eigen oneMKL:    ${MKL_VERSION} "
+                   "(${MKL_INTERFACE}, ${MKL_THREADING}, ${MKL_LINK})")
+endif()
 
 # -----------------------------------------------------------------------------
 # 32. efsw — cross-platform filesystem watcher.
@@ -612,15 +716,17 @@ endif()
 # vk_tp_deploy_runtime(<target>): copy every shared-library DLL that <target>
 # transitively links (assimp-*, glfw3, ktx, meshoptimizer, spdlog, tbb12, ...)
 # next to its executable. Statically-linked libraries contribute nothing.
-# Uses $<TARGET_RUNTIME_DLLS> so the set always tracks the real link graph.
+# Uses $<TARGET_RUNTIME_DLLS> plus custom transitive payloads so the set tracks the real link graph.
 #
 # Additionally copies COCA toolchain runtime DLLs (c++.dll, and the ASan
 # dynamic runtime when sanitizers are enabled) which are not tracked by
 # CMake's target graph but are required at process start.
 function(vk_tp_deploy_runtime tgt)
     add_custom_command(TARGET ${tgt} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_RUNTIME_DLLS:${tgt}>" "$<TARGET_FILE_DIR:${tgt}>"
+        COMMAND ${CMAKE_COMMAND}
+                "-DVK_TP_RUNTIME_DESTINATION=$<TARGET_FILE_DIR:${tgt}>"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../cmake/DeployRuntimeDlls.cmake"
+                "$<TARGET_RUNTIME_DLLS:${tgt}>" "$<TARGET_PROPERTY:${tgt},VK_TP_RUNTIME_DLLS>"
         COMMAND_EXPAND_LISTS
         COMMENT "Deploying runtime DLLs -> $<TARGET_FILE_DIR:${tgt}>")
 
@@ -705,7 +811,7 @@ message(STATUS "  Textures      : $<$<BOOL:${VK_TP_BUILD_KTX}>:ktx> stb tinyexr"
 message(STATUS "  Window/UI     : glfw glad imgui")
 message(STATUS "  Math          : glm")
 message(STATUS "  Assets        : $<$<BOOL:${VK_TP_BUILD_ASSIMP}>:assimp> tinyobjloader tinygltf cgltf fastgltf meshoptimizer mikktspace")
-message(STATUS "  Utility       : spdlog::spdlog nlohmann_json::nlohmann_json entt/EnTT::EnTT tinyfiledialogs cli11")
+message(STATUS "  Utility       : spdlog::spdlog nlohmann_json::nlohmann_json simdjson::simdjson entt/EnTT::EnTT tinyfiledialogs cli11")
 message(STATUS "  Profiling     : TracyClient (active=${VK_TP_BUILD_TRACY})  renderdoc_app $<$<BOOL:${VK_TP_BUILD_PERFETTO}>:perfetto>")
 message(STATUS "  Concurrency   : $<$<BOOL:${VK_TP_BUILD_TBB}>:TBB::tbb (vk_tp_deploy_tbb())> taskflow stdexec")
 message(STATUS "  UI extras     : imguizmo implot")

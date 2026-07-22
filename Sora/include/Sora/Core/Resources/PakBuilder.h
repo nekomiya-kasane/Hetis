@@ -9,7 +9,6 @@
 #include <Sora/ErrorCode.h>
 #include <Sora/Core/Resources/Format.h>
 #include <Sora/Core/Resources/PakLayout.h>
-#include <Sora/Core/Resources/ResourceBytes.h>
 #include <Sora/Core/Resources/ResourceId.h>
 
 #include <algorithm>
@@ -51,14 +50,6 @@ namespace Sora::Resources {
             return {};
         }
 
-        /** @brief Add a borrowed resource byte view. The payload is copied into the builder. */
-        auto Add(ResourceBytesView resource) -> VoidResult {
-            if (resource.size != 0 && resource.data == nullptr) {
-                return std::unexpected(ErrorCode::InvalidArgument);
-            }
-            return Add(resource.uri, resource.type, resource.Bytes());
-        }
-
         /** @brief Number of resources currently staged. */
         [[nodiscard]] auto Count() const noexcept -> size_t { return resources_.size(); }
 
@@ -89,9 +80,8 @@ namespace Sora::Resources {
                                               .bytes = r.bytes});
             }
 
-            std::ranges::sort(built, [](const BuiltResource& a, const BuiltResource& b) {
-                return a.semanticHash < b.semanticHash;
-            });
+            std::ranges::sort(
+                built, [](const BuiltResource& a, const BuiltResource& b) { return a.semanticHash < b.semanticHash; });
 
             for (size_t i = 1; i < built.size(); ++i) {
                 if (built[i - 1].semanticHash == built[i].semanticHash) {
@@ -121,9 +111,9 @@ namespace Sora::Resources {
             auto bytes = std::span<std::byte>{file};
             for (size_t i = 0; i < built.size(); ++i) {
                 const auto& r = built[i];
-                const auto entry = Detail::MakePakEntry(r.semanticHash, r.contentHash,
-                                                        layout->dataOffset + r.payloadOffset, r.bytes.size(),
-                                                        r.uriOffset, r.uriSize, r.type);
+                const auto entry =
+                    Detail::MakePakEntry(r.semanticHash, r.contentHash, layout->dataOffset + r.payloadOffset,
+                                         r.bytes.size(), r.uriOffset, r.uriSize, r.type);
                 Detail::WritePakEntryUnchecked(bytes, *layout, i, entry);
 
                 auto uriOut = Detail::PakRegion(bytes, layout->stringsOffset + r.uriOffset, r.uriSize);
