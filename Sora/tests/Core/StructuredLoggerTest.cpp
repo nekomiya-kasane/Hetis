@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <simdjson.h>
+
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -36,16 +38,18 @@ TEST_CASE("JsonLogSink emits parseable NDJSON through ToJson", "[Sora.Core.Struc
 
     std::string line;
     REQUIRE(static_cast<bool>(std::getline(input, line)));
-    const Sora::Json parsed = Sora::Json::parse(line);
 
-    CHECK(parsed.at("ts") == 123);
-    CHECK(parsed.at("level") == "Warn");
-    CHECK(parsed.at("category") == "Resource");
-    CHECK(parsed.at("thread") == 17);
-    CHECK(parsed.at("file") == "G:/Teaching/Vulkan/Sora/tests/Core/StructuredLoggerTest.cpp");
-    CHECK(parsed.at("line") == 42);
-    CHECK(parsed.at("function") == "JsonLogSinkTest");
-    CHECK(parsed.at("message") == "quote \" slash \\ newline\n");
+    simdjson::dom::parser parser;
+    const simdjson::dom::element parsed = parser.parse(line);
+
+    CHECK(int64_t(parsed["ts"]) == 123);
+    CHECK(std::string_view(parsed["level"]) == "Warn");
+    CHECK(std::string_view(parsed["category"]) == "Resource");
+    CHECK(int64_t(parsed["thread"]) == 17);
+    CHECK(std::string_view(parsed["file"]) == "G:/Teaching/Vulkan/Sora/tests/Core/StructuredLoggerTest.cpp");
+    CHECK(int64_t(parsed["line"]) == 42);
+    CHECK(std::string_view(parsed["function"]) == "JsonLogSinkTest");
+    CHECK(std::string_view(parsed["message"]) == "quote \" slash \\ newline\n");
 
     input.close();
     std::error_code cleanupError;

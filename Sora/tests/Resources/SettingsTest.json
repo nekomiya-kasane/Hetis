@@ -1,0 +1,9 @@
+{
+  "render": {
+    "width": 1920,
+    "height": 1080,
+    "vsync": true,
+    "shader": "res://shader/demo.wgsl",
+    "scales": [1.0, 0.5]
+  }
+}
