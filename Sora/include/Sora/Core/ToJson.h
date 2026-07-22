@@ -1,6 +1,6 @@
 /**
  * @file ToJson.h
- * @brief Reflection-driven JSON conversion built on nlohmann/json and C++26 annotations.
+ * @brief Reflection-driven JSON conversion built on Sora::Json and C++26 annotations.
  * @ingroup Core
  *
  * @details Provides @ref Sora::ToJson and @ref Sora::FromJson. Generic object conversion uses P2996 reflection and
@@ -10,10 +10,9 @@
  */
 #pragma once
 
+#include <Sora/Core/Json.h>
 #include <Sora/Core/ToString.h>
 #include <Sora/Core/Traits.h>
-
-#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <concepts>
@@ -32,11 +31,6 @@
 
 namespace Sora {
 
-    /** @brief The JSON value type used by Sora. */
-    using Json = nlohmann::json;
-
-    /** @brief Insertion-order-preserving JSON value type used for golden-file output. */
-    using OrderedJson = nlohmann::ordered_json;
 
     namespace $::Serialization {
 
@@ -175,8 +169,8 @@ namespace Sora {
         template<typename T>
         [[nodiscard]] Sora::Json ToJsonImpl(T&& value);
 
-        template<typename T>
-        void FromJsonImpl(const Sora::Json& input, T& output);
+        template<typename Input, typename T>
+        void FromJsonImpl(const Input& input, T& output);
 
         namespace ADL {
 
@@ -191,8 +185,8 @@ namespace Sora {
                 { ToJson(std::forward<T>(value)) } -> std::convertible_to<Sora::Json>;
             };
 
-            template<typename T>
-            concept HasFreeFromJson = requires(const Sora::Json& input, T& output) {
+            template<typename Input, typename T>
+            concept HasFreeFromJson = requires(const Input& input, T& output) {
                 { FromJson(input, output) } -> std::same_as<void>;
             };
 
@@ -203,8 +197,8 @@ namespace Sora {
             { value.ToJson() } -> std::convertible_to<Sora::Json>;
         };
 
-        template<typename T>
-        concept HasMemberFromJson = requires(const Sora::Json& input) {
+        template<typename T, typename Input>
+        concept HasMemberFromJson = requires(const Input& input) {
             { T::FromJson(input) } -> std::convertible_to<T>;
         };
 
@@ -213,8 +207,8 @@ namespace Sora {
             { Hook::ToJsonHook<T>::ToJson(value) } -> std::convertible_to<Sora::Json>;
         };
 
-        template<typename T>
-        concept HasHookFromJson = requires(const Sora::Json& input, T& output) {
+        template<typename T, typename Input>
+        concept HasHookFromJson = requires(const Input& input, T& output) {
             { Hook::ToJsonHook<T>::FromJson(input, output) } -> std::same_as<void>;
         };
 
@@ -248,15 +242,6 @@ namespace Sora {
             !ChronoTimePoint<T> && !OptionalLike<T> && !VariantLikeClass<std::remove_cvref_t<T>> &&
             !TupleLikeClass<std::remove_cvref_t<T>> && !std::ranges::range<T>;
 
-        /** @brief Type with a directly callable nlohmann @c to_json customization. */
-        template<typename T>
-        concept NlohmannJsonSerializable = requires(const std::remove_cvref_t<T>& value) { Sora::Json(value); };
-
-        /** @brief Type with a directly callable nlohmann @c from_json customization. */
-        template<typename T>
-        concept NlohmannJsonDeserializable = requires(const Sora::Json& input, std::remove_cvref_t<T>& output) {
-            { input.get_to(output) } -> std::same_as<std::remove_cvref_t<T>&>;
-        };
 
         /** @brief Type explicitly customizing JSON serialization through a hook, ADL, or member function. */
         template<typename T>
@@ -266,9 +251,9 @@ namespace Sora {
 
         /** @brief Type explicitly customizing JSON deserialization through a hook, ADL, or static member. */
         template<typename T>
-        concept JsonCustomDeserializable = Detail::Json::HasHookFromJson<std::remove_cvref_t<T>> ||
-                                           Detail::Json::ADL::HasFreeFromJson<std::remove_cvref_t<T>> ||
-                                           Detail::Json::HasMemberFromJson<std::remove_cvref_t<T>>;
+        concept JsonCustomDeserializable = Detail::Json::HasHookFromJson<std::remove_cvref_t<T>, Sora::Json> ||
+                                           Detail::Json::ADL::HasFreeFromJson<Sora::Json, std::remove_cvref_t<T>> ||
+                                           Detail::Json::HasMemberFromJson<std::remove_cvref_t<T>, Sora::Json>;
 
     } // namespace Concept
 
@@ -319,15 +304,15 @@ namespace Sora {
         }
 
         /** @brief Parse enum @p output from a JSON string or integer. */
-        template<typename E>
-        void EnumFromJson(const Sora::Json& input, E& output) {
+        template<typename Input, typename E>
+        void EnumFromJson(const Input& input, E& output) {
             using U = std::underlying_type_t<E>;
             if (input.is_number_integer()) {
                 output = static_cast<E>(input.template get<U>());
                 return;
             }
             if (!input.is_string()) {
-                throw nlohmann::json::type_error::create(302, "expected string or integer for enum", &input);
+                throw Sora::JsonException("expected string or integer for enum");
             }
 
             std::string text = input.template get<std::string>();
@@ -350,8 +335,7 @@ namespace Sora {
                             }
                         }
                         if (!matched) {
-                            throw nlohmann::json::other_error::create(
-                                501, "unknown enumerator '" + std::string(token) + "'", &input);
+                            throw Sora::JsonException("unknown enumerator '" + std::string(token) + "'");
                         }
                     }
                     pos = bar + 1;
@@ -366,8 +350,7 @@ namespace Sora {
                     }
                 }
                 if (!matched) {
-                    throw nlohmann::json::other_error::create(501, "unknown enumerator '" + std::string(sv) + "'",
-                                                              &input);
+                    throw Sora::JsonException("unknown enumerator '" + std::string(sv) + "'");
                 }
             }
         }
@@ -437,12 +420,12 @@ namespace Sora {
         }
 
         /** @brief Parse reflectable class @p output from JSON object @p input. */
-        template<typename T>
-        void ClassFromJson(const Sora::Json& input, T& output) {
+        template<typename Input, typename T>
+        void ClassFromJson(const Input& input, T& output) {
             static_assert(!Meta::HasReservedJsonInheritanceKey<T>(),
                           "'$bases' is reserved for reflected base-class subobjects");
             if (!input.is_object()) {
-                throw nlohmann::json::type_error::create(302, "expected JSON object", &input);
+                throw Sora::JsonException("expected JSON object");
             }
             template for (constexpr auto m : Meta::JsonSerializableMembersOf<T>()) {
                 using Member = typename [:std::meta::type_of(m):];
@@ -455,13 +438,12 @@ namespace Sora {
                     auto it = input.find(key);
                     if (it == input.end()) {
                         if constexpr ($::Has<$::Serialization::Required>(m)) {
-                            throw nlohmann::json::out_of_range::create(403, "missing required key '" + key + "'",
-                                                                       &input);
+                            throw Sora::JsonException("missing required key '" + key + "'");
                         }
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsInt>(m)) {
                         static_assert(!$::Has<$::Serialization::AsString>(m),
                                       "Enum member JSON policy cannot be both AsInt and AsString");
-                        field = static_cast<Member>(it->template get<std::underlying_type_t<Member>>());
+                        field = static_cast<Member>((*it).template get<std::underlying_type_t<Member>>());
                     } else if constexpr (std::is_enum_v<Member> && $::Has<$::Serialization::AsString>(m)) {
                         EnumFromJson(*it, field);
                     } else {
@@ -471,25 +453,37 @@ namespace Sora {
             }
             if constexpr (!Meta::BasesOf(^^T, std::meta::access_context::unprivileged()).empty()) {
                 const auto bases = input.find("$bases");
-                if (bases != input.end() && !bases->is_object()) {
-                    throw nlohmann::json::type_error::create(302, "expected '$bases' to be a JSON object", &input);
-                }
                 const Sora::Json empty = Sora::Json::object();
-                template for (constexpr auto base : Meta::BasesOf(^^T, std::meta::access_context::unprivileged())) {
-                    using Base = typename [:std::meta::type_of(base):];
-                    if constexpr (std::is_convertible_v<T*, Base*>) {
-                        const auto key = std::string(Traits::TypeName<Base>);
-                        const auto serializedBase = bases == input.end() ? empty.end() : bases->find(key);
-                        const Sora::Json& baseInput =
-                            bases == input.end() || serializedBase == bases->end() ? empty : *serializedBase;
-                        ClassFromJson(baseInput, static_cast<Base&>(output));
+                if (bases != input.end()) {
+                    const auto basesValue = *bases;
+                    if (!basesValue.is_object()) {
+                        throw Sora::JsonException("expected '$bases' to be a JSON object");
+                    }
+                    template for (constexpr auto base : Meta::BasesOf(^^T, std::meta::access_context::unprivileged())) {
+                        using Base = typename [:std::meta::type_of(base):];
+                        if constexpr (std::is_convertible_v<T*, Base*>) {
+                            const auto key = std::string(Traits::TypeName<Base>);
+                            const auto serializedBase = basesValue.find(key);
+                            if (serializedBase == basesValue.end()) {
+                                ClassFromJson(empty, static_cast<Base&>(output));
+                            } else {
+                                ClassFromJson(*serializedBase, static_cast<Base&>(output));
+                            }
+                        }
+                    }
+                } else {
+                    template for (constexpr auto base : Meta::BasesOf(^^T, std::meta::access_context::unprivileged())) {
+                        using Base = typename [:std::meta::type_of(base):];
+                        if constexpr (std::is_convertible_v<T*, Base*>) {
+                            ClassFromJson(empty, static_cast<Base&>(output));
+                        }
                     }
                 }
             }
         }
 
-        template<size_t I = 0, typename Variant>
-        [[nodiscard]] bool TryVariantFromJson(const Sora::Json& input, Variant& output) {
+        template<size_t I = 0, typename Input, typename Variant>
+        [[nodiscard]] bool TryVariantFromJson(const Input& input, Variant& output) {
             if constexpr (I == std::variant_size_v<Variant>) {
                 return false;
             } else {
@@ -500,7 +494,7 @@ namespace Sora {
                         FromJsonImpl(input, alternative);
                         output = std::move(alternative);
                         return true;
-                    } catch (const nlohmann::json::exception&) {
+                    } catch (const Sora::JsonException&) {
                     }
                 }
                 return TryVariantFromJson<I + 1>(input, output);
@@ -559,29 +553,25 @@ namespace Sora {
                     array.push_back(ToJsonImpl(element));
                 }
                 return array;
-            } else if constexpr (Concept::JsonReflectableClass<U> || Concept::NlohmannJsonSerializable<U>) {
-                if constexpr (Concept::NlohmannJsonSerializable<U>) {
-                    return Sora::Json(value);
-                } else {
-                    return ClassToJson(value);
-                }
+            } else if constexpr (Concept::JsonReflectableClass<U>) {
+                return ClassToJson(value);
             } else {
                 static_assert(false, "Type cannot be serialized to JSON");
             }
         }
 
-        template<typename T>
-        void FromJsonImpl(const Sora::Json& input, T& output) {
+        template<typename Input, typename T>
+        void FromJsonImpl(const Input& input, T& output) {
             using U = std::remove_cvref_t<T>;
-            if constexpr (HasHookFromJson<U>) {
+            if constexpr (HasHookFromJson<U, Input>) {
                 Hook::ToJsonHook<U>::FromJson(input, output);
-            } else if constexpr (ADL::HasFreeFromJson<U>) {
+            } else if constexpr (ADL::HasFreeFromJson<Input, U>) {
                 FromJson(input, output);
-            } else if constexpr (HasMemberFromJson<U>) {
+            } else if constexpr (HasMemberFromJson<U, Input>) {
                 output = U::FromJson(input);
             } else if constexpr (std::is_null_pointer_v<U>) {
                 if (!input.is_null()) {
-                    throw nlohmann::json::type_error::create(302, "expected null", &input);
+                    throw Sora::JsonException("expected null");
                 }
             } else if constexpr (std::same_as<U, bool>) {
                 output = input.template get<bool>();
@@ -594,10 +584,10 @@ namespace Sora {
             } else if constexpr (std::same_as<U, std::u8string> || std::same_as<U, std::u16string> ||
                                  std::same_as<U, std::u32string> || std::same_as<U, std::wstring> ||
                                  std::same_as<U, std::filesystem::path>) {
-                const auto& text = input.template get_ref<const std::string&>();
+                const std::string text = input.template get<std::string>();
                 auto decoded = Sora::FromString(std::in_place_type<U>, text);
                 if (!decoded) {
-                    throw nlohmann::json::type_error::create(302, "invalid UTF-8 JSON string", &input);
+                    throw Sora::JsonException("invalid UTF-8 JSON string");
                 }
                 output = std::move(*decoded);
             } else if constexpr (Concept::ChronoDuration<U>) {
@@ -615,11 +605,11 @@ namespace Sora {
                 }
             } else if constexpr (Sora::Concept::VariantLikeClass<U>) {
                 if (!TryVariantFromJson(input, output)) {
-                    throw nlohmann::json::type_error::create(302, "no variant alternative matched", &input);
+                    throw Sora::JsonException("no variant alternative matched");
                 }
             } else if constexpr (Sora::Concept::ByteRange<U>) {
                 if (!input.is_array()) {
-                    throw nlohmann::json::type_error::create(302, "expected JSON array for byte range", &input);
+                    throw Sora::JsonException("expected JSON array for byte range");
                 }
                 output.clear();
                 for (const auto& element : input) {
@@ -627,7 +617,7 @@ namespace Sora {
                 }
             } else if constexpr (Concept::JsonStringKeyedAssociative<U>) {
                 if (!input.is_object()) {
-                    throw nlohmann::json::type_error::create(302, "expected JSON object for string-keyed map", &input);
+                    throw Sora::JsonException("expected JSON object for string-keyed map");
                 }
                 output.clear();
                 for (auto it = input.begin(); it != input.end(); ++it) {
@@ -637,14 +627,14 @@ namespace Sora {
                 }
             } else if constexpr (Sora::Concept::TupleLikeClass<U> && !std::ranges::range<U>) {
                 if (!input.is_array() || input.size() != std::tuple_size_v<U>) {
-                    throw nlohmann::json::type_error::create(302, "expected fixed-size JSON array for tuple", &input);
+                    throw Sora::JsonException("expected fixed-size JSON array for tuple");
                 }
                 [&]<size_t... I>(std::index_sequence<I...>) {
                     (FromJsonImpl(input[I], std::get<I>(output)), ...);
                 }(std::make_index_sequence<std::tuple_size_v<U>>{});
             } else if constexpr (std::ranges::range<U>) {
                 if (!input.is_array()) {
-                    throw nlohmann::json::type_error::create(302, "expected JSON array for range", &input);
+                    throw Sora::JsonException("expected JSON array for range");
                 }
                 output.clear();
                 for (const auto& element : input) {
@@ -652,12 +642,8 @@ namespace Sora {
                     FromJsonImpl(element, temp);
                     output.push_back(std::move(temp));
                 }
-            } else if constexpr (Concept::JsonReflectableClass<U> || Concept::NlohmannJsonDeserializable<U>) {
-                if constexpr (Concept::NlohmannJsonDeserializable<U>) {
-                    input.get_to(output);
-                } else {
-                    ClassFromJson(input, output);
-                }
+            } else if constexpr (Concept::JsonReflectableClass<U>) {
+                ClassFromJson(input, output);
             } else {
                 static_assert(false, "Type cannot be deserialized from JSON");
             }
@@ -687,6 +673,18 @@ namespace Sora {
 
             template<typename T>
             void operator()(const Json& input, T& output) const {
+                Detail::Json::FromJsonImpl(input, output);
+            }
+
+            template<std::default_initializable T>
+            [[nodiscard]] T operator()(std::in_place_type_t<T>, const JsonView& input) const {
+                T output{};
+                Detail::Json::FromJsonImpl(input, output);
+                return output;
+            }
+
+            template<typename T>
+            void operator()(const JsonView& input, T& output) const {
                 Detail::Json::FromJsonImpl(input, output);
             }
         };

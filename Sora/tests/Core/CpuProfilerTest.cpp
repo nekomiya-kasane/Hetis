@@ -7,7 +7,7 @@
 #include <Sora/Core/CpuProfiler.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <nlohmann/json.hpp>
+#include <simdjson.h>
 
 #include <algorithm>
 #include <atomic>
@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -211,16 +213,44 @@ TEST_CASE("CpuProfiler exports escaped Trace Event JSON and restores enabled sta
 
     std::ifstream input{trace.Path(), std::ios::binary};
     REQUIRE(input.is_open());
-    const nlohmann::json document = nlohmann::json::parse(input);
-    REQUIRE(document["displayTimeUnit"] == "ns");
-    REQUIRE(document["traceEvents"].size() == 1);
-    const nlohmann::json& event = document["traceEvents"][0];
-    REQUIRE(event["name"] == "quoted\"\nname");
-    REQUIRE(event["cat"] == "Resource");
-    REQUIRE(event["ph"] == "X");
-    REQUIRE(event["ts"] == 1.250);
-    REQUIRE(event["dur"] == 3.250);
-    REQUIRE(event["args"]["depth"] == 3);
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+
+    const std::string json = buffer.str();
+    simdjson::dom::parser parser;
+    simdjson::dom::element document{};
+    REQUIRE(parser.parse(json).get(document) == simdjson::SUCCESS);
+
+    std::string_view displayUnit{};
+    REQUIRE(document["displayTimeUnit"].get(displayUnit) == simdjson::SUCCESS);
+    REQUIRE(displayUnit == "ns");
+
+    simdjson::dom::array events{};
+    REQUIRE(document["traceEvents"].get(events) == simdjson::SUCCESS);
+    REQUIRE(events.size() == 1);
+
+    simdjson::dom::element event{};
+    REQUIRE(events.at(0).get(event) == simdjson::SUCCESS);
+
+    std::string_view name{};
+    std::string_view category{};
+    std::string_view phase{};
+    REQUIRE(event["name"].get(name) == simdjson::SUCCESS);
+    REQUIRE(event["cat"].get(category) == simdjson::SUCCESS);
+    REQUIRE(event["ph"].get(phase) == simdjson::SUCCESS);
+    REQUIRE(name == "quoted\"\nname");
+    REQUIRE(category == "Resource");
+    REQUIRE(phase == "X");
+
+    double timestamp = 0.0;
+    double duration = 0.0;
+    int64_t depth = 0;
+    REQUIRE(event["ts"].get(timestamp) == simdjson::SUCCESS);
+    REQUIRE(event["dur"].get(duration) == simdjson::SUCCESS);
+    REQUIRE(event["args"]["depth"].get(depth) == simdjson::SUCCESS);
+    REQUIRE(timestamp == 1.250);
+    REQUIRE(duration == 3.250);
+    REQUIRE(depth == 3);
 }
 
 TEST_CASE("CpuProfiler rejects inverted intervals", "[Sora.Core.CpuProfiler]") {

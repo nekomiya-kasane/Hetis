@@ -3,8 +3,8 @@
  * @brief Opt-in, one-way JSON integration for @ref Sora::RefPtr.
  * @ingroup Core
  *
- * @details Bridges @ref Sora::RefPtr into the reflection-driven @ref Sora::ToJson framework without forcing the
- * nlohmann/json dependency onto @c RefPtr.h. Include this header when borrowed pointer identity should appear in
+ * @details Bridges @ref Sora::RefPtr into the reflection-driven @ref Sora::ToJson framework without forcing JSON
+ * pointer formatting concerns onto @c RefPtr.h. Include this header when borrowed pointer identity should appear in
  * diagnostic JSON output, for example as a member of a reflected object dumped for inspection.
  *
  * @par Why one-way
