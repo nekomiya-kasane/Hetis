@@ -1,8 +1,9 @@
 /**
  * @file SOABenchmark.cpp
- * @brief Compare scalar AoS, scalar SoA, and compiler-vectorized SoA execution of one source operation.
+ * @brief Compare sample-loop and vectorized execution of one reflection-lifted particle operation.
  */
 
+#include <BenchmarkHarness.h>
 #include <Sora/Core/SOA.h>
 
 #include <algorithm>
@@ -33,39 +34,47 @@ namespace {
         const float drive = std::sin(phase) * 0.01F;
         const float velocity = std::fma(value.acceleration, deltaTime, value.velocity) * attenuation;
         const float temperature = std::fma(value.source, deltaTime, value.temperature);
-        return {std::fma(velocity + drive, deltaTime, value.position), velocity, value.acceleration, value.damping,
-                phase, value.frequency, temperature, value.source};
+        return {std::fma(velocity + drive, deltaTime, value.position),
+                velocity,
+                value.acceleration,
+                value.damping,
+                phase,
+                value.frequency,
+                temperature,
+                value.source};
     }
 
     inline constexpr size_t kElementCount = 1U << 18U;
     inline constexpr size_t kSampleCount = 11;
-    inline constexpr size_t kRepetitionsPerSample = 4;
+    inline constexpr auto kMinimumSampleTime = std::chrono::milliseconds(100);
     inline constexpr float kDeltaTime = 1.0F / 120.0F;
 
 } // namespace
 
-consteval { Sora::SoA::Define<Particle, kElementCount>(); }
+consteval {
+    Sora::SoA::Define<Particle, kElementCount>();
+}
 
 namespace {
 
     using ParticleSoA = Sora::SoA::SoAType<Particle, kElementCount>;
 
-    [[gnu::noinline]] void RunAoS(std::span<Particle> output, std::span<const Particle> input) noexcept {
+    [[gnu::noinline]] void RunAoSSampleLoop(std::span<Particle> output, std::span<const Particle> input) noexcept {
 #pragma clang loop vectorize(disable) interleave(disable)
         for (size_t index = 0; index < input.size(); ++index) {
             output[index] = Step(input[index], kDeltaTime);
         }
     }
 
-    [[gnu::noinline]] void RunSoAScalar(ParticleSoA& output, const ParticleSoA& input) noexcept {
+    [[gnu::noinline]] void RunSoASampleLoop(ParticleSoA& output, const ParticleSoA& input) noexcept {
         Sora::SoA::Adapt<&Step>.ScalarTo(output, input, kDeltaTime);
     }
 
-    [[gnu::noinline]] void RunSoASimd(ParticleSoA& output, const ParticleSoA& input) noexcept {
+    [[gnu::noinline]] void RunSoAAdapted(ParticleSoA& output, const ParticleSoA& input) noexcept {
         Sora::SoA::Adapt<&Step>.SimdTo(output, input, kDeltaTime);
     }
 
-    [[gnu::noinline]] void RunSoAManualSimd(ParticleSoA& output, const ParticleSoA& input) noexcept {
+    [[gnu::noinline]] void RunSoAManual(ParticleSoA& output, const ParticleSoA& input) noexcept {
 #pragma clang loop vectorize(enable) interleave(enable)
         for (size_t index = 0; index < kElementCount; ++index) {
             const float positionInput = input.position[index];
@@ -89,71 +98,6 @@ namespace {
             output.temperature[index] = std::fma(sourceInput, kDeltaTime, temperatureInput);
             output.source[index] = sourceInput;
         }
-    }
-
-    template<typename Function>
-    [[nodiscard]] double MedianNanosecondsPerElement(Function&& function) {
-        std::array<double, kSampleCount> samples{};
-        for (size_t warmup = 0; warmup < 3; ++warmup) {
-            function();
-        }
-
-        for (double& sample : samples) {
-            const auto begin = std::chrono::steady_clock::now();
-            for (size_t repetition = 0; repetition < kRepetitionsPerSample; ++repetition) {
-                function();
-            }
-            const auto end = std::chrono::steady_clock::now();
-            sample = std::chrono::duration<double, std::nano>(end - begin).count() /
-                     static_cast<double>(kElementCount * kRepetitionsPerSample);
-        }
-
-        std::ranges::sort(samples);
-        return samples[samples.size() / 2];
-    }
-
-    struct SimdPairTiming {
-        double adapted;
-        double manual;
-        double ratio;
-    };
-
-    template<typename Adapted, typename Manual>
-    [[nodiscard]] SimdPairTiming MedianSimdPair(Adapted&& adapted, Manual&& manual) {
-        std::array<double, kSampleCount> adaptedSamples{};
-        std::array<double, kSampleCount> manualSamples{};
-        std::array<double, kSampleCount> ratioSamples{};
-        for (size_t warmup = 0; warmup < 3; ++warmup) {
-            adapted();
-            manual();
-        }
-
-        const auto measure = [](auto&& function) {
-            const auto begin = std::chrono::steady_clock::now();
-            for (size_t repetition = 0; repetition < kRepetitionsPerSample; ++repetition) {
-                function();
-            }
-            const auto end = std::chrono::steady_clock::now();
-            return std::chrono::duration<double, std::nano>(end - begin).count() /
-                   static_cast<double>(kElementCount * kRepetitionsPerSample);
-        };
-
-        for (size_t sample = 0; sample < kSampleCount; ++sample) {
-            if (sample % 2 == 0) {
-                adaptedSamples[sample] = measure(adapted);
-                manualSamples[sample] = measure(manual);
-            } else {
-                manualSamples[sample] = measure(manual);
-                adaptedSamples[sample] = measure(adapted);
-            }
-            ratioSamples[sample] = adaptedSamples[sample] / manualSamples[sample];
-        }
-
-        std::ranges::sort(adaptedSamples);
-        std::ranges::sort(manualSamples);
-        std::ranges::sort(ratioSamples);
-        return {adaptedSamples[adaptedSamples.size() / 2], manualSamples[manualSamples.size() / 2],
-                ratioSamples[ratioSamples.size() / 2]};
     }
 
     [[nodiscard]] float RelativeError(float expected, float actual) noexcept {
@@ -183,48 +127,57 @@ int main() {
     auto aosInput = std::make_unique<Particle[]>(kElementCount);
     auto aosOutput = std::make_unique<Particle[]>(kElementCount);
     auto soaInput = std::make_unique<ParticleSoA>();
-    auto soaScalarOutput = std::make_unique<ParticleSoA>();
-    auto soaSimdOutput = std::make_unique<ParticleSoA>();
-    auto soaManualSimdOutput = std::make_unique<ParticleSoA>();
+    auto soaSampleOutput = std::make_unique<ParticleSoA>();
+    auto soaAdaptedOutput = std::make_unique<ParticleSoA>();
+    auto soaManualOutput = std::make_unique<ParticleSoA>();
 
     for (size_t index = 0; index < kElementCount; ++index) {
         const float unit = static_cast<float>(index % 1024U) / 1024.0F;
-        const Particle value{unit * 10.0F, 1.0F + unit, 0.25F + unit * 0.5F, 0.05F + unit * 0.1F,
+        const Particle value{unit * 10.0F, 1.0F + unit, 0.25F + unit * 0.5F,   0.05F + unit * 0.1F,
                              unit,         0.5F + unit, 290.0F + unit * 20.0F, 0.1F + unit * 0.2F};
         aosInput[index] = value;
         Sora::SoA::Scatter(*soaInput, index, value);
     }
 
-    RunAoS({aosOutput.get(), kElementCount}, {aosInput.get(), kElementCount});
-    RunSoAScalar(*soaScalarOutput, *soaInput);
-    RunSoASimd(*soaSimdOutput, *soaInput);
-    RunSoAManualSimd(*soaManualSimdOutput, *soaInput);
+    RunAoSSampleLoop({aosOutput.get(), kElementCount}, {aosInput.get(), kElementCount});
+    RunSoASampleLoop(*soaSampleOutput, *soaInput);
+    RunSoAAdapted(*soaAdaptedOutput, *soaInput);
+    RunSoAManual(*soaManualOutput, *soaInput);
 
-    const float scalarError = MaxRelativeError({aosOutput.get(), kElementCount}, *soaScalarOutput);
-    const float simdError = MaxRelativeError({aosOutput.get(), kElementCount}, *soaSimdOutput);
-    const float manualSimdError = MaxRelativeError({aosOutput.get(), kElementCount}, *soaManualSimdOutput);
-    if (scalarError != 0.0F || simdError > 2.0e-6F || manualSimdError > 2.0e-6F) {
-        std::println("result mismatch: scalar={}, adapted SIMD={}, manual SIMD={}", scalarError, simdError,
-                     manualSimdError);
+    const float sampleError = MaxRelativeError({aosOutput.get(), kElementCount}, *soaSampleOutput);
+    const float adaptedError = MaxRelativeError({aosOutput.get(), kElementCount}, *soaAdaptedOutput);
+    const float manualError = MaxRelativeError({aosOutput.get(), kElementCount}, *soaManualOutput);
+    const float maximumError = std::max({sampleError, adaptedError, manualError});
+    if (sampleError != 0.0F || maximumError > 2.0e-6F) {
+        std::println("result mismatch: sample={}, adapted={}, manual={}", sampleError, adaptedError, manualError);
         return 2;
     }
 
-    const double aosTime = MedianNanosecondsPerElement(
-        [&] { RunAoS({aosOutput.get(), kElementCount}, {aosInput.get(), kElementCount}); });
-    const double soaScalarTime =
-        MedianNanosecondsPerElement([&] { RunSoAScalar(*soaScalarOutput, *soaInput); });
-    const SimdPairTiming simdTiming =
-        MedianSimdPair([&] { RunSoASimd(*soaSimdOutput, *soaInput); },
-                       [&] { RunSoAManualSimd(*soaManualSimdOutput, *soaInput); });
+    auto runAos = [&]() noexcept {
+        RunAoSSampleLoop({aosOutput.get(), kElementCount}, {aosInput.get(), kElementCount});
+    };
+    auto runSoaSample = [&]() noexcept { RunSoASampleLoop(*soaSampleOutput, *soaInput); };
+    auto runSoaAdapted = [&]() noexcept { RunSoAAdapted(*soaAdaptedOutput, *soaInput); };
+    auto runSoaManual = [&]() noexcept { RunSoAManual(*soaManualOutput, *soaInput); };
+    const std::array cases{
+        Sora::Benchmark::MakeCase("particle_aos_sample_loop", runAos),
+        Sora::Benchmark::MakeCase("particle_soa_sample_loop", runSoaSample),
+        Sora::Benchmark::MakeCase("particle_soa_adapted", runSoaAdapted),
+        Sora::Benchmark::MakeCase("particle_soa_manual", runSoaManual),
+    };
+    const auto timing = Sora::Benchmark::MeasureInterleaved<kSampleCount>(cases, kElementCount, kMinimumSampleTime);
 
-    const double checksum = static_cast<double>(soaSimdOutput->position[kElementCount / 3]) +
-                            static_cast<double>(soaSimdOutput->temperature[kElementCount / 2]);
-    std::println("AOS scalar : {:.3f} ns/element", aosTime);
-    std::println("SOA scalar : {:.3f} ns/element", soaScalarTime);
-    std::println("SOA SIMD adapted: {:.3f} ns/element", simdTiming.adapted);
-    std::println("SOA SIMD manual : {:.3f} ns/element", simdTiming.manual);
-    std::println("SIMD speedup over AOS scalar: {:.2f}x", aosTime / simdTiming.adapted);
-    std::println("SIMD speedup over SOA scalar: {:.2f}x", soaScalarTime / simdTiming.adapted);
-    std::println("adapted/manual SIMD paired ratio: {:.3f}", simdTiming.ratio);
-    std::println("maximum relative error: {:.3e}; checksum: {:.6f}", simdError, checksum);
+    const double checksum = static_cast<double>(soaAdaptedOutput->position[kElementCount / 3]) +
+                            static_cast<double>(soaAdaptedOutput->temperature[kElementCount / 2]);
+    std::println("metric,value,unit");
+    std::println("particle_aos_sample_loop,{:.6f},ns/element", timing.MedianTime(0));
+    std::println("particle_soa_sample_loop,{:.6f},ns/element", timing.MedianTime(1));
+    std::println("particle_soa_adapted,{:.6f},ns/element", timing.MedianTime(2));
+    std::println("particle_soa_manual,{:.6f},ns/element", timing.MedianTime(3));
+    std::println("adapted_speedup_over_aos,{:.6f},ratio", timing.PairedRatio(0, 2));
+    std::println("adapted_speedup_over_sample_loop,{:.6f},ratio", timing.PairedRatio(1, 2));
+    std::println("adapted_manual_paired_ratio,{:.6f},ratio", timing.PairedRatio(2, 3));
+    std::println("measurement_repetitions,{},count", timing.repetitions);
+    std::println("maximum_relative_error,{:.9e},ratio", maximumError);
+    std::println("checksum,{:.9f},value", checksum);
 }
