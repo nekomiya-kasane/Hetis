@@ -8,7 +8,6 @@
 #include <Sora/Core/Resources/Format.h>
 #include <Sora/Core/Resources/PakBuilder.h>
 #include <Sora/Core/Resources/PakView.h>
-#include <Sora/Core/Resources/ResourceAnnotation.h>
 #include <Sora/Core/Resources/ResourceId.h>
 #include <Sora/Core/Resources/ResourceModule.h>
 #include <Sora/Core/Resources/ResourceRegistry.h>

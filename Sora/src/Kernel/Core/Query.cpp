@@ -135,7 +135,7 @@ namespace Sora::Kernel {
                 }
 
                 BaseUnknown* existing = BaseUnknownInternal::FindBoundFacetNode(provider, targetIid);
-                Release(facet);
+                BaseUnknownInternal::ReleaseStorageReference(facet);
                 return existing;
             }
 
@@ -192,7 +192,7 @@ namespace Sora::Kernel {
                             }
 
                             if (!BUI::AdoptExtensionNode(nucleus, extension)) {
-                                Release(extension);
+                                BUI::ReleaseStorageReference(extension);
                                 extension = BUI::FindExtensionNode(nucleus, extensionIid);
                             }
                         }

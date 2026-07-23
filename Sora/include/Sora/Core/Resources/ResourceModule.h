@@ -13,7 +13,6 @@
 #include <Sora/Core/StringUtils.h>
 #include <Sora/Core/Resources/Format.h>
 #include <Sora/Core/Resources/PakLayout.h>
-#include <Sora/Core/Resources/ResourceAnnotation.h>
 #include <Sora/Core/Resources/ResourceId.h>
 
 #include <array>

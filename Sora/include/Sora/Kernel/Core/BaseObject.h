@@ -80,6 +80,9 @@ public:
         /** @brief Cold closure graph state stored outside the hot BaseUnknown payload. */
         struct ClosureState;
 
+        /** @brief Opaque weak-promotion state owned by a component closure and its weak references. */
+        class WeakState;
+
         /** @brief Opaque friend that owns BaseUnknown's storage-level object-model operations. */
         class BaseUnknownInternal;
 
@@ -236,8 +239,11 @@ public:
         /** @brief Try to add one reference while a weak-state lifetime gate is held. */
         [[nodiscard]] bool TryRetain() noexcept;
 
-        /** @brief Release one reference and return true on the last-reference transition. */
-        bool Release() noexcept;
+        /** @brief Release one strong reference from this closure nucleus. */
+        bool ReleaseNucleusReference() noexcept;
+
+        /** @brief Release one storage reference from this exact object-model node. */
+        bool ReleaseStorageReference() noexcept;
 
         mutable std::atomic<uint64_t> data_{ComData::Initial()};
     };
@@ -245,43 +251,28 @@ public:
     static_assert(sizeof(BaseUnknown) == 2 * sizeof(void*));
     static_assert(alignof(BaseUnknown) >= 16);
 
-    /** @brief Shared synchronization state behind weak references to a closure nucleus. */
-    struct WeakState {
-        mutable std::mutex mutex{};          /**< Serializes strong promotion against final release. */
-        std::atomic<BaseUnknown*> nucleus{}; /**< Null before destruction begins. */
-    };
-
     /** @brief Non-owning weak reference to a component closure nucleus. */
     class WeakRef {
     public:
         /** @brief Construct an empty weak reference. */
         WeakRef() noexcept = default;
 
-        /** @brief Construct from shared weak state. */
-        explicit WeakRef(std::shared_ptr<WeakState> state) noexcept : state_(std::move(state)) {}
-
-        /** @brief Return whether a non-owning snapshot currently observes a nucleus. */
-        [[nodiscard]] bool Expired() const noexcept { return Get() == nullptr; }
-
-        /**
-         * @brief Return a non-owning snapshot of the nucleus.
-         *
-         * @warning The returned pointer may expire immediately. Use @ref Lock before dereferencing across a lifetime
-         * boundary.
-         */
-        [[nodiscard]] BaseUnknown* Get() const noexcept {
-            return state_ ? state_->nucleus.load(std::memory_order_acquire) : nullptr;
-        }
+        /** @brief Return whether the observed closure nucleus has begun destruction. */
+        [[nodiscard]] bool Expired() const noexcept;
 
         /**
          * @brief Atomically promote this weak reference to an owning nucleus pointer, or return empty.
-         * @pre Concurrent destruction must occur through the intrusive @ref Release path; directly destroyed objects
-         * require external synchronization because C++ begins derived destruction before the base can invalidate state.
+         * @pre The observed object must be managed by the intrusive @ref Retain and @ref Release protocol.
          */
         [[nodiscard]] ComPtr<BaseUnknown> Lock() const noexcept;
 
     private:
-        std::shared_ptr<WeakState> state_{};
+        friend class BaseUnknown;
+
+        /** @brief Construct from the opaque weak-promotion state of a live closure nucleus. */
+        explicit WeakRef(std::shared_ptr<Detail::WeakState> state) noexcept : state_(std::move(state)) {}
+
+        std::shared_ptr<Detail::WeakState> state_{};
     };
 
     namespace Detail {
@@ -315,6 +306,9 @@ public:
 
             /** @brief Return a stable snapshot of closure-owned extension nodes. */
             [[nodiscard]] static std::vector<BaseUnknown*> SnapshotExtensionNodes(BaseUnknown* component);
+
+            /** @brief Release the initial or closure-owned storage reference of the exact node @p object. */
+            static void ReleaseStorageReference(BaseUnknown* object) noexcept;
 
         private:
             friend class Sora::Kernel::BaseUnknown;

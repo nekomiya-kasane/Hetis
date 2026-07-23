@@ -14,30 +14,33 @@ namespace Sora::Kernel {
 
     namespace Detail {
 
+        /** @brief Synchronization and tombstone state shared by a closure nucleus and all of its weak references. */
+        class WeakState final {
+            friend class Sora::Kernel::BaseUnknown;
+            friend class Sora::Kernel::WeakRef;
+            friend class BaseUnknownInternal;
+
+            std::mutex mutex{};                 /**< Serializes strong promotion against final nucleus release. */
+            std::atomic<BaseUnknown*> nucleus{}; /**< Monotonic live-to-null nucleus address. */
+        };
+
         /** @brief Cold object chain allocated only when extensions, bound facets, or weak refs are used. */
         struct alignas(16) ClosureState {
             mutable std::mutex mutex{};                     /**< Serializes chain mutation and snapshots. */
             std::flat_map<Iid, BaseUnknown*> extensions{};  /**< Closure-owned extension nodes. */
             std::flat_map<Iid, BaseUnknown*> boundFacets{}; /**< Closure-owned bound facet nodes. */
-            std::shared_ptr<WeakState> weak{std::make_shared<WeakState>()}; /**< Weak-reference state. */
+            std::shared_ptr<WeakState> weak{};               /**< Weak state initialized before closure publication. */
 
             ~ClosureState() noexcept {
-                if (weak) {
-                    std::scoped_lock weakLock(weak->mutex);
-                    weak->nucleus.store(nullptr, std::memory_order_release);
+                std::scoped_lock lock(mutex);
+                for (const auto& extension : extensions | std::views::values) {
+                    BaseUnknownInternal::ReleaseStorageReference(extension);
                 }
-
-                {
-                    std::scoped_lock lock(mutex);
-                    for (const auto& extension : extensions | std::views::values) {
-                        Release(extension);
-                    }
-                    for (const auto& facet : boundFacets | std::views::values) {
-                        Release(facet);
-                    }
-                    extensions.clear();
-                    boundFacets.clear();
+                for (const auto& facet : boundFacets | std::views::values) {
+                    BaseUnknownInternal::ReleaseStorageReference(facet);
                 }
+                extensions.clear();
+                boundFacets.clear();
             }
 
         };
@@ -150,6 +153,13 @@ namespace Sora::Kernel {
             return result;
         }
 
+        void BaseUnknownInternal::ReleaseStorageReference(BaseUnknown* object) noexcept {
+            if (object) {
+                assert(IsExtension(object->GetRole()) || IsTie(object->GetRole()));
+                object->ReleaseStorageReference();
+            }
+        }
+
         void BaseUnknownInternal::BindObjectModelBase(BaseUnknown* object, BaseUnknown::ComData::PointerType kind,
                                                       BaseUnknown* base) noexcept {
             using PT = BaseUnknown::ComData::PointerType;
@@ -247,7 +257,8 @@ namespace Sora::Kernel {
 
                 if (!candidate) {
                     candidate = new Detail::ClosureState;
-                    candidate->weak->nucleus.store(const_cast<BaseUnknown*>(object), std::memory_order_release);
+                    candidate->weak = std::shared_ptr<WeakState>{new WeakState};
+                    candidate->weak->nucleus.store(object, std::memory_order_relaxed);
                 }
 
                 const uint64_t next = CD::WithPointer(current, PT::ForImplementation, candidate);
@@ -314,6 +325,10 @@ namespace Sora::Kernel {
             return;
         }
         auto* state = static_cast<Detail::ClosureState*>(ComData::Pointer(word));
+        if (state && state->weak) {
+            std::scoped_lock lock(state->weak->mutex);
+            state->weak->nucleus.store(nullptr, std::memory_order_release);
+        }
         delete state;
     }
 
@@ -374,11 +389,11 @@ namespace Sora::Kernel {
     WeakRef BaseUnknown::GetComponentWeakRef() {
         BaseUnknown* nucleus = Nucleus();
         Detail::ClosureState& state = Detail::BaseUnknownInternal::EnsureClosureState(nucleus);
-        {
-            std::scoped_lock lock(state.weak->mutex);
-            state.weak->nucleus.store(nucleus, std::memory_order_release);
-        }
         return WeakRef{state.weak};
+    }
+
+    bool WeakRef::Expired() const noexcept {
+        return !state_ || state_->nucleus.load(std::memory_order_acquire) == nullptr;
     }
 
     ComPtr<BaseUnknown> WeakRef::Lock() const noexcept {
@@ -403,8 +418,10 @@ namespace Sora::Kernel {
         return ComData::TryIncrement(data_);
     }
 
-    bool BaseUnknown::Release() noexcept {
-        Detail::ClosureState* state = Detail::BaseUnknownInternal::TryClosureState(this);
+    bool BaseUnknown::ReleaseNucleusReference() noexcept {
+        const uint64_t word = data_.load(std::memory_order_acquire);
+        assert(ComData::Kind(word) == ComData::PointerType::ForImplementation);
+        auto* state = static_cast<Detail::ClosureState*>(ComData::Pointer(word));
         std::unique_lock<std::mutex> weakLock;
         if (state && state->weak) {
             weakLock = std::unique_lock{state->weak->mutex};
@@ -420,18 +437,30 @@ namespace Sora::Kernel {
         return false;
     }
 
+    bool BaseUnknown::ReleaseStorageReference() noexcept {
+        if (!ComData::TryDecrement(data_)) {
+            return false;
+        }
+        delete this;
+        return true;
+    }
+
     void Retain(BaseUnknown* object) noexcept {
         if (!object) {
             return;
         }
-        object->Retain();
+        BaseUnknown* nucleus = object->Nucleus();
+        assert(nucleus != nullptr);
+        nucleus->Retain();
     }
 
     void Release(BaseUnknown* object) noexcept {
         if (!object) {
             return;
         }
-        object->Release();
+        BaseUnknown* nucleus = object->Nucleus();
+        assert(nucleus != nullptr);
+        nucleus->ReleaseNucleusReference();
     }
 
 } // namespace Sora::Kernel
