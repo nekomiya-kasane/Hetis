@@ -170,6 +170,19 @@ namespace Sora {
             return Ascii::IsAlpha(c) || Ascii::IsDigit(c) || c == '+' || c == '-' || c == '.';
         }
 
+        [[nodiscard]] constexpr UriError ValidateScheme(std::string_view scheme) noexcept {
+            if (scheme.empty()) {
+                return UriError::MissingScheme;
+            }
+            if (!Ascii::IsAlpha(scheme.front())) {
+                return UriError::BadSchemeStart;
+            }
+            if (std::ranges::any_of(scheme | std::views::drop(1), std::not_fn(IsSchemeCharacter))) {
+                return UriError::BadSchemeCharacter;
+            }
+            return UriError::Ok;
+        }
+
         [[nodiscard]] constexpr bool IsPcharPlain(char c) noexcept {
             return IsUnreserved(c) || IsSubDelimiter(c) || c == ':' || c == '@';
         }
@@ -267,14 +280,11 @@ namespace Sora {
         /** @brief Parse `scheme:` and leave the cursor immediately after the colon. */
         [[nodiscard]] constexpr auto ParseScheme(Cursor& cursor) noexcept -> std::expected<std::string_view, UriError> {
             const std::string_view scheme = cursor.TakeUntilAny(":");
-            if (!cursor.Consume(':') || scheme.empty()) {
+            if (!cursor.Consume(':')) {
                 return std::unexpected(UriError::MissingScheme);
             }
-            if (!Ascii::IsAlpha(scheme.front())) {
-                return std::unexpected(UriError::BadSchemeStart);
-            }
-            if (std::ranges::any_of(scheme | std::views::drop(1), std::not_fn(IsSchemeCharacter))) {
-                return std::unexpected(UriError::BadSchemeCharacter);
+            if (const UriError error = ValidateScheme(scheme); error != UriError::Ok) {
+                return std::unexpected(error);
             }
             return scheme;
         }
@@ -353,6 +363,16 @@ namespace Sora {
     /** @brief Return true when @p c can appear literally in an RFC 3986 fragment/anchor component. */
     [[nodiscard]] constexpr bool IsUriAnchorCharacter(char c) noexcept {
         return Detail::Uri::IsFragmentPlain(c);
+    }
+
+    /** @brief Return true when @p text is a syntactically valid RFC 3986 URI scheme. */
+    [[nodiscard]] constexpr bool IsUriScheme(std::string_view text) noexcept {
+        return Detail::Uri::ValidateScheme(text) == UriError::Ok;
+    }
+
+    /** @brief Return true when @p text is a valid URI scheme in canonical lowercase spelling. */
+    [[nodiscard]] constexpr bool IsCanonicalUriScheme(std::string_view text) noexcept {
+        return IsUriScheme(text) && std::ranges::none_of(text, [](char c) { return c >= 'A' && c <= 'Z'; });
     }
 
     /** @brief Parse an absolute RFC 3986 URI into component views. */
