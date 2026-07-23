@@ -9,6 +9,7 @@
 #   HAVE_REFLECTION            P2996  Reflection for C++26       (MANDATORY)
 #   HAVE_DEFINE_STATIC_ARRAY   P3491  std::define_static_array   (MANDATORY)
 #   HAVE_ANNOTATIONS           P3394  Annotations for Reflection (MANDATORY)
+#   HAVE_PARAMETER_ANNOTATIONS P3394  Function-parameter annotations (OPTIONAL)
 #   HAVE_CONSTEVAL_BLOCKS       P3289  consteval { } blocks       (MANDATORY)
 #   HAVE_EXPANSION_STATEMENTS   P1306  template for               (MANDATORY)
 #   HAVE_EMBED                  P1967  #embed                     (MANDATORY)
@@ -252,6 +253,32 @@ int main() {
 }
 ")
 
+# --- P3394: function-parameter annotations ----------------------------------
+# This is a separate gate because accepting annotations on types, members, and
+# namespaces does not imply that the compiler preserves them on parameter
+# reflection entities.
+hetis_check_cxx_source_compiles(
+    HAVE_PARAMETER_ANNOTATIONS
+    "P3394 function-parameter annotation and parameter reflection support"
+"
+#include <meta>
+struct HetisParameterTag {};
+constexpr HetisParameterTag hetisParameterTag{};
+
+void hetisAnnotatedParameter([[=hetisParameterTag]] int value) {
+    (void)value;
+}
+
+consteval bool hetisHasParameterAnnotation() {
+    auto parameters = std::meta::parameters_of(^^hetisAnnotatedParameter);
+    return parameters.size() == 1 &&
+           std::meta::annotations_of(parameters[0], ^^HetisParameterTag).size() == 1;
+}
+
+static_assert(hetisHasParameterAnnotation());
+int main() { return 0; }
+"
+)
 set(CMAKE_CXX_STANDARD "${_hetis_saved_cxx_standard}")
 unset(_hetis_saved_cxx_standard)
 
@@ -305,3 +332,10 @@ endif()
 
 message(STATUS "[Hetis] C++26 required features: P2996, P3491, P3394, P3289, P1306, P1967 -> all present.")
 message(STATUS "[Hetis] 128-bit integer extension (__int128 / __uint128_t) -> present (required).")
+
+if(HAVE_PARAMETER_ANNOTATIONS)
+    message(STATUS "[Hetis] function-parameter custom annotations -> present (optional capability).")
+else()
+    message(STATUS
+        "[Hetis] function-parameter custom annotations -> unavailable (optional capability; no current target requires it).")
+endif()
