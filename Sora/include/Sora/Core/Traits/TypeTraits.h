@@ -11,6 +11,7 @@
 
 #include <array>
 #include <bit>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <meta>
@@ -229,6 +230,32 @@ namespace Sora {
 
     namespace Traits {
 
+        template<size_t Bits>
+        constexpr bool HasNativeFloatWidth =
+#if defined(__FLT16_MANT_DIG__)
+            (Bits == 16 && sizeof(_Float16) * CHAR_BIT == 16) ||
+#endif
+            (Bits == 32 && sizeof(float) * CHAR_BIT == 32) || (Bits == 64 && sizeof(double) * CHAR_BIT == 64);
+
+        template<size_t Bits>
+            requires(
+#if defined(__FLT16_MANT_DIG__)
+                        Bits == 16 ||
+#endif
+                        Bits == 32 || Bits == 64)
+        using NativeFloatType = [:[] consteval {
+            if constexpr (Bits == 16) {
+#if defined(__FLT16_MANT_DIG__)
+                return ^^_Float16;
+#endif
+            } else if constexpr (Bits == 32) {
+                return ^^float;
+            } else if constexpr (Bits == 64) {
+                return ^^double;
+            }
+            return ^^void; // unreachable, but required to satisfy the consteval return type
+        }():];
+
         /** @brief Reflection display string for @p T, preserving template arguments where available. */
         template<typename T>
         inline constexpr auto TypeName = std::meta::display_string_of(^^T);
@@ -264,10 +291,17 @@ namespace Sora {
             requires(std::has_single_bit(Bits) && Bits <= 64)
         using Signed = std::make_signed_t<BestSizeType<Bits>>;
 
-        /** @brief Unsigned integer type with exactly @p Bits bits. */
+        /**
+         * @brief Native floating-point type with an object representation of exactly @p Bits bits.
+         *
+         * @details Only 16-, 32-, and 64-bit representations participate. The 16-bit specialization is available
+         * only when the translation target exposes Clang's native @c _Float16 type, as indicated by @c
+         * __FLT16_MANT_DIG__. An unsupported width is rejected by the constraint instead of silently widening and
+         * changing storage, ABI, or vector-lane semantics.
+         */
         template<size_t Bits>
-            requires(std::has_single_bit(Bits) && Bits <= 64)
-        using Float = std::conditional_t<(Bits <= 16), __bfloat16, std::conditional_t<(Bits <= 32), float, double>>;
+            requires(HasNativeFloatWidth<Bits>)
+        using Float = NativeFloatType<Bits>;
 
     } // namespace Traits
 

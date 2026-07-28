@@ -2,6 +2,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+TEST_CASE("URI scheme helpers distinguish syntax from canonical spelling", "[Sora][Core][Uri]") {
+    static_assert(Sora::IsUriScheme("settings"));
+    static_assert(Sora::IsUriScheme("git+ssh"));
+    static_assert(Sora::IsUriScheme("HTTP"));
+    static_assert(!Sora::IsUriScheme(""));
+    static_assert(!Sora::IsUriScheme("1settings"));
+    static_assert(!Sora::IsUriScheme("set/tings"));
+
+    static_assert(Sora::IsCanonicalUriScheme("settings"));
+    static_assert(Sora::IsCanonicalUriScheme("git+ssh"));
+    static_assert(!Sora::IsCanonicalUriScheme("HTTP"));
+}
+
 TEST_CASE("URI identity helpers validate canonical paths", "[Sora][Core][Uri]") {
     static_assert(Sora::IsCanonicalUriIdentityPath(""));
     static_assert(Sora::IsCanonicalUriIdentityPath("/shader/fullscreen.wgsl"));

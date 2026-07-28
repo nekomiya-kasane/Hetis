@@ -96,3 +96,25 @@ TEST_CASE("EventPort for BaseUnknown is backed by a DataExtension", "[Sora.Core.
     CHECK(&extension->Object() == &port);
     CHECK(&Sora::Kernel::EventPortOf(*object) == &port);
 }
+
+TEST_CASE("Releasing an attached object-model node does not expire its nucleus", "[Sora.Core.ComAdaptor]") {
+    using Sora::Kernel::Detail::BaseUnknownInternal;
+
+    auto object = Sora::Kernel::MakeComAdaptor<Payload>(Payload{7});
+    Sora::Kernel::WeakRef originalWeak = object->GetComponentWeakRef();
+
+    auto* rejectedExtension = new PayloadExtension;
+    BaseUnknownInternal::BindExtendee(rejectedExtension, object.Get());
+    BaseUnknownInternal::ReleaseStorageReference(rejectedExtension);
+
+    CHECK_FALSE(originalWeak.Expired());
+    CHECK(originalWeak.Lock().Get() == object.Get());
+
+    Sora::Kernel::WeakRef secondWeak = object->GetComponentWeakRef();
+    object.Reset();
+
+    CHECK(originalWeak.Expired());
+    CHECK(secondWeak.Expired());
+    CHECK_FALSE(originalWeak.Lock());
+    CHECK_FALSE(secondWeak.Lock());
+}
