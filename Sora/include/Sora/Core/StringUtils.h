@@ -71,6 +71,21 @@ namespace Sora {
             return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
         }
 
+        /** @brief Return true when @p c is an ASCII uppercase letter. */
+        [[nodiscard]] constexpr bool IsUpper(char c) noexcept {
+            return c >= 'A' && c <= 'Z';
+        }
+
+        /** @brief Return true when @p c is an ASCII lowercase letter. */
+        [[nodiscard]] constexpr bool IsLower(char c) noexcept {
+            return c >= 'a' && c <= 'z';
+        }
+
+        /** @brief Return true when @p c is an ASCII alphanumeric character. */
+        [[nodiscard]] constexpr bool IsAlnum(char c) noexcept {
+            return IsAlpha(c) || IsDigit(c);
+        }
+
         /** @brief Convert an ASCII uppercase letter to lowercase; other bytes pass through. */
         [[nodiscard]] constexpr char ToLower(char c) noexcept {
             return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c;

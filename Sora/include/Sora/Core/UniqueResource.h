@@ -90,7 +90,7 @@ namespace Sora {
             [[nodiscard]] constexpr const T& Get() const noexcept { return value_; }
 
         private:
-            NO_UNIQUE_ADDRESS T value_{};
+            SORA_NO_UNIQUE_ADDRESS T value_{};
         };
 
         template<typename Resource>
@@ -291,8 +291,8 @@ namespace Sora {
             std::is_nothrow_constructible_v<std::decay_t<ResourceSource>, ResourceSource> &&
             std::is_nothrow_constructible_v<std::decay_t<DeleterSource>, DeleterSource>);
 
-        NO_UNIQUE_ADDRESS ResourceStorage resource_{};
-        NO_UNIQUE_ADDRESS DeleterStorage deleter_{};
+        SORA_NO_UNIQUE_ADDRESS ResourceStorage resource_{};
+        SORA_NO_UNIQUE_ADDRESS DeleterStorage deleter_{};
         bool armed_ = false;
     };
 

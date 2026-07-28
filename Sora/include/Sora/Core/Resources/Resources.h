@@ -10,5 +10,6 @@
 #include <Sora/Core/Resources/PakView.h>
 #include <Sora/Core/Resources/ResourceId.h>
 #include <Sora/Core/Resources/ResourceModule.h>
+#include <Sora/Core/Resources/ResourceDomain.h>
 #include <Sora/Core/Resources/ResourceRegistry.h>
 #include <Sora/Core/Resources/Settings.h>

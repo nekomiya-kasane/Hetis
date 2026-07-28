@@ -9,7 +9,6 @@
 #include <type_traits>
 #include <vector>
 
-using namespace Sora::Literals;
 using namespace Sora::Resources;
 
 namespace {
@@ -22,16 +21,19 @@ namespace {
 #embed "SettingsTest.json"
     };
 
-    using RenderPipelineSettings = StaticSettingFor<"render"_FS, "pipeline"_FS, kRenderSettingsJson>;
+    using RenderPipelineSettings =
+        StaticSetting<ComposeResourceDomainUri<SettingsDomain, Sora::FixedString<256>{"render"},
+                                                Sora::FixedString<256>{"pipeline"}>(),
+                      kRenderSettingsJson>;
 
     struct TelemetryDomain final {
         inline static constexpr ResourceDomainDescriptor kDescriptor =
-            DefineResourceDomain("telemetry", ResourceType::Data, RuntimeEntryPolicy::Open);
+            MakeResourceDomainDescriptor("telemetry", ResourceType::Data, RuntimeEntryPolicy::AllowUndeclared);
     };
 
     struct DefaultPolicyDomain final {
         inline static constexpr ResourceDomainDescriptor kDescriptor =
-            DefineResourceDomain("defaults", ResourceType::Data);
+            MakeResourceDomainDescriptor("defaults", ResourceType::Data);
     };
 
     struct MissingDescriptorDomain final {};
@@ -61,12 +63,12 @@ namespace {
         inline static constexpr ResourceDomainDescriptor kDescriptor{
             .scheme = Sora::FixedString<32>{"unknown-policy"},
             .resourceType = ResourceType::Data,
-            .runtimeEntries = static_cast<RuntimeEntryPolicy>(255),
+            .entryPolicy = static_cast<RuntimeEntryPolicy>(255),
         };
     };
 
-    using StaticTelemetry =
-        StaticResourceDomainObjectFor<TelemetryDomain, "engine"_FS, "frame"_FS, kRenderSettingsJson>;
+    using StaticTelemetry = StaticDomainResourceFor<TelemetryDomain, Sora::FixedString<256>{"engine"},
+                                                         Sora::FixedString<256>{"frame"}, kRenderSettingsJson>;
 
     template<typename T>
     concept RenderSettingsShape = requires(T settings) {
@@ -87,8 +89,8 @@ namespace {
     static_assert(!Sora::Concept::ResourceDomain<ReservedSchemeDomain>);
     static_assert(!Sora::Concept::ResourceDomain<UnknownResourceTypeDomain>);
     static_assert(!Sora::Concept::ResourceDomain<UnknownRuntimePolicyDomain>);
-    static_assert(kResourceDomainDescriptor<DefaultPolicyDomain>.runtimeEntries == RuntimeEntryPolicy::DeclaredOnly);
-    static_assert(kResourceDomainDescriptor<TelemetryDomain>.runtimeEntries == RuntimeEntryPolicy::Open);
+    static_assert(kResourceDomainDescriptor<DefaultPolicyDomain>.entryPolicy == RuntimeEntryPolicy::DeclaredOnly);
+    static_assert(kResourceDomainDescriptor<TelemetryDomain>.entryPolicy == RuntimeEntryPolicy::AllowUndeclared);
     static_assert(RenderSettingsShape<RenderPipelineSettings::Value>);
     static_assert(RenderPipelineSettings::kId.kHash == HashUri("res://settings/render/pipeline"));
     static_assert(RenderPipelineSettings::kResourceUri == "res://settings/render/pipeline");
@@ -128,11 +130,12 @@ TEST_CASE("StaticSetting parses embedded JSON and exposes canonical settings res
 TEST_CASE("RuntimeSettingsProvider updates settings without reparsing static resource paths", "[Sora][Resources]") {
     RuntimeSettingsProvider provider;
     REQUIRE_FALSE(provider.SetText("settings://render/pipeline", R"({"quality":"low"})").has_value());
-    REQUIRE(provider.Declare<RenderPipelineSettings>().has_value());
+    REQUIRE(provider.DeclareOverride<RenderPipelineSettings>().has_value());
+    REQUIRE_FALSE(provider.SetText("res://shader/render/pipeline", R"({"quality":"low"})").has_value());
     REQUIRE(provider.SetText("settings://render/pipeline", R"({"quality":"low"})").has_value());
 
     ResourceRegistry registry;
-    auto descriptor = provider.Provider(10);
+    auto descriptor = provider.ProviderDescriptor(10);
     REQUIRE(registry.AddProvider(descriptor, {}).has_value());
 
     auto first = registry.Open("settings://render/pipeline");
@@ -147,31 +150,33 @@ TEST_CASE("RuntimeSettingsProvider updates settings without reparsing static res
 }
 
 TEST_CASE("settings URI classification only observes settings identity roots", "[Sora][Resources]") {
-    static_assert(IsSettingsUri("settings://module/entry"));
-    static_assert(IsSettingsUri("settings://module/../entry"));
-    static_assert(IsSettingsUri("settings://module/entry?debug=true"));
-    static_assert(IsSettingsUri("settings://module/"));
-    static_assert(IsSettingsUri("res://settings/module/entry"));
-    static_assert(IsSettingsUri("res://settings/module/../entry"));
-    static_assert(!IsSettingsUri("res://shader/demo.wgsl"));
-    static_assert(!IsSettingsUri("file://settings/module/entry"));
+    static_assert(IsResourceDomainUri<SettingsDomain>("settings://module/entry"));
+    static_assert(IsResourceDomainUri<SettingsDomain>("settings://module/../entry"));
+    static_assert(IsResourceDomainUri<SettingsDomain>("settings://module/entry?debug=true"));
+    static_assert(IsResourceDomainUri<SettingsDomain>("settings://module/"));
+    static_assert(IsResourceDomainUri<SettingsDomain>("res://settings/module/entry"));
+    static_assert(IsResourceDomainUri<SettingsDomain>("res://settings/module/../entry"));
+    static_assert(!IsResourceDomainUri<SettingsDomain>("res://shader/demo.wgsl"));
+    static_assert(!IsResourceDomainUri<SettingsDomain>("file://settings/module/entry"));
 }
 
 TEST_CASE("settings URI normalization enforces canonical resource identity", "[Sora][Resources]") {
-    auto alias = SettingsResourceUriText("settings://module/entry");
+    auto alias = CanonicalizeResourceDomainUri<SettingsDomain>("settings://module/entry");
     REQUIRE(alias.has_value());
     REQUIRE(alias->view() == "res://settings/module/entry");
 
-    auto canonical = SettingsResourceUriText("res://settings/module/entry");
+    auto canonical = CanonicalizeResourceDomainUri<SettingsDomain>("res://settings/module/entry");
     REQUIRE(canonical.has_value());
     REQUIRE(canonical->view() == "res://settings/module/entry");
 
-    REQUIRE(NormalizeResourceOrSettingsUri("settings://module/entry").value() == "res://settings/module/entry");
-    REQUIRE_FALSE(SettingsResourceUriText("settings://module/../entry").has_value());
-    REQUIRE_FALSE(SettingsResourceUriText("settings://module/entry?debug=true").has_value());
-    REQUIRE_FALSE(SettingsResourceUriText("settings://module/").has_value());
-    REQUIRE_FALSE(SettingsResourceUriText("res://settings/module/../entry").has_value());
-    REQUIRE_FALSE(NormalizeResourceOrSettingsUri("settings://module/../entry").has_value());
+    REQUIRE(NormalizeResourceReference<SettingsDomain>("settings://module/entry").value() ==
+            "res://settings/module/entry");
+    REQUIRE_FALSE(CanonicalizeResourceDomainUri<SettingsDomain>("settings://module/../entry").has_value());
+    REQUIRE_FALSE(CanonicalizeResourceDomainUri<SettingsDomain>("settings://module/entry?debug=true").has_value());
+    REQUIRE_FALSE(CanonicalizeResourceDomainUri<SettingsDomain>("settings://module/").has_value());
+    REQUIRE_FALSE(CanonicalizeResourceDomainUri<SettingsDomain>("res://settings/module/../entry").has_value());
+    REQUIRE_FALSE(NormalizeResourceReference<SettingsDomain>("settings://module/../entry").has_value());
+    REQUIRE_FALSE(NormalizeResourceReference<SettingsDomain>("res://shader/demo.wgsl").has_value());
 }
 
 TEST_CASE("resource domains generalize settings URI aliases and runtime injection policy", "[Sora][Resources]") {
@@ -182,16 +187,16 @@ TEST_CASE("resource domains generalize settings URI aliases and runtime injectio
     static_assert(StaticTelemetry::kResourceUri == "res://telemetry/engine/frame");
     static_assert(StaticTelemetry::kId.kHash == HashUri("res://telemetry/engine/frame"));
 
-    auto alias = ResourceDomainUriText<TelemetryDomain>("telemetry://engine/frame");
+    auto alias = CanonicalizeResourceDomainUri<TelemetryDomain>("telemetry://engine/frame");
     REQUIRE(alias.has_value());
     REQUIRE(alias->view() == "res://telemetry/engine/frame");
-    REQUIRE(NormalizeResourceOrDomainUri("telemetry://engine/frame").value() == "res://telemetry/engine/frame");
+    REQUIRE(NormalizeResourceReference("telemetry://engine/frame").value() == "res://telemetry/engine/frame");
 
-    RuntimeResourceDomainProvider<TelemetryDomain> provider;
+    RuntimeDomainResourceProvider<TelemetryDomain> provider;
     REQUIRE(provider.SetText("telemetry://engine/injected", R"({"fps":144})").has_value());
 
     ResourceRegistry registry;
-    auto descriptor = provider.Provider(10);
+    auto descriptor = provider.ProviderDescriptor(10);
     REQUIRE(registry.AddProvider(descriptor, {}).has_value());
 
     auto injected = registry.Open("telemetry://engine/injected");

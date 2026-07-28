@@ -5,12 +5,14 @@
  */
 
 #include "Sora/Core/Resources/ResourceRegistry.h"
-#include "Sora/Core/Resources/Settings.h"
+#include "Sora/Core/Resources/ResourceDomain.h"
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <limits>
 #include <ranges>
+#include <span>
 #include <utility>
 
 namespace Sora::Resources {
@@ -22,22 +24,6 @@ namespace Sora::Resources {
             ResourceRegistry* registry = nullptr;
             PAL::ModulePtr owner{};
         };
-
-        /** @brief Convert a fallible operation to the ABI error-code form. */
-        [[nodiscard]] constexpr ErrorCode ToErrorCode(const VoidResult& result) noexcept {
-            return result ? ErrorCode::Ok : result.error();
-        }
-
-        /** @brief View a module-owned byte range. */
-        [[nodiscard]] auto BytesOf(const unsigned char* data, uint64_t size) -> Result<std::span<const std::byte>> {
-            if (size == 0) {
-                return std::span<const std::byte>{};
-            }
-            if (data == nullptr || size > std::numeric_limits<size_t>::max()) {
-                return std::unexpected(ErrorCode::InvalidArgument);
-            }
-            return std::span<const std::byte>{reinterpret_cast<const std::byte*>(data), static_cast<size_t>(size)};
-        }
 
         /** @brief Validate a sparse or provider index entry. */
         [[nodiscard]] auto ValidateEntry(const ModuleResourceEntry& entry, bool requirePayload) -> VoidResult {
@@ -55,20 +41,14 @@ namespace Sora::Resources {
                 return std::unexpected(ErrorCode::InvalidArgument);
             }
 
-            auto bytes = BytesOf(entry.data, entry.size);
-            if (!bytes) {
-                if (requirePayload) {
-                    return std::unexpected(bytes.error());
-                }
-                if (entry.data != nullptr || entry.size != 0) {
-                    return std::unexpected(bytes.error());
-                }
-                return {};
+            if ((entry.size != 0 && entry.data == nullptr) || entry.size > std::numeric_limits<size_t>::max()) {
+                return std::unexpected(ErrorCode::InvalidArgument);
             }
-            if (requirePayload && Sora::Hashing::HashByteRange(*bytes) != entry.contentHash) {
+            const auto bytes = BytesOf(entry);
+            if (requirePayload && Sora::Hashing::HashByteRange(bytes) != entry.contentHash) {
                 return std::unexpected(ErrorCode::ResourceCorrupted);
             }
-            if (!requirePayload && entry.data != nullptr && Sora::Hashing::HashByteRange(*bytes) != entry.contentHash) {
+            if (!requirePayload && entry.data != nullptr && Sora::Hashing::HashByteRange(bytes) != entry.contentHash) {
                 return std::unexpected(ErrorCode::ResourceCorrupted);
             }
             return {};
@@ -80,7 +60,8 @@ namespace Sora::Resources {
             if (context == nullptr || context->registry == nullptr || block == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
-            return ToErrorCode(context->registry->AddLpak(*block, context->owner));
+            auto res = context->registry->AddLpak(*block, context->owner);
+            return res ? ErrorCode::Ok : res.error();
         }
 
         /** @brief Add a disclosed sparse table through a registry sink. */
@@ -89,7 +70,8 @@ namespace Sora::Resources {
             if (context == nullptr || context->registry == nullptr || table == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
-            return ToErrorCode(context->registry->AddSparse(*table, context->owner));
+            auto res = context->registry->AddSparse(*table, context->owner);
+            return res ? ErrorCode::Ok : res.error();
         }
 
         /** @brief Add a disclosed callback provider through a registry sink. */
@@ -98,7 +80,8 @@ namespace Sora::Resources {
             if (context == nullptr || context->registry == nullptr || provider == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
-            return ToErrorCode(context->registry->AddProvider(*provider, context->owner));
+            auto res = context->registry->AddProvider(*provider, context->owner);
+            return res ? ErrorCode::Ok : res.error();
         }
 
     } // namespace
@@ -220,11 +203,10 @@ namespace Sora::Resources {
         std::vector<std::string> pending;
         {
             std::scoped_lock lock{mutex_};
-            for (const auto& candidate : candidates_) {
-                if (candidate.state == ResourceModuleState::Candidate) {
-                    pending.push_back(candidate.name);
-                }
-            }
+            pending.append_range(candidates_ | std::views::filter([](const Candidate& candidate) {
+                                     return candidate.state == ResourceModuleState::Candidate;
+                                 }) |
+                                 std::views::transform(&Candidate::name));
         }
 
         ErrorCode firstError = ErrorCode::Ok;
@@ -256,7 +238,7 @@ namespace Sora::Resources {
     }
 
     Result<ResourceBlob> ResourceRegistry::Open(std::string_view uri) {
-        auto normalized = NormalizeResourceOrSettingsUri(uri);
+        auto normalized = NormalizeResourceReference(uri);
         if (!normalized) {
             return std::unexpected(normalized.error());
         }
@@ -328,11 +310,11 @@ namespace Sora::Resources {
         if (!IsCompatible(block.header, sizeof(LpakBlock))) {
             return std::unexpected(ErrorCode::InvalidArgument);
         }
-        auto bytes = BytesOf(block.bytes, block.size);
-        if (!bytes) {
-            return std::unexpected(bytes.error());
+        if ((block.size != 0 && block.bytes == nullptr) || block.size > std::numeric_limits<size_t>::max()) {
+            return std::unexpected(ErrorCode::InvalidArgument);
         }
-        auto pak = PakView::Open(*bytes);
+        const auto bytes = std::as_bytes(std::span{block.bytes, static_cast<size_t>(block.size)});
+        auto pak = PakView::Open(bytes);
         if (!pak) {
             return std::unexpected(pak.error());
         }
@@ -465,14 +447,10 @@ namespace Sora::Resources {
             }
             case SourceKind::Sparse: {
                 const ModuleResourceEntry& entry = source.entries[it->entryIndex];
-                auto bytes = BytesOf(entry.data, entry.size);
-                if (!bytes) {
-                    return std::unexpected(bytes.error());
-                }
                 return ResourceBlob{ResourceId{.hash = entry.semanticHash,
                                                .type = static_cast<ResourceType>(entry.type),
                                                .uri = std::string_view{entry.uri, entry.uriSize}},
-                                    *bytes, source.owner};
+                                    BytesOf(entry), source.owner};
             }
             case SourceKind::Provider: {
                 const ModuleResourceEntry& entry = source.entries[it->entryIndex];
@@ -481,11 +459,12 @@ namespace Sora::Resources {
                 if (opened != ErrorCode::Ok) {
                     return std::unexpected(opened);
                 }
-                auto bytes = BytesOf(payload.data, payload.size);
-                if (!bytes) {
-                    return std::unexpected(bytes.error());
+                if ((payload.size != 0 && payload.data == nullptr) ||
+                    payload.size > std::numeric_limits<size_t>::max()) {
+                    return std::unexpected(ErrorCode::InvalidArgument);
                 }
-                std::vector<std::byte> owned{bytes->begin(), bytes->end()};
+                const auto bytes = std::as_bytes(std::span{payload.data, static_cast<size_t>(payload.size)});
+                std::vector<std::byte> owned{bytes.begin(), bytes.end()};
                 return ResourceBlob{ResourceId{.hash = entry.semanticHash,
                                                .type = static_cast<ResourceType>(entry.type),
                                                .uri = std::string_view{entry.uri, entry.uriSize}},
@@ -496,9 +475,8 @@ namespace Sora::Resources {
     }
 
     bool ResourceRegistry::ContainsSourceNameLocked(std::string_view name) const noexcept {
-        return !name.empty() && std::ranges::any_of(sources_, [name](const Source& source) {
-                   return source.name == name;
-               });
+        return !name.empty() &&
+               std::ranges::any_of(sources_, [name](const Source& source) { return source.name == name; });
     }
 
     void ResourceRegistry::RebuildIndex() {

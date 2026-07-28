@@ -43,7 +43,7 @@ namespace {
     struct Empty {};
 
     struct OverlappingEmpty {
-        NO_UNIQUE_ADDRESS Empty marker{};
+        SORA_NO_UNIQUE_ADDRESS Empty marker{};
         std::uint8_t value{};
     };
 

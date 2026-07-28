@@ -320,11 +320,17 @@ namespace Sora::PAL {
         if (!IsValidFileHandle(handle)) {
 #if defined(PLATFORM_WINDOWS)
             const auto error = CaptureLastSystemError();
+            if (error == WindowsSystem::kErrorFileNotFound || error == WindowsSystem::kErrorPathNotFound) {
+                return std::unexpected{ErrorCode::ResourceNotFound};
+            }
             if (error == WindowsSystem::kErrorFileExists || error == WindowsSystem::kErrorAlreadyExists) {
                 return std::unexpected{ErrorCode::AlreadyExists};
             }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             if (errno == EEXIST) {
+                if (errno == ENOENT) {
+                    return std::unexpected{ErrorCode::ResourceNotFound};
+                }
                 return std::unexpected{ErrorCode::AlreadyExists};
             }
 #endif
