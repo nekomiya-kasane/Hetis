@@ -205,9 +205,9 @@ int main() {
     assert(commit.HasValue());
     const Runtime::UndoRecord* undo = transactions.FindUndoRecord(commit.Value().undo_record);
     assert(undo);
-    const std::size_t inserted_count = undo->summary.inserted.size();
-    const std::size_t updated_count = undo->summary.updated.size();
-    const std::size_t erased_count = undo->summary.erased.size();
+    const size_t inserted_count = undo->summary.inserted.size();
+    const size_t updated_count = undo->summary.updated.size();
+    const size_t erased_count = undo->summary.erased.size();
     Runtime::Completion<Runtime::TransactionResult> undo_result = Runtime::SyncWait(transactions.UndoLast());
     assert(undo_result.HasValue());
     assert(document.Features().empty());

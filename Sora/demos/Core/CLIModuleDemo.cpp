@@ -5,6 +5,7 @@
 
 #include <array>
 #include <expected>
+#include <format>
 #include <memory>
 #include <print>
 #include <string>
@@ -21,8 +22,9 @@
 namespace {
 
     struct HostCommand {
-        [[=Sora::CLI::Switch{.name = "details", .shortName = 'd', .about = "Show the executable command details."}]]
-        bool details = false;
+        [[= Sora::CLI::Switch{
+            .name = "details", .shortName = 'd', .about = "Show the executable command details."}]] bool details =
+            false;
 
         [[nodiscard]] int operator()() const noexcept {
             std::println("executable: host{}", details ? " with details" : "");
@@ -53,7 +55,7 @@ namespace {
         };
         auto loaded = Sora::PAL::LoadModule(names, options);
         if (!loaded) {
-            return std::unexpected(loaded.error().Message());
+            return std::unexpected(std::format("failed to load runtime CLI module '{}'", moduleName));
         }
 
         const Sora::PAL::ModulePtr& module = *loaded;

@@ -149,16 +149,10 @@ namespace {
         static_assert(shaderId.kType == R::ResourceType::Shader);
         static_assert(shaderId.kHash == R::HashUri("res://shader/fullscreen.wgsl"));
 
-        R::ResourceBytesView shader{};
-        shader.hash = shaderId.kHash;
-        shader.type = R::ResourceType::Shader;
-        shader.uri = "res://shader/fullscreen.wgsl";
-        shader.data = kShaderBytes;
-        shader.size = sizeof(kShaderBytes);
+        constexpr R::ResourceId shader = shaderId.Runtime();
         assert(shader.hash == shaderId.kHash);
         assert(shader.type == R::ResourceType::Shader);
         assert(shader.uri == "res://shader/fullscreen.wgsl");
-        assert(std::ranges::equal(shader.Bytes(), RawBytes(kShaderBytes, sizeof(kShaderBytes))));
     }
 
     void StaticResourceModuleDemo() {
@@ -275,8 +269,8 @@ namespace {
 
         auto overrideConfig = registry.Open("res://config/window.ini");
         Require(overrideConfig);
-        assert(std::ranges::equal(overrideConfig->Bytes(),
-                                  RawBytes(kOverrideConfigBytes, sizeof(kOverrideConfigBytes))));
+        assert(
+            std::ranges::equal(overrideConfig->Bytes(), RawBytes(kOverrideConfigBytes, sizeof(kOverrideConfigBytes))));
 
         auto duplicateMount = registry.MountPak("base", TextBytes("not a pak"), 100);
         assert(!duplicateMount && duplicateMount.error() == Sora::ErrorCode::InvalidArgument);

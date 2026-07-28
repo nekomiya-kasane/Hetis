@@ -86,6 +86,7 @@ add_sora_demo(Core GetSetDemo)
 add_sora_demo(Core CLIDemo)
 add_sora_demo(Core StackTraceDemo)
 add_sora_demo(Core AsyncEventCallbackDemo)
+add_sora_demo(Core SpscDemo)
 
 add_sora_demo_module(Core CLIModuleLinkedAlpha)
 add_sora_demo_module(Core CLIModuleLinkedBeta)
@@ -234,6 +235,7 @@ set_tests_properties(Demo.Sora.Core.CLIComplexModuleDemo.ForeignWorkingDirectory
 add_sora_demo(PAL ModuleDemo)
 
 add_sora_demo(Resources ResourcesDemo)
+add_sora_demo(Resources SettingsDemo)
 add_sora_demo_asset_resource_library(Resources EmbeddedPakModule)
 add_sora_demo(Resources EmbeddedPakIndexDemo)
 add_dependencies(Demo.Sora.Resources.EmbeddedPakIndexDemo Demo.Sora.Resources.EmbeddedPakModule)
@@ -248,3 +250,5 @@ add_sora_demo(Kernel CommandRuntimeDemo)
 add_sora_demo(Core EventPortDemo)
 
 add_sora_demo(Math PrimaryFunctionsDemo)
+
+add_sora_demo(Antis SpscBadDrain)

@@ -8,6 +8,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <format>
 #include <memory>
 #include <print>
 #include <string>
@@ -125,7 +126,7 @@ namespace {
         };
         auto loaded = Sora::PAL::LoadModule(names, options);
         if (!loaded) {
-            return std::unexpected(loaded.error().Message());
+            return std::unexpected(std::format("failed to load runtime CLI module '{}'", moduleName));
         }
 
         Sora::PAL::ModulePtr module = *loaded;
@@ -157,7 +158,7 @@ namespace {
             if (line.empty() || line.starts_with('#')) {
                 continue;
             }
-            const std::size_t separator = line.find('|');
+            const size_t separator = line.find('|');
             if (separator == std::string::npos || separator == 0) {
                 return std::unexpected("CLI module manifest contains a malformed entry: " + line);
             }
@@ -169,7 +170,7 @@ namespace {
             if (separator != std::string::npos) {
                 std::string_view mount{line.data() + separator + 1, line.size() - separator - 1};
                 while (!mount.empty()) {
-                    const std::size_t slash = mount.find('/');
+                    const size_t slash = mount.find('/');
                     registration->mountPath.emplace_back(mount.substr(0, slash));
                     mount = slash == std::string_view::npos ? std::string_view{} : mount.substr(slash + 1);
                 }
