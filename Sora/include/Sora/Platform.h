@@ -60,9 +60,9 @@
 #endif
 
 #if defined(_MSC_VER)
-#    define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#    define SORA_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #else
-#    define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#    define SORA_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #endif
 
 namespace Sora {
@@ -124,6 +124,9 @@ namespace Sora {
             Arm64,       /**< AArch64 / ARM64. */
             RiscV32,     /**< 32-bit RISC-V. */
             RiscV64,     /**< 64-bit RISC-V. */
+            PowerPC64,   /**< 64-bit Power ISA. */
+            LoongArch64, /**< 64-bit LoongArch. */
+            S390x,       /**< 64-bit IBM Z architecture. */
             Wasm32,      /**< 32-bit WebAssembly. */
             Wasm64,      /**< 64-bit WebAssembly. */
         };
@@ -268,6 +271,12 @@ namespace Sora {
         inline constexpr CpuArchitecture kCpuArchitecture = CpuArchitecture::RiscV64;
 #elif defined(__riscv) && (__riscv_xlen == 32)
         inline constexpr CpuArchitecture kCpuArchitecture = CpuArchitecture::RiscV32;
+#elif defined(__powerpc64__) || defined(__ppc64__) || defined(__PPC64__)
+        inline constexpr CpuArchitecture kCpuArchitecture = CpuArchitecture::PowerPC64;
+#elif defined(__loongarch64) || defined(__loongarch_lp64)
+        inline constexpr CpuArchitecture kCpuArchitecture = CpuArchitecture::LoongArch64;
+#elif defined(__s390x__)
+        inline constexpr CpuArchitecture kCpuArchitecture = CpuArchitecture::S390x;
 #elif defined(__wasm64__)
         inline constexpr CpuArchitecture kCpuArchitecture = CpuArchitecture::Wasm64;
 #elif defined(__wasm32__)

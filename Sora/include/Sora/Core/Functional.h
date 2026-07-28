@@ -54,7 +54,7 @@ namespace Sora {
     template<typename F>
     struct Adaptor {
         /** @brief Wrapped callable. */
-        NO_UNIQUE_ADDRESS F fn;
+        SORA_NO_UNIQUE_ADDRESS F fn;
 
         /**
          * @brief Forward all arguments to the wrapped callable.
@@ -141,8 +141,8 @@ namespace Sora {
         /** @brief Stateless-layout-preserving composition of an outer and inner callable. */
         template<typename Outer, typename Inner>
         struct Composition {
-            NO_UNIQUE_ADDRESS Outer outer;
-            NO_UNIQUE_ADDRESS Inner inner;
+            SORA_NO_UNIQUE_ADDRESS Outer outer;
+            SORA_NO_UNIQUE_ADDRESS Inner inner;
 
             template<typename Self, typename... Xs>
                 requires requires(Self&& self, Xs&&... xs) {

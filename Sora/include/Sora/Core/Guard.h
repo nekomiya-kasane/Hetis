@@ -120,8 +120,8 @@ namespace Sora {
             constexpr void Release() noexcept { state_.Release(); }
 
         private:
-            NO_UNIQUE_ADDRESS ExitFunction exitFunction_;
-            NO_UNIQUE_ADDRESS State state_;
+            SORA_NO_UNIQUE_ADDRESS ExitFunction exitFunction_;
+            SORA_NO_UNIQUE_ADDRESS State state_;
         };
 
     } // namespace Detail

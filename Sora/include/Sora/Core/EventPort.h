@@ -53,16 +53,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(NO_UNIQUE_ADDRESS)
-#    pragma push_macro("NO_UNIQUE_ADDRESS")
-#    undef NO_UNIQUE_ADDRESS
-#    define SORA_EVENT_PORT_RESTORE_NO_UNIQUE_ADDRESS
-#endif
 #include <stdexec/execution.hpp>
-#if defined(SORA_EVENT_PORT_RESTORE_NO_UNIQUE_ADDRESS)
-#    pragma pop_macro("NO_UNIQUE_ADDRESS")
-#    undef SORA_EVENT_PORT_RESTORE_NO_UNIQUE_ADDRESS
-#endif
 
 namespace Sora {
 
