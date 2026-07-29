@@ -151,7 +151,7 @@ namespace Sora::Resources {
         if (entry.size == 0) {
             return {};
         }
-        return {reinterpret_cast<const std::byte*>(entry.data), static_cast<size_t>(entry.size)};
+        return std::as_bytes(std::span{entry.data, static_cast<size_t>(entry.size)});
     }
 
     /** @brief Static sparse resource descriptor generated from a `#embed` byte array. */
