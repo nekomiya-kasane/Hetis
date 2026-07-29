@@ -9,6 +9,7 @@
 
 #include <concurrentqueue.h>
 #include <oneapi/tbb/concurrent_queue.h>
+#include <rigtorp/MPMCQueue.h>
 #include <rigtorp/SPSCQueue.h>
 
 #include <algorithm>
@@ -65,6 +66,7 @@ namespace Mashiro::Benchmark {
         bool pinWorkers = true;
         bool paired = false;
         bool layouts = false;
+        bool references = false;
     };
 
     /** @brief Fixed-size trivially copyable payload carrying a correctness identity. */
@@ -195,9 +197,22 @@ namespace Mashiro::Benchmark {
         }
 #if defined(_WIN32)
         const ULONG cpuSet = cpuSets[workerIndex];
-        return SetThreadSelectedCpuSets(GetCurrentThread(), &cpuSet, 1) != FALSE;
+        return SetThreadSelectedCpuSets(GetCurrentThread(), &cpuSet, 1) != FALSE &&
+               SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) != FALSE;
 #else
         static_cast<void>(workerIndex);
+        return true;
+#endif
+    }
+
+    /** @brief Reduce scheduler preemption noise for pinned strict-FIFO queue measurements. */
+    [[nodiscard]] bool ConfigureBenchmarkProcess(bool enabled) noexcept {
+        if (!enabled) {
+            return true;
+        }
+#if defined(_WIN32)
+        return SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) != FALSE;
+#else
         return true;
 #endif
     }
@@ -208,10 +223,19 @@ namespace Mashiro::Benchmark {
     public:
         static constexpr std::string_view name = "Mashiro SPSC";
         using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
-        static constexpr std::size_t storageBytes = sizeof(Storage);
+        static constexpr std::size_t padding = (Platform::kCacheLineSize - 1) / sizeof(T) + 1;
+        static constexpr std::size_t storageBytes = sizeof(Storage) + (Capacity + 1 + 2 * padding) * sizeof(T);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
-        [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
+        [[nodiscard]] bool Pop(T& value) noexcept {
+            T* front = queue_.Front();
+            if (front == nullptr) {
+                return false;
+            }
+            value = std::move(*front);
+            queue_.PopFront();
+            return true;
+        }
 
     private:
         Storage queue_{};
@@ -374,9 +398,15 @@ namespace Mashiro::Benchmark {
     class RigtorpSpsc {
     public:
         static constexpr std::string_view name = "Rigtorp SPSC";
-        static constexpr std::size_t storageBytes = 0;
+        static constexpr std::size_t padding = (Platform::kCacheLineSize - 1) / sizeof(T) + 1;
+        static constexpr std::size_t storageBytes =
+            sizeof(rigtorp::SPSCQueue<T>) + (Capacity + 1 + 2 * padding) * sizeof(T);
 
-        RigtorpSpsc() : queue_(Capacity) {}
+        RigtorpSpsc() : queue_(Capacity) {
+            if (queue_.capacity() != Capacity) {
+                throw std::runtime_error("Rigtorp SPSC allocator changed the requested capacity");
+            }
+        }
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.try_push(value); }
         [[nodiscard]] bool Pop(T& value) noexcept {
@@ -391,6 +421,23 @@ namespace Mashiro::Benchmark {
 
     private:
         rigtorp::SPSCQueue<T> queue_;
+    };
+
+    /** @brief Rigtorp's bounded strict-FIFO MPMC queue adapter. */
+    template<typename T, std::size_t Capacity>
+    class RigtorpMpmc {
+    public:
+        static constexpr std::string_view name = "Rigtorp MPMC";
+        static constexpr std::size_t storageBytes =
+            sizeof(rigtorp::MPMCQueue<T>) + (Capacity + 1) * sizeof(rigtorp::mpmc::Slot<T>);
+
+        RigtorpMpmc() : queue_(Capacity) {}
+
+        [[nodiscard]] bool Push(const T& value) noexcept { return queue_.try_push(value); }
+        [[nodiscard]] bool Pop(T& value) noexcept { return queue_.try_pop(value); }
+
+    private:
+        rigtorp::MPMCQueue<T> queue_;
     };
 
     /** @brief Official moodycamel ConcurrentQueue adapter with preallocated initial capacity. */
@@ -478,7 +525,7 @@ namespace Mashiro::Benchmark {
                     placementFailed.store(true, std::memory_order_relaxed);
                 }
                 start.arrive_and_wait();
-                auto& result = producerResults[producer];
+                WorkerResult result{};
                 const std::uint64_t first = producer * itemsPerProducer + 1;
                 for (std::size_t index = 0; index < itemsPerProducer; ++index) {
                     const T value{.id = first + index};
@@ -488,6 +535,7 @@ namespace Mashiro::Benchmark {
                     }
                     ++result.transferred;
                 }
+                producerResults[producer] = result;
                 activeProducers.fetch_sub(1, std::memory_order_release);
                 done.count_down();
             });
@@ -499,7 +547,7 @@ namespace Mashiro::Benchmark {
                     placementFailed.store(true, std::memory_order_relaxed);
                 }
                 start.arrive_and_wait();
-                auto& result = consumerResults[consumer];
+                WorkerResult result{};
                 T value{};
                 for (;;) {
                     if (queue->Pop(value)) {
@@ -518,6 +566,7 @@ namespace Mashiro::Benchmark {
                     }
                     Relax();
                 }
+                consumerResults[consumer] = result;
                 done.count_down();
             });
         }
@@ -578,7 +627,8 @@ namespace Mashiro::Benchmark {
             stream_ << config.label << ',' << scenario << ',' << Queue::name << ',' << payloadBytes << ',' << capacity
                     << ',' << producers << ',' << consumers << ',' << sampleIndex << ',' << sample.transferred << ','
                     << sample.seconds << ',' << throughput << ',' << sample.pushFailures << ',' << sample.popFailures
-                    << ',' << Queue::storageBytes << ',' << (config.pinWorkers ? "cpu-set" : "scheduler") << ','
+                    << ',' << Queue::storageBytes << ','
+                    << (config.pinWorkers ? "cpu-set-high-priority" : "scheduler") << ','
                     << config.minimumSampleSeconds * 1'000.0 << '\n';
         }
 
@@ -634,21 +684,23 @@ namespace Mashiro::Benchmark {
                        std::size_t producers, std::size_t consumers) {
         const std::size_t firstItems = CalibratedItems<First, T>(config, producers, consumers);
         const std::size_t secondItems = CalibratedItems<Second, T>(config, producers, consumers);
+        const std::size_t pairedItems = std::max(firstItems, secondItems);
         std::cout << scenario << " | " << First::name << " versus " << Second::name << " | payload=" << sizeof(T)
-                  << " | capacity=" << capacity << " | " << producers << 'P' << consumers << "C\n";
+                  << " | capacity=" << capacity << " | " << producers << 'P' << consumers
+                  << "C | items/producer=" << pairedItems << '\n';
         for (std::size_t warmup = 0; warmup < config.warmups; ++warmup) {
             static_cast<void>(
-                RunSample<First, T>(producers, consumers, std::max(1uz, firstItems / 2), config.pinWorkers));
+                RunSample<First, T>(producers, consumers, std::max(1uz, pairedItems / 2), config.pinWorkers));
             static_cast<void>(
-                RunSample<Second, T>(producers, consumers, std::max(1uz, secondItems / 2), config.pinWorkers));
+                RunSample<Second, T>(producers, consumers, std::max(1uz, pairedItems / 2), config.pinWorkers));
         }
         for (std::size_t sampleIndex = 0; sampleIndex < config.samples; ++sampleIndex) {
             auto runFirst = [&] {
-                const Sample sample = RunSample<First, T>(producers, consumers, firstItems, config.pinWorkers);
+                const Sample sample = RunSample<First, T>(producers, consumers, pairedItems, config.pinWorkers);
                 writer.Write<First>(config, scenario, sizeof(T), capacity, producers, consumers, sampleIndex, sample);
             };
             auto runSecond = [&] {
-                const Sample sample = RunSample<Second, T>(producers, consumers, secondItems, config.pinWorkers);
+                const Sample sample = RunSample<Second, T>(producers, consumers, pairedItems, config.pinWorkers);
                 writer.Write<Second>(config, scenario, sizeof(T), capacity, producers, consumers, sampleIndex, sample);
             };
             if ((sampleIndex & 1uz) == 0) {
@@ -688,6 +740,7 @@ namespace Mashiro::Benchmark {
         for (const std::size_t producers : producerCounts) {
             add.template operator()<MashiroMpsc<T, Capacity>>(config, writer, "MPSC", producers, 1);
             add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "MPSC", producers, 1);
+            add.template operator()<RigtorpMpmc<T, Capacity>>(config, writer, "MPSC", producers, 1);
             add.template operator()<MoodycamelQueue<T, Capacity>>(config, writer, "MPSC", producers, 1);
             add.template operator()<TbbQueue<T, Capacity>>(config, writer, "MPSC", producers, 1);
             add.template operator()<MutexQueue<T, Capacity>>(config, writer, "MPSC", producers, 1);
@@ -701,6 +754,7 @@ namespace Mashiro::Benchmark {
         for (const std::size_t consumers : consumerCounts) {
             add.template operator()<MashiroSpmc<T, Capacity>>(config, writer, "SPMC", 1, consumers);
             add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            add.template operator()<RigtorpMpmc<T, Capacity>>(config, writer, "SPMC", 1, consumers);
             add.template operator()<MoodycamelQueue<T, Capacity>>(config, writer, "SPMC", 1, consumers);
             add.template operator()<TbbQueue<T, Capacity>>(config, writer, "SPMC", 1, consumers);
             add.template operator()<MutexQueue<T, Capacity>>(config, writer, "SPMC", 1, consumers);
@@ -713,6 +767,7 @@ namespace Mashiro::Benchmark {
                                                                        : std::array{2uz, 4uz};
         for (const std::size_t count : symmetricCounts) {
             add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "MPMC", count, count);
+            add.template operator()<RigtorpMpmc<T, Capacity>>(config, writer, "MPMC", count, count);
             add.template operator()<MoodycamelQueue<T, Capacity>>(config, writer, "MPMC", count, count);
             add.template operator()<TbbQueue<T, Capacity>>(config, writer, "MPMC", count, count);
             add.template operator()<MutexQueue<T, Capacity>>(config, writer, "MPMC", count, count);
@@ -794,6 +849,46 @@ namespace Mashiro::Benchmark {
         }
     }
 
+    /** @brief Append strict-FIFO Mashiro versus Rigtorp reference comparisons for every topology. */
+    template<std::size_t Capacity, typename T>
+    void AppendReferenceCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+        auto add = [&cases]<typename First, typename Second>(const Config& cfg, CsvWriter& out,
+                                                             std::string_view scenario, std::size_t producers,
+                                                             std::size_t consumers) {
+            cases.push_back({[&cfg, &out, scenario, producers, consumers] {
+                RunPairedCase<First, Second, T>(cfg, out, scenario, Capacity, producers, consumers);
+            }});
+        };
+
+        add.template operator()<MashiroSpsc<T, Capacity>, RigtorpSpsc<T, Capacity>>(config, writer, "SPSC", 1, 1);
+
+        const std::array<std::size_t, 3> endpointCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
+        for (const std::size_t producers : endpointCounts) {
+            add.template operator()<MashiroMpsc<T, Capacity>, RigtorpMpmc<T, Capacity>>(config, writer, "MPSC",
+                                                                                        producers, 1);
+            if (config.quick) {
+                break;
+            }
+        }
+        for (const std::size_t consumers : endpointCounts) {
+            add.template operator()<MashiroSpmc<T, Capacity>, RigtorpMpmc<T, Capacity>>(config, writer, "SPMC", 1,
+                                                                                        consumers);
+            if (config.quick) {
+                break;
+            }
+        }
+
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
+        for (const std::size_t count : symmetricCounts) {
+            add.template operator()<MashiroMpmc<T, Capacity>, RigtorpMpmc<T, Capacity>>(config, writer, "MPMC", count,
+                                                                                        count);
+            if (config.quick) {
+                break;
+            }
+        }
+    }
+
     /** @brief Parse benchmark command-line options. */
     [[nodiscard]] Config ParseArguments(int argc, char** argv) {
         Config config;
@@ -827,6 +922,8 @@ namespace Mashiro::Benchmark {
                 config.paired = true;
             } else if (argument == "--layouts") {
                 config.layouts = true;
+            } else if (argument == "--references") {
+                config.references = true;
             } else {
                 throw std::invalid_argument("unknown command-line option: " + std::string{argument});
             }
@@ -836,8 +933,10 @@ namespace Mashiro::Benchmark {
             throw std::invalid_argument(
                 "samples and items must be non-zero and minimum-ms must be finite and non-negative");
         }
-        if (config.paired && config.layouts) {
-            throw std::invalid_argument("paired algorithm and layout modes are mutually exclusive");
+        if (static_cast<unsigned>(config.paired) + static_cast<unsigned>(config.layouts) +
+                static_cast<unsigned>(config.references) >
+            1) {
+            throw std::invalid_argument("paired algorithm, layout, and reference modes are mutually exclusive");
         }
         return config;
     }
@@ -847,11 +946,21 @@ namespace Mashiro::Benchmark {
 int main(int argc, char** argv) {
     try {
         const auto config = Mashiro::Benchmark::ParseArguments(argc, argv);
+        if (!Mashiro::Benchmark::ConfigureBenchmarkProcess(config.pinWorkers)) {
+            throw std::runtime_error("failed to raise queue benchmark process priority");
+        }
         std::filesystem::create_directories(config.output.parent_path().empty() ? "." : config.output.parent_path());
         Mashiro::Benchmark::CsvWriter writer{config};
         std::vector<Mashiro::Benchmark::Case> cases;
 
-        if (config.quick && config.layouts) {
+        if (config.quick && config.references) {
+            Mashiro::Benchmark::AppendReferenceCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.references) {
+            Mashiro::Benchmark::AppendReferenceCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendReferenceCases<16'384, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendReferenceCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendReferenceCases<16'384, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+        } else if (config.quick && config.layouts) {
             Mashiro::Benchmark::AppendLayoutCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
         } else if (config.layouts) {
             Mashiro::Benchmark::AppendLayoutCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);

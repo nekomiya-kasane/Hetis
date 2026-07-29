@@ -525,6 +525,7 @@ TEST_CASE("SpscRingBuffer: PopFront destroys the element exactly once", AUTO_TAG
     {
         SpscRing<DtorCounter, 8> q;
         REQUIRE(q.TryEmplace(&dtors));
+        REQUIRE(q.Front() != nullptr);
         q.PopFront();
         REQUIRE(dtors == 1);
     }

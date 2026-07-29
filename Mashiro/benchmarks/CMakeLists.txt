@@ -2,6 +2,7 @@ add_executable(Benchmark.Mashiro.Queues EXCLUDE_FROM_ALL QueueBenchmark.cpp)
 target_link_libraries(Benchmark.Mashiro.Queues PRIVATE Mashiro TBB::tbb)
 target_include_directories(Benchmark.Mashiro.Queues PRIVATE
     "${CMAKE_SOURCE_DIR}/thirdparty/concurrentqueue"
+    "${CMAKE_SOURCE_DIR}/thirdparty/rigtorp-mpmcqueue/include"
     "${CMAKE_SOURCE_DIR}/thirdparty/rigtorp-spscqueue/include"
 )
 target_compile_definitions(Benchmark.Mashiro.Queues PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

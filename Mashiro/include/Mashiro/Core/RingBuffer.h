@@ -248,15 +248,20 @@ namespace Mashiro {
             alignas(T) std::byte slots_[Capacity * sizeof(T)];
         };
 
-        /** @brief Wait-free cross-thread SPSC ring using cached publication cursors. */
+        /**
+         * @brief Wait-free cross-thread SPSC ring using cached publication cursors.
+         * @details One sentinel slot distinguishes full from empty. The padded slot arena is allocated separately so
+         * producer/consumer metadata remains compact, while each published cursor and remote cursor cache occupies an
+         * independent cache line.
+         */
         template<class T, std::size_t Capacity>
             requires(ValidateRingCapacity(Capacity) && Capacity <= (std::size_t{1} << 31) && std::is_object_v<T> &&
                      std::is_nothrow_destructible_v<T>)
         class PublishedCursorRingBuffer {
-            static constexpr std::uint32_t kIndexMask = static_cast<std::uint32_t>(Capacity - 1);
+            static constexpr std::size_t kPadding = (Platform::kCacheLineSize - 1) / sizeof(T) + 1;
 
-            static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
-                          "SPSC RingBuffer requires lock-free 32-bit atomics");
+            static_assert(std::atomic<std::size_t>::is_always_lock_free,
+                          "SPSC RingBuffer requires lock-free size_t atomics");
 
         public:
             using value_type = T;
@@ -264,32 +269,37 @@ namespace Mashiro {
             static constexpr QueueTopology topology = Concurrency::QueueTopologies::Spsc;
             static constexpr bool transactionalPushBatch = true;
 
-            PublishedCursorRingBuffer() = default;
+            PublishedCursorRingBuffer() : slots_(nullptr) {
+                slots_ = allocator_.allocate(slotCount_ + 2 * kPadding);
+            }
             PublishedCursorRingBuffer(const PublishedCursorRingBuffer&) = delete;
             PublishedCursorRingBuffer& operator=(const PublishedCursorRingBuffer&) = delete;
             PublishedCursorRingBuffer(PublishedCursorRingBuffer&&) = delete;
             PublishedCursorRingBuffer& operator=(PublishedCursorRingBuffer&&) = delete;
 
             ~PublishedCursorRingBuffer() {
-                std::uint32_t head = head_.load(std::memory_order_relaxed);
-                const std::uint32_t tail = tail_.load(std::memory_order_relaxed);
+                std::size_t head = head_.load(std::memory_order_relaxed);
+                const std::size_t tail = tail_.load(std::memory_order_relaxed);
                 while (head != tail) {
-                    std::destroy_at(Slot(head++));
+                    std::destroy_at(Slot(head));
+                    head = Next(head);
                 }
+                allocator_.deallocate(slots_, slotCount_ + 2 * kPadding);
             }
 
             template<class... Args>
                 requires std::constructible_from<T, Args&&...>
             [[nodiscard]] bool TryEmplace(Args&&... args) noexcept(std::is_nothrow_constructible_v<T, Args&&...>) {
-                const std::uint32_t tail = tail_.load(std::memory_order_relaxed);
-                if (tail - cachedHead_ == Capacity) {
+                const std::size_t tail = tail_.load(std::memory_order_relaxed);
+                const std::size_t next = Next(tail);
+                if (next == cachedHead_) {
                     cachedHead_ = head_.load(std::memory_order_acquire);
-                    if (tail - cachedHead_ == Capacity) {
+                    if (next == cachedHead_) {
                         return false;
                     }
                 }
                 ::new (Storage(tail)) T(std::forward<Args>(args)...);
-                tail_.store(tail + 1, std::memory_order_release);
+                tail_.store(next, std::memory_order_release);
                 return true;
             }
 
@@ -310,28 +320,24 @@ namespace Mashiro {
             [[nodiscard]] bool TryPop(T& output) noexcept(std::is_nothrow_move_assignable_v<T>)
                 requires std::is_move_assignable_v<T>
             {
-                const std::uint32_t head = head_.load(std::memory_order_relaxed);
-                if (!RefreshTail(head)) {
+                T* value = Front();
+                if (value == nullptr) {
                     return false;
                 }
-                T* value = Slot(head);
                 output = std::move(*value);
-                std::destroy_at(value);
-                head_.store(head + 1, std::memory_order_release);
+                PopFront();
                 return true;
             }
 
             [[nodiscard]] std::optional<T> TryPop() noexcept(std::is_nothrow_move_constructible_v<T>)
                 requires std::move_constructible<T>
             {
-                const std::uint32_t head = head_.load(std::memory_order_relaxed);
-                if (!RefreshTail(head)) {
+                T* value = Front();
+                if (value == nullptr) {
                     return std::nullopt;
                 }
-                T* value = Slot(head);
                 std::optional<T> result{std::move(*value)};
-                std::destroy_at(value);
-                head_.store(head + 1, std::memory_order_release);
+                PopFront();
                 return result;
             }
 
@@ -349,41 +355,51 @@ namespace Mashiro {
             template<class Sink>
                 requires std::invocable<Sink&, T&&> && std::is_nothrow_invocable_v<Sink&, T&&>
             std::size_t Drain(Sink&& sink) noexcept {
-                const std::uint32_t begin = head_.load(std::memory_order_relaxed);
-                const std::uint32_t end = tail_.load(std::memory_order_acquire);
+                const std::size_t begin = head_.load(std::memory_order_relaxed);
+                const std::size_t end = tail_.load(std::memory_order_acquire);
                 cachedTail_ = end;
-                for (std::uint32_t position = begin; position != end; ++position) {
+                std::size_t count = 0;
+                for (std::size_t position = begin; position != end; position = Next(position)) {
                     T* value = Slot(position);
                     sink(std::move(*value));
                     std::destroy_at(value);
+                    ++count;
                 }
                 head_.store(end, std::memory_order_release);
-                return end - begin;
+                return count;
             }
 
             [[nodiscard]] T* Front() noexcept {
-                const std::uint32_t head = head_.load(std::memory_order_relaxed);
+                const std::size_t head = head_.load(std::memory_order_relaxed);
                 return RefreshTail(head) ? Slot(head) : nullptr;
             }
 
+            /**
+             * @brief Destroy and release the element returned by the preceding successful @ref Front call.
+             * @pre Front() returned non-null and no consumer operation has executed since that call.
+             */
             void PopFront() noexcept {
-                const std::uint32_t head = head_.load(std::memory_order_relaxed);
+                const std::size_t head = head_.load(std::memory_order_relaxed);
                 std::destroy_at(Slot(head));
-                head_.store(head + 1, std::memory_order_release);
+                head_.store(Next(head), std::memory_order_release);
             }
 
             [[nodiscard]] std::size_t SizeApprox() const noexcept {
-                const std::uint32_t head = head_.load(std::memory_order_acquire);
-                const std::uint32_t tail = tail_.load(std::memory_order_acquire);
-                const std::uint32_t size = tail - head;
-                return size <= Capacity ? size : Capacity;
+                const std::size_t head = head_.load(std::memory_order_acquire);
+                const std::size_t tail = tail_.load(std::memory_order_acquire);
+                return tail >= head ? tail - head : tail + slotCount_ - head;
             }
 
             [[nodiscard]] bool Empty() const noexcept { return SizeApprox() == 0; }
             [[nodiscard]] static constexpr std::size_t GetCapacity() noexcept { return Capacity; }
 
         private:
-            [[nodiscard]] bool RefreshTail(std::uint32_t head) noexcept {
+            [[nodiscard]] std::size_t Next(std::size_t position) const noexcept {
+                ++position;
+                return position == slotCount_ ? 0 : position;
+            }
+
+            [[nodiscard]] bool RefreshTail(std::size_t head) noexcept {
                 if (head != cachedTail_) {
                     return true;
                 }
@@ -391,28 +407,29 @@ namespace Mashiro {
                 return head != cachedTail_;
             }
 
-            [[nodiscard]] void* Storage(std::uint32_t position) noexcept {
-                return &slots_[std::size_t{position & kIndexMask} * sizeof(T)];
-            }
+            [[nodiscard]] void* Storage(std::size_t position) noexcept { return slots_ + kPadding + position; }
 
-            [[nodiscard]] T* Slot(std::uint32_t position) noexcept {
+            [[nodiscard]] T* Slot(std::size_t position) noexcept {
                 return std::assume_aligned<alignof(T)>(std::launder(reinterpret_cast<T*>(Storage(position))));
             }
 
-            [[= Concurrency::ProducerOwned{}]] alignas(Platform::kCacheLineSize) std::atomic<std::uint32_t> tail_{0};
-            [[= Concurrency::ProducerOwned{}]] std::uint32_t cachedHead_ = 0;
-            [[= Concurrency::ConsumerOwned{}]] alignas(Platform::kCacheLineSize) std::atomic<std::uint32_t> head_{0};
-            [[= Concurrency::ConsumerOwned{}]] std::uint32_t cachedTail_ = 0;
-            [[= Concurrency::SharedStorage{}]] alignas(Platform::kCacheLineSize) alignas(
-                T) std::byte slots_[Capacity * sizeof(T)];
+            [[= Concurrency::Immutable{}]] const std::size_t slotCount_ = Capacity + 1;
+            [[= Concurrency::Immutable{}]] T* slots_;
+            [[= Concurrency::Immutable{}]] std::allocator<T> allocator_{};
+            [[= Concurrency::ProducerOwned{}]] alignas(Platform::kCacheLineSize) std::atomic<std::size_t> tail_{0};
+            [[= Concurrency::ProducerOwned{}]] alignas(Platform::kCacheLineSize) std::size_t cachedHead_ = 0;
+            [[= Concurrency::ConsumerOwned{}]] alignas(Platform::kCacheLineSize) std::atomic<std::size_t> head_{0};
+            [[= Concurrency::ConsumerOwned{}]] alignas(Platform::kCacheLineSize) std::size_t cachedTail_ = 0;
         };
 
         /**
          * @brief Sequence-cell ring whose endpoint claim operations are selected entirely at compile time.
-         * @details Multiple producers isolate adjacent cells to prevent publication false sharing; SPMC stays compact.
+         * @details Adjacent cells are isolated because any multi-participant endpoint can publish sequence words in
+         * parallel.
          */
         template<class T, std::size_t Capacity, QueueTopology Topology,
-                 bool IsolateCells = Topology.producers == QueueCardinality::Multiple>
+                 bool IsolateCells = Topology.producers == QueueCardinality::Multiple ||
+                                     Topology.consumers == QueueCardinality::Multiple>
             requires Traits::ConcurrentQueueElement<T> && (ValidateRingCapacity(Capacity)) &&
                      (ValidateQueueTopology(Topology)) && (Topology.sharing == QueueSharing::Concurrent) &&
                      (Topology.producers == QueueCardinality::Multiple ||

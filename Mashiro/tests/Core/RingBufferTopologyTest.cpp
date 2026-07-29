@@ -32,10 +32,10 @@ TEST_CASE("RingBuffer exact participant counts reduce to canonical topologies", 
     STATIC_REQUIRE(std::is_same_v<Counted, Canonical>);
 }
 
-TEST_CASE("sequence-cell layout isolates concurrent producers", AUTO_TAG) {
+TEST_CASE("sequence-cell layout isolates every multi-participant topology", AUTO_TAG) {
     using namespace Concurrency::QueueTopologies;
     STATIC_REQUIRE(RingBuffer<int, 8, Mpsc>::isolatesCells);
-    STATIC_REQUIRE_FALSE(RingBuffer<int, 8, Spmc>::isolatesCells);
+    STATIC_REQUIRE(RingBuffer<int, 8, Spmc>::isolatesCells);
     STATIC_REQUIRE(RingBuffer<int, 8, Mpmc>::isolatesCells);
 }
 
