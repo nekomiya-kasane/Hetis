@@ -337,7 +337,7 @@ namespace Sora {
         inline constexpr StandardLibrary kStandardLibrary = StandardLibrary::Unknown;
 #endif
 
-#if defined(SORA_BUILD_DEBUG) || defined(_DEBUG)
+#if defined(SORA_BUILD_DEBUG) || defined(DEBUG) || defined(_DEBUG)
         inline constexpr BuildMode kBuildMode = BuildMode::Debug;
 #elif defined(SORA_BUILD_RELWITHDEBINFO)
         inline constexpr BuildMode kBuildMode = BuildMode::RelWithDebInfo;

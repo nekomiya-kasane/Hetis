@@ -30,16 +30,6 @@
 
 namespace Sora {
 
-    /** @brief Diagnostic severity ordered from most verbose to most severe. */
-    enum class LogLevel : uint8_t {
-        Trace = 0, /**< Finest-grained execution diagnostics. */
-        Debug = 1, /**< Debug-time state useful while developing or investigating a subsystem. */
-        Info = 2,  /**< Normal operational information. */
-        Warn = 3,  /**< Suspicious condition that did not prevent the current operation from continuing. */
-        Error = 4, /**< Recoverable failure. */
-        Fatal = 5, /**< Unrecoverable failure; callers normally abort or start crash handling after logging. */
-    };
-
 #ifndef SORA_MIN_LOG_LEVEL
 #    ifdef NDEBUG
     inline constexpr LogLevel kMinLogLevel = LogLevel::Info;
@@ -194,7 +184,7 @@ namespace Sora {
         /** @brief Return the default process logger. */
         [[nodiscard]] static StructuredLogger& Default() noexcept;
 
-        /** @brief Construct a logger with built-in category thresholds. */
+        /** @brief Construct a logger with annotation-defined category thresholds. */
         StructuredLogger();
 
         /** @brief Stop the drain thread and flush buffered records. */

@@ -11,8 +11,12 @@
 #include <array>
 #include <cerrno>
 #include <charconv>
+#include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <new>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -29,6 +33,8 @@
 #    include <Psapi.h>
 #    include <Shellapi.h>
 #    include <TlHelp32.h>
+#    include <evntrace.h>
+#    include <evntcons.h>
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
 #    include <cstdio>
 #    include <dlfcn.h>
@@ -104,6 +110,229 @@ namespace Sora::PAL {
         [[nodiscard]] const ModulePtr& DbgHelpModule() noexcept {
             static const ModulePtr module = LoadSystemModule("dbghelp.dll");
             return module;
+        }
+
+        [[nodiscard]] const ModulePtr& TracingModule() noexcept {
+            static const ModulePtr module = LoadSystemModule("advapi32.dll");
+            return module;
+        }
+
+        inline constexpr GUID kKernelProcessProvider{0x3d6fa8d0,
+                                                     0xfe05,
+                                                     0x11d0,
+                                                     {0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c}};
+        inline constexpr GUID kKernelThreadProvider{0x3d6fa8d1,
+                                                    0xfe05,
+                                                    0x11d0,
+                                                    {0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c}};
+        inline constexpr GUID kSoraSchedulerSessionGuid{0xe837d88f,
+                                                        0x5a6f,
+                                                        0x4f8b,
+                                                        {0x9d, 0x2f, 0x62, 0xd3, 0x73, 0xb8, 0x7d, 0x26}};
+        inline constexpr wchar_t kSoraSchedulerSessionName[] = L"Sora Scheduler Trace";
+
+        [[nodiscard]] ErrorCode ClassifyTraceStatus(ULONG status) noexcept {
+            switch (status) {
+                case ERROR_SUCCESS:
+                    return ErrorCode::Ok;
+                case ERROR_ACCESS_DENIED:
+                case ERROR_PRIVILEGE_NOT_HELD:
+                    return ErrorCode::PermissionDenied;
+                case ERROR_ALREADY_EXISTS:
+                case ERROR_BUSY:
+                    return ErrorCode::ResourceBusy;
+                case ERROR_NOT_SUPPORTED:
+                case ERROR_CALL_NOT_IMPLEMENTED:
+                    return ErrorCode::NotSupported;
+                default:
+                    return ErrorCode::TraceCaptureFailed;
+            }
+        }
+
+        struct WindowsSchedulerTraceProperties {
+            EVENT_TRACE_PROPERTIES value{};
+            wchar_t loggerName[std::size(kSoraSchedulerSessionName)]{};
+        };
+        static_assert(std::is_standard_layout_v<WindowsSchedulerTraceProperties>);
+
+        struct WindowsSchedulerTraceSession {
+            const SchedulerTraceSystemAPI* api = nullptr;
+            WindowsSchedulerTraceProperties properties{};
+            TRACEHANDLE producerHandle = 0;
+            std::atomic<TRACEHANDLE> consumerHandle{INVALID_PROCESSTRACE_HANDLE};
+            SchedulerTraceSystemAPI::EventCallback eventCallback = nullptr;
+            SchedulerTraceSystemAPI::LossCallback lossCallback = nullptr;
+            void* userData = nullptr;
+
+            [[nodiscard]] EVENT_TRACE_PROPERTIES* Properties() noexcept {
+                return &properties.value;
+            }
+
+            static ULONG __stdcall BufferCallback(EVENT_TRACE_LOGFILEW* log) noexcept {
+                if (log != nullptr && log->Context != nullptr) {
+                    auto& session = *static_cast<WindowsSchedulerTraceSession*>(log->Context);
+                    if (session.lossCallback != nullptr) {
+                        session.lossCallback(log->EventsLost, session.userData);
+                    }
+                }
+                return TRUE;
+            }
+
+            static void __stdcall EventCallback(EVENT_RECORD* event) noexcept {
+                if (event == nullptr || event->UserContext == nullptr) {
+                    return;
+                }
+                auto& session = *static_cast<WindowsSchedulerTraceSession*>(event->UserContext);
+                if (session.eventCallback == nullptr || (event->UserData == nullptr && event->UserDataLength != 0)) {
+                    return;
+                }
+
+                NativeSchedulerTraceProvider provider = NativeSchedulerTraceProvider::Unknown;
+                if (IsEqualGUID(event->EventHeader.ProviderId, kKernelThreadProvider)) {
+                    provider = NativeSchedulerTraceProvider::Thread;
+                } else if (IsEqualGUID(event->EventHeader.ProviderId, kKernelProcessProvider)) {
+                    provider = NativeSchedulerTraceProvider::Process;
+                }
+                const auto pointerWidth = (event->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER) != 0
+                                              ? NativeSchedulerTracePointerWidth::Bits32
+                                              : NativeSchedulerTracePointerWidth::Bits64;
+                const auto* payload = static_cast<const std::byte*>(event->UserData);
+                const NativeSchedulerTraceRecord record{
+                    .provider = provider,
+                    .opcode = event->EventHeader.EventDescriptor.Opcode,
+                    .pointerWidth = pointerWidth,
+                    .timestampTicks = event->EventHeader.TimeStamp.QuadPart,
+                    .processorIndex = event->BufferContext.ProcessorIndex,
+                    .payload = std::span<const std::byte>{payload, event->UserDataLength},
+                };
+                session.eventCallback(record, session.userData);
+            }
+        };
+
+        [[nodiscard]] ErrorCode StartWindowsSchedulerTrace(
+            const NativeSchedulerTraceOptions& options, SchedulerTraceSystemAPI::EventCallback eventCallback,
+            SchedulerTraceSystemAPI::LossCallback lossCallback, void* userData,
+            SchedulerTraceSystemAPI::SessionHandle* output, uint64_t* ticksPerSecond) noexcept {
+            if (output == nullptr || ticksPerSecond == nullptr || eventCallback == nullptr) {
+                return ErrorCode::InvalidArgument;
+            }
+            *output = nullptr;
+            *ticksPerSecond = 0;
+
+            const SchedulerTraceSystemAPI& api = LoadSchedulerTraceSystemAPI();
+            auto session = std::unique_ptr<WindowsSchedulerTraceSession>{
+                new (std::nothrow) WindowsSchedulerTraceSession};
+            if (session == nullptr) {
+                return ErrorCode::OutOfMemory;
+            }
+            session->api = &api;
+            session->eventCallback = eventCallback;
+            session->lossCallback = lossCallback;
+            session->userData = userData;
+            EVENT_TRACE_PROPERTIES& properties = *session->Properties();
+            properties.Wnode.BufferSize = static_cast<ULONG>(sizeof(session->properties));
+            properties.Wnode.Guid = kSoraSchedulerSessionGuid;
+            properties.Wnode.ClientContext = 1;
+            properties.Wnode.Flags = WNODE_FLAG_TRACED_GUID;
+            properties.BufferSize = options.bufferSizeKilobytes;
+            properties.MinimumBuffers = options.minimumBuffers;
+            properties.MaximumBuffers = options.maximumBuffers;
+            properties.FlushTimer = 1;
+            properties.LogFileMode = EVENT_TRACE_REAL_TIME_MODE | EVENT_TRACE_SYSTEM_LOGGER_MODE;
+            properties.EnableFlags = EVENT_TRACE_FLAG_PROCESS | EVENT_TRACE_FLAG_THREAD | EVENT_TRACE_FLAG_CSWITCH |
+                                     EVENT_TRACE_FLAG_DISPATCHER;
+            properties.LoggerNameOffset =
+                static_cast<ULONG>(offsetof(WindowsSchedulerTraceProperties, loggerName));
+            std::memcpy(session->properties.loggerName, kSoraSchedulerSessionName, sizeof(kSoraSchedulerSessionName));
+
+            LARGE_INTEGER frequency{};
+            if (api.queryPerformanceFrequency(&frequency) == FALSE || frequency.QuadPart <= 0) {
+                return ErrorCode::TraceCaptureFailed;
+            }
+            *ticksPerSecond = static_cast<uint64_t>(frequency.QuadPart);
+
+            ULONG status =
+                api.startTrace(&session->producerHandle, session->properties.loggerName, session->Properties());
+            if (status != ERROR_SUCCESS) {
+                return ClassifyTraceStatus(status);
+            }
+
+            EVENT_TRACE_LOGFILEW log{};
+            log.LoggerName = session->properties.loggerName;
+            log.ProcessTraceMode =
+                PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+            log.EventRecordCallback = &WindowsSchedulerTraceSession::EventCallback;
+            log.BufferCallback = &WindowsSchedulerTraceSession::BufferCallback;
+            log.Context = session.get();
+            const TRACEHANDLE consumerHandle = api.openTrace(&log);
+            session->consumerHandle.store(consumerHandle, std::memory_order_release);
+            if (consumerHandle == INVALID_PROCESSTRACE_HANDLE) {
+                status = ::GetLastError();
+                api.controlTrace(session->producerHandle, session->properties.loggerName, session->Properties(),
+                                 EVENT_TRACE_CONTROL_STOP);
+                session->producerHandle = 0;
+                return ClassifyTraceStatus(status);
+            }
+
+            *output = session.release();
+            return ErrorCode::Ok;
+        }
+
+        [[nodiscard]] ErrorCode ProcessWindowsSchedulerTrace(SchedulerTraceSystemAPI::SessionHandle handle) noexcept {
+            if (handle == nullptr) {
+                return ErrorCode::InvalidArgument;
+            }
+            auto& session = *static_cast<WindowsSchedulerTraceSession*>(handle);
+            TRACEHANDLE consumerHandle = session.consumerHandle.load(std::memory_order_acquire);
+            const ULONG status = session.api->processTrace(&consumerHandle, 1, nullptr, nullptr);
+            return status == ERROR_CANCELLED ? ErrorCode::Ok : ClassifyTraceStatus(status);
+        }
+
+        [[nodiscard]] ErrorCode StopWindowsSchedulerTrace(SchedulerTraceSystemAPI::SessionHandle handle,
+                                                          NativeSchedulerTraceLosses* losses) noexcept {
+            if (handle == nullptr || losses == nullptr) {
+                return ErrorCode::InvalidArgument;
+            }
+            auto& session = *static_cast<WindowsSchedulerTraceSession*>(handle);
+            ULONG status = ERROR_SUCCESS;
+            if (session.producerHandle != 0) {
+                status = session.api->controlTrace(session.producerHandle, session.properties.loggerName,
+                                                   session.Properties(), EVENT_TRACE_CONTROL_STOP);
+                session.producerHandle = 0;
+            }
+            const EVENT_TRACE_PROPERTIES& properties = *session.Properties();
+            *losses = {
+                .eventsLost = properties.EventsLost,
+                .logBuffersLost = properties.LogBuffersLost,
+                .realtimeBuffersLost = properties.RealTimeBuffersLost,
+            };
+            if (status == ERROR_WMI_INSTANCE_NOT_FOUND) {
+                status = ERROR_SUCCESS;
+            } else if (status != ERROR_SUCCESS) {
+                const TRACEHANDLE consumerHandle =
+                    session.consumerHandle.exchange(INVALID_PROCESSTRACE_HANDLE, std::memory_order_acq_rel);
+                if (consumerHandle != INVALID_PROCESSTRACE_HANDLE) {
+                    session.api->closeTrace(consumerHandle);
+                }
+            }
+            return ClassifyTraceStatus(status);
+        }
+
+        void CloseWindowsSchedulerTrace(SchedulerTraceSystemAPI::SessionHandle handle) noexcept {
+            std::unique_ptr<WindowsSchedulerTraceSession> session{
+                static_cast<WindowsSchedulerTraceSession*>(handle)};
+            if (session == nullptr) {
+                return;
+            }
+            if (session->producerHandle != 0) {
+                session->api->controlTrace(session->producerHandle, session->properties.loggerName,
+                                           session->Properties(), EVENT_TRACE_CONTROL_STOP);
+            }
+            const TRACEHANDLE consumerHandle =
+                session->consumerHandle.exchange(INVALID_PROCESSTRACE_HANDLE, std::memory_order_acq_rel);
+            if (consumerHandle != INVALID_PROCESSTRACE_HANDLE) {
+                session->api->closeTrace(consumerHandle);
+            }
         }
 
         [[nodiscard]] bool QueryWindowsParentProcessId(WindowsSystem::DWord* parent) noexcept {
@@ -208,6 +437,7 @@ namespace Sora::PAL {
         static_assert(WindowsSystem::kInfinite                                   == INFINITE);
         static_assert(WindowsSystem::kWaitObject                                 == WAIT_OBJECT_0);
         static_assert(WindowsSystem::kWaitTimeout                                == WAIT_TIMEOUT);
+        static_assert(WindowsSystem::kSnapshotThreads                            == TH32CS_SNAPTHREAD);
 
         static_assert(std::is_same_v<WindowsSystem::Bool,    BOOL>);
         static_assert(std::is_same_v<WindowsSystem::DWord,   DWORD>);
@@ -215,6 +445,16 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<WindowsSystem::UInt,    UINT>);
         static_assert(std::is_same_v<WindowsSystem::HResult, HRESULT>);
         static_assert(std::is_same_v<WindowsSystem::Long,    LONG>);
+        static_assert(sizeof(WindowsSystem::ThreadEntry) == sizeof(THREADENTRY32));
+        static_assert(alignof(WindowsSystem::ThreadEntry) == alignof(THREADENTRY32));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, size) == offsetof(THREADENTRY32, dwSize));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, usageCount) == offsetof(THREADENTRY32, cntUsage));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, threadId) == offsetof(THREADENTRY32, th32ThreadID));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, ownerProcessId) ==
+                      offsetof(THREADENTRY32, th32OwnerProcessID));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, basePriority) == offsetof(THREADENTRY32, tpBasePri));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, priorityDelta) == offsetof(THREADENTRY32, tpDeltaPri));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, flags) == offsetof(THREADENTRY32, dwFlags));
 
         static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction,                   decltype(&::SymSetOptions)>);
         static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction,                   decltype(&::SymInitialize)>);
@@ -225,6 +465,18 @@ namespace Sora::PAL {
        
         static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction,        decltype(&::RtlCaptureStackBackTrace)>);
 
+        static_assert(
+            std::is_same_v<SchedulerTraceSystemAPI::StartTraceFunction, decltype(&::StartTraceW)>);
+        static_assert(
+            std::is_same_v<SchedulerTraceSystemAPI::ControlTraceFunction, decltype(&::ControlTraceW)>);
+        static_assert(
+            std::is_same_v<SchedulerTraceSystemAPI::OpenTraceFunction, decltype(&::OpenTraceW)>);
+        static_assert(
+            std::is_same_v<SchedulerTraceSystemAPI::ProcessTraceFunction, decltype(&::ProcessTrace)>);
+        static_assert(
+            std::is_same_v<SchedulerTraceSystemAPI::CloseTraceFunction, decltype(&::CloseTrace)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::QueryPerformanceFrequencyFunction,
+                                     decltype(&::QueryPerformanceFrequency)>);
 
         static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessIdFunction,             decltype(&::GetCurrentProcessId)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessFunction,               decltype(&::GetCurrentProcess)>);
@@ -1114,6 +1366,8 @@ namespace Sora::PAL {
                 loaded.createProcessSnapshot         = module->TryFindFunction<API::CreateProcessSnapshotFunction>("CreateToolhelp32Snapshot");
                 loaded.firstProcess                  = module->TryFindFunction<API::ReadProcessEntryFunction>("Process32FirstW");
                 loaded.nextProcess                   = module->TryFindFunction<API::ReadProcessEntryFunction>("Process32NextW");
+                loaded.firstThread                   = module->TryFindFunction<API::ReadThreadEntryFunction>("Thread32First");
+                loaded.nextThread                    = module->TryFindFunction<API::ReadThreadEntryFunction>("Thread32Next");
                 loaded.closeHandle                   = module->TryFindFunction<API::CloseHandleFunction>("CloseHandle");
                 loaded.queryFullProcessImageNameWide = module->TryFindFunction<API::QueryFullProcessImageNameWideFunction>("QueryFullProcessImageNameW");
                 loaded.getCommandLineWide            = module->TryFindFunction<API::GetCommandLineWideFunction>("GetCommandLineW");
@@ -1207,6 +1461,42 @@ namespace Sora::PAL {
 #    endif
 #endif
             // clang-format on
+            return loaded;
+        }();
+        return api;
+    }
+
+    const SchedulerTraceSystemAPI& LoadSchedulerTraceSystemAPI() noexcept {
+        static const SchedulerTraceSystemAPI api = [] {
+            SchedulerTraceSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            const ModulePtr& tracing = TracingModule();
+            const ModulePtr& kernel = KernelModule();
+            if (tracing != nullptr) {
+                loaded.startTrace =
+                    tracing->TryFindFunction<SchedulerTraceSystemAPI::StartTraceFunction>("StartTraceW");
+                loaded.controlTrace =
+                    tracing->TryFindFunction<SchedulerTraceSystemAPI::ControlTraceFunction>("ControlTraceW");
+                loaded.openTrace =
+                    tracing->TryFindFunction<SchedulerTraceSystemAPI::OpenTraceFunction>("OpenTraceW");
+                loaded.processTrace =
+                    tracing->TryFindFunction<SchedulerTraceSystemAPI::ProcessTraceFunction>("ProcessTrace");
+                loaded.closeTrace =
+                    tracing->TryFindFunction<SchedulerTraceSystemAPI::CloseTraceFunction>("CloseTrace");
+            }
+            if (kernel != nullptr) {
+                loaded.queryPerformanceFrequency =
+                    kernel->TryFindFunction<SchedulerTraceSystemAPI::QueryPerformanceFrequencyFunction>(
+                        "QueryPerformanceFrequency");
+            }
+            if (EnsureSystemAPIs(loaded.startTrace, loaded.controlTrace, loaded.openTrace, loaded.processTrace,
+                                 loaded.closeTrace, loaded.queryPerformanceFrequency)) {
+                loaded.start = StartWindowsSchedulerTrace;
+                loaded.process = ProcessWindowsSchedulerTrace;
+                loaded.stop = StopWindowsSchedulerTrace;
+                loaded.close = CloseWindowsSchedulerTrace;
+            }
+#endif
             return loaded;
         }();
         return api;

@@ -28,6 +28,7 @@
  */
 #pragma once
 
+#include "Sora/Core/PAL/NativeIdentity.h"
 #include "Sora/ErrorCode.h"
 #include "Sora/Platform.h"
 
@@ -79,7 +80,7 @@ namespace Sora {
          * correlating Sora diagnostics with native debuggers, profilers, and Trace Event consumers.
          * @return A nonzero native identifier on supported platforms, or zero when the platform cannot provide one.
          */
-        [[nodiscard]] Result<uint64_t> CurrentNativeThreadId() noexcept;
+        [[nodiscard]] Result<NativeThreadId> CurrentNativeThreadId() noexcept;
 
         /**
          * @brief Assign a UTF-8 debugger/profiler name to the calling thread.

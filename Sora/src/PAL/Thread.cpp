@@ -29,25 +29,31 @@ namespace Sora::PAL {
 
     } // namespace
 
-    Result<uint64_t> CurrentNativeThreadId() noexcept {
-        constexpr Result<uint64_t> unsupported{std::unexpected(ErrorCode::NotSupported)};
+    Result<NativeThreadId> CurrentNativeThreadId() noexcept {
+        constexpr Result<NativeThreadId> unsupported{std::unexpected(ErrorCode::NotSupported)};
 #if defined(PLATFORM_WINDOWS)
         const ThreadSystemAPI& api = LoadThreadSystemAPI();
-        return api.getCurrentThreadId ? Result<uint64_t>{static_cast<uint64_t>(api.getCurrentThreadId())} : unsupported;
+        if (!EnsureSystemAPIs(api.getCurrentThreadId)) {
+            return unsupported;
+        }
+        const uint64_t id = api.getCurrentThreadId();
+        return id != 0 ? Result<NativeThreadId>{NativeThreadId{id}} : unsupported;
 #elif defined(PLATFORM_LINUX)
         const ThreadSystemAPI& api = LoadThreadSystemAPI();
         if (api.systemCall == nullptr) {
             return std::unexpected(ErrorCode::NotSupported);
         }
         const long threadId = api.systemCall(SYS_gettid);
-        return threadId > 0 ? Result<uint64_t>{static_cast<uint64_t>(threadId)} : unsupported;
+        return threadId > 0 ? Result<NativeThreadId>{NativeThreadId{static_cast<uint64_t>(threadId)}} : unsupported;
 #elif defined(PLATFORM_MACOS)
         const ThreadSystemAPI& api = LoadThreadSystemAPI();
         if (api.pthreadThreadId == nullptr) {
             return std::unexpected(ErrorCode::NotSupported);
         }
         uint64_t threadId = 0;
-        return api.pthreadThreadId(nullptr, &threadId) ? Result<uint64_t>{threadId} : unsupported;
+        return api.pthreadThreadId(nullptr, &threadId) == 0 && threadId != 0
+                   ? Result<NativeThreadId>{NativeThreadId{threadId}}
+                   : unsupported;
 #else
         return std::unexpected(ErrorCode::NotSupported);
 #endif

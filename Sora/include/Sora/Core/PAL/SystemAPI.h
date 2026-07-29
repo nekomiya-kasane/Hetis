@@ -20,6 +20,7 @@
 #pragma once
 
 #include <Sora/Core/FixedString.h>
+#include <Sora/ErrorCode.h>
 #include <Sora/Platform.h>
 
 #include <concepts>
@@ -28,6 +29,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -43,6 +45,8 @@ struct timespec;
 #if defined(PLATFORM_WINDOWS)
 struct _IMAGEHLP_LINE64;
 struct _IMAGEHLP_MODULE64;
+struct _EVENT_TRACE_LOGFILEW;
+struct _EVENT_TRACE_PROPERTIES;
 struct _FILETIME;
 struct _PROCESS_MEMORY_COUNTERS;
 union _LARGE_INTEGER;
@@ -95,6 +99,43 @@ namespace Sora::PAL {
     /** @brief Allocation-free callback invoked by the normalized native crash adapter. */
     using NativeCrashCallback = void (*)(const NativeCrashContext& context, void* userData) noexcept;
 
+    /** @brief Native scheduler provider family after platform GUID or tracepoint normalization. */
+    enum class NativeSchedulerTraceProvider : uint8_t {
+        Process,
+        Thread,
+        Unknown,
+    };
+
+    /** @brief Pointer width used by pointer-sized fields in one native event payload. */
+    enum class NativeSchedulerTracePointerWidth : uint8_t {
+        Bits32 = 4,
+        Bits64 = 8,
+    };
+
+    /** @brief Platform-neutral native scheduler record valid only for the duration of its callback. */
+    struct NativeSchedulerTraceRecord {
+        NativeSchedulerTraceProvider provider = NativeSchedulerTraceProvider::Unknown;
+        uint8_t opcode = 0;
+        NativeSchedulerTracePointerWidth pointerWidth = NativeSchedulerTracePointerWidth::Bits64;
+        int64_t timestampTicks = 0;
+        uint32_t processorIndex = 0;
+        std::span<const std::byte> payload{};
+    };
+
+    /** @brief Native buffering parameters for the scheduler trace transport. */
+    struct NativeSchedulerTraceOptions {
+        uint32_t bufferSizeKilobytes = 64;
+        uint32_t minimumBuffers = 64;
+        uint32_t maximumBuffers = 256;
+    };
+
+    /** @brief Native transport loss totals captured when the session stops. */
+    struct NativeSchedulerTraceLosses {
+        uint64_t eventsLost = 0;
+        uint64_t logBuffersLost = 0;
+        uint64_t realtimeBuffersLost = 0;
+    };
+
     /** @brief Platform-normalized module and symbol information for one native address. */
     struct ModuleAddressInfo {
         const char* modulePath = nullptr; /**< Native module path containing the address, when available. */
@@ -124,10 +165,24 @@ namespace Sora::PAL {
         using HResult = long;
         using Size = uintptr_t;
         using Handle = void*;
+        using TraceHandle = uint64_t;
         using GlobalMemory = void*;
         /** @brief Opaque native type used by the existing Win32 file API table. */
         using NativeOverlapped = ::_OVERLAPPED;
         using NativeLargeInteger = ::_LARGE_INTEGER;
+
+        /** @brief Layout-compatible Win32 thread snapshot entry without exposing the Windows SDK. */
+        struct ThreadEntry {
+            DWord size = sizeof(ThreadEntry);
+            DWord usageCount = 0;
+            DWord threadId = 0;
+            DWord ownerProcessId = 0;
+            Long basePriority = 0;
+            Long priorityDelta = 0;
+            DWord flags = 0;
+        };
+
+        inline constexpr DWord kSnapshotThreads = 0x00000004;
 
         /** @brief Layout used by Win32 asynchronous file operations without including the Windows SDK. */
         struct Overlapped {
@@ -247,6 +302,8 @@ namespace Sora::PAL {
                 inline constexpr DWord kErrorFileNotFound                = 2;
                 [[= PAL::$::Macro{"ERROR_PATH_NOT_FOUND"}]]
                 inline constexpr DWord kErrorPathNotFound                = 3;
+                [[= PAL::$::Macro{"ERROR_NO_MORE_FILES"}]]
+                inline constexpr DWord kErrorNoMoreFiles                 = 18;
                 [[= PAL::$::Macro{"ERROR_HANDLE_EOF"}]]
                 inline constexpr DWord kErrorHandleEof                   = 38;
                 [[= PAL::$::Macro{"ERROR_FILE_EXISTS"}]]
@@ -520,6 +577,7 @@ namespace Sora::PAL {
         using GetCurrentProcessFunction             = WindowsSystem::Handle(__stdcall*)();
         using CreateProcessSnapshotFunction         = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord);
         using ReadProcessEntryFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::tagPROCESSENTRY32W*);
+        using ReadThreadEntryFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::ThreadEntry*);
         using CloseHandleFunction                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
         using QueryFullProcessImageNameWideFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord*);
         using GetCommandLineWideFunction            = wchar_t*(__stdcall*)();
@@ -540,6 +598,10 @@ namespace Sora::PAL {
         ReadProcessEntryFunction              firstProcess                  = nullptr;
         [[= $::Syscall{"Process32NextW"}]]
         ReadProcessEntryFunction              nextProcess                   = nullptr;
+        [[= $::Syscall{"Thread32First"}]]
+        ReadThreadEntryFunction               firstThread                   = nullptr;
+        [[= $::Syscall{"Thread32Next"}]]
+        ReadThreadEntryFunction               nextThread                    = nullptr;
         [[= $::Syscall{"CloseHandle"}]]
         CloseHandleFunction                   closeHandle                    = nullptr;
         [[= $::Syscall{"QueryFullProcessImageNameW"}]]
@@ -1197,6 +1259,48 @@ namespace Sora::PAL {
 
 #endif
 
+    /** @brief Normalized scheduler-tracing transport implemented by the platform-specific system adapter. */
+    struct SchedulerTraceSystemAPI {
+        // clang-format off
+        using SessionHandle   = void*;
+        using EventCallback   = void (*)(const NativeSchedulerTraceRecord&, void*) noexcept;
+        using LossCallback    = void (*)(uint64_t eventsLost, void*) noexcept;
+        using StartFunction =
+            ErrorCode (*)(const NativeSchedulerTraceOptions&, EventCallback, LossCallback, void*, SessionHandle*,
+                          uint64_t*) noexcept;
+        using ProcessFunction = ErrorCode (*)(SessionHandle) noexcept;
+        using StopFunction    = ErrorCode (*)(SessionHandle, NativeSchedulerTraceLosses*) noexcept;
+        using CloseFunction   = void (*)(SessionHandle) noexcept;
+
+#if defined(PLATFORM_WINDOWS)
+        using StartTraceFunction                = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle*, const wchar_t*, ::_EVENT_TRACE_PROPERTIES*);
+        using ControlTraceFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle, const wchar_t*, ::_EVENT_TRACE_PROPERTIES*, WindowsSystem::DWord);
+        using OpenTraceFunction                 = WindowsSystem::TraceHandle(__stdcall*)(::_EVENT_TRACE_LOGFILEW*);
+        using ProcessTraceFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle*, WindowsSystem::DWord, ::_FILETIME*, ::_FILETIME*);
+        using CloseTraceFunction                = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle);
+        using QueryPerformanceFrequencyFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::NativeLargeInteger*);
+
+        [[= $::Syscall{"StartTraceW"}]]
+        StartTraceFunction                startTrace                = nullptr;
+        [[= $::Syscall{"ControlTraceW"}]]
+        ControlTraceFunction              controlTrace              = nullptr;
+        [[= $::Syscall{"OpenTraceW"}]]
+        OpenTraceFunction                 openTrace                 = nullptr;
+        [[= $::Syscall{"ProcessTrace"}]]
+        ProcessTraceFunction              processTrace              = nullptr;
+        [[= $::Syscall{"CloseTrace"}]]
+        CloseTraceFunction                closeTrace                = nullptr;
+        [[= $::Syscall{"QueryPerformanceFrequency"}]]
+        QueryPerformanceFrequencyFunction queryPerformanceFrequency = nullptr;
+#endif
+
+        StartFunction   start   = nullptr;     /**< Create and start one native producer and real-time consumer. */
+        ProcessFunction process = nullptr;     /**< Block while dispatching native records to the event callback. */
+        StopFunction    stop    = nullptr;     /**< Stop collection and capture final native loss totals. */
+        CloseFunction   close   = nullptr;     /**< Close the consumer and destroy the opaque native session. */
+        // clang-format on
+    };
+
     /** @brief Exclusive access token for the process-global, non-thread-safe DbgHelp API. */
     class LockedDbgHelpSystemAPI {
     public:
@@ -1237,6 +1341,9 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable current-thread function table. */
     [[nodiscard]] const ThreadSystemAPI& LoadThreadSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable native scheduler-tracing function table. */
+    [[nodiscard]] const SchedulerTraceSystemAPI& LoadSchedulerTraceSystemAPI() noexcept;
 
     /** @brief Load and return the immutable movable-global-memory function table. */
     [[nodiscard]] const GlobalMemorySystemAPI& LoadGlobalMemorySystemAPI() noexcept;

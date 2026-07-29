@@ -84,6 +84,8 @@ namespace Sora {
         ProcessNativeFailure = 0x0029,      ///< A native current-process introspection operation failed.
         InvalidNativeProcessText = 0x002A,  ///< Native process metadata is not valid Unicode text.
         GlobalMemoryNativeFailure = 0x002B, ///< A native movable-global-memory operation failed.
+        PermissionDenied = 0x002C,          ///< The caller lacks permission for the requested operation.
+        ResourceBusy = 0x002D,              ///< An exclusive resource is currently owned by another operation.
         /** @} */
 
         /** @name Core Rendering (0x1000 – 0x1FFF) @{ */
@@ -131,6 +133,7 @@ namespace Sora {
         CaptureToolNotAvailable = 0xD006,   ///< Frame-capture tool (RenderDoc, PIX) not attached.
         ProfilerNotInitialized = 0xD007,    ///< GPU profiler was not initialised.
         TraceExportFailed = 0xD008,         ///< Performance trace export failed.
+        TraceCaptureFailed = 0xD009,        ///< Native performance trace acquisition failed.
         /** @} */
 
         /** @name GPU Device (0xF000 – 0xFFFF) @{ */

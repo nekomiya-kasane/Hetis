@@ -19,27 +19,6 @@ namespace Sora {
 
     namespace {
 
-        /** @brief Return the built-in default threshold for @p category. */
-        [[nodiscard]] constexpr LogLevel DefaultCategoryLevel(LogCategory category) noexcept {
-            switch (category) {
-                case LogCategory::Core:
-                case LogCategory::Kernel:
-                case LogCategory::Resource:
-                case LogCategory::Render:
-                case LogCategory::Audio:
-                case LogCategory::Network:
-                    return LogLevel::Info;
-                case LogCategory::Scene:
-                case LogCategory::Input:
-                case LogCategory::Script:
-                case LogCategory::Editor:
-                    return LogLevel::Debug;
-                case LogCategory::App:
-                    return LogLevel::Trace;
-            }
-            return LogLevel::Trace;
-        }
-
         /** @brief Format @p time as local wall-clock time with millisecond precision. */
         [[nodiscard]] std::string FormatTimestamp(std::chrono::system_clock::time_point time) {
             using namespace std::chrono;
@@ -106,6 +85,24 @@ namespace Sora {
             std::string_view function;
             std::string_view message;
         };
+
+        constexpr std::array<LogLevel, Traits::EnumeratorsCountOf<LogCategory>> kDefaultLogCategoryLevels =
+            [] consteval {
+                std::array<LogLevel, Traits::EnumeratorsCountOf<LogCategory>> levels{};
+                size_t index = 0;
+                template for (constexpr auto enumerator : Meta::EnumeratorsOf(^^LogCategory)) {
+                    const LogCategory category = std::meta::extract<LogCategory>(enumerator);
+                    if (static_cast<size_t>(category) != index) {
+                        throw "LogCategory built-ins must be zero-based contiguous ordinals.";
+                    }
+                    const auto annotations = std::meta::annotations_of(enumerator, ^^$::DefaultLogLevel);
+                    if (annotations.size() != 1) {
+                        throw "Each LogCategory enumerator must have exactly one DefaultLogLevel annotation.";
+                    }
+                    levels[index++] = std::meta::extract<$::DefaultLogLevel>(annotations.front()).value;
+                }
+                return levels;
+            }();
 
     } // namespace
 
@@ -303,9 +300,12 @@ namespace Sora {
     }
 
     StructuredLogger::StructuredLogger() {
-        for (size_t i = 0; i < categoryLevels_.size(); ++i) {
-            const auto category = static_cast<LogCategory>(i);
-            categoryLevels_[i].store(static_cast<uint8_t>(DefaultCategoryLevel(category)), std::memory_order_relaxed);
+        for (std::atomic<uint8_t>& level : categoryLevels_) {
+            level.store(static_cast<uint8_t>(LogLevel::Trace), std::memory_order_relaxed);
+        }
+        for (size_t index = 0; index < kDefaultLogCategoryLevels.size(); ++index) {
+            categoryLevels_[index].store(static_cast<uint8_t>(kDefaultLogCategoryLevels[index]),
+                                         std::memory_order_relaxed);
         }
         running_.store(true, std::memory_order_release);
         drainThread_ = std::thread([this] { DrainLoop(); });
@@ -373,7 +373,7 @@ namespace Sora {
                          .category = category,
                          .source = source,
                          .timestamp = std::chrono::system_clock::now(),
-                         .threadId = threadId ? *threadId : 0,
+                         .threadId = threadId ? threadId->Value() : 0,
                          .message = std::move(message)};
         WriteToRing(record);
     }
@@ -530,7 +530,7 @@ namespace Sora {
             StructuredLogger& logger = StructuredLogger::Default();
             std::lock_guard lock(logger.ringsMutex_);
             auto threadId = PAL::CurrentNativeThreadId();
-            logger.rings_.push_back({.ring = &guard.ring, .threadId = threadId ? *threadId : 0});
+            logger.rings_.push_back({.ring = &guard.ring, .threadId = threadId ? threadId->Value() : 0});
         }
         return guard.ring;
     }

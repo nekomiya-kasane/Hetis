@@ -13,6 +13,8 @@
 #include <Sora/Platform.h>
 
 #include <array>
+#include <algorithm>
+#include <charconv>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -82,48 +84,115 @@ namespace Sora::PAL {
 
     } // namespace
 
-    Result<ProcessId> CurrentProcessId() noexcept {
+    Result<NativeProcessId> CurrentNativeProcessId() noexcept {
 #if defined(PLATFORM_WINDOWS)
         const ProcessSystemAPI& api = LoadProcessSystemAPI();
         if (api.getCurrentProcessId == nullptr) {
             return std::unexpected(ErrorCode::NotSupported);
         }
         const WindowsSystem::DWord id = api.getCurrentProcessId();
-        return id != 0 ? Result<ProcessId>{static_cast<ProcessId>(id)}
-                       : Result<ProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
+        return id != 0 ? Result<NativeProcessId>{NativeProcessId{id}}
+                       : Result<NativeProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
         const ProcessSystemAPI& api = LoadProcessSystemAPI();
         if (!EnsureSystemAPIs(api.getProcessId)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
         const int id = api.getProcessId();
-        return id > 0 ? Result<ProcessId>{static_cast<ProcessId>(id)}
-                      : Result<ProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
+        return id > 0 ? Result<NativeProcessId>{NativeProcessId{static_cast<uint64_t>(id)}}
+                      : Result<NativeProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
 #else
         return std::unexpected(ErrorCode::NotSupported);
 #endif
     }
 
-    Result<ProcessId> ParentProcessId() noexcept {
+    Result<NativeProcessId> ParentNativeProcessId() noexcept {
 #if defined(PLATFORM_WINDOWS)
         const ProcessSystemAPI& api = LoadProcessSystemAPI();
         if (!EnsureSystemAPIs(api.queryParentProcessId)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
         WindowsSystem::DWord parent = 0;
-        return api.queryParentProcessId(&parent) ? Result<ProcessId>{static_cast<ProcessId>(parent)}
-                                                 : Result<ProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
+        return api.queryParentProcessId(&parent)
+                   ? Result<NativeProcessId>{NativeProcessId{parent}}
+                   : Result<NativeProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
         const ProcessSystemAPI& api = LoadProcessSystemAPI();
         if (!EnsureSystemAPIs(api.getParentProcessId)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
         const int id = api.getParentProcessId();
-        return id >= 0 ? Result<ProcessId>{static_cast<ProcessId>(id)}
-                       : Result<ProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
+        return id >= 0 ? Result<NativeProcessId>{NativeProcessId{static_cast<uint64_t>(id)}}
+                       : Result<NativeProcessId>{std::unexpected(ErrorCode::ProcessNativeFailure)};
 #else
         return std::unexpected(ErrorCode::NotSupported);
 #endif
+    }
+
+    Result<std::vector<NativeThreadId>> EnumerateProcessThreads(NativeProcessId process) {
+#if defined(PLATFORM_WINDOWS)
+        if (process.Value() > std::numeric_limits<WindowsSystem::DWord>::max()) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+        const ProcessSystemAPI& api = LoadProcessSystemAPI();
+        if (!EnsureSystemAPIs(api.createProcessSnapshot, api.firstThread, api.nextThread, api.closeHandle)) {
+            return std::unexpected(ErrorCode::NotSupported);
+        }
+
+        WindowsSystem::Handle snapshot = api.createProcessSnapshot(WindowsSystem::kSnapshotThreads, 0);
+        if (WindowsSystem::IsInvalidHandle(snapshot)) {
+            return std::unexpected(ErrorCode::ProcessNativeFailure);
+        }
+        ScopeExit closeSnapshot{[&api, snapshot] noexcept { api.closeHandle(snapshot); }};
+
+        std::vector<NativeThreadId> threads;
+        WindowsSystem::ThreadEntry entry{};
+        WindowsSystem::Bool found = api.firstThread(snapshot, &entry);
+        while (found != WindowsSystem::kFalse) {
+            if (entry.ownerProcessId == process.Value()) {
+                threads.emplace_back(entry.threadId);
+            }
+            entry.size = sizeof(WindowsSystem::ThreadEntry);
+            found = api.nextThread(snapshot, &entry);
+        }
+        if (CaptureLastSystemError() != WindowsSystem::kErrorNoMoreFiles) {
+            return std::unexpected(ErrorCode::ProcessNativeFailure);
+        }
+#elif defined(PLATFORM_LINUX)
+        if (process.Value() == 0 || process.Value() > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            return std::unexpected(ErrorCode::InvalidArgument);
+        }
+        const std::filesystem::path taskDirectory =
+            std::filesystem::path{"/proc"} / std::to_string(process.Value()) / "task";
+        std::error_code error;
+        std::filesystem::directory_iterator entries{taskDirectory, error};
+        if (error) {
+            return std::unexpected(ErrorCode::ProcessNativeFailure);
+        }
+
+        std::vector<NativeThreadId> threads;
+        const std::filesystem::directory_iterator end{};
+        while (entries != end) {
+            const std::filesystem::directory_entry& entry = *entries;
+            const std::string name = entry.path().filename().string();
+            uint64_t value = 0;
+            const auto [end, parseError] = std::from_chars(name.data(), name.data() + name.size(), value);
+            if (parseError == std::errc{} && end == name.data() + name.size() && value != 0) {
+                threads.emplace_back(value);
+            }
+            entries.increment(error);
+            if (error) {
+                return std::unexpected(ErrorCode::ProcessNativeFailure);
+            }
+        }
+#else
+        return std::unexpected(ErrorCode::NotSupported);
+#endif
+
+        std::ranges::sort(threads);
+        auto uniqueEnd = std::ranges::unique(threads).begin();
+        threads.erase(uniqueEnd, threads.end());
+        return threads;
     }
 
     Result<std::filesystem::path> CurrentProcessImagePath() {

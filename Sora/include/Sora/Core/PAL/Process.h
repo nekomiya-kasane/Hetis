@@ -6,7 +6,7 @@
  * and dynamic resource usage remain separate so callers that only need an identifier do not pay for path conversion,
  * argument materialization, or native accounting queries:
  * @code{.cpp}
- * const auto process = Sora::PAL::CurrentProcessId();
+ * const auto process = Sora::PAL::CurrentNativeProcessId();
  * const auto image = Sora::PAL::CurrentProcessImagePath();
  * const auto usage = Sora::PAL::CaptureCurrentProcessUsage();
  * @endcode
@@ -18,6 +18,7 @@
  */
 #pragma once
 
+#include <Sora/Core/PAL/NativeIdentity.h>
 #include <Sora/ErrorCode.h>
 
 #include <chrono>
@@ -27,9 +28,6 @@
 #include <vector>
 
 namespace Sora::PAL {
-
-    /** @brief Platform-neutral unsigned representation of an operating-system process identifier. */
-    using ProcessId = uint64_t;
 
     /** @brief One non-atomic observation of the calling process's accumulated CPU time and resident memory. */
     struct ProcessUsage {
@@ -41,10 +39,19 @@ namespace Sora::PAL {
     };
 
     /** @brief Return the calling process's stable native identifier. */
-    [[nodiscard]] Result<ProcessId> CurrentProcessId() noexcept;
+    [[nodiscard]] Result<NativeProcessId> CurrentNativeProcessId() noexcept;
 
     /** @brief Return the native identifier recorded for the calling process's parent. */
-    [[nodiscard]] Result<ProcessId> ParentProcessId() noexcept;
+    [[nodiscard]] Result<NativeProcessId> ParentNativeProcessId() noexcept;
+
+    /**
+     * @brief Capture the native thread identifiers currently owned by @p process.
+     * @details The result is sorted and duplicate-free. Native enumeration is not transactional: threads may start or
+     * exit while the operating system captures the snapshot, so consumers must reconcile it with lifecycle events.
+     * @param[in] process Nonzero process identifier to inspect.
+     * @return Native thread identifiers, or an argument, support, permission, or native snapshot failure.
+     */
+    [[nodiscard]] Result<std::vector<NativeThreadId>> EnumerateProcessThreads(NativeProcessId process);
 
     /** @brief Return the native path of the executable image backing the calling process. */
     [[nodiscard]] Result<std::filesystem::path> CurrentProcessImagePath();

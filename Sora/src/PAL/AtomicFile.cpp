@@ -196,7 +196,7 @@ namespace Sora::PAL {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
         try {
-            const ProcessId process = CurrentProcessId().value_or(0);
+            const uint64_t process = CurrentNativeProcessId().value_or(NativeProcessId{}).Value();
             // 1. Generate bounded, process-specific candidate names beside the destination.
             for (std::uint32_t attempt = 0; attempt < 128; ++attempt) {
                 const std::uint64_t sequence = gTemporarySequence.fetch_add(1, std::memory_order_relaxed);
