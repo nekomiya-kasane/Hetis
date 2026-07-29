@@ -64,6 +64,7 @@ namespace Mashiro::Benchmark {
         bool quick = false;
         bool pinWorkers = true;
         bool paired = false;
+        bool layouts = false;
     };
 
     /** @brief Fixed-size trivially copyable payload carrying a correctness identity. */
@@ -270,6 +271,36 @@ namespace Mashiro::Benchmark {
     public:
         static constexpr std::string_view name = "Mashiro MPSC";
         using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpsc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
+
+        [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
+        [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
+
+    private:
+        Storage queue_{};
+    };
+
+    /** @brief Mashiro SPMC storage adapter. */
+    template<typename T, std::size_t Capacity>
+    class MashiroSpmc {
+    public:
+        static constexpr std::string_view name = "Mashiro SPMC";
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spmc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
+
+        [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
+        [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
+
+    private:
+        Storage queue_{};
+    };
+
+    /** @brief Adapter for one compile-time sequence-cell layout candidate. */
+    template<typename T, std::size_t Capacity, Concurrency::QueueTopology Topology, bool IsolateCells>
+    class MashiroSequenceLayout {
+    public:
+        static constexpr std::string_view name = IsolateCells ? "isolated cells" : "compact cells";
+        using Storage = Detail::SequenceCellRingBuffer<T, Capacity, Topology, IsolateCells>;
         static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
@@ -665,6 +696,19 @@ namespace Mashiro::Benchmark {
             }
         }
 
+        const std::array<std::size_t, 3> consumerCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
+        for (const std::size_t consumers : consumerCounts) {
+            add.template operator()<MashiroSpmc<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            add.template operator()<MoodycamelQueue<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            add.template operator()<TbbQueue<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            add.template operator()<MutexQueue<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            if (config.quick) {
+                break;
+            }
+        }
+
         const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz}
                                                                        : std::array{2uz, 4uz};
         for (const std::size_t count : symmetricCounts) {
@@ -713,6 +757,43 @@ namespace Mashiro::Benchmark {
         }
     }
 
+    /** @brief Append alternating layout comparisons for every concurrent sequence-cell topology. */
+    template<std::size_t Capacity, typename T>
+    void AppendLayoutCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+        auto add = [&cases]<Concurrency::QueueTopology Topology>(const Config& cfg, CsvWriter& out,
+                                                                 std::string_view scenario, std::size_t producers,
+                                                                 std::size_t consumers) {
+            using First = MashiroSequenceLayout<T, Capacity, Topology, false>;
+            using Second = MashiroSequenceLayout<T, Capacity, Topology, true>;
+            cases.push_back({[&cfg, &out, scenario, producers, consumers] {
+                RunPairedCase<First, Second, T>(cfg, out, scenario, Capacity, producers, consumers);
+            }});
+        };
+
+        const std::array<std::size_t, 3> endpointCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
+        for (const std::size_t producers : endpointCounts) {
+            add.template operator()<Concurrency::QueueTopologies::Mpsc>(config, writer, "MPSC", producers, 1);
+            if (config.quick) {
+                break;
+            }
+        }
+        for (const std::size_t consumers : endpointCounts) {
+            add.template operator()<Concurrency::QueueTopologies::Spmc>(config, writer, "SPMC", 1, consumers);
+            if (config.quick) {
+                break;
+            }
+        }
+
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
+        for (const std::size_t count : symmetricCounts) {
+            add.template operator()<Concurrency::QueueTopologies::Mpmc>(config, writer, "MPMC", count, count);
+            if (config.quick) {
+                break;
+            }
+        }
+    }
+
     /** @brief Parse benchmark command-line options. */
     [[nodiscard]] Config ParseArguments(int argc, char** argv) {
         Config config;
@@ -744,6 +825,8 @@ namespace Mashiro::Benchmark {
                 config.pinWorkers = false;
             } else if (argument == "--paired") {
                 config.paired = true;
+            } else if (argument == "--layouts") {
+                config.layouts = true;
             } else {
                 throw std::invalid_argument("unknown command-line option: " + std::string{argument});
             }
@@ -752,6 +835,9 @@ namespace Mashiro::Benchmark {
             config.minimumSampleSeconds < 0.0) {
             throw std::invalid_argument(
                 "samples and items must be non-zero and minimum-ms must be finite and non-negative");
+        }
+        if (config.paired && config.layouts) {
+            throw std::invalid_argument("paired algorithm and layout modes are mutually exclusive");
         }
         return config;
     }
@@ -765,7 +851,14 @@ int main(int argc, char** argv) {
         Mashiro::Benchmark::CsvWriter writer{config};
         std::vector<Mashiro::Benchmark::Case> cases;
 
-        if (config.quick) {
+        if (config.quick && config.layouts) {
+            Mashiro::Benchmark::AppendLayoutCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.layouts) {
+            Mashiro::Benchmark::AppendLayoutCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLayoutCases<16'384, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLayoutCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLayoutCases<16'384, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+        } else if (config.quick) {
             if (config.paired) {
                 Mashiro::Benchmark::AppendPairedCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
             } else {

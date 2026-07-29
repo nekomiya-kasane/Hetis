@@ -407,8 +407,12 @@ namespace Mashiro {
                 T) std::byte slots_[Capacity * sizeof(T)];
         };
 
-        /** @brief Sequence-cell ring whose endpoint claim operations are selected entirely at compile time. */
-        template<class T, std::size_t Capacity, QueueTopology Topology>
+        /**
+         * @brief Sequence-cell ring whose endpoint claim operations are selected entirely at compile time.
+         * @details Multiple producers isolate adjacent cells to prevent publication false sharing; SPMC stays compact.
+         */
+        template<class T, std::size_t Capacity, QueueTopology Topology,
+                 bool IsolateCells = Topology.producers == QueueCardinality::Multiple>
             requires Traits::ConcurrentQueueElement<T> && (ValidateRingCapacity(Capacity)) &&
                      (ValidateQueueTopology(Topology)) && (Topology.sharing == QueueSharing::Concurrent) &&
                      (Topology.producers == QueueCardinality::Multiple ||
@@ -416,9 +420,8 @@ namespace Mashiro {
         class SequenceCellRingBuffer {
             static constexpr bool kMultipleProducers = Topology.producers == QueueCardinality::Multiple;
             static constexpr bool kMultipleConsumers = Topology.consumers == QueueCardinality::Multiple;
-            static constexpr bool kIsolatedCells = kMultipleProducers && !kMultipleConsumers;
             static constexpr std::size_t kIndexMask = Capacity - 1;
-            using Cell = SequenceCell<T, kIsolatedCells>;
+            using Cell = SequenceCell<T, IsolateCells>;
             using ProducerDomain =
                 std::conditional_t<kMultipleProducers, Concurrency::Contended, Concurrency::ProducerOwned>;
             using ConsumerDomain =
@@ -432,6 +435,7 @@ namespace Mashiro {
             static constexpr std::size_t kCapacity = Capacity;
             static constexpr QueueTopology topology = Topology;
             static constexpr bool transactionalPushBatch = false;
+            static constexpr bool isolatesCells = IsolateCells;
 
             SequenceCellRingBuffer() noexcept {
                 for (std::size_t index = 0; index != Capacity; ++index) {

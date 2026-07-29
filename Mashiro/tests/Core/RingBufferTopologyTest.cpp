@@ -32,6 +32,13 @@ TEST_CASE("RingBuffer exact participant counts reduce to canonical topologies", 
     STATIC_REQUIRE(std::is_same_v<Counted, Canonical>);
 }
 
+TEST_CASE("sequence-cell layout isolates concurrent producers", AUTO_TAG) {
+    using namespace Concurrency::QueueTopologies;
+    STATIC_REQUIRE(RingBuffer<int, 8, Mpsc>::isolatesCells);
+    STATIC_REQUIRE_FALSE(RingBuffer<int, 8, Spmc>::isolatesCells);
+    STATIC_REQUIRE(RingBuffer<int, 8, Mpmc>::isolatesCells);
+}
+
 TEST_CASE("single-thread RingBuffer uses the local FIFO protocol", AUTO_TAG) {
     using LocalRing = RingBuffer<int, 4, Concurrency::QueueTopologies::Local>;
     LocalRing ring;
@@ -58,6 +65,8 @@ TEST_CASE("SPMC RingBuffer transfers each value exactly once", AUTO_TAG) {
     auto seen = std::make_unique<std::atomic_uint8_t[]>(kValueCount);
     std::atomic_size_t consumed{0};
     std::atomic_bool producerDone{false};
+    std::atomic_bool invalidValue{false};
+    std::atomic_bool duplicateValue{false};
     std::vector<std::jthread> consumers;
     consumers.reserve(kConsumerCount);
 
@@ -70,8 +79,14 @@ TEST_CASE("SPMC RingBuffer transfers each value exactly once", AUTO_TAG) {
                     std::this_thread::yield();
                     continue;
                 }
-                REQUIRE(*value < kValueCount);
-                REQUIRE(seen[*value].fetch_add(1, std::memory_order_relaxed) == 0);
+                if (*value >= kValueCount) {
+                    invalidValue.store(true, std::memory_order_relaxed);
+                    consumed.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                if (seen[*value].fetch_add(1, std::memory_order_relaxed) != 0) {
+                    duplicateValue.store(true, std::memory_order_relaxed);
+                }
                 consumed.fetch_add(1, std::memory_order_relaxed);
             }
         });
@@ -86,6 +101,8 @@ TEST_CASE("SPMC RingBuffer transfers each value exactly once", AUTO_TAG) {
     consumers.clear();
 
     REQUIRE(consumed.load(std::memory_order_relaxed) == kValueCount);
+    REQUIRE_FALSE(invalidValue.load(std::memory_order_relaxed));
+    REQUIRE_FALSE(duplicateValue.load(std::memory_order_relaxed));
     REQUIRE(ring.Empty());
     for (std::size_t value = 0; value != kValueCount; ++value) {
         REQUIRE(seen[value].load(std::memory_order_relaxed) == 1);
