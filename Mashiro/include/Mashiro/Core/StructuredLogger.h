@@ -21,7 +21,7 @@
  */
 #pragma once
 
-#include "Mashiro/Core/SpscRingBuffer.h"
+#include "Mashiro/Core/SpscByteRing.h"
 #include "Mashiro/Core/TypeTraits.h"
 
 #include <array>
@@ -316,7 +316,7 @@ namespace Mashiro {
 
     /// @}
 
-    /// @brief Logger's internal ring buffer type (64 KB, from SpscRingBuffer.h).
+    /// @brief Logger's internal 64 KB byte ring.
     using LogRing = SpscByteRing<64 * 1024>;
 
     // =========================================================================

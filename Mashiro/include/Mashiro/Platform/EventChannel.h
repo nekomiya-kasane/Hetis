@@ -18,7 +18,7 @@
  */
 #pragma once
 
-#include "Mashiro/Core/SpscRingBuffer.h"
+#include "Mashiro/Core/RingBuffer.h"
 #include "Mashiro/Platform/SystemEvent.h"
 
 #include <stdexec/execution.hpp>
@@ -252,7 +252,7 @@ namespace Mashiro::Platform {
             return batch;
         }
 
-        SpscRingBuffer<SystemEvent, kEventChannelCapacity> ring_{};
+        RingBuffer<SystemEvent, kEventChannelCapacity, Concurrency::QueueTopologies::Spsc> ring_{};
         std::atomic<std::uint64_t> pushEpoch_{0};
     };
 

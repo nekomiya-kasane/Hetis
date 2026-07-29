@@ -6,9 +6,7 @@
 #pragma once
 
 #include "Mashiro/Concurrency/QueueBatch.h"
-#include "Mashiro/Core/MpmcQueue.h"
-#include "Mashiro/Core/MpscQueue.h"
-#include "Mashiro/Core/SpscRingBuffer.h"
+#include "Mashiro/Core/RingBuffer.h"
 
 #include <concepts>
 #include <cstddef>
@@ -19,12 +17,6 @@
 #include <utility>
 
 namespace Mashiro::Concurrency {
-
-    /** @brief Number of agents permitted to invoke one side of a queue concurrently. */
-    enum class QueueCardinality : std::uint8_t {
-        Single,
-        Multiple,
-    };
 
     /**
      * @brief Per-operation progress vocabulary.
@@ -128,21 +120,22 @@ namespace Mashiro::Concurrency {
 
     } // namespace Detail
 
-    /** @brief Adapter for the wait-free single-producer/single-consumer ring. */
-    template<class T, std::uint32_t Capacity>
-        requires std::is_nothrow_move_constructible_v<T>
-    struct QueueAdapter<SpscRingBuffer<T, Capacity>> {
-        using storage_type = SpscRingBuffer<T, Capacity>;
-        using value_type = T;
-        using batch_type = QueueBatch<T, Capacity>;
+    /** @brief Uniform adapter for every compile-time-specialized ring-buffer topology. */
+    template<Mashiro::Detail::RingBufferStorage Storage>
+    struct QueueAdapter<Storage> {
+        using storage_type = Storage;
+        using value_type = typename Storage::value_type;
+        using batch_type = QueueBatch<value_type, Storage::kCapacity>;
 
-        static constexpr QueueCardinality producerCardinality = QueueCardinality::Single;
-        static constexpr QueueCardinality consumerCardinality = QueueCardinality::Single;
-        static constexpr QueueProgress pushProgress = QueueProgress::WaitFree;
-        static constexpr QueueProgress popProgress = QueueProgress::WaitFree;
-        static constexpr std::size_t capacity = Capacity;
+        static constexpr QueueCardinality producerCardinality = Storage::topology.producers;
+        static constexpr QueueCardinality consumerCardinality = Storage::topology.consumers;
+        static constexpr QueueProgress pushProgress =
+            producerCardinality == QueueCardinality::Single ? QueueProgress::WaitFree : QueueProgress::NonBlocking;
+        static constexpr QueueProgress popProgress =
+            consumerCardinality == QueueCardinality::Single ? QueueProgress::WaitFree : QueueProgress::NonBlocking;
+        static constexpr std::size_t capacity = Storage::kCapacity;
         static constexpr bool pushFailurePreservesInput = true;
-        static constexpr bool transactionalPushBatch = true;
+        static constexpr bool transactionalPushBatch = Storage::transactionalPushBatch;
 
         [[nodiscard]] static bool TryPush(storage_type& storage, value_type& value) noexcept {
             return storage.TryPush(std::move(value));
@@ -152,7 +145,9 @@ namespace Mashiro::Concurrency {
             return storage.TryPop();
         }
 
-        [[nodiscard]] static QueueTransferStatus TryPushBatch(storage_type& storage, batch_type& batch) noexcept {
+        [[nodiscard]] static QueueTransferStatus TryPushBatch(storage_type& storage, batch_type& batch) noexcept
+            requires transactionalPushBatch
+        {
             return Detail::PushSingleProducerBatch<QueueAdapter>(storage, batch);
         }
 
@@ -163,72 +158,6 @@ namespace Mashiro::Concurrency {
         [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }
         [[nodiscard]] static std::size_t SizeApprox(const storage_type& storage) noexcept {
             return storage.SizeApprox();
-        }
-    };
-
-    /** @brief Adapter for the bounded many-producer/single-consumer mailbox. */
-    template<class T, std::size_t Capacity>
-    struct QueueAdapter<MpscQueue<T, Capacity>> {
-        using storage_type = MpscQueue<T, Capacity>;
-        using value_type = T;
-        using batch_type = QueueBatch<T, Capacity>;
-
-        static constexpr QueueCardinality producerCardinality = QueueCardinality::Multiple;
-        static constexpr QueueCardinality consumerCardinality = QueueCardinality::Single;
-        static constexpr QueueProgress pushProgress = QueueProgress::NonBlocking;
-        static constexpr QueueProgress popProgress = QueueProgress::WaitFree;
-        static constexpr std::size_t capacity = Capacity;
-        static constexpr bool pushFailurePreservesInput = true;
-        static constexpr bool transactionalPushBatch = false;
-
-        [[nodiscard]] static bool TryPush(storage_type& storage, value_type& value) noexcept {
-            return storage.TryPush(std::move(value));
-        }
-
-        [[nodiscard]] static std::optional<value_type> TryPop(storage_type& storage) noexcept {
-            return storage.TryPop();
-        }
-
-        [[nodiscard]] static bool TryPopBatch(storage_type& storage, batch_type& batch) noexcept {
-            return Detail::PopAvailable<QueueAdapter>(storage, batch);
-        }
-
-        [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }
-        [[nodiscard]] static std::size_t SizeApprox(const storage_type& storage) noexcept {
-            return storage.ApproxSize();
-        }
-    };
-
-    /** @brief Adapter for bounded multi-producer/multi-consumer storage. */
-    template<class T, std::size_t Capacity>
-    struct QueueAdapter<MpmcQueue<T, Capacity>> {
-        using storage_type = MpmcQueue<T, Capacity>;
-        using value_type = T;
-        using batch_type = QueueBatch<T, Capacity>;
-
-        static constexpr QueueCardinality producerCardinality = QueueCardinality::Multiple;
-        static constexpr QueueCardinality consumerCardinality = QueueCardinality::Multiple;
-        static constexpr QueueProgress pushProgress = QueueProgress::NonBlocking;
-        static constexpr QueueProgress popProgress = QueueProgress::NonBlocking;
-        static constexpr std::size_t capacity = Capacity;
-        static constexpr bool pushFailurePreservesInput = true;
-        static constexpr bool transactionalPushBatch = false;
-
-        [[nodiscard]] static bool TryPush(storage_type& storage, value_type& value) noexcept {
-            return storage.TryPush(std::move(value));
-        }
-
-        [[nodiscard]] static std::optional<value_type> TryPop(storage_type& storage) noexcept {
-            return storage.TryPop();
-        }
-
-        [[nodiscard]] static bool TryPopBatch(storage_type& storage, batch_type& batch) noexcept {
-            return Detail::PopAvailable<QueueAdapter>(storage, batch);
-        }
-
-        [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }
-        [[nodiscard]] static std::size_t SizeApprox(const storage_type& storage) noexcept {
-            return storage.ApproxSize();
         }
     };
 

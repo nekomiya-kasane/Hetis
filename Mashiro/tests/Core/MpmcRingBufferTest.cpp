@@ -1,8 +1,8 @@
 /**
- * @file MpmcQueueTest.cpp
+ * @file MpmcRingBufferTest.cpp
  * @brief Correctness tests for bounded multi-producer/multi-consumer queue storage.
  */
-#include "Mashiro/Core/MpmcQueue.h"
+#include "Mashiro/Core/RingBuffer.h"
 
 #include "Support/Meta.h"
 
@@ -17,8 +17,11 @@
 
 using namespace Mashiro;
 
-TEST_CASE("MpmcQueue output-parameter pop preserves FIFO order", AUTO_TAG) {
-    MpmcQueue<int, 8> queue;
+template<class T, std::size_t Capacity = 1024>
+using MpmcRing = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpmc>;
+
+TEST_CASE("MPMC RingBuffer output-parameter pop preserves FIFO order", AUTO_TAG) {
+    MpmcRing<int, 8> queue;
     REQUIRE(queue.TryPush(11));
     REQUIRE(queue.TryPush(22));
 
@@ -30,8 +33,8 @@ TEST_CASE("MpmcQueue output-parameter pop preserves FIFO order", AUTO_TAG) {
     REQUIRE_FALSE(queue.TryPop(value));
 }
 
-TEST_CASE("MpmcQueue reuses every cell after full-ring wrap-around", AUTO_TAG) {
-    MpmcQueue<std::uint64_t, 4> queue;
+TEST_CASE("MPMC RingBuffer reuses every cell after full-ring wrap-around", AUTO_TAG) {
+    MpmcRing<std::uint64_t, 4> queue;
     std::uint64_t value = 0;
     for (std::uint64_t round = 0; round != 64; ++round) {
         for (std::uint64_t index = 0; index != 4; ++index) {
@@ -45,20 +48,20 @@ TEST_CASE("MpmcQueue reuses every cell after full-ring wrap-around", AUTO_TAG) {
     }
 }
 
-TEST_CASE("MpmcQueue optional pop supports move-only payloads", AUTO_TAG) {
-    MpmcQueue<std::unique_ptr<int>, 4> queue;
+TEST_CASE("MPMC RingBuffer optional pop supports move-only payloads", AUTO_TAG) {
+    MpmcRing<std::unique_ptr<int>, 4> queue;
     REQUIRE(queue.TryPush(std::make_unique<int>(42)));
     auto value = queue.TryPop();
     REQUIRE(value.has_value());
     REQUIRE(**value == 42);
 }
 
-TEST_CASE("MpmcQueue transfers each value exactly once under symmetric contention", AUTO_TAG) {
+TEST_CASE("MPMC RingBuffer transfers each value exactly once under symmetric contention", AUTO_TAG) {
     constexpr std::size_t kProducers = 4;
     constexpr std::size_t kConsumers = 4;
     constexpr std::size_t kItemsPerProducer = 10'000;
     constexpr std::size_t kItemCount = kProducers * kItemsPerProducer;
-    MpmcQueue<std::size_t, 1024> queue;
+    MpmcRing<std::size_t, 1024> queue;
     auto seen = std::make_unique<std::atomic<std::uint8_t>[]>(kItemCount);
     std::atomic<bool> start{false};
     std::atomic<std::size_t> activeProducers{kProducers};

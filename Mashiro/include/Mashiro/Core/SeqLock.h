@@ -42,7 +42,7 @@
  *       canonical high-performance seqlock design (cf. Rigtorp/Folly). The
  *       transient read that races an in-progress write is *discarded* before it is
  *       ever observed, so no torn value is exposed. This mirrors the deliberate
- *       non-atomic shared storage used by @ref SpscRingBuffer.h.
+ *       non-atomic shared storage used by @ref RingBuffer.h.
  *
  * ### Compile-time guarantees (C++26 reflection)
  * Both data members are written only by the single writer thread, so each is tagged

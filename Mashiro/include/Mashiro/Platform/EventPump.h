@@ -37,7 +37,7 @@
  */
 #pragma once
 
-#include "Mashiro/Core/MpscQueue.h"
+#include "Mashiro/Core/RingBuffer.h"
 #include "Mashiro/Core/Result.h"
 #include "Mashiro/Platform/EventChannel.h"
 #include "Mashiro/Platform/PlatformBackend.h"
@@ -203,10 +203,10 @@ namespace Mashiro::Platform {
         PlatformManagers platformManagers_{};
 
         /* Inbox: Dedicated Managers and other threads post here. */
-        MpscQueue<SystemEvent> inbox_{};
+        RingBuffer<SystemEvent, 1024, Concurrency::QueueTopologies::Mpsc> inbox_{};
 
         /* OwnerExecutor mailbox: cross-thread coroutine resumption. */
-        MpscQueue<std::coroutine_handle<>> ownerMailbox_{};
+        RingBuffer<std::coroutine_handle<>, 1024, Concurrency::QueueTopologies::Mpsc> ownerMailbox_{};
 
         /* Topic fan-out: subscribers, written by Platform thread only. */
         std::vector<std::unique_ptr<EventChannel>> channels_{};

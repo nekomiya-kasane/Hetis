@@ -4,10 +4,8 @@
  * @ingroup Core
  */
 
-#include <Mashiro/Core/MpmcQueue.h>
-#include <Mashiro/Core/MpscQueue.h>
+#include <Mashiro/Core/RingBuffer.h>
 #include <Mashiro/Core/SpscChannel.h>
-#include <Mashiro/Core/SpscRingBuffer.h>
 
 #include <concurrentqueue.h>
 #include <oneapi/tbb/concurrent_queue.h>
@@ -208,13 +206,14 @@ namespace Mashiro::Benchmark {
     class MashiroSpsc {
     public:
         static constexpr std::string_view name = "Mashiro SPSC";
-        static constexpr std::size_t storageBytes = sizeof(SpscRingBuffer<T, Capacity>);
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
         [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
 
     private:
-        SpscRingBuffer<T, Capacity> queue_{};
+        Storage queue_{};
     };
 
     /** @brief Mashiro SPSC channel adapter, including its atomic notification-plane cost. */
@@ -236,7 +235,8 @@ namespace Mashiro::Benchmark {
     class SharedEpochSpscChannel {
     public:
         static constexpr std::string_view name = "shared-epoch SPSC channel";
-        static constexpr std::size_t storageBytes = sizeof(SpscRingBuffer<T, Capacity>) + Platform::kCacheLineSize;
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage) + Platform::kCacheLineSize;
 
         [[nodiscard]] bool Push(const T& value) noexcept {
             if (!queue_.TryPush(value)) {
@@ -260,7 +260,7 @@ namespace Mashiro::Benchmark {
             epoch_.notify_one();
         }
 
-        SpscRingBuffer<T, Capacity> queue_{};
+        Storage queue_{};
         alignas(Platform::kCacheLineSize) std::atomic<std::uint64_t> epoch_{0};
     };
 
@@ -269,13 +269,14 @@ namespace Mashiro::Benchmark {
     class MashiroMpsc {
     public:
         static constexpr std::string_view name = "Mashiro MPSC";
-        static constexpr std::size_t storageBytes = sizeof(MpscQueue<T, Capacity>);
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpsc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
         [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
 
     private:
-        MpscQueue<T, Capacity> queue_{};
+        Storage queue_{};
     };
 
     /** @brief MPSC adapter retaining the value-returning optional pop path for paired measurements. */
@@ -283,7 +284,8 @@ namespace Mashiro::Benchmark {
     class MashiroMpscOptional {
     public:
         static constexpr std::string_view name = "Mashiro MPSC optional";
-        static constexpr std::size_t storageBytes = sizeof(MpscQueue<T, Capacity>);
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpsc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
         [[nodiscard]] bool Pop(T& value) noexcept {
@@ -296,7 +298,7 @@ namespace Mashiro::Benchmark {
         }
 
     private:
-        MpscQueue<T, Capacity> queue_{};
+        Storage queue_{};
     };
 
     /** @brief Mashiro MPMC storage adapter. */
@@ -304,13 +306,14 @@ namespace Mashiro::Benchmark {
     class MashiroMpmc {
     public:
         static constexpr std::string_view name = "Mashiro MPMC";
-        static constexpr std::size_t storageBytes = sizeof(MpmcQueue<T, Capacity>);
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpmc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
         [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
 
     private:
-        MpmcQueue<T, Capacity> queue_{};
+        Storage queue_{};
     };
 
     /** @brief MPMC adapter retaining the value-returning optional pop path for paired measurements. */
@@ -318,7 +321,8 @@ namespace Mashiro::Benchmark {
     class MashiroMpmcOptional {
     public:
         static constexpr std::string_view name = "Mashiro MPMC optional";
-        static constexpr std::size_t storageBytes = sizeof(MpmcQueue<T, Capacity>);
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpmc>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
         [[nodiscard]] bool Pop(T& value) noexcept {
@@ -331,7 +335,7 @@ namespace Mashiro::Benchmark {
         }
 
     private:
-        MpmcQueue<T, Capacity> queue_{};
+        Storage queue_{};
     };
 
     /** @brief Rigtorp's specialized bounded SPSC queue adapter. */

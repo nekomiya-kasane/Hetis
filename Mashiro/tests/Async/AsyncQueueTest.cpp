@@ -28,9 +28,9 @@ using namespace std::chrono_literals;
 
 namespace {
 
-    using SpscStorage = SpscRingBuffer<int, 4>;
-    using MpscStorage = MpscQueue<int, 1024>;
-    using MpmcStorage = MpmcQueue<int, 1024>;
+    using SpscStorage = RingBuffer<int, 4, QueueTopologies::Spsc>;
+    using MpscStorage = RingBuffer<int, 1024, QueueTopologies::Mpsc>;
+    using MpmcStorage = RingBuffer<int, 1024, QueueTopologies::Mpmc>;
     using SpscAsyncQueue = AsyncQueue<SpscStorage>;
     using MpscAsyncQueue = AsyncQueue<MpscStorage>;
     using MpmcAsyncQueue = AsyncQueue<MpmcStorage>;
@@ -188,7 +188,7 @@ TEST_CASE("AsyncQueue Pop parks and completes after a later Push", AUTO_TAG) {
 }
 
 TEST_CASE("AsyncQueue sender start returns while a full SPSC queue applies back pressure", AUTO_TAG) {
-    using SmallQueue = AsyncQueue<SpscRingBuffer<int, 2>>;
+    using SmallQueue = AsyncQueue<RingBuffer<int, 2, QueueTopologies::Spsc>>;
 
     SmallQueue queue;
     auto producer = queue.Producer();
@@ -213,7 +213,7 @@ TEST_CASE("AsyncQueue sender start returns while a full SPSC queue applies back 
 }
 
 TEST_CASE("AsyncQueue producer policies reject or drop without parking", AUTO_TAG) {
-    using SmallQueue = AsyncQueue<SpscRingBuffer<int, 2>>;
+    using SmallQueue = AsyncQueue<RingBuffer<int, 2, QueueTopologies::Spsc>>;
 
     SmallQueue rejectQueue;
     auto rejecting = rejectQueue.Producer().WithBackpressure(Backpressure::Reject{});
@@ -235,7 +235,7 @@ TEST_CASE("AsyncQueue producer policies reject or drop without parking", AUTO_TA
 }
 
 TEST_CASE("AsyncQueue bounded retry composes with fallback and opt-in telemetry", AUTO_TAG) {
-    using SmallQueue = AsyncQueue<SpscRingBuffer<int, 2>>;
+    using SmallQueue = AsyncQueue<RingBuffer<int, 2, QueueTopologies::Spsc>>;
     using RetryPolicy = Backpressure::Retry<3, Backpressure::RetryMode::Spin, Backpressure::Reject>;
 
     Backpressure::Counters counters;
@@ -256,7 +256,7 @@ TEST_CASE("AsyncQueue bounded retry composes with fallback and opt-in telemetry"
 }
 
 TEST_CASE("AsyncQueue bounded retry can fall back to asynchronous suspension", AUTO_TAG) {
-    using SmallQueue = AsyncQueue<SpscRingBuffer<int, 2>>;
+    using SmallQueue = AsyncQueue<RingBuffer<int, 2, QueueTopologies::Spsc>>;
     using RetryThenSuspend = Backpressure::Retry<2, Backpressure::RetryMode::Yield, Backpressure::Suspend>;
 
     SmallQueue queue;

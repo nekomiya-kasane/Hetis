@@ -5,7 +5,7 @@
  */
 #pragma once
 
-#include "Mashiro/Core/SpscRingBuffer.h"
+#include "Mashiro/Core/RingBuffer.h"
 
 #include <atomic>
 #include <bit>
@@ -150,7 +150,7 @@ namespace Mashiro {
             epoch.notify_one();
         }
 
-        SpscRingBuffer<T, Capacity> queue_{};
+        RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc> queue_{};
         [[=Concurrency::ProducerOwned{}]] alignas(Platform::kCacheLineSize) mutable std::atomic<uint64_t>
             readableEpoch_{0};
         [[=Concurrency::ConsumerOwned{}]] alignas(Platform::kCacheLineSize) mutable std::atomic<uint64_t>

@@ -5,9 +5,7 @@
  */
 
 #include <Mashiro/Concurrency/AsyncQueue.h>
-#include <Mashiro/Core/MpmcQueue.h>
-#include <Mashiro/Core/MpscQueue.h>
-#include <Mashiro/Core/SpscRingBuffer.h>
+#include <Mashiro/Core/RingBuffer.h>
 
 #include <blockingconcurrentqueue.h>
 #include <oneapi/tbb/concurrent_queue.h>
@@ -695,7 +693,7 @@ namespace Mashiro::Benchmark {
     /** @brief Measure same-thread ready-path cost for storage, facade, and connected sender layers. */
     template<typename T, std::size_t Capacity>
     void RunReadyPath(const Config& config, CsvWriter& writer) {
-        using Storage = SpscRingBuffer<T, Capacity>;
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
         using Queue = Concurrency::AsyncQueue<Storage>;
         const auto runRate = [&](std::string_view implementation, auto&& body) {
             std::uint64_t iterations = 100'000;
@@ -877,7 +875,7 @@ namespace Mashiro::Benchmark {
     /** @brief Measure Mashiro consumer resume after the pop operation is observably pending. */
     template<typename T>
     [[nodiscard]] LatencySample RunMashiroConsumerResume(const Config& config) {
-        using Queue = Concurrency::AsyncQueue<SpscRingBuffer<T, 8>>;
+        using Queue = Concurrency::AsyncQueue<RingBuffer<T, 8, Concurrency::QueueTopologies::Spsc>>;
         Queue queue;
         auto producer = queue.Producer();
         auto consumer = queue.Consumer();
@@ -931,7 +929,7 @@ namespace Mashiro::Benchmark {
     /** @brief Measure Mashiro producer resume after the push operation is observably pending. */
     template<typename T>
     [[nodiscard]] LatencySample RunMashiroProducerResume(const Config& config) {
-        using Queue = Concurrency::AsyncQueue<SpscRingBuffer<T, 8>>;
+        using Queue = Concurrency::AsyncQueue<RingBuffer<T, 8, Concurrency::QueueTopologies::Spsc>>;
         Queue queue;
         auto producer = queue.Producer();
         auto consumer = queue.Consumer();
@@ -1071,7 +1069,7 @@ namespace Mashiro::Benchmark {
     /** @brief Measure synchronous stop-callback delivery for a parked AsyncQueue pop. */
     template<typename T>
     [[nodiscard]] LatencySample RunMashiroCancellation(const Config& config) {
-        using Queue = Concurrency::AsyncQueue<SpscRingBuffer<T, 8>>;
+        using Queue = Concurrency::AsyncQueue<RingBuffer<T, 8, Concurrency::QueueTopologies::Spsc>>;
         Queue queue;
         auto consumer = queue.Consumer();
         LatencySample sample{.nanoseconds = std::vector<std::uint64_t>(config.latencyIterations)};
@@ -1129,7 +1127,7 @@ namespace Mashiro::Benchmark {
         void Abort() noexcept { queue_.Abort(); }
 
     private:
-        Concurrency::AsyncQueue<MpmcQueue<T, 1024>> queue_{};
+        Concurrency::AsyncQueue<RingBuffer<T, 1024, Concurrency::QueueTopologies::Mpmc>> queue_{};
     };
 
     /** @brief oneTBB adapter for abort fan-out measurements. */
@@ -1207,7 +1205,7 @@ namespace Mashiro::Benchmark {
     /** @brief Measure AsyncQueue abort-to-receiver delivery without introducing a thread terminal. */
     template<typename T>
     [[nodiscard]] LatencySample RunAbortCallbackFanout(const Config&, std::size_t waiterCount) {
-        using Queue = Concurrency::AsyncQueue<MpmcQueue<T, 1024>>;
+        using Queue = Concurrency::AsyncQueue<RingBuffer<T, 1024, Concurrency::QueueTopologies::Mpmc>>;
         Queue queue;
         auto consumer = queue.Consumer();
         std::atomic<std::size_t> completions{};
@@ -1237,7 +1235,7 @@ namespace Mashiro::Benchmark {
     /** @brief Measure pending-pop to inline receiver callback delivery without an OS thread wake. */
     template<typename T>
     [[nodiscard]] LatencySample RunMashiroCallbackDelivery(const Config& config) {
-        using Queue = Concurrency::AsyncQueue<SpscRingBuffer<T, 8>>;
+        using Queue = Concurrency::AsyncQueue<RingBuffer<T, 8, Concurrency::QueueTopologies::Spsc>>;
         Queue queue;
         auto producer = queue.Producer();
         auto consumer = queue.Consumer();
@@ -1263,7 +1261,7 @@ namespace Mashiro::Benchmark {
 
     /** @brief Record queue, sender, and connected-operation storage footprints. */
     void WriteSizes(const Config& config, CsvWriter& writer) {
-        using Storage = SpscRingBuffer<Payload<8>, 1024>;
+        using Storage = RingBuffer<Payload<8>, 1024, Concurrency::QueueTopologies::Spsc>;
         using Queue = Concurrency::AsyncQueue<Storage>;
         using Producer = Concurrency::ProducerPort<Queue>;
         using Consumer = Concurrency::ConsumerPort<Queue>;
@@ -1367,21 +1365,21 @@ namespace Mashiro::Benchmark {
         const auto throughput = [&]<typename T, std::size_t Capacity>(std::size_t producers, std::size_t consumers,
                                                                       std::string_view scenario) {
             if (producers == 1 && consumers == 1) {
-                using Storage = SpscRingBuffer<T, Capacity>;
+                using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
                 RunThroughputCase(config, writer, scenario, "Mashiro AsyncQueue", sizeof(T), Capacity, producers,
                                   consumers, [&](std::size_t items) {
                                       return RunMashiroThroughput<Storage, T>(producers, consumers, items,
                                                                              config.pinWorkers);
                                   });
             } else if (consumers == 1) {
-                using Storage = MpscQueue<T, Capacity>;
+                using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpsc>;
                 RunThroughputCase(config, writer, scenario, "Mashiro AsyncQueue", sizeof(T), Capacity, producers,
                                   consumers, [&](std::size_t items) {
                                       return RunMashiroThroughput<Storage, T>(producers, consumers, items,
                                                                              config.pinWorkers);
                                   });
             } else {
-                using Storage = MpmcQueue<T, Capacity>;
+                using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpmc>;
                 RunThroughputCase(config, writer, scenario, "Mashiro AsyncQueue", sizeof(T), Capacity, producers,
                                   consumers, [&](std::size_t items) {
                                       return RunMashiroThroughput<Storage, T>(producers, consumers, items,

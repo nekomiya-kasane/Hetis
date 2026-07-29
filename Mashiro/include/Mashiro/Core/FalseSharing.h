@@ -6,7 +6,7 @@
  * non-static data members with a *contention domain* â€” the set of agents that may write it â€” and a
  * single `consteval` analyzer proves, via C++26 P2996 static reflection, that the physical layout
  * cannot exhibit false sharing. This supersedes the per-class audits previously hand-rolled in
- * `SpscRingBuffer.h`, `SeqLock.h` and `ConcurrentObjectPool.h`.
+ * `RingBuffer.h`, `SeqLock.h` and `ConcurrentObjectPool.h`.
  *
  * @section model The model: false sharing has exactly two faces
  * - **Internal** â€” two members written by *distinct concurrent agents* land on one cache line, so
