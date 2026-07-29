@@ -14,8 +14,10 @@
 #include <latch>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 static_assert(Sora::PAL::ThreadStackBounds{.lower = 2, .upper = 1}.Size() == 0);
+static_assert(std::is_nothrow_invocable_r_v<size_t, std::hash<Sora::PAL::NativeThreadId>, Sora::PAL::NativeThreadId>);
 
 TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[Sora.PAL.Thread]") {
     const auto callingThread = Sora::PAL::CurrentNativeThreadId();
@@ -24,15 +26,15 @@ TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[S
     REQUIRE(repeated.has_value());
     REQUIRE(*repeated == *callingThread);
 
-    std::array<uint64_t, 2> workerIds{};
+    std::array<Sora::PAL::NativeThreadId, 2> workerIds{};
     std::latch captured{2};
     std::array workers{
         std::thread{[&] {
-            workerIds[0] = Sora::PAL::CurrentNativeThreadId().value_or(0);
+            workerIds[0] = Sora::PAL::CurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
             captured.arrive_and_wait();
         }},
         std::thread{[&] {
-            workerIds[1] = Sora::PAL::CurrentNativeThreadId().value_or(0);
+            workerIds[1] = Sora::PAL::CurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
             captured.arrive_and_wait();
         }},
     };
@@ -40,8 +42,8 @@ TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[S
         worker.join();
     }
 
-    REQUIRE(workerIds[0] != 0);
-    REQUIRE(workerIds[1] != 0);
+    REQUIRE(workerIds[0].Value() != 0);
+    REQUIRE(workerIds[1].Value() != 0);
     REQUIRE(workerIds[0] != *callingThread);
     REQUIRE(workerIds[1] != *callingThread);
     REQUIRE(workerIds[0] != workerIds[1]);

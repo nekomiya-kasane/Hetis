@@ -5,28 +5,45 @@
  */
 
 #include <Sora/Core/PAL/Process.h>
+#include <Sora/Core/PAL/Thread.h>
 #include <Sora/Core/Unicode.h>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <ranges>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 static_assert(std::is_trivially_copyable_v<Sora::PAL::ProcessUsage>);
+static_assert(std::is_nothrow_invocable_r_v<size_t, std::hash<Sora::PAL::NativeProcessId>,
+                                            Sora::PAL::NativeProcessId>);
 
 TEST_CASE("Current process identity is stable and has a parent", "[Sora.PAL.Process]") {
-    const auto first = Sora::PAL::CurrentProcessId();
-    const auto second = Sora::PAL::CurrentProcessId();
-    const auto parent = Sora::PAL::ParentProcessId();
+    const auto first = Sora::PAL::CurrentNativeProcessId();
+    const auto second = Sora::PAL::CurrentNativeProcessId();
+    const auto parent = Sora::PAL::ParentNativeProcessId();
 
     REQUIRE(first.has_value());
     REQUIRE(second.has_value());
     REQUIRE(*second == *first);
-    REQUIRE(*first != 0);
+    REQUIRE(first->Value() != 0);
     REQUIRE(parent.has_value());
     REQUIRE(*parent != *first);
+}
+
+TEST_CASE("Current process thread snapshot contains the calling thread", "[Sora.PAL.Process]") {
+    const auto process = Sora::PAL::CurrentNativeProcessId();
+    const auto thread = Sora::PAL::CurrentNativeThreadId();
+    REQUIRE(process.has_value());
+    REQUIRE(thread.has_value());
+
+    const auto threads = Sora::PAL::EnumerateProcessThreads(*process);
+    REQUIRE(threads.has_value());
+    REQUIRE(std::ranges::is_sorted(*threads));
+    REQUIRE(std::ranges::find(*threads, *thread) != threads->end());
 }
 
 TEST_CASE("Current process image path identifies the running test", "[Sora.PAL.Process]") {

@@ -43,8 +43,7 @@ namespace Sora::PAL {
 
         static void StoreMaximum(std::atomic_uint64_t& destination, uint64_t value) noexcept {
             uint64_t previous = destination.load(std::memory_order_relaxed);
-            while (previous < value &&
-                   !destination.compare_exchange_weak(previous, value, std::memory_order_relaxed)) {
+            while (previous < value && !destination.compare_exchange_weak(previous, value, std::memory_order_relaxed)) {
             }
         }
 
@@ -95,14 +94,14 @@ namespace Sora::PAL {
 
     SchedulerTraceSession& SchedulerTraceSession::operator=(SchedulerTraceSession&& other) noexcept {
         if (this != &other) {
-            (void)Stop();
+            std::ignore = Stop();
             state_ = std::move(other.state_);
         }
         return *this;
     }
 
     SchedulerTraceSession::~SchedulerTraceSession() noexcept {
-        (void)Stop();
+        std::ignore = Stop();
     }
 
     Result<SchedulerTraceSession> SchedulerTraceSession::Start(const SchedulerTraceOptions& options) {
@@ -131,9 +130,8 @@ namespace Sora::PAL {
             .minimumBuffers = options.minimumBuffers,
             .maximumBuffers = options.maximumBuffers,
         };
-        const ErrorCode startError =
-            api.start(nativeOptions, &State::EventCallback, &State::LossCallback, state.get(), &state->nativeSession,
-                      &state->clock.ticksPerSecond);
+        const ErrorCode startError = api.start(nativeOptions, &State::EventCallback, &State::LossCallback, state.get(),
+                                               &state->nativeSession, &state->clock.ticksPerSecond);
         if (startError != ErrorCode::Ok) {
             return std::unexpected(startError);
         }

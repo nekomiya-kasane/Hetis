@@ -44,6 +44,7 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadModuleSystemAPI() == &PAL::LoadModuleSystemAPI());
     REQUIRE(&PAL::LoadProcessSystemAPI() == &PAL::LoadProcessSystemAPI());
     REQUIRE(&PAL::LoadThreadSystemAPI() == &PAL::LoadThreadSystemAPI());
+    REQUIRE(&PAL::LoadSchedulerTraceSystemAPI() == &PAL::LoadSchedulerTraceSystemAPI());
     REQUIRE(&PAL::LoadGlobalMemorySystemAPI() == &PAL::LoadGlobalMemorySystemAPI());
     REQUIRE(&PAL::LoadClipboardSystemAPI() == &PAL::LoadClipboardSystemAPI());
     REQUIRE(&PAL::LoadStackTraceSystemAPI() == &PAL::LoadStackTraceSystemAPI());
@@ -226,6 +227,20 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(thread.getCurrentThread != nullptr);
     REQUIRE(thread.localFree != nullptr);
     REQUIRE(thread.getCurrentThreadId() != 0);
+
+    const PAL::SchedulerTraceSystemAPI& tracing = PAL::LoadSchedulerTraceSystemAPI();
+#if defined(PLATFORM_WINDOWS)
+    REQUIRE(tracing.startTrace != nullptr);
+    REQUIRE(tracing.controlTrace != nullptr);
+    REQUIRE(tracing.openTrace != nullptr);
+    REQUIRE(tracing.processTrace != nullptr);
+    REQUIRE(tracing.closeTrace != nullptr);
+    REQUIRE(tracing.queryPerformanceFrequency != nullptr);
+#endif
+    REQUIRE(tracing.start != nullptr);
+    REQUIRE(tracing.process != nullptr);
+    REQUIRE(tracing.stop != nullptr);
+    REQUIRE(tracing.close != nullptr);
 
     const PAL::GlobalMemorySystemAPI& globalMemory = PAL::LoadGlobalMemorySystemAPI();
     REQUIRE(globalMemory.globalAllocate != nullptr);
