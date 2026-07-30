@@ -14,12 +14,14 @@
 #include <stdexec/execution.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -61,6 +63,15 @@ namespace Mashiro::Concurrency {
         struct QueueAccess;
         inline thread_local OperationBase* activeStopCallback = nullptr;
 
+        /** @brief Empty operation-state field used when the receiver's stop token cannot stop. */
+        struct NoStopCallback {};
+
+        /** @brief Store a stop callback only for receiver environments in which cancellation is possible. */
+        template<class StopToken, class Callback>
+        using StopCallbackStorage =
+            std::conditional_t<stdexec::unstoppable_token<StopToken>, NoStopCallback,
+                               std::optional<typename StopToken::template callback_type<Callback>>>;
+
         template<class Queue, class Receiver, BackpressurePolicy Policy>
         struct PushOp;
         template<class Queue, class Receiver>
@@ -69,6 +80,113 @@ namespace Mashiro::Concurrency {
         struct PushBatchOp;
         template<class Queue, class Receiver>
         struct PopBatchOp;
+
+        template<class Queue>
+        struct PopSender;
+        template<class Queue>
+        struct PopBatchSender;
+        template<class Queue, BackpressurePolicy Policy>
+        struct PushSender;
+        template<class Queue, BackpressurePolicy Policy>
+        struct PushBatchSender;
+
+        template<class Sender>
+        struct QueueSenderValue;
+
+        template<class Queue>
+        struct QueueSenderValue<PopSender<Queue>> {
+            using type = typename Queue::value_type;
+        };
+
+        template<class Queue>
+        struct QueueSenderValue<PopBatchSender<Queue>> {
+            using type = typename Queue::batch_type;
+        };
+
+        template<class Queue, BackpressurePolicy Policy>
+        struct QueueSenderValue<PushSender<Queue, Policy>> {
+            using type = PushOutcome;
+        };
+
+        template<class Queue, BackpressurePolicy Policy>
+        struct QueueSenderValue<PushBatchSender<Queue, Policy>> {
+            using type = PushOutcome;
+        };
+
+        template<class Sender>
+        concept PrimitiveQueueSender = requires { typename QueueSenderValue<std::remove_cvref_t<Sender>>::type; };
+
+        template<class Sender>
+        using QueueSenderValueType = typename QueueSenderValue<std::remove_cvref_t<Sender>>::type;
+
+        /** @brief Stack-local synchronization state for a primitive queue sender consumed by @c sync_wait. */
+        template<class Value>
+        struct QueueSyncWaitState {
+            std::mutex mutex{};
+            std::condition_variable ready{};
+            std::optional<std::tuple<Value>> result{};
+            std::optional<QueueError> error{};
+            bool completed{};
+
+            void Complete() noexcept {
+                {
+                    std::scoped_lock lock{mutex};
+                    completed = true;
+                }
+                ready.notify_one();
+            }
+
+            void Wait() noexcept {
+                std::unique_lock lock{mutex};
+                ready.wait(lock, [this] { return completed; });
+            }
+        };
+
+        /** @brief Receiver publishing one primitive queue sender completion to a stack-local wait state. */
+        template<class Value>
+        struct QueueSyncWaitReceiver {
+            using receiver_concept = stdexec::receiver_t;
+
+            QueueSyncWaitState<Value>* state;
+
+            [[nodiscard]] stdexec::env<> get_env() const noexcept { return {}; }
+
+            void set_value(Value value) && noexcept {
+                state->result.emplace(std::move(value));
+                state->Complete();
+            }
+
+            void set_stopped() && noexcept { state->Complete(); }
+
+            void set_error(QueueError error) && noexcept {
+                state->error.emplace(error);
+                state->Complete();
+            }
+        };
+
+        /** @brief Completion domain specializing synchronous consumption of primitive queue senders. */
+        struct QueueDomain : stdexec::default_domain {
+            template<PrimitiveQueueSender Sender>
+            static auto apply_sender(stdexec::sync_wait_t, Sender&& sender)
+                -> std::optional<std::tuple<QueueSenderValueType<Sender>>> {
+                using Value = QueueSenderValueType<Sender>;
+                QueueSyncWaitState<Value> state;
+                auto operation = stdexec::connect(std::forward<Sender>(sender), QueueSyncWaitReceiver<Value>{&state});
+                stdexec::start(operation);
+                state.Wait();
+                if (state.error.has_value()) {
+                    throw *state.error;
+                }
+                return std::move(state.result);
+            }
+
+            template<class Sender>
+                requires(!PrimitiveQueueSender<Sender>)
+            static auto apply_sender(stdexec::sync_wait_t terminal, Sender&& sender)
+                -> decltype(stdexec::default_domain{}.apply_sender(terminal, std::forward<Sender>(sender))) {
+                return stdexec::default_domain{}.apply_sender(terminal, std::forward<Sender>(sender));
+            }
+        };
 
         struct OperationBase : WaitNode {
             using TryFn = bool (*)(OperationBase&) noexcept;
@@ -116,8 +234,10 @@ namespace Mashiro::Concurrency {
 
         template<class Op>
         void ReleaseStopCallback(Op& op) noexcept {
-            if (activeStopCallback != static_cast<OperationBase*>(&op)) {
-                op.stopCallback.reset();
+            if constexpr (!stdexec::unstoppable_token<typename Op::StopToken>) {
+                if (activeStopCallback != static_cast<OperationBase*>(&op)) {
+                    op.stopCallback.reset();
+                }
             }
         }
 
@@ -658,22 +778,27 @@ namespace Mashiro::Concurrency {
 
         template<class Op>
         void StartWithStopToken(Op& op) noexcept {
-            auto expected = OperationPhase::Constructed;
-            if (!op.phase.compare_exchange_strong(expected, OperationPhase::Starting, std::memory_order_acq_rel,
-                                                  std::memory_order_acquire)) {
-                return;
-            }
+            if constexpr (stdexec::unstoppable_token<typename Op::StopToken>) {
+                op.phase.store(OperationPhase::Starting, std::memory_order_relaxed);
+                static_cast<void>(QueueAccess::Start(*op.owner, op));
+            } else {
+                auto expected = OperationPhase::Constructed;
+                if (!op.phase.compare_exchange_strong(expected, OperationPhase::Starting, std::memory_order_acq_rel,
+                                                      std::memory_order_acquire)) {
+                    return;
+                }
 
-            auto token = stdexec::get_stop_token(stdexec::get_env(op.receiver));
-            if (token.stop_requested()) {
-                op.phase.store(OperationPhase::Completed, std::memory_order_release);
-                stdexec::set_stopped(std::move(op.receiver));
-                return;
-            }
+                auto token = stdexec::get_stop_token(stdexec::get_env(op.receiver));
+                if (token.stop_requested()) {
+                    op.phase.store(OperationPhase::Completed, std::memory_order_release);
+                    stdexec::set_stopped(std::move(op.receiver));
+                    return;
+                }
 
-            op.stopCallback.emplace(token, typename Op::OnStop{&op});
-            if (!QueueAccess::Start(*op.owner, op)) {
-                CompleteStopRequestedAfterRegistration(op);
+                op.stopCallback.emplace(token, typename Op::OnStop{&op});
+                if (!QueueAccess::Start(*op.owner, op)) {
+                    CompleteStopRequestedAfterRegistration(op);
+                }
             }
         }
 
@@ -690,14 +815,12 @@ namespace Mashiro::Concurrency {
                 }
             };
 
-            using StopCallback = typename StopToken::template callback_type<OnStop>;
-
             Queue* owner;
             Receiver receiver;
             value_type value;
             [[msvc::no_unique_address]] Policy policy;
             PushOutcome outcome{};
-            std::optional<StopCallback> stopCallback;
+            [[msvc::no_unique_address]] StopCallbackStorage<StopToken, OnStop> stopCallback;
 
             PushOp(Queue* q, Receiver&& r, value_type&& v,
                    Policy p) noexcept(std::is_nothrow_move_constructible_v<Receiver> &&
@@ -759,12 +882,10 @@ namespace Mashiro::Concurrency {
                 }
             };
 
-            using StopCallback = typename StopToken::template callback_type<OnStop>;
-
             Queue* owner;
             Receiver receiver;
             std::optional<value_type> value;
-            std::optional<StopCallback> stopCallback;
+            [[msvc::no_unique_address]] StopCallbackStorage<StopToken, OnStop> stopCallback;
 
             PopOp(Queue* q, Receiver&& r) noexcept(std::is_nothrow_move_constructible_v<Receiver>)
                 : OperationBase(OperationKind::Pop, true, &PopOp::TryImmediate, nullptr, &PopOp::CompleteValue,
@@ -816,14 +937,12 @@ namespace Mashiro::Concurrency {
                 }
             };
 
-            using StopCallback = typename StopToken::template callback_type<OnStop>;
-
             Queue* owner;
             Receiver receiver;
             batch_type batch;
             [[msvc::no_unique_address]] Policy policy;
             PushOutcome outcome{};
-            std::optional<StopCallback> stopCallback;
+            [[msvc::no_unique_address]] StopCallbackStorage<StopToken, OnStop> stopCallback;
 
             PushBatchOp(Queue* q, Receiver&& r, batch_type&& b,
                         Policy p) noexcept(std::is_nothrow_move_constructible_v<Receiver> &&
@@ -883,12 +1002,10 @@ namespace Mashiro::Concurrency {
                 }
             };
 
-            using StopCallback = typename StopToken::template callback_type<OnStop>;
-
             Queue* owner;
             Receiver receiver;
             batch_type batch;
-            std::optional<StopCallback> stopCallback;
+            [[msvc::no_unique_address]] StopCallbackStorage<StopToken, OnStop> stopCallback;
 
             PopBatchOp(Queue* q, Receiver&& r) noexcept(std::is_nothrow_move_constructible_v<Receiver>)
                 : OperationBase(OperationKind::PopBatch, true, &PopBatchOp::TryImmediate, nullptr,
@@ -931,6 +1048,10 @@ namespace Mashiro::Concurrency {
 
             Queue* owner;
 
+            [[nodiscard]] auto get_env() const noexcept {
+                return stdexec::prop{stdexec::get_completion_domain<stdexec::set_value_t>, QueueDomain{}};
+            }
+
             template<class Receiver>
             [[nodiscard]] auto connect(Receiver&& receiver) const
                 noexcept(std::is_nothrow_constructible_v<std::remove_cvref_t<Receiver>, Receiver>)
@@ -948,6 +1069,10 @@ namespace Mashiro::Concurrency {
                                                stdexec::set_error_t(QueueError)>;
 
             Queue* owner;
+
+            [[nodiscard]] auto get_env() const noexcept {
+                return stdexec::prop{stdexec::get_completion_domain<stdexec::set_value_t>, QueueDomain{}};
+            }
 
             template<class Receiver>
             [[nodiscard]] auto connect(Receiver&& receiver) const
@@ -968,6 +1093,10 @@ namespace Mashiro::Concurrency {
             Queue* owner;
             value_type value;
             [[msvc::no_unique_address]] Policy policy;
+
+            [[nodiscard]] auto get_env() const noexcept {
+                return stdexec::prop{stdexec::get_completion_domain<stdexec::set_value_t>, QueueDomain{}};
+            }
 
             template<class Receiver>
                 requires std::copy_constructible<value_type>
@@ -1008,6 +1137,10 @@ namespace Mashiro::Concurrency {
             Queue* owner;
             batch_type batch;
             [[msvc::no_unique_address]] Policy policy;
+
+            [[nodiscard]] auto get_env() const noexcept {
+                return stdexec::prop{stdexec::get_completion_domain<stdexec::set_value_t>, QueueDomain{}};
+            }
 
             template<class Receiver>
                 requires std::copy_constructible<batch_type>

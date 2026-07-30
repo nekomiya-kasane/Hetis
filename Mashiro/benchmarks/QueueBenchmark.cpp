@@ -325,7 +325,7 @@ namespace Mashiro::Benchmark {
     class MashiroSequenceLayout {
     public:
         static constexpr std::string_view name = IsolateCells ? "isolated cells" : "compact cells";
-        using Storage = Detail::SequenceCellRingBuffer<T, Capacity, Topology, IsolateCells>;
+        using Storage = Detail::RingBufferImplementation<T, Capacity, Topology, IsolateCells>;
         static constexpr std::size_t storageBytes = sizeof(Storage);
 
         [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }

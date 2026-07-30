@@ -56,6 +56,7 @@ namespace Mashiro::Benchmark {
         std::filesystem::path output = "async-queue-results.csv";
         std::string label = "formal";
         std::string section = "all";
+        std::string implementationPrefix{};
         std::size_t samples = 25;
         std::size_t warmups = 3;
         std::size_t itemsPerProducer = 20'000;
@@ -86,6 +87,22 @@ namespace Mashiro::Benchmark {
     struct ThroughputSample {
         double seconds{};
         std::uint64_t transfers{};
+    };
+
+    /** @brief Terminal used to consume one queue sender in the blocking throughput matrix. */
+    enum class TerminalKind : std::uint8_t {
+        SyncWait,
+        AtomicWait,
+        SpinWait,
+        ConditionVariable,
+    };
+
+    /** @brief Completion channel observed by benchmark-only sender terminals. */
+    enum class TerminalCompletion : std::uint8_t {
+        Pending,
+        Value,
+        Stopped,
+        Error,
     };
 
     /** @brief One latency distribution measured over repeated park/resume operations. */
@@ -318,6 +335,111 @@ namespace Mashiro::Benchmark {
         }
     };
 
+    /** @brief Minimal atomic terminal state with release/acquire publication of completion data. */
+    struct AtomicTerminalState {
+        std::atomic<TerminalCompletion> completion{TerminalCompletion::Pending};
+
+        void Complete(TerminalCompletion result) noexcept {
+            completion.store(result, std::memory_order_release);
+            completion.notify_one();
+        }
+
+        [[nodiscard]] TerminalCompletion Wait() noexcept {
+            TerminalCompletion result = completion.load(std::memory_order_acquire);
+            while (result == TerminalCompletion::Pending) {
+                completion.wait(TerminalCompletion::Pending, std::memory_order_relaxed);
+                result = completion.load(std::memory_order_acquire);
+            }
+            return result;
+        }
+    };
+
+    /** @brief Spin-only terminal state used to isolate queue and sender cost from operating-system parking. */
+    struct SpinTerminalState {
+        std::atomic<TerminalCompletion> completion{TerminalCompletion::Pending};
+
+        void Complete(TerminalCompletion result) noexcept { completion.store(result, std::memory_order_release); }
+
+        [[nodiscard]] TerminalCompletion Wait() noexcept {
+            TerminalCompletion result = completion.load(std::memory_order_acquire);
+            while (result == TerminalCompletion::Pending) {
+#if defined(_M_X64) || defined(__x86_64__)
+                _mm_pause();
+#else
+                std::this_thread::yield();
+#endif
+                result = completion.load(std::memory_order_acquire);
+            }
+            return result;
+        }
+    };
+
+    /** @brief Minimal condition-variable terminal state without a scheduler or run loop. */
+    struct ConditionTerminalState {
+        std::mutex mutex{};
+        std::condition_variable ready{};
+        TerminalCompletion completion{TerminalCompletion::Pending};
+
+        void Complete(TerminalCompletion result) noexcept {
+            {
+                std::scoped_lock lock{mutex};
+                completion = result;
+            }
+            ready.notify_one();
+        }
+
+        [[nodiscard]] TerminalCompletion Wait() noexcept {
+            std::unique_lock lock{mutex};
+            ready.wait(lock, [&] { return completion != TerminalCompletion::Pending; });
+            return completion;
+        }
+    };
+
+    /** @brief Map one terminal selection to its benchmark synchronization state. */
+    template<TerminalKind Terminal>
+    using TerminalState =
+        std::conditional_t<Terminal == TerminalKind::ConditionVariable, ConditionTerminalState,
+                           std::conditional_t<Terminal == TerminalKind::SpinWait, SpinTerminalState,
+                                              AtomicTerminalState>>;
+
+    /** @brief Receiver adapting one push sender to a benchmark terminal state. */
+    template<typename State>
+    struct TerminalPushReceiver {
+        using receiver_concept = stdexec::receiver_t;
+
+        State* state{};
+        Concurrency::PushOutcome* outcome{};
+
+        [[nodiscard]] stdexec::env<> get_env() const noexcept { return {}; }
+
+        void set_value(Concurrency::PushOutcome result) && noexcept {
+            *outcome = result;
+            state->Complete(TerminalCompletion::Value);
+        }
+
+        void set_stopped() && noexcept { state->Complete(TerminalCompletion::Stopped); }
+        void set_error(Concurrency::QueueError) && noexcept { state->Complete(TerminalCompletion::Error); }
+    };
+
+    /** @brief Receiver adapting one pop sender to a benchmark terminal state. */
+    template<typename State, typename T>
+    struct TerminalPopReceiver {
+        using receiver_concept = stdexec::receiver_t;
+
+        State* state{};
+        T* value{};
+
+        [[nodiscard]] stdexec::env<> get_env() const noexcept { return {}; }
+
+        void set_value(T result) && noexcept {
+            *value = std::move(result);
+            state->Complete(TerminalCompletion::Value);
+        }
+
+        void set_stopped() && noexcept { state->Complete(TerminalCompletion::Stopped); }
+        void set_error(Concurrency::QueueError) && noexcept { state->Complete(TerminalCompletion::Error); }
+    };
+
     /** @brief Receiver counting callback fan-out completions without blocking a thread. */
     template<typename T>
     struct FanoutReceiver {
@@ -490,10 +612,55 @@ namespace Mashiro::Benchmark {
         ConditionQueue<T, Capacity> queue_{};
     };
 
+    /** @brief Consume one push sender through the selected benchmark terminal. */
+    template<TerminalKind Terminal, typename Port, typename T>
+    void PushAndWait(Port& port, T value) {
+        if constexpr (Terminal == TerminalKind::SyncWait) {
+            auto result = stdexec::sync_wait(port.Push(std::move(value)));
+            if (!result.has_value() || !std::get<0>(*result).Enqueued()) {
+                std::terminate();
+            }
+        } else {
+            using State = TerminalState<Terminal>;
+            State state;
+            Concurrency::PushOutcome outcome{};
+            auto sender = port.Push(std::move(value));
+            auto operation = stdexec::connect(std::move(sender), TerminalPushReceiver<State>{&state, &outcome});
+            stdexec::start(operation);
+            if (state.Wait() != TerminalCompletion::Value || !outcome.Enqueued()) {
+                std::terminate();
+            }
+        }
+    }
+
+    /** @brief Consume one pop sender through the selected benchmark terminal. */
+    template<TerminalKind Terminal, typename Port, typename T>
+    [[nodiscard]] bool PopAndWait(Port& port, T& value) {
+        if constexpr (Terminal == TerminalKind::SyncWait) {
+            auto result = stdexec::sync_wait(port.Pop());
+            if (!result.has_value()) {
+                return false;
+            }
+            value = std::move(std::get<0>(*result));
+            return true;
+        } else {
+            using State = TerminalState<Terminal>;
+            State state;
+            auto sender = port.Pop();
+            auto operation = stdexec::connect(std::move(sender), TerminalPopReceiver<State, T>{&state, &value});
+            stdexec::start(operation);
+            const TerminalCompletion completion = state.Wait();
+            if (completion == TerminalCompletion::Error) {
+                std::terminate();
+            }
+            return completion == TerminalCompletion::Value;
+        }
+    }
+
     /** @brief Run one Mashiro AsyncQueue throughput sample through the public sender API. */
-    template<typename Storage, typename T>
+    template<TerminalKind Terminal, typename Storage, typename T>
     [[nodiscard]] ThroughputSample RunMashiroThroughput(std::size_t producers, std::size_t consumers,
-                                                        std::size_t itemsPerProducer, bool pinWorkers) {
+                                                         std::size_t itemsPerProducer, bool pinWorkers) {
         using Queue = Concurrency::AsyncQueue<Storage>;
         Queue queue;
         const std::size_t workerCount = producers + consumers;
@@ -516,10 +683,7 @@ namespace Mashiro::Benchmark {
                 start.arrive_and_wait();
                 const std::uint64_t first = producerIndex * itemsPerProducer + 1;
                 for (std::size_t index = 0; index < itemsPerProducer; ++index) {
-                    auto result = stdexec::sync_wait(port.Push(T{.id = first + index}));
-                    if (!result.has_value() || !std::get<0>(*result).Enqueued()) {
-                        std::terminate();
-                    }
+                    PushAndWait<Terminal>(port, T{.id = first + index});
                 }
                 if (remainingProducers.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     queue.Close();
@@ -536,9 +700,10 @@ namespace Mashiro::Benchmark {
                 start.arrive_and_wait();
                 std::uint64_t localCount = 0;
                 std::uint64_t localChecksum = 0;
-                while (auto result = stdexec::sync_wait(port.Pop())) {
+                T value{};
+                while (PopAndWait<Terminal>(port, value)) {
                     ++localCount;
-                    localChecksum += std::get<0>(*result).id;
+                    localChecksum += value.id;
                 }
                 consumed.fetch_add(localCount, std::memory_order_relaxed);
                 checksum.fetch_add(localChecksum, std::memory_order_relaxed);
@@ -656,6 +821,9 @@ namespace Mashiro::Benchmark {
     void RunThroughputCase(const Config& config, CsvWriter& writer, std::string_view scenario,
                            std::string_view implementation, std::size_t payloadBytes, std::size_t capacity,
                            std::size_t producers, std::size_t consumers, Runner&& runner) {
+        if (!implementation.starts_with(config.implementationPrefix)) {
+            return;
+        }
         std::size_t items = CalibrateItems(config, runner);
         std::cout << "throughput | " << scenario << " | " << implementation << " | payload=" << payloadBytes
                   << " | items/producer=" << items << '\n';
@@ -1315,6 +1483,8 @@ namespace Mashiro::Benchmark {
                 config.label = requireValue();
             } else if (option == "--section") {
                 config.section = requireValue();
+            } else if (option == "--implementation-prefix") {
+                config.implementationPrefix = requireValue();
             } else if (option == "--samples") {
                 config.samples = ParseSize(requireValue(), option);
             } else if (option == "--warmups") {
@@ -1364,27 +1534,25 @@ namespace Mashiro::Benchmark {
 
         const auto throughput = [&]<typename T, std::size_t Capacity>(std::size_t producers, std::size_t consumers,
                                                                       std::string_view scenario) {
+            const auto runMashiro = [&]<typename Storage>() {
+                const auto run = [&]<TerminalKind Terminal>(std::string_view implementation) {
+                    RunThroughputCase(config, writer, scenario, implementation, sizeof(T), Capacity, producers,
+                                      consumers, [&](std::size_t items) {
+                                          return RunMashiroThroughput<Terminal, Storage, T>(
+                                              producers, consumers, items, config.pinWorkers);
+                                      });
+                };
+                run.template operator()<TerminalKind::SyncWait>("Mashiro sync_wait");
+                run.template operator()<TerminalKind::AtomicWait>("Mashiro atomic terminal");
+                run.template operator()<TerminalKind::SpinWait>("Mashiro spin terminal");
+                run.template operator()<TerminalKind::ConditionVariable>("Mashiro CV terminal");
+            };
             if (producers == 1 && consumers == 1) {
-                using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
-                RunThroughputCase(config, writer, scenario, "Mashiro AsyncQueue", sizeof(T), Capacity, producers,
-                                  consumers, [&](std::size_t items) {
-                                      return RunMashiroThroughput<Storage, T>(producers, consumers, items,
-                                                                             config.pinWorkers);
-                                  });
+                runMashiro.template operator()<RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>>();
             } else if (consumers == 1) {
-                using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpsc>;
-                RunThroughputCase(config, writer, scenario, "Mashiro AsyncQueue", sizeof(T), Capacity, producers,
-                                  consumers, [&](std::size_t items) {
-                                      return RunMashiroThroughput<Storage, T>(producers, consumers, items,
-                                                                             config.pinWorkers);
-                                  });
+                runMashiro.template operator()<RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpsc>>();
             } else {
-                using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpmc>;
-                RunThroughputCase(config, writer, scenario, "Mashiro AsyncQueue", sizeof(T), Capacity, producers,
-                                  consumers, [&](std::size_t items) {
-                                      return RunMashiroThroughput<Storage, T>(producers, consumers, items,
-                                                                             config.pinWorkers);
-                                  });
+                runMashiro.template operator()<RingBuffer<T, Capacity, Concurrency::QueueTopologies::Mpmc>>();
             }
             RunThroughputCase(config, writer, scenario, "oneTBB bounded", sizeof(T), Capacity, producers, consumers,
                               [&](std::size_t items) {

@@ -166,6 +166,43 @@ TEST_CASE("AsyncQueue SPSC immediate sender operations preserve FIFO order", AUT
     REQUIRE(queue.EmptyApprox());
 }
 
+TEST_CASE("AsyncQueue sync_wait domain preserves push composition", AUTO_TAG) {
+    SpscAsyncQueue queue;
+    auto producer = queue.Producer();
+
+    auto push = producer.Push(42) | stdexec::then([](PushOutcome outcome) { return outcome.Enqueued(); });
+    auto pushed = stdexec::sync_wait(std::move(push));
+    REQUIRE(pushed.has_value());
+    REQUIRE(std::get<0>(*pushed));
+}
+
+TEST_CASE("AsyncQueue sync_wait domain preserves pop composition", AUTO_TAG) {
+    SpscAsyncQueue queue;
+    auto producer = queue.Producer();
+    auto consumer = queue.Consumer();
+    REQUIRE(stdexec::sync_wait(producer.Push(42)).has_value());
+
+    auto pop = consumer.Pop() | stdexec::then([](int value) { return value * 2; });
+    auto popped = stdexec::sync_wait(std::move(pop));
+    REQUIRE(popped.has_value());
+    REQUIRE(std::get<0>(*popped) == 84);
+}
+
+TEST_CASE("AsyncQueue sync_wait domain preserves queue errors", AUTO_TAG) {
+    SpscAsyncQueue queue;
+    auto producer = queue.Producer();
+
+    queue.Close();
+    QueueError caught{};
+    try {
+        static_cast<void>(stdexec::sync_wait(producer.Push(7)));
+        FAIL("sync_wait must propagate a closed queue error");
+    } catch (QueueError error) {
+        caught = error;
+    }
+    REQUIRE(caught == kQueueClosed);
+}
+
 TEST_CASE("AsyncQueue Pop parks and completes after a later Push", AUTO_TAG) {
     SpscAsyncQueue queue;
     auto producer = queue.Producer();
