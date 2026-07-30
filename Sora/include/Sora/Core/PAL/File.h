@@ -45,6 +45,7 @@ namespace Sora::PAL {
 
     class FileMapping;
     class FileWatcher;
+    class InterprocessFileLock;
     class OwnedNativeCrashStream;
 
     /** @brief Platform-native file handle type. */
@@ -211,6 +212,7 @@ namespace Sora::PAL {
     private:
         friend class FileMapping;
         friend class FileWatcher;
+        friend class InterprocessFileLock;
         friend class OwnedNativeCrashStream;
 
         File(NativeFileHandle handle, bool direct, bool positional, DirectIORequirements requirements) noexcept

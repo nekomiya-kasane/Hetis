@@ -41,6 +41,7 @@
 #    include <execinfo.h>
 #    include <fcntl.h>
 #    include <poll.h>
+#    include <sys/file.h>
 #    include <ucontext.h>
 #    include <pthread.h>
 #    include <signal.h>
@@ -117,18 +118,12 @@ namespace Sora::PAL {
             return module;
         }
 
-        inline constexpr GUID kKernelProcessProvider{0x3d6fa8d0,
-                                                     0xfe05,
-                                                     0x11d0,
-                                                     {0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c}};
-        inline constexpr GUID kKernelThreadProvider{0x3d6fa8d1,
-                                                    0xfe05,
-                                                    0x11d0,
-                                                    {0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c}};
-        inline constexpr GUID kSoraSchedulerSessionGuid{0xe837d88f,
-                                                        0x5a6f,
-                                                        0x4f8b,
-                                                        {0x9d, 0x2f, 0x62, 0xd3, 0x73, 0xb8, 0x7d, 0x26}};
+        inline constexpr GUID kKernelProcessProvider{
+            0x3d6fa8d0, 0xfe05, 0x11d0, {0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c}};
+        inline constexpr GUID kKernelThreadProvider{
+            0x3d6fa8d1, 0xfe05, 0x11d0, {0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c}};
+        inline constexpr GUID kSoraSchedulerSessionGuid{
+            0xe837d88f, 0x5a6f, 0x4f8b, {0x9d, 0x2f, 0x62, 0xd3, 0x73, 0xb8, 0x7d, 0x26}};
         inline constexpr wchar_t kSoraSchedulerSessionName[] = L"Sora Scheduler Trace";
 
         [[nodiscard]] ErrorCode ClassifyTraceStatus(ULONG status) noexcept {
@@ -164,9 +159,7 @@ namespace Sora::PAL {
             SchedulerTraceSystemAPI::LossCallback lossCallback = nullptr;
             void* userData = nullptr;
 
-            [[nodiscard]] EVENT_TRACE_PROPERTIES* Properties() noexcept {
-                return &properties.value;
-            }
+            [[nodiscard]] EVENT_TRACE_PROPERTIES* Properties() noexcept { return &properties.value; }
 
             static ULONG __stdcall BufferCallback(EVENT_TRACE_LOGFILEW* log) noexcept {
                 if (log != nullptr && log->Context != nullptr) {
@@ -209,10 +202,12 @@ namespace Sora::PAL {
             }
         };
 
-        [[nodiscard]] ErrorCode StartWindowsSchedulerTrace(
-            const NativeSchedulerTraceOptions& options, SchedulerTraceSystemAPI::EventCallback eventCallback,
-            SchedulerTraceSystemAPI::LossCallback lossCallback, void* userData,
-            SchedulerTraceSystemAPI::SessionHandle* output, uint64_t* ticksPerSecond) noexcept {
+        [[nodiscard]] ErrorCode StartWindowsSchedulerTrace(const NativeSchedulerTraceOptions& options,
+                                                           SchedulerTraceSystemAPI::EventCallback eventCallback,
+                                                           SchedulerTraceSystemAPI::LossCallback lossCallback,
+                                                           void* userData,
+                                                           SchedulerTraceSystemAPI::SessionHandle* output,
+                                                           uint64_t* ticksPerSecond) noexcept {
             if (output == nullptr || ticksPerSecond == nullptr || eventCallback == nullptr) {
                 return ErrorCode::InvalidArgument;
             }
@@ -220,8 +215,8 @@ namespace Sora::PAL {
             *ticksPerSecond = 0;
 
             const SchedulerTraceSystemAPI& api = LoadSchedulerTraceSystemAPI();
-            auto session = std::unique_ptr<WindowsSchedulerTraceSession>{
-                new (std::nothrow) WindowsSchedulerTraceSession};
+            auto session =
+                std::unique_ptr<WindowsSchedulerTraceSession>{new (std::nothrow) WindowsSchedulerTraceSession};
             if (session == nullptr) {
                 return ErrorCode::OutOfMemory;
             }
@@ -241,8 +236,7 @@ namespace Sora::PAL {
             properties.LogFileMode = EVENT_TRACE_REAL_TIME_MODE | EVENT_TRACE_SYSTEM_LOGGER_MODE;
             properties.EnableFlags = EVENT_TRACE_FLAG_PROCESS | EVENT_TRACE_FLAG_THREAD | EVENT_TRACE_FLAG_CSWITCH |
                                      EVENT_TRACE_FLAG_DISPATCHER;
-            properties.LoggerNameOffset =
-                static_cast<ULONG>(offsetof(WindowsSchedulerTraceProperties, loggerName));
+            properties.LoggerNameOffset = static_cast<ULONG>(offsetof(WindowsSchedulerTraceProperties, loggerName));
             std::memcpy(session->properties.loggerName, kSoraSchedulerSessionName, sizeof(kSoraSchedulerSessionName));
 
             LARGE_INTEGER frequency{};
@@ -319,8 +313,7 @@ namespace Sora::PAL {
         }
 
         void CloseWindowsSchedulerTrace(SchedulerTraceSystemAPI::SessionHandle handle) noexcept {
-            std::unique_ptr<WindowsSchedulerTraceSession> session{
-                static_cast<WindowsSchedulerTraceSession*>(handle)};
+            std::unique_ptr<WindowsSchedulerTraceSession> session{static_cast<WindowsSchedulerTraceSession*>(handle)};
             if (session == nullptr) {
                 return;
             }
@@ -508,6 +501,7 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<FileSystemAPI::ReadFileFunction,                           decltype(&::ReadFile)>);
         static_assert(std::is_same_v<FileSystemAPI::WriteFileFunction,                          decltype(&::WriteFile)>);
         static_assert(std::is_same_v<FileSystemAPI::FlushFileBuffersFunction,                   decltype(&::FlushFileBuffers)>);
+        static_assert(std::is_same_v<FileSystemAPI::LockFileFunction,                           decltype(&::LockFileEx)>);
 
         static_assert(sizeof(WindowsSystem::DWord)                  == sizeof(DWORD));
         static_assert(alignof(WindowsSystem::DWord)                 == alignof(DWORD));
@@ -737,6 +731,7 @@ namespace Sora::PAL {
         static_assert(std::is_convertible_v<decltype(&::unlink),        FileSystemAPI::UnlinkFunction>);
         static_assert(std::is_convertible_v<decltype(&::fcntl),         FileSystemAPI::ControlFunction>);
         static_assert(std::is_convertible_v<decltype(&::posix_fadvise), FileSystemAPI::AdviseFileFunction>);
+        static_assert(std::is_convertible_v<decltype(&::flock),         FileSystemAPI::LockFunction>);
 
 
         static_assert(sizeof(PosixSystem::ThreadId)          == sizeof(pthread_t));
@@ -1473,21 +1468,18 @@ namespace Sora::PAL {
             const ModulePtr& tracing = TracingModule();
             const ModulePtr& kernel = KernelModule();
             if (tracing != nullptr) {
-                loaded.startTrace =
-                    tracing->TryFindFunction<SchedulerTraceSystemAPI::StartTraceFunction>("StartTraceW");
-                loaded.controlTrace =
-                    tracing->TryFindFunction<SchedulerTraceSystemAPI::ControlTraceFunction>("ControlTraceW");
-                loaded.openTrace =
-                    tracing->TryFindFunction<SchedulerTraceSystemAPI::OpenTraceFunction>("OpenTraceW");
-                loaded.processTrace =
-                    tracing->TryFindFunction<SchedulerTraceSystemAPI::ProcessTraceFunction>("ProcessTrace");
-                loaded.closeTrace =
-                    tracing->TryFindFunction<SchedulerTraceSystemAPI::CloseTraceFunction>("CloseTrace");
+                // clang-format off
+                loaded.startTrace   = tracing->TryFindFunction<SchedulerTraceSystemAPI::StartTraceFunction>("StartTraceW");
+                loaded.controlTrace = tracing->TryFindFunction<SchedulerTraceSystemAPI::ControlTraceFunction>("ControlTraceW");
+                loaded.openTrace    = tracing->TryFindFunction<SchedulerTraceSystemAPI::OpenTraceFunction>("OpenTraceW");
+                loaded.processTrace = tracing->TryFindFunction<SchedulerTraceSystemAPI::ProcessTraceFunction>("ProcessTrace");
+                loaded.closeTrace   = tracing->TryFindFunction<SchedulerTraceSystemAPI::CloseTraceFunction>("CloseTrace");
+                // clang-format on
             }
             if (kernel != nullptr) {
-                loaded.queryPerformanceFrequency =
-                    kernel->TryFindFunction<SchedulerTraceSystemAPI::QueryPerformanceFrequencyFunction>(
-                        "QueryPerformanceFrequency");
+                // clang-format off
+                loaded.queryPerformanceFrequency = kernel->TryFindFunction<SchedulerTraceSystemAPI::QueryPerformanceFrequencyFunction>("QueryPerformanceFrequency");
+                // clang-format on
             }
             if (EnsureSystemAPIs(loaded.startTrace, loaded.controlTrace, loaded.openTrace, loaded.processTrace,
                                  loaded.closeTrace, loaded.queryPerformanceFrequency)) {
@@ -1584,6 +1576,7 @@ namespace Sora::PAL {
             loaded.waitForSingleObject   = module->TryFindFunction<API::WaitForSingleObjectFunction>("WaitForSingleObject");
             loaded.getOverlappedResult   = module->TryFindFunction<API::GetOverlappedResultFunction>("GetOverlappedResult");
             loaded.cancelIo              = module->TryFindFunction<API::CancelIoFunction>("CancelIoEx");
+            loaded.lockFile              = module->TryFindFunction<API::LockFileFunction>("LockFileEx");
             loaded.readDirectoryChanges  = module->TryFindFunction<API::ReadDirectoryChangesFunction>("ReadDirectoryChangesW");
             loaded.getSystemInfo         = module->TryFindFunction<API::GetSystemInfoFunction>("GetSystemInfo");
             loaded.duplicateHandle       = module->TryFindFunction<API::DuplicateHandleFunction>("DuplicateHandle");
@@ -1611,6 +1604,7 @@ namespace Sora::PAL {
             loaded.queryFileSize         = loaded.stat != nullptr ? &QueryPosixFileSize : nullptr;
             loaded.duplicate             = module->TryFindFunction<API::DuplicateFunction>("dup");
             loaded.adviseFile            = module->TryFindFunction<API::AdviseFileFunction>("posix_fadvise");
+            loaded.lock                  = module->TryFindFunction<API::LockFunction>("flock");
 #    if defined(PLATFORM_LINUX)
             loaded.initializeNotify      = module->TryFindFunction<API::InitializeNotifyFunction>("inotify_init1");
             loaded.addNotify             = module->TryFindFunction<API::AddNotifyFunction>("inotify_add_watch");

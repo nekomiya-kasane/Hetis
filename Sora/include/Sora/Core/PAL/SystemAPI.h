@@ -395,6 +395,12 @@ namespace Sora::PAL {
                 inline constexpr DWord kStandardOutputHandle             = static_cast<DWord>(-11);
                 [[= PAL::$::Macro{"STD_ERROR_HANDLE"}]]
                 inline constexpr DWord kStandardErrorHandle              = static_cast<DWord>(-12);
+                [[= PAL::$::Macro{"LOCKFILE_FAIL_IMMEDIATELY", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kLockFileFailImmediately          = 0x00000001;
+                [[= PAL::$::Macro{"LOCKFILE_EXCLUSIVE_LOCK", PAL::$::Macro::Type::Mask}]]
+                inline constexpr DWord kLockFileExclusive                = 0x00000002;
+                [[= PAL::$::Macro{"ERROR_LOCK_VIOLATION"}]]
+                inline constexpr DWord kErrorLockViolation               = 33;
                 // clang-format on
 
             } // namespace File
@@ -720,6 +726,7 @@ namespace Sora::PAL {
         using WaitForSingleObjectFunction   = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
         using GetOverlappedResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool);
         using CancelIoFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*);
+        using LockFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
         using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
         using ReadDirectoryChangesFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*, DirectoryCompletionFunction);
         using GetSystemInfoFunction         = void(__stdcall*)(void*);
@@ -767,6 +774,8 @@ namespace Sora::PAL {
         GetOverlappedResultFunction   getOverlappedResult   = nullptr;
         [[= $::Syscall{"CancelIoEx"}]]
         CancelIoFunction              cancelIo              = nullptr;
+        [[= $::Syscall{"LockFileEx"}]]
+        LockFileFunction              lockFile              = nullptr;
         [[= $::Syscall{"ReadDirectoryChangesW"}]]
         ReadDirectoryChangesFunction  readDirectoryChanges  = nullptr;
         [[= $::Syscall{"GetSystemInfo"}]]
@@ -931,6 +940,8 @@ namespace Sora::PAL {
             inline constexpr int kPageSizeConfiguration = 30;
             inline constexpr int kFileAdviceSequential = 2;
             inline constexpr int kFileAdviceRandom = 1;
+            inline constexpr int kLockExclusive = 2;
+            inline constexpr int kLockNonBlocking = 4;
             // clang-format on
 #    elif defined(PLATFORM_MACOS)
             // clang-format off
@@ -945,6 +956,8 @@ namespace Sora::PAL {
             inline constexpr int kNoCacheControl = 48;
             inline constexpr int kFullSyncControl = 51;
             inline constexpr int kPageSizeConfiguration = 29;
+            inline constexpr int kLockExclusive = 2;
+            inline constexpr int kLockNonBlocking = 4;
             // clang-format on
 #    endif
 
@@ -1161,6 +1174,7 @@ namespace Sora::PAL {
         using QueryFileSizeFunction       = bool (*)(int, uint64_t*) noexcept;
         using DuplicateFunction           = int (*)(int);
         using AdviseFileFunction          = int (*)(int, PosixSystem::FileOffset, PosixSystem::FileOffset, int);
+        using LockFunction                = int (*)(int, int);
 
         [[= $::Syscall{"open"}]]
         OpenFunction                open                = nullptr;
@@ -1204,6 +1218,8 @@ namespace Sora::PAL {
         DuplicateFunction           duplicate           = nullptr;
         [[= $::Syscall{"posix_fadvise"}]]
         AdviseFileFunction          adviseFile          = nullptr;
+        [[= $::Syscall{"flock"}]]
+        LockFunction                lock                = nullptr;
 
 #    if defined(PLATFORM_LINUX)
         using InitializeNotifyFunction = int (*)(int);
