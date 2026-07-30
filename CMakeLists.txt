@@ -13,9 +13,13 @@ if(NOT DEFINED CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()
 
+# The bundled libc++ is built against the release UCRT for every configuration. Mixing it with CMake's default
+# Debug /MDd runtime crosses allocator and thread-local-state domains at DLL boundaries.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+
 add_compile_definitions(
-    "$<$<CONFIG:Debug>:DEBUG;_DEBUG>"
-    "$<$<NOT:$<CONFIG:Debug>>:NDEBUG;_NDEBUG>"
+    "$<$<CONFIG:Debug>:DEBUG>"
+    "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>"
 )
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build dependencies as static libraries")
@@ -24,7 +28,10 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/catch2/extras"
+)
 include(ReflectionFeatureProbes)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

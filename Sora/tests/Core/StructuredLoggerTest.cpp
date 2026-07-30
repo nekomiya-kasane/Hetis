@@ -11,6 +11,18 @@
 #include <fstream>
 #include <string>
 
+TEST_CASE("StructuredLogger initializes category thresholds from enum annotations",
+          "[Sora.Core.StructuredLogger]") {
+    Sora::StructuredLogger logger;
+    CHECK(logger.GetCategoryLevel(Sora::LogCategory::Core) == Sora::LogLevel::Info);
+    CHECK(logger.GetCategoryLevel(Sora::LogCategory::Scene) == Sora::LogLevel::Debug);
+    CHECK(logger.GetCategoryLevel(Sora::LogCategory::Audio) == Sora::LogLevel::Info);
+    CHECK(logger.GetCategoryLevel(Sora::LogCategory::Editor) == Sora::LogLevel::Debug);
+    CHECK(logger.GetCategoryLevel(Sora::LogCategory::App) == Sora::LogLevel::Trace);
+    CHECK(logger.GetCategoryLevel(static_cast<Sora::LogCategory>(63)) == Sora::LogLevel::Trace);
+    logger.Shutdown();
+}
+
 TEST_CASE("JsonLogSink emits parseable NDJSON through ToJson", "[Sora.Core.StructuredLogger]") {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path path =
