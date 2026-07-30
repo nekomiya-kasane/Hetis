@@ -37,6 +37,39 @@ namespace Sora::Concurrency {
      * @tparam Capacity Number of slots; must be a power of two and at least two.
      * @note Producer operations must be serialized on one producer endpoint. Consumer operations must independently be
      * serialized on one consumer endpoint. Diagnostic queries may be called concurrently but return approximate values.
+     *
+     * @example
+     * @code
+     * #include <thread>
+     * #include <iostream>
+     *
+     * // Create a ring buffer with capacity of 16 elements holding integers
+     * Sora::Concurrency::SpscRingBuffer<int, 16> buffer;
+     *
+     * // Producer thread: push values into the buffer
+     * std::thread producer([&buffer]() {
+     *     for (int i = 0; i < 100; ++i) {
+     *         buffer.Push(i);  // Blocks until space is available
+     *         std::cout << "Produced: " << i << std::endl;
+     *     }
+     * });
+     *
+     * // Consumer thread: pop values from the buffer
+     * std::thread consumer([&buffer]() {
+     *     int value;
+     *     for (int i = 0; i < 100; ++i) {
+     *         buffer.Pop(value);  // Blocks until data is available
+     *         std::cout << "Consumed: " << value << std::endl;
+     *     }
+     * });
+     *
+     * producer.join();
+     * consumer.join();
+     *
+     * // Alternatively, use non-blocking operations:
+     * // buffer.TryPush(42);  // Returns false if buffer is full
+     * // buffer.TryPop(value);  // Returns false if buffer is empty
+     * @endcode
      */
     template<typename T, std::uint32_t Capacity>
         requires(std::has_single_bit(Capacity) && Capacity >= 2 && std::is_object_v<T> &&

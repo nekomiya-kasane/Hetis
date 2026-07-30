@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include "Mashiro/Core/Attributes.h"
 #include "Mashiro/Core/FalseSharing.h"
 #include "Mashiro/Core/TypeTraits.h"
 
@@ -15,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <meta>
 #include <memory>
 #include <new>
 #include <optional>
@@ -150,26 +152,17 @@ namespace Mashiro {
             SequenceCell,
         };
 
-        /** @brief Reduce a queue topology to the protocol that determines generated code and physical layout. */
-        [[nodiscard]] consteval RingProtocol SelectRingProtocol(QueueTopology topology) {
-            if (topology.sharing == QueueSharing::SingleThread) {
-                return RingProtocol::Local;
-            }
-            if (topology.producers == QueueCardinality::Single &&
-                topology.consumers == QueueCardinality::Single) {
-                return RingProtocol::PublishedCursor;
-            }
-            return RingProtocol::SequenceCell;
-        }
-
-        template<class Tag>
-        struct EmptyRingField {};
-
-        struct AllocatedSlotsTag {};
-        struct PublishedSlotCountTag {};
-        struct CachedReadPositionTag {};
-        struct CachedWritePositionTag {};
-        struct UnusedArenaTag {};
+        /** @brief Physical member roles whose types and contention domains are dispatched at compile time. */
+        enum class RingField : std::uint8_t {
+            PublishedSlotCount,
+            AllocatedSlots,
+            Allocator,
+            WritePosition,
+            CachedReadPosition,
+            ReadPosition,
+            CachedWritePosition,
+            Arena,
+        };
 
         /** @brief Inline raw payload arena used only by the single-thread protocol. */
         template<class T, std::size_t Capacity>
@@ -183,23 +176,129 @@ namespace Mashiro {
             SequenceCell<T, IsolateCells> cells[Capacity]{};
         };
 
-        template<class T, std::size_t Capacity, RingProtocol Protocol, bool IsolateCells>
-        [[nodiscard]] consteval auto SelectSlotArena() {
-            if constexpr (Protocol == RingProtocol::Local) {
-                return std::type_identity<InlineSlotArena<T, Capacity>>{};
-            } else if constexpr (Protocol == RingProtocol::SequenceCell) {
-                return std::type_identity<SequenceCellArena<T, Capacity, IsolateCells>>{};
+    } // namespace Detail
+
+    namespace Meta {
+
+        /** @brief Match a queue topology to the protocol that determines generated code and physical layout. */
+        [[nodiscard]] consteval Detail::RingProtocol DispatchRingProtocol(Concurrency::QueueTopology topology) {
+            if (topology.sharing == Concurrency::QueueSharing::SingleThread) {
+                return Detail::RingProtocol::Local;
+            }
+            if (topology.producers == Concurrency::QueueCardinality::Single &&
+                topology.consumers == Concurrency::QueueCardinality::Single) {
+                return Detail::RingProtocol::PublishedCursor;
+            }
+            return Detail::RingProtocol::SequenceCell;
+        }
+
+        /**
+         * @brief Match one ring-buffer field role and topology to its concrete reflected type.
+         * @details An inactive field becomes a distinct empty @c integral_constant keyed by @p Field. This preserves
+         * unique member identities while allowing @c MASHIRO_NO_UNIQUE_ADDRESS to erase all inactive storage.
+         */
+        template<Detail::RingField Field, class T, std::size_t Capacity, Concurrency::QueueTopology Topology,
+                 bool IsolateCells>
+        [[nodiscard]] consteval std::meta::info DispatchRingFieldType() {
+            constexpr Detail::RingProtocol protocol = DispatchRingProtocol(Topology);
+            using Empty = std::integral_constant<Detail::RingField, Field>;
+
+            if constexpr (Field == Detail::RingField::PublishedSlotCount) {
+                if constexpr (protocol == Detail::RingProtocol::PublishedCursor) {
+                    using Type = const std::size_t;
+                    return ^^Type;
+                } else {
+                    return ^^Empty;
+                }
+            } else if constexpr (Field == Detail::RingField::AllocatedSlots) {
+                if constexpr (protocol == Detail::RingProtocol::PublishedCursor) {
+                    using Type = T*;
+                    return ^^Type;
+                } else {
+                    return ^^Empty;
+                }
+            } else if constexpr (Field == Detail::RingField::Allocator) {
+                using Type = std::allocator<T>;
+                return ^^Type;
+            } else if constexpr (Field == Detail::RingField::WritePosition ||
+                                 Field == Detail::RingField::ReadPosition) {
+                if constexpr (protocol == Detail::RingProtocol::Local) {
+                    return ^^std::size_t;
+                } else {
+                    using Type = std::atomic<std::size_t>;
+                    return ^^Type;
+                }
+            } else if constexpr (Field == Detail::RingField::CachedReadPosition ||
+                                 Field == Detail::RingField::CachedWritePosition) {
+                if constexpr (protocol == Detail::RingProtocol::PublishedCursor) {
+                    return ^^std::size_t;
+                } else {
+                    return ^^Empty;
+                }
             } else {
-                return std::type_identity<EmptyRingField<UnusedArenaTag>>{};
+                static_assert(Field == Detail::RingField::Arena);
+                if constexpr (protocol == Detail::RingProtocol::Local) {
+                    using Type = Detail::InlineSlotArena<T, Capacity>;
+                    return ^^Type;
+                } else if constexpr (protocol == Detail::RingProtocol::SequenceCell) {
+                    using Type = Detail::SequenceCellArena<T, Capacity, IsolateCells>;
+                    return ^^Type;
+                } else {
+                    return ^^Empty;
+                }
             }
         }
+
+        /** @brief Match one ring-buffer field role and topology to its reflected contention-domain type. */
+        template<Detail::RingField Field, Concurrency::QueueTopology Topology>
+        [[nodiscard]] consteval std::meta::info DispatchRingFieldDomain() {
+            constexpr Detail::RingProtocol protocol = DispatchRingProtocol(Topology);
+
+            if constexpr (Field == Detail::RingField::WritePosition) {
+                if constexpr (Topology.producers == Concurrency::QueueCardinality::Multiple) {
+                    return ^^Concurrency::Contended;
+                } else {
+                    return ^^Concurrency::ProducerOwned;
+                }
+            } else if constexpr (Field == Detail::RingField::ReadPosition) {
+                if constexpr (Topology.consumers == Concurrency::QueueCardinality::Multiple) {
+                    return ^^Concurrency::Contended;
+                } else {
+                    return ^^Concurrency::ConsumerOwned;
+                }
+            } else if constexpr (Field == Detail::RingField::CachedReadPosition) {
+                if constexpr (protocol == Detail::RingProtocol::PublishedCursor) {
+                    return ^^Concurrency::ProducerOwned;
+                } else {
+                    return ^^Concurrency::Immutable;
+                }
+            } else if constexpr (Field == Detail::RingField::CachedWritePosition) {
+                if constexpr (protocol == Detail::RingProtocol::PublishedCursor) {
+                    return ^^Concurrency::ConsumerOwned;
+                } else {
+                    return ^^Concurrency::Immutable;
+                }
+            } else if constexpr (Field == Detail::RingField::Arena) {
+                if constexpr (protocol == Detail::RingProtocol::PublishedCursor) {
+                    return ^^Concurrency::Immutable;
+                } else {
+                    return ^^Concurrency::SharedStorage;
+                }
+            } else {
+                return ^^Concurrency::Immutable;
+            }
+        }
+
+    } // namespace Meta
+
+    namespace Detail {
 
         template<class T, std::size_t Capacity, QueueTopology Topology>
         concept ValidRingBuffer = ValidateRingCapacity(Capacity) && ValidateQueueTopology(Topology) &&
                                   std::is_object_v<T> && std::is_nothrow_destructible_v<T> &&
-                                  (SelectRingProtocol(Topology) != RingProtocol::PublishedCursor ||
+                                  (Meta::DispatchRingProtocol(Topology) != RingProtocol::PublishedCursor ||
                                    Capacity <= (std::size_t{1} << 31)) &&
-                                  (SelectRingProtocol(Topology) != RingProtocol::SequenceCell ||
+                                  (Meta::DispatchRingProtocol(Topology) != RingProtocol::SequenceCell ||
                                    Traits::ConcurrentQueueElement<T>);
 
         /**
@@ -214,7 +313,7 @@ namespace Mashiro {
                                      Topology.consumers == QueueCardinality::Multiple>
             requires ValidRingBuffer<T, Capacity, Topology>
         class RingBufferImplementation {
-            static constexpr RingProtocol kProtocol = SelectRingProtocol(Topology);
+            static constexpr RingProtocol kProtocol = Meta::DispatchRingProtocol(Topology);
             static constexpr bool kLocal = kProtocol == RingProtocol::Local;
             static constexpr bool kPublishedCursor = kProtocol == RingProtocol::PublishedCursor;
             static constexpr bool kSequenceCell = kProtocol == RingProtocol::SequenceCell;
@@ -228,25 +327,24 @@ namespace Mashiro {
             static constexpr std::size_t kArenaAlignment =
                 kSequenceCell ? Platform::kCacheLineSize : (kLocal ? alignof(T) : 1);
 
-            using Position = std::conditional_t<kLocal, std::size_t, std::atomic<std::size_t>>;
             using PublishedSlotCount =
-                std::conditional_t<kPublishedCursor, const std::size_t, EmptyRingField<PublishedSlotCountTag>>;
-            using AllocatedSlots = std::conditional_t<kPublishedCursor, T*, EmptyRingField<AllocatedSlotsTag>>;
+                [:Meta::DispatchRingFieldType<RingField::PublishedSlotCount, T, Capacity, Topology, IsolateCells>():];
+            using AllocatedSlots =
+                [:Meta::DispatchRingFieldType<RingField::AllocatedSlots, T, Capacity, Topology, IsolateCells>():];
+            using Allocator =
+                [:Meta::DispatchRingFieldType<RingField::Allocator, T, Capacity, Topology, IsolateCells>():];
+            using Position =
+                [:Meta::DispatchRingFieldType<RingField::WritePosition, T, Capacity, Topology, IsolateCells>():];
             using CachedReadPosition =
-                std::conditional_t<kPublishedCursor, std::size_t, EmptyRingField<CachedReadPositionTag>>;
+                [:Meta::DispatchRingFieldType<RingField::CachedReadPosition, T, Capacity, Topology, IsolateCells>():];
             using CachedWritePosition =
-                std::conditional_t<kPublishedCursor, std::size_t, EmptyRingField<CachedWritePositionTag>>;
-            using Arena = typename decltype(SelectSlotArena<T, Capacity, kProtocol, IsolateCells>())::type;
-            using WriteDomain = std::conditional_t<kMultipleProducers, Concurrency::Contended,
-                                                   Concurrency::ProducerOwned>;
-            using ReadDomain =
-                std::conditional_t<kMultipleConsumers, Concurrency::Contended, Concurrency::ConsumerOwned>;
-            using CachedReadDomain =
-                std::conditional_t<kPublishedCursor, Concurrency::ProducerOwned, Concurrency::Immutable>;
-            using CachedWriteDomain =
-                std::conditional_t<kPublishedCursor, Concurrency::ConsumerOwned, Concurrency::Immutable>;
-            using ArenaDomain = std::conditional_t<kPublishedCursor, Concurrency::Immutable,
-                                                   Concurrency::SharedStorage>;
+                [:Meta::DispatchRingFieldType<RingField::CachedWritePosition, T, Capacity, Topology, IsolateCells>():];
+            using Arena = [:Meta::DispatchRingFieldType<RingField::Arena, T, Capacity, Topology, IsolateCells>():];
+            using WriteDomain = [:Meta::DispatchRingFieldDomain<RingField::WritePosition, Topology>():];
+            using ReadDomain = [:Meta::DispatchRingFieldDomain<RingField::ReadPosition, Topology>():];
+            using CachedReadDomain = [:Meta::DispatchRingFieldDomain<RingField::CachedReadPosition, Topology>():];
+            using CachedWriteDomain = [:Meta::DispatchRingFieldDomain<RingField::CachedWritePosition, Topology>():];
+            using ArenaDomain = [:Meta::DispatchRingFieldDomain<RingField::Arena, Topology>():];
             using Cell = SequenceCell<T, IsolateCells>;
 
             static_assert(kLocal || std::atomic<std::size_t>::is_always_lock_free,
@@ -621,17 +719,17 @@ namespace Mashiro {
                 }
             }
 
-            [[= Concurrency::Immutable{}]] [[msvc::no_unique_address]] PublishedSlotCount slotCount_ =
+            [[= Concurrency::Immutable{}]] MASHIRO_NO_UNIQUE_ADDRESS PublishedSlotCount slotCount_ =
                 InitialSlotCount();
-            [[= Concurrency::Immutable{}]] [[msvc::no_unique_address]] AllocatedSlots allocatedSlots_{};
-            [[= Concurrency::Immutable{}]] [[msvc::no_unique_address]] std::allocator<T> allocator_{};
+            [[= Concurrency::Immutable{}]] MASHIRO_NO_UNIQUE_ADDRESS AllocatedSlots allocatedSlots_{};
+            [[= Concurrency::Immutable{}]] MASHIRO_NO_UNIQUE_ADDRESS Allocator allocator_{};
             [[= WriteDomain{}]] alignas(kPositionAlignment) Position writePosition_{0};
-            [[= CachedReadDomain{}]] [[msvc::no_unique_address]] alignas(kCacheAlignment)
+            [[= CachedReadDomain{}]] MASHIRO_NO_UNIQUE_ADDRESS alignas(kCacheAlignment)
                 CachedReadPosition cachedReadPosition_{};
             [[= ReadDomain{}]] alignas(kPositionAlignment) Position readPosition_{0};
-            [[= CachedWriteDomain{}]] [[msvc::no_unique_address]] alignas(kCacheAlignment)
+            [[= CachedWriteDomain{}]] MASHIRO_NO_UNIQUE_ADDRESS alignas(kCacheAlignment)
                 CachedWritePosition cachedWritePosition_{};
-            [[= ArenaDomain{}]] [[msvc::no_unique_address]] alignas(kArenaAlignment) Arena arena_{};
+            [[= ArenaDomain{}]] MASHIRO_NO_UNIQUE_ADDRESS alignas(kArenaAlignment) Arena arena_{};
         };
 
         template<class Storage>
