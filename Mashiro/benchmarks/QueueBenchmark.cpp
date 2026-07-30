@@ -67,6 +67,7 @@ namespace Mashiro::Benchmark {
         bool paired = false;
         bool layouts = false;
         bool references = false;
+        bool spscAudit = false;
     };
 
     /** @brief Fixed-size trivially copyable payload carrying a correctness identity. */
@@ -423,6 +424,28 @@ namespace Mashiro::Benchmark {
         rigtorp::SPSCQueue<T> queue_;
     };
 
+    /** @brief Give one queue implementation an independent benchmark identity without changing its operations. */
+    template<typename Queue, typename Tag>
+    class NamedQueue : public Queue {
+    public:
+        using Queue::Queue;
+        static constexpr std::string_view name = Tag::name;
+        static constexpr std::size_t storageBytes = Queue::storageBytes;
+    };
+
+    struct MashiroSpscA {
+        static constexpr std::string_view name = "Mashiro SPSC A";
+    };
+    struct MashiroSpscB {
+        static constexpr std::string_view name = "Mashiro SPSC B";
+    };
+    struct RigtorpSpscA {
+        static constexpr std::string_view name = "Rigtorp SPSC A";
+    };
+    struct RigtorpSpscB {
+        static constexpr std::string_view name = "Rigtorp SPSC B";
+    };
+
     /** @brief Rigtorp's bounded strict-FIFO MPMC queue adapter. */
     template<typename T, std::size_t Capacity>
     class RigtorpMpmc {
@@ -520,7 +543,7 @@ namespace Mashiro::Benchmark {
         workers.reserve(workerCount);
 
         for (std::size_t producer = 0; producer < producers; ++producer) {
-            workers.emplace_back([&, producer] {
+            workers.emplace_back([&, producer] [[gnu::noinline, gnu::aligned(Platform::kCacheLineSize)]] {
                 if (!BindWorker(cpuSets, consumers + producer)) {
                     placementFailed.store(true, std::memory_order_relaxed);
                 }
@@ -542,7 +565,7 @@ namespace Mashiro::Benchmark {
         }
 
         for (std::size_t consumer = 0; consumer < consumers; ++consumer) {
-            workers.emplace_back([&, consumer] {
+            workers.emplace_back([&, consumer] [[gnu::noinline, gnu::aligned(Platform::kCacheLineSize)]] {
                 if (!BindWorker(cpuSets, consumer)) {
                     placementFailed.store(true, std::memory_order_relaxed);
                 }
@@ -889,6 +912,24 @@ namespace Mashiro::Benchmark {
         }
     }
 
+    /** @brief Append controls that expose benchmark-template and implementation-order bias in SPSC comparisons. */
+    template<std::size_t Capacity, typename T>
+    void AppendSpscAuditCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+        using MashiroA = NamedQueue<MashiroSpsc<T, Capacity>, MashiroSpscA>;
+        using MashiroB = NamedQueue<MashiroSpsc<T, Capacity>, MashiroSpscB>;
+        using RigtorpA = NamedQueue<RigtorpSpsc<T, Capacity>, RigtorpSpscA>;
+        using RigtorpB = NamedQueue<RigtorpSpsc<T, Capacity>, RigtorpSpscB>;
+
+        auto add = [&cases]<typename First, typename Second>(const Config& cfg, CsvWriter& out) {
+            cases.push_back({[&cfg, &out] { RunPairedCase<First, Second, T>(cfg, out, "SPSC", Capacity, 1, 1); }});
+        };
+
+        add.template operator()<MashiroA, MashiroB>(config, writer);
+        add.template operator()<RigtorpA, RigtorpB>(config, writer);
+        add.template operator()<MashiroA, RigtorpA>(config, writer);
+        add.template operator()<RigtorpB, MashiroB>(config, writer);
+    }
+
     /** @brief Parse benchmark command-line options. */
     [[nodiscard]] Config ParseArguments(int argc, char** argv) {
         Config config;
@@ -924,6 +965,8 @@ namespace Mashiro::Benchmark {
                 config.layouts = true;
             } else if (argument == "--references") {
                 config.references = true;
+            } else if (argument == "--spsc-audit") {
+                config.spscAudit = true;
             } else {
                 throw std::invalid_argument("unknown command-line option: " + std::string{argument});
             }
@@ -934,9 +977,10 @@ namespace Mashiro::Benchmark {
                 "samples and items must be non-zero and minimum-ms must be finite and non-negative");
         }
         if (static_cast<unsigned>(config.paired) + static_cast<unsigned>(config.layouts) +
-                static_cast<unsigned>(config.references) >
+                static_cast<unsigned>(config.references) + static_cast<unsigned>(config.spscAudit) >
             1) {
-            throw std::invalid_argument("paired algorithm, layout, and reference modes are mutually exclusive");
+            throw std::invalid_argument(
+                "paired algorithm, layout, reference, and SPSC audit modes are mutually exclusive");
         }
         return config;
     }
@@ -953,7 +997,9 @@ int main(int argc, char** argv) {
         Mashiro::Benchmark::CsvWriter writer{config};
         std::vector<Mashiro::Benchmark::Case> cases;
 
-        if (config.quick && config.references) {
+        if (config.spscAudit) {
+            Mashiro::Benchmark::AppendSpscAuditCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.quick && config.references) {
             Mashiro::Benchmark::AppendReferenceCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
         } else if (config.references) {
             Mashiro::Benchmark::AppendReferenceCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
