@@ -5,7 +5,6 @@
 
 #include <BenchmarkHarness.h>
 #include <Sora/Math/EigenAdaptor.h>
-#include <Sora/Math/KernelContext.h>
 #include <Sora/Math/PortableCompile.h>
 #include <Sora/Math/Types.h>
 #include <Sora/Math/ValueBatch.h>
@@ -147,22 +146,6 @@ namespace {
     inline constexpr auto kPortableScale =
         Sora::Math::CompilePortable<float, 2>([](auto value, auto scale) { return Sora::Math::Mul(value, scale); });
 
-    struct ScaleState {
-        float scale;
-    };
-
-    [[gnu::noinline]] void ScaleKernel(void* opaque, const Sora::Math::KernelInvocation& invocation) noexcept {
-        const auto scale = static_cast<const ScaleState*>(opaque)->scale;
-        const auto* input = static_cast<const float*>(invocation.Inputs()[0].data);
-        auto* output = static_cast<float*>(invocation.Outputs()[0].data);
-        for (size_t i = 0; i < invocation.workItemCount; ++i) {
-            output[invocation.workItemOffset + i] = input[invocation.workItemOffset + i] * scale;
-        }
-    }
-
-    [[gnu::noinline]] void RunDirect(ScaleState& state, const Sora::Math::KernelInvocation& invocation) noexcept {
-        ScaleKernel(&state, invocation);
-    }
     [[gnu::noinline]] void RunCompiledMath(std::span<float> output, std::span<const float> input,
                                            float scale) noexcept {
         for (size_t i = 0; i < input.size(); ++i) {
@@ -175,21 +158,6 @@ namespace {
         for (size_t i = 0; i < input.size(); ++i) {
             output[i] = kPortableScale(input[i], scale);
         }
-    }
-
-    [[gnu::noinline]] void RunResolved(const Sora::Math::KernelExecutable& executable,
-                                       const Sora::Math::KernelInvocation& invocation) noexcept {
-        executable(invocation);
-    }
-
-    Sora::Math::KernelCompileResult CompileCached(void* state, const Sora::Math::KernelRequest&,
-                                                  Sora::Math::KernelFeatureMask,
-                                                  const Sora::Math::KernelPolicy&) noexcept {
-        return {.entry = ScaleKernel,
-                .state = state,
-                .requiredFeatures = Sora::Math::KernelFeature::Scalar,
-                .error = {},
-                .deterministic = true};
     }
 
 } // namespace
@@ -256,60 +224,21 @@ int main() {
     auto scaleInput = std::make_unique<float[]>(kCount);
     auto scaleOutput = std::make_unique<float[]>(kCount);
     std::ranges::fill(std::span{scaleInput.get(), kCount}, 1.25F);
-    ScaleState scale{1.75F};
-    Sora::Math::KernelInput kernelInput{scaleInput.get(), kCount, sizeof(float),
-                                        Sora::Math::KernelScalarFormat::Float32};
-    Sora::Math::KernelOutput kernelOutput{scaleOutput.get(), kCount, sizeof(float),
-                                          Sora::Math::KernelScalarFormat::Float32};
-    const Sora::Math::KernelInvocation invocation{&kernelInput, 1, &kernelOutput, 1, 0, kCount, nullptr, 0};
-    const Sora::Math::KernelRequest staticRequest{
-        .familyId = 0x7363616C65, .workItemCount = kCount, .requiredFeatures = Sora::Math::KernelFeature::Scalar};
-    const std::array candidates{Sora::Math::KernelCandidate{ScaleKernel, &scale, Sora::Math::KernelFeature::Scalar,
-                                                            Sora::Math::KernelBackendKind::Scalar, 0, 1, true}};
-    const Sora::Math::KernelContext staticContext{Sora::Math::KernelFeature::Scalar};
-    auto staticExecutable = staticContext.Resolve(staticRequest, candidates, {.jit = Sora::Math::JitMode::Disabled});
-    if (!staticExecutable) {
-        return 3;
-    }
+    constexpr float scale = 1.75F;
 
-    constexpr std::array<std::byte, 4> ir{std::byte{0x53}, std::byte{0x4F}, std::byte{0x52}, std::byte{0x41}};
-    const Sora::Math::KernelRequest jitRequest{.familyId = 0x7363616C65,
-                                               .semanticHash = 0x12345678,
-                                               .irKind = Sora::Math::KernelIrKind::SoraKernelIr,
-                                               .irData = ir.data(),
-                                               .irSize = ir.size(),
-                                               .workItemCount = kCount,
-                                               .requiredFeatures = Sora::Math::KernelFeature::Scalar};
-    const Sora::Math::KernelContext jitContext{
-        Sora::Math::KernelFeature::Scalar,
-        Sora::Math::JitProviderRef{&scale, CompileCached, Sora::Math::kKernelAbiVersion}};
-    auto jitExecutable = jitContext.Resolve(jitRequest, {}, {.jit = Sora::Math::JitMode::Require});
-    if (!jitExecutable) {
-        return 4;
-    }
-
-    auto runDirect = [&]() noexcept { RunDirect(scale, invocation); };
     auto runCompiled = [&]() noexcept {
-        RunCompiledMath({scaleOutput.get(), kCount}, {scaleInput.get(), kCount}, scale.scale);
+        RunCompiledMath({scaleOutput.get(), kCount}, {scaleInput.get(), kCount}, scale);
     };
     auto runPortable = [&]() noexcept {
-        RunPortableDirect({scaleOutput.get(), kCount}, {scaleInput.get(), kCount}, scale.scale);
+        RunPortableDirect({scaleOutput.get(), kCount}, {scaleInput.get(), kCount}, scale);
     };
-    auto runStatic = [&]() noexcept { RunResolved(*staticExecutable, invocation); };
-    auto runJit = [&]() noexcept { RunResolved(*jitExecutable, invocation); };
     const std::array directCases{
         Sora::Benchmark::MakeCase("compiled_math_kernel", runCompiled),
         Sora::Benchmark::MakeCase("portable_direct_kernel", runPortable),
     };
     const auto directTiming = Sora::Benchmark::MeasureInterleaved<kSamples>(directCases, kCount, kMinimumSampleTime);
-    const std::array kernelCases{
-        Sora::Benchmark::MakeCase("direct_static_kernel", runDirect),
-        Sora::Benchmark::MakeCase("resolved_static_kernel", runStatic),
-        Sora::Benchmark::MakeCase("cached_jit_executable", runJit),
-    };
-    const auto kernelTiming = Sora::Benchmark::MeasureInterleaved<kSamples>(kernelCases, kCount, kMinimumSampleTime);
-    if (scaleOutput[kCount / 2] != 1.25F * scale.scale) {
-        return 5;
+    if (scaleOutput[kCount / 2] != 1.25F * scale) {
+        return 3;
     }
 
     const double checksum =
@@ -328,16 +257,10 @@ int main() {
     std::println("explicit_simd_speedup_over_soa_auto,{:.6f},ratio", valueTiming.PairedRatio(2, 3));
     std::println("explicit_manual_paired_ratio,{:.6f},ratio", valueTiming.PairedRatio(3, 4));
     std::println("value_measurement_repetitions,{},count", valueTiming.repetitions);
-    std::println("direct_static_kernel,{:.6f},ns/element", kernelTiming.MedianTime(0));
     std::println("compiled_math_kernel,{:.6f},ns/element", directTiming.MedianTime(0));
     std::println("portable_direct_kernel,{:.6f},ns/element", directTiming.MedianTime(1));
-    std::println("resolved_static_kernel,{:.6f},ns/element", kernelTiming.MedianTime(1));
-    std::println("cached_jit_executable,{:.6f},ns/element", kernelTiming.MedianTime(2));
     std::println("portable_direct_over_compiled,{:.6f},ratio", directTiming.PairedRatio(1, 0));
-    std::println("static_dispatch_over_direct,{:.6f},ratio", kernelTiming.PairedRatio(1, 0));
-    std::println("jit_dispatch_over_direct,{:.6f},ratio", kernelTiming.PairedRatio(2, 0));
     std::println("direct_measurement_repetitions,{},count", directTiming.repetitions);
-    std::println("kernel_measurement_repetitions,{},count", kernelTiming.repetitions);
     std::println("maximum_relative_error,{:.9e},ratio", maximumError);
     std::println("checksum,{:.9f},value", checksum);
 }

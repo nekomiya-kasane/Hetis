@@ -70,6 +70,28 @@ namespace Sora::Benchmark {
         }
     };
 
+    /** @brief Interleaved timing samples with independently calibrated repetitions for disparate cases. */
+    template<size_t CaseCount, size_t SampleCount>
+        requires(CaseCount > 0 && SampleCount > 0 && SampleCount % 2 == 1)
+    struct IndependentResult {
+        std::array<std::array<double, SampleCount>, CaseCount> nanosecondsPerElement{};
+        std::array<size_t, CaseCount> repetitions{};
+
+        /** @brief Return the per-case median time. */
+        [[nodiscard]] double MedianTime(size_t caseIndex) const noexcept {
+            return Median(nanosecondsPerElement[caseIndex]);
+        }
+
+        /** @brief Return the median of same-round normalized time ratios. */
+        [[nodiscard]] double PairedRatio(size_t numerator, size_t denominator) const noexcept {
+            std::array<double, SampleCount> ratios{};
+            for (size_t sample = 0; sample < SampleCount; ++sample) {
+                ratios[sample] = nanosecondsPerElement[numerator][sample] / nanosecondsPerElement[denominator][sample];
+            }
+            return Median(ratios);
+        }
+    };
+
     namespace Detail {
 
         [[nodiscard]] inline std::chrono::steady_clock::duration MeasureDuration(const Case& benchmarkCase,
@@ -100,6 +122,17 @@ namespace Sora::Benchmark {
                        "benchmark repetition calibration overflowed");
                 repetitions *= 2;
             }
+        }
+
+        [[nodiscard]] inline size_t Calibrate(const Case& benchmarkCase,
+                                              std::chrono::steady_clock::duration minimumSampleTime) noexcept {
+            size_t repetitions = 1;
+            while (MeasureDuration(benchmarkCase, repetitions) < minimumSampleTime) {
+                assert(repetitions <= std::numeric_limits<size_t>::max() / 2 &&
+                       "benchmark repetition calibration overflowed");
+                repetitions *= 2;
+            }
+            return repetitions;
         }
 
     } // namespace Detail
@@ -137,6 +170,47 @@ namespace Sora::Benchmark {
                 result.nanosecondsPerElement[caseIndex][sample] =
                     std::chrono::duration<double, std::nano>(elapsed).count() /
                     (static_cast<double>(elementCount) * static_cast<double>(result.repetitions));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @brief Measure disparate cases with per-case calibration and alternating forward/reverse rotation.
+     * @details Same-round ratios remain paired after normalization, while no fast case can amplify a slow case's
+     * repetition count. Use this model for crossover studies spanning distinct scheduling regimes.
+     * @tparam SampleCount Positive odd sample count used for median statistics.
+     * @param cases Operations over the same number of logical elements.
+     * @param elementCount Logical elements processed by one invocation of every case.
+     * @param minimumSampleTime Minimum calibrated wall time of each case in one sample.
+     */
+    template<size_t SampleCount, size_t CaseCount>
+        requires(SampleCount > 0 && SampleCount % 2 == 1 && CaseCount > 0)
+    [[nodiscard]] IndependentResult<CaseCount, SampleCount>
+    MeasureInterleavedIndependent(const std::array<Case, CaseCount>& cases, size_t elementCount,
+                                  std::chrono::steady_clock::duration minimumSampleTime) noexcept {
+        assert(elementCount > 0);
+        assert(minimumSampleTime > std::chrono::steady_clock::duration::zero());
+        IndependentResult<CaseCount, SampleCount> result;
+        for (size_t caseIndex = 0; caseIndex < CaseCount; ++caseIndex) {
+            const Case& benchmarkCase = cases[caseIndex];
+            assert(!benchmarkCase.name.empty() && benchmarkCase.invoke != nullptr);
+            for (size_t warmup = 0; warmup < 3; ++warmup) {
+                benchmarkCase();
+            }
+            result.repetitions[caseIndex] = Detail::Calibrate(benchmarkCase, minimumSampleTime);
+        }
+
+        for (size_t sample = 0; sample < SampleCount; ++sample) {
+            const size_t rotation = sample % CaseCount;
+            const bool reverse = sample % 2 != 0;
+            for (size_t position = 0; position < CaseCount; ++position) {
+                const size_t caseIndex =
+                    reverse ? (rotation + CaseCount - position) % CaseCount : (rotation + position) % CaseCount;
+                const auto elapsed = Detail::MeasureDuration(cases[caseIndex], result.repetitions[caseIndex]);
+                result.nanosecondsPerElement[caseIndex][sample] =
+                    std::chrono::duration<double, std::nano>(elapsed).count() /
+                    (static_cast<double>(elementCount) * static_cast<double>(result.repetitions[caseIndex]));
             }
         }
         return result;

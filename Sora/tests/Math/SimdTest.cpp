@@ -325,18 +325,18 @@ TEST_CASE("batch executor vectorizes multiple inputs and masks the tail", "[Sora
     REQUIRE(preferredOutput == output);
     REQUIRE(preferredUnroll2Output == output);
 
-    constexpr std::size_t count = 39;
+    constexpr size_t count = 39;
     std::array<float, count> largeLeft{};
     std::array<float, count> largeRight{};
     std::array<float, count> unroll1{};
     std::array<float, count> unroll2{};
     std::array<float, count> unroll4{};
-    for (std::size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < count; ++i) {
         largeLeft[i] = static_cast<float>(i) * 0.25F;
         largeRight[i] = 2.0F + static_cast<float>(i % 3);
     }
 
-    const auto run = [&]<std::size_t Unroll>(std::array<float, count>& destination) {
+    const auto run = [&]<size_t Unroll>(std::array<float, count>& destination) {
         Sora::Math::TransformBatch<Float4, Unroll>(
             std::span<float>(destination), [](auto x, auto y) noexcept { return Sora::Math::Fma(x, y, 1.0F); },
             std::span<const float>(largeLeft), std::span<const float>(largeRight));
@@ -347,13 +347,13 @@ TEST_CASE("batch executor vectorizes multiple inputs and masks the tail", "[Sora
 
     REQUIRE(unroll1 == unroll2);
     REQUIRE(unroll1 == unroll4);
-    for (std::size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < count; ++i) {
         REQUIRE(unroll4[i] == std::fma(largeLeft[i], largeRight[i], 1.0F));
     }
 }
 
 TEST_CASE("batched JVP combines automatic differentiation with SIMD tail handling", "[Sora][Math][Batch][Autodiff]") {
-    constexpr std::size_t count = 7;
+    constexpr size_t count = 7;
     const std::array<float, count> x{0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F, 0.7F};
     const std::array<float, count> y{1.0F, 1.1F, 1.2F, 1.3F, 1.4F, 1.5F, 1.6F};
     const std::array<float, count> dx{1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F};
@@ -368,24 +368,24 @@ TEST_CASE("batched JVP combines automatic differentiation with SIMD tail handlin
         },
         Sora::Math::JvpInput<float>{x, dx}, Sora::Math::JvpInput<float>{y, dy});
 
-    for (std::size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < count; ++i) {
         REQUIRE(std::abs(primal[i] - (x[i] * y[i] + std::sin(x[i]))) < 1e-6F);
         REQUIRE(std::abs(tangent[i] - (dx[i] * y[i] + x[i] * dy[i] + std::cos(x[i]) * dx[i])) < 1e-6F);
     }
 
-    constexpr std::size_t largeCount = 39;
+    constexpr size_t largeCount = 39;
     std::array<float, largeCount> largeX{};
     std::array<float, largeCount> largeDx{};
     std::array<float, largeCount> referencePrimal{};
     std::array<float, largeCount> referenceTangent{};
     std::array<float, largeCount> candidatePrimal{};
     std::array<float, largeCount> candidateTangent{};
-    for (std::size_t i = 0; i < largeCount; ++i) {
+    for (size_t i = 0; i < largeCount; ++i) {
         largeX[i] = 0.01F * static_cast<float>(i + 1);
         largeDx[i] = 0.5F + 0.01F * static_cast<float>(i);
     }
 
-    const auto run = [&]<std::size_t Unroll>(std::array<float, largeCount>& primalDestination,
+    const auto run = [&]<size_t Unroll>(std::array<float, largeCount>& primalDestination,
                                              std::array<float, largeCount>& tangentDestination) {
         Sora::Math::TransformBatchJvp<Float4, Unroll>(
             std::span<float>(primalDestination), std::span<float>(tangentDestination),
