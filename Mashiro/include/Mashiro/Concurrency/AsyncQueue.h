@@ -100,7 +100,7 @@ namespace Mashiro::Concurrency {
 
         template<class Queue>
         struct QueueSenderValue<PopBatchSender<Queue>> {
-            using type = typename Queue::batch_type;
+            using type = typename Queue::adapter_type::batch_type;
         };
 
         template<class Queue, BackpressurePolicy Policy>
@@ -297,6 +297,10 @@ namespace Mashiro::Concurrency {
                     error = kQueueBatchTooLarge;
                     return false;
                 }
+                if (status == QueueTransferStatus::InvalidValue) {
+                    error = kQueueInvalidValue;
+                    return false;
+                }
 
                 switch (policy.OnBackpressure()) {
                     case BackpressureAction::Suspend:
@@ -337,11 +341,9 @@ namespace Mashiro::Concurrency {
         using storage_type = Storage;
         using adapter_type = Adapter;
         using value_type = typename Adapter::value_type;
-        using batch_type = typename Adapter::batch_type;
 
         static constexpr QueueCardinality producerCardinality = Adapter::producerCardinality;
         static constexpr QueueCardinality consumerCardinality = Adapter::consumerCardinality;
-        static constexpr std::size_t capacity = Adapter::capacity;
 
         AsyncQueue()
             requires std::default_initializable<storage_type>
@@ -436,8 +438,8 @@ namespace Mashiro::Concurrency {
                 }
                 return false;
             }
-            const bool committed =
-                waitingProducers_.load(std::memory_order_acquire) == 0 && Adapter::TryPush(storage_, value);
+            const bool committed = waitingProducers_.load(std::memory_order_acquire) == 0 &&
+                                   Adapter::TryPush(storage_, value) == QueueTransferStatus::Committed;
             shouldService = LeaveProducer() || (committed && waitingConsumers_.load(std::memory_order_acquire) != 0);
             if (shouldService) {
                 ServiceWaiters();
@@ -461,10 +463,14 @@ namespace Mashiro::Concurrency {
         }
 
         /** @brief Return a transient occupancy hint; concurrent operations may invalidate it immediately. */
-        [[nodiscard]] bool EmptyApprox() const noexcept { return Adapter::SizeApprox(storage_) == 0; }
+        [[nodiscard]] bool EmptyApprox() const noexcept { return Adapter::IsDrained(storage_); }
 
         /** @brief Return a transient approximate occupancy count. */
-        [[nodiscard]] std::size_t SizeApprox() const noexcept { return Adapter::SizeApprox(storage_); }
+        [[nodiscard]] std::size_t SizeApprox() const noexcept
+            requires ApproximateSizedQueueAdapter<Adapter>
+        {
+            return Adapter::SizeApprox(storage_);
+        }
 
     private:
         template<class, BackpressurePolicy>
@@ -583,15 +589,19 @@ namespace Mashiro::Concurrency {
             completions.CompleteAll();
         }
 
-        [[nodiscard]] bool TryPushStorage(value_type& value) noexcept { return Adapter::TryPush(storage_, value); }
-        [[nodiscard]] std::optional<value_type> TryPopStorage() noexcept { return Adapter::TryPop(storage_); }
-        [[nodiscard]] QueueTransferStatus TryPushBatchStorage(batch_type& batch) noexcept
-            requires TransactionalBatchQueueAdapter<Adapter>
-        {
-            return Adapter::TryPushBatch(storage_, batch);
+        [[nodiscard]] QueueTransferStatus TryPushStorage(value_type& value) noexcept {
+            return Adapter::TryPush(storage_, value);
         }
-        [[nodiscard]] bool TryPopBatchStorage(batch_type& batch) noexcept {
-            return Adapter::TryPopBatch(storage_, batch);
+        [[nodiscard]] std::optional<value_type> TryPopStorage() noexcept { return Adapter::TryPop(storage_); }
+        template<class CurrentAdapter = Adapter>
+            requires TransactionalBatchQueueAdapter<CurrentAdapter>
+        [[nodiscard]] QueueTransferStatus TryPushBatchStorage(typename CurrentAdapter::batch_type& batch) noexcept {
+            return CurrentAdapter::TryPushBatch(storage_, batch);
+        }
+        template<class CurrentAdapter = Adapter>
+            requires BatchQueueAdapter<CurrentAdapter>
+        [[nodiscard]] bool TryPopBatchStorage(typename CurrentAdapter::batch_type& batch) noexcept {
+            return CurrentAdapter::TryPopBatch(storage_, batch);
         }
 
         [[nodiscard]] bool HasOlderSameSideWaiterLocked(Detail::OperationKind kind) const noexcept {
@@ -838,10 +848,8 @@ namespace Mashiro::Concurrency {
 
             [[nodiscard]] static bool TryImmediate(OperationBase& base) noexcept {
                 auto& self = static_cast<PushOp&>(base);
-                return ResolvePush(self.policy, self.outcome, self.readyError, [&self] noexcept {
-                    return self.owner->TryPushStorage(self.value) ? QueueTransferStatus::Committed
-                                                                  : QueueTransferStatus::BackPressure;
-                });
+                return ResolvePush(self.policy, self.outcome, self.readyError,
+                                   [&self] noexcept { return self.owner->TryPushStorage(self.value); });
             }
 
             [[nodiscard]] static bool TryBackpressured(OperationBase& base) noexcept {
@@ -926,7 +934,7 @@ namespace Mashiro::Concurrency {
 
         template<class Queue, class Receiver, BackpressurePolicy Policy>
         struct PushBatchOp : OperationBase {
-            using batch_type = typename Queue::batch_type;
+            using batch_type = typename Queue::adapter_type::batch_type;
             using StopToken = stdexec::stop_token_of_t<stdexec::env_of_t<Receiver>>;
 
             struct OnStop {
@@ -991,7 +999,7 @@ namespace Mashiro::Concurrency {
 
         template<class Queue, class Receiver>
         struct PopBatchOp : OperationBase {
-            using batch_type = typename Queue::batch_type;
+            using batch_type = typename Queue::adapter_type::batch_type;
             using StopToken = stdexec::stop_token_of_t<stdexec::env_of_t<Receiver>>;
 
             struct OnStop {
@@ -1063,7 +1071,7 @@ namespace Mashiro::Concurrency {
         template<class Queue>
         struct PopBatchSender {
             using sender_concept = stdexec::sender_t;
-            using batch_type = typename Queue::batch_type;
+            using batch_type = typename Queue::adapter_type::batch_type;
             using completion_signatures =
                 stdexec::completion_signatures<stdexec::set_value_t(batch_type), stdexec::set_stopped_t(),
                                                stdexec::set_error_t(QueueError)>;
@@ -1129,7 +1137,7 @@ namespace Mashiro::Concurrency {
         template<class Queue, BackpressurePolicy Policy>
         struct PushBatchSender {
             using sender_concept = stdexec::sender_t;
-            using batch_type = typename Queue::batch_type;
+            using batch_type = typename Queue::adapter_type::batch_type;
             using completion_signatures =
                 stdexec::completion_signatures<stdexec::set_value_t(PushOutcome), stdexec::set_stopped_t(),
                                                stdexec::set_error_t(QueueError)>;
@@ -1239,13 +1247,13 @@ namespace Mashiro::Concurrency {
 
         template<class Batch>
             requires TransactionalBatchQueueAdapter<typename Queue::adapter_type> &&
-                     std::constructible_from<typename Queue::batch_type, Batch&&>
-        [[nodiscard]] auto
-        PushBatch(Batch&& batch) noexcept(std::is_nothrow_constructible_v<typename Queue::batch_type, Batch&&> &&
-                                          std::is_nothrow_copy_constructible_v<Policy>) {
+                     std::constructible_from<typename Queue::adapter_type::batch_type, Batch&&>
+        [[nodiscard]] auto PushBatch(Batch&& batch) noexcept(
+            std::is_nothrow_constructible_v<typename Queue::adapter_type::batch_type, Batch&&> &&
+            std::is_nothrow_copy_constructible_v<Policy>) {
             return Detail::PushBatchSender<Queue, Policy>{
                 .owner = owner_,
-                .batch = typename Queue::batch_type(std::forward<Batch>(batch)),
+                .batch = typename Queue::adapter_type::batch_type(std::forward<Batch>(batch)),
                 .policy = policy_,
             };
         }
@@ -1291,7 +1299,11 @@ namespace Mashiro::Concurrency {
 
         [[nodiscard]] auto Pop() noexcept { return Detail::PopSender<Queue>{.owner = owner_}; }
 
-        [[nodiscard]] auto PopBatch() noexcept { return Detail::PopBatchSender<Queue>{.owner = owner_}; }
+        [[nodiscard]] auto PopBatch() noexcept
+            requires BatchQueueAdapter<typename Queue::adapter_type>
+        {
+            return Detail::PopBatchSender<Queue>{.owner = owner_};
+        }
 
         [[nodiscard]] std::optional<typename Queue::value_type> TryPop() noexcept { return owner_->TryPop(); }
 

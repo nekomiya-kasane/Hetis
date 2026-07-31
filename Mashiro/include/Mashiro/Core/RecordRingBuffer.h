@@ -553,6 +553,14 @@ namespace Mashiro {
                 std::array<std::uint64_t, kWordCount> words_{};
         };
 
+        /** @brief Match a packed-record storage specialization accepted by the asynchronous queue adapter. */
+        template<class Storage>
+        concept RecordRingBufferStorage = requires {
+            { Storage::kByteCapacity } -> std::convertible_to<std::size_t>;
+            { Storage::kMaxRecordBytes } -> std::convertible_to<std::size_t>;
+            { Storage::topology } -> std::same_as<const Concurrency::QueueTopology&>;
+        };
+
     } // namespace Detail
 
     /**

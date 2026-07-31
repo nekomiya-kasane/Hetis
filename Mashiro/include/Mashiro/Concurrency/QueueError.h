@@ -15,6 +15,7 @@ namespace Mashiro::Concurrency {
         Closed,
         Aborted,
         BatchTooLarge,
+        InvalidValue,
     };
 
     /** @brief Lightweight error object carried by queue senders. */
@@ -29,5 +30,6 @@ namespace Mashiro::Concurrency {
     inline constexpr QueueError kQueueClosed{QueueErrorCode::Closed};
     inline constexpr QueueError kQueueAborted{QueueErrorCode::Aborted};
     inline constexpr QueueError kQueueBatchTooLarge{QueueErrorCode::BatchTooLarge};
+    inline constexpr QueueError kQueueInvalidValue{QueueErrorCode::InvalidValue};
 
 } // namespace Mashiro::Concurrency
