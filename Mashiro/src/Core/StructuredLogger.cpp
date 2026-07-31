@@ -277,7 +277,7 @@ namespace Mashiro {
                 // only drains rings that are still in `rings_`. Drain-then-deregister, under
                 // the same mutex DrainOnce() takes, makes the SPSC consumer single-threaded
                 // throughout the lifetime of the ring.
-                ring.ReadAll([&logger](std::span<const std::byte> data) { logger.DispatchSerialized(data); });
+                ring.Drain([&logger](std::span<const std::byte> record) { logger.DispatchSerialized(record); });
                 std::erase_if(logger.rings_, [this](const RegisteredRing& r) { return r.ring == &ring; });
             }
         };
@@ -388,9 +388,18 @@ namespace Mashiro {
         hdr.line = line;
         hdr.timestampNs = timestampNs;
         hdr.threadId = GetCurrentThreadIdHash();
-        hdr.fileLen = static_cast<uint16_t>(std::min<size_t>(file.size(), 0xFFFF));
-        hdr.funcLen = static_cast<uint16_t>(std::min<size_t>(func.size(), 0xFFFF));
-        hdr.msgLen = static_cast<uint16_t>(std::min<size_t>(message.size(), 0xFFFF));
+        static_assert(LogRing::GetMaxRecordBytes() >= sizeof(SerializedHeader));
+        std::size_t remaining = LogRing::GetMaxRecordBytes() - sizeof(SerializedHeader);
+        const auto takeLength = [&remaining](std::size_t requested) {
+            const std::size_t length = std::min({requested, remaining, std::size_t{0xFFFF}});
+            remaining -= length;
+            return static_cast<uint16_t>(length);
+        };
+
+        // Preserve the diagnostic payload first when a direct Submit call supplies pathological source strings.
+        hdr.msgLen = takeLength(message.size());
+        hdr.fileLen = takeLength(file.size());
+        hdr.funcLen = takeLength(func.size());
 
         uint32_t totalPayload = sizeof(SerializedHeader) + hdr.fileLen + hdr.funcLen + hdr.msgLen;
 
@@ -497,7 +506,7 @@ namespace Mashiro {
             if (!reg.ring) {
                 continue;
             }
-            total += reg.ring->ReadAll([this](std::span<const std::byte> data) { DispatchSerialized(data); });
+            total += reg.ring->Drain([this](std::span<const std::byte> record) { DispatchSerialized(record); });
         }
         return total;
     }

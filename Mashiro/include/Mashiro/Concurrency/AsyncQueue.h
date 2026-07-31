@@ -792,13 +792,19 @@ namespace Mashiro::Concurrency {
                 op.phase.store(OperationPhase::Starting, std::memory_order_relaxed);
                 static_cast<void>(QueueAccess::Start(*op.owner, op));
             } else {
+                auto token = stdexec::get_stop_token(stdexec::get_env(op.receiver));
+                if (!token.stop_possible()) {
+                    op.phase.store(OperationPhase::Starting, std::memory_order_relaxed);
+                    static_cast<void>(QueueAccess::Start(*op.owner, op));
+                    return;
+                }
+
                 auto expected = OperationPhase::Constructed;
                 if (!op.phase.compare_exchange_strong(expected, OperationPhase::Starting, std::memory_order_acq_rel,
                                                       std::memory_order_acquire)) {
                     return;
                 }
 
-                auto token = stdexec::get_stop_token(stdexec::get_env(op.receiver));
                 if (token.stop_requested()) {
                     op.phase.store(OperationPhase::Completed, std::memory_order_release);
                     stdexec::set_stopped(std::move(op.receiver));

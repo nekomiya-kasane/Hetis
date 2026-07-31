@@ -205,14 +205,18 @@ namespace Mashiro::Concurrency {
 
         [[nodiscard]] static std::optional<value_type> TryPop(storage_type& storage) noexcept {
             value_type value;
-            if (!storage.TryConsume([&value](std::span<const std::byte> bytes) noexcept {
-                    if (!value.TryAssign(bytes)) [[unlikely]] {
-                        std::terminate();
-                    }
-                })) {
+            if (!TryPopInto(storage, value)) {
                 return std::nullopt;
             }
             return std::optional<value_type>{std::move(value)};
+        }
+
+        [[nodiscard]] static bool TryPopInto(storage_type& storage, value_type& value) noexcept {
+            return storage.TryConsume([&value](std::span<const std::byte> bytes) noexcept {
+                if (!value.TryAssign(bytes)) [[unlikely]] {
+                    std::terminate();
+                }
+            });
         }
 
         [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }

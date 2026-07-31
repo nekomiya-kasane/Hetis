@@ -173,7 +173,7 @@ TEST_CASE("Logger: multiple messages", AUTO_TAG) {
     LogTestFixture fix;
     auto& logger = StructuredLogger::Instance();
 
-    logger.Log({}, LogLevel::Debug, LogCategory::Render, "frame {}", 1);
+    logger.Log({}, LogLevel::Info, LogCategory::Render, "frame {}", 1);
     logger.Log({}, LogLevel::Warn, LogCategory::Scene, "missing {}", "node");
     logger.Log({}, LogLevel::Error, LogCategory::Core, "fatal");
     fix.DrainAll();
@@ -387,6 +387,20 @@ TEST_CASE("Logger: message truncated at 511 chars", AUTO_TAG) {
 
     REQUIRE(fix.captured.entries.size() == 1);
     REQUIRE(fix.captured.entries[0].message.size() <= 511);
+}
+
+TEST_CASE("Logger: oversized direct submission cannot stall block backpressure", AUTO_TAG) {
+    LogTestFixture fix;
+    auto& logger = StructuredLogger::Instance();
+    logger.SetBackpressurePolicy(BackpressurePolicy::Block);
+    std::string huge(LogRing::GetMaxRecordBytes() * 2, 'C');
+
+    logger.Submit(LogLevel::Info, LogCategory::Core, SourceLoc::Current(), huge);
+    fix.DrainAll();
+
+    REQUIRE(fix.captured.entries.size() == 1);
+    REQUIRE(fix.captured.entries[0].message.size() < huge.size());
+    REQUIRE(fix.captured.entries[0].message.size() > 30'000);
 }
 
 TEST_CASE("Logger: ClearSinks removes all sinks", AUTO_TAG) {
