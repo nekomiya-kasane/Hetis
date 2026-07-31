@@ -178,7 +178,7 @@ namespace {
         if (!result) {
             return std::unexpected(result.error());
         }
-        return std::move(result->storage);
+        return std::move(result->selection.storage);
     }
 
     HeftPlanningPolicy SmallPartitionPolicy() {
@@ -397,7 +397,8 @@ TEST_CASE("HEFT publishes partition-search timing only after the frozen planning
     REQUIRE(estimate.has_value());
     REQUIRE(estimate->sampleCount == 1);
     REQUIRE(estimate->meanNanosecondsPerEvaluation != 0);
-    REQUIRE(PhysicalGraphPlan::Create(first->storage, fixture.resources).has_value());
+    REQUIRE(first->selection.predictedMakespanNanoseconds != 0);
+    REQUIRE(PhysicalGraphPlan::Create(first->selection.storage, fixture.resources).has_value());
 }
 
 TEST_CASE("HEFT schedules and validates a fork-join DAG in upward-rank order",
@@ -1006,9 +1007,10 @@ TEST_CASE("HEFT bounded local search escapes a greedy placement minimum within "
 
     const auto baseline = DetailedPlan(*graph, fixture, {}, true);
     REQUIRE(baseline.has_value());
-    REQUIRE_FALSE(baseline->statistics.Improved());
+    REQUIRE_FALSE(baseline->Improved());
     REQUIRE(baseline->statistics.neighborEvaluations == 0);
-    REQUIRE(Dispatches(baseline->storage).front()->queue.device == kGpu);
+    REQUIRE(baseline->selection.predictedMakespanNanoseconds == baseline->statistics.baselineMakespanNanoseconds);
+    REQUIRE(Dispatches(baseline->selection.storage).front()->queue.device == kGpu);
 
     HeftPlanningPolicy policy;
     policy.localSearch = {.maximumPasses = 1, .maximumNeighborEvaluations = 1};
@@ -1017,32 +1019,34 @@ TEST_CASE("HEFT bounded local search escapes a greedy placement minimum within "
     REQUIRE(optimized.has_value());
     REQUIRE(repeated.has_value());
     REQUIRE(optimized->statistics.baselineMakespanNanoseconds == baseline->statistics.baselineMakespanNanoseconds);
-    REQUIRE(optimized->statistics.Improved());
+    REQUIRE(optimized->Improved());
     REQUIRE(optimized->statistics.neighborEvaluations == 1);
     REQUIRE(optimized->statistics.acceptedMoves == 1);
     REQUIRE(optimized->statistics == repeated->statistics);
-    REQUIRE(Dispatches(optimized->storage).front()->queue.device == kGpuB);
-    REQUIRE(Dispatches(repeated->storage).front()->queue.device == kGpuB);
-    REQUIRE(optimized->storage.edges == repeated->storage.edges);
-    REQUIRE(PhysicalGraphPlan::Create(optimized->storage, fixture.resources).has_value());
+    REQUIRE(optimized->selection.predictedMakespanNanoseconds == repeated->selection.predictedMakespanNanoseconds);
+    REQUIRE(Dispatches(optimized->selection.storage).front()->queue.device == kGpuB);
+    REQUIRE(Dispatches(repeated->selection.storage).front()->queue.device == kGpuB);
+    REQUIRE(optimized->selection.storage.edges == repeated->selection.storage.edges);
+    REQUIRE(PhysicalGraphPlan::Create(optimized->selection.storage, fixture.resources).has_value());
 
     policy.localSearch = {.maximumPasses = 2, .maximumNeighborEvaluations = 3};
     const auto secondPass = DetailedPlan(*graph, fixture, policy, true);
     REQUIRE(secondPass.has_value());
-    REQUIRE(secondPass->statistics.optimizedMakespanNanoseconds == optimized->statistics.optimizedMakespanNanoseconds);
+    REQUIRE(secondPass->selection.predictedMakespanNanoseconds == optimized->selection.predictedMakespanNanoseconds);
     REQUIRE(secondPass->statistics.neighborEvaluations == 3);
     REQUIRE(secondPass->statistics.acceptedMoves == 1);
-    REQUIRE(Dispatches(secondPass->storage).front()->queue.device == kGpuB);
-    REQUIRE(PhysicalGraphPlan::Create(secondPass->storage, fixture.resources).has_value());
+    REQUIRE(Dispatches(secondPass->selection.storage).front()->queue.device == kGpuB);
+    REQUIRE(PhysicalGraphPlan::Create(secondPass->selection.storage, fixture.resources).has_value());
 
     policy.localSearch = {.maximumPasses = 1, .maximumNeighborEvaluations = 1};
     policy.localSearch.minimumImprovementNanoseconds = UINT64_MAX;
     const auto thresholded = DetailedPlan(*graph, fixture, policy, true);
     REQUIRE(thresholded.has_value());
-    REQUIRE_FALSE(thresholded->statistics.Improved());
+    REQUIRE_FALSE(thresholded->Improved());
     REQUIRE(thresholded->statistics.neighborEvaluations == 1);
     REQUIRE(thresholded->statistics.acceptedMoves == 0);
-    REQUIRE(Dispatches(thresholded->storage).front()->queue.device == kGpu);
+    REQUIRE(thresholded->selection.predictedMakespanNanoseconds == thresholded->statistics.baselineMakespanNanoseconds);
+    REQUIRE(Dispatches(thresholded->selection.storage).front()->queue.device == kGpu);
 
     policy.localSearch = {.maximumPasses = 1, .maximumNeighborEvaluations = 0};
     const auto invalid = DetailedPlan(*graph, fixture, policy, true);

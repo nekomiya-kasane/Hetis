@@ -44,15 +44,20 @@ namespace Sora::Compute {
         const PerformancePriorModel* priors = nullptr;
     };
 
-    /** @brief Expected-like result whose success value is pure physical-plan
-     * storage. */
+    /** @brief One pure physical plan paired with the planner objective that selected it. */
+    struct GraphPlanSelection {
+        PhysicalGraphPlanStorage storage{};
+        uint64_t predictedMakespanNanoseconds = 0;
+    };
+
+    /** @brief Expected-like result whose success value is one physical graph-plan selection. */
     template<typename Result>
-    concept PhysicalGraphPlanStorageResult = requires(Result& result) {
+    concept GraphPlanSelectionResult = requires(Result& result) {
         typename Result::value_type;
         typename Result::error_type;
-        requires std::same_as<typename Result::value_type, PhysicalGraphPlanStorage>;
+        requires std::same_as<typename Result::value_type, GraphPlanSelection>;
         { result.has_value() } noexcept -> std::same_as<bool>;
-        { *result } -> std::same_as<PhysicalGraphPlanStorage&>;
+        { *result } -> std::same_as<GraphPlanSelection&>;
         { result.error() } -> std::same_as<typename Result::error_type&>;
     };
 
@@ -65,7 +70,7 @@ namespace Sora::Compute {
     template<typename Planner>
     concept GraphPlanningEngine = requires(Planner& planner, const ExecutionGraph& graph,
                                            const GraphPlanningContext& context, GraphPlanningServices services) {
-        requires PhysicalGraphPlanStorageResult<
+        requires GraphPlanSelectionResult<
             std::invoke_result_t<Planner&, const ExecutionGraph&, const GraphPlanningContext&, GraphPlanningServices>>;
         requires std::is_nothrow_invocable_v<Planner&, const ExecutionGraph&, const GraphPlanningContext&,
                                              GraphPlanningServices>;
@@ -73,5 +78,7 @@ namespace Sora::Compute {
             Planner&, const ExecutionGraph&, const GraphPlanningContext&, GraphPlanningServices>::error_type>;
         { std::invoke(planner, graph, context, services) } noexcept;
     };
+
+    static_assert(std::is_nothrow_move_constructible_v<GraphPlanSelection>);
 
 } // namespace Sora::Compute

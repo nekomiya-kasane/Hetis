@@ -1078,6 +1078,11 @@ namespace {
         InvalidInput,
     };
 
+    Sora::Compute::GraphPlanSelection SelectPlan(Sora::Compute::PhysicalGraphPlanStorage storage,
+                                                 uint64_t predictedMakespanNanoseconds = 0) {
+        return {.storage = std::move(storage), .predictedMakespanNanoseconds = predictedMakespanNanoseconds};
+    }
+
     std::expected<Sora::Compute::RuntimeEpoch, Sora::Compute::RuntimeRecoveryError>
     RejectRuntimeRecovery(const Sora::Compute::RuntimeRecoveryRequest& request) noexcept {
         return std::unexpected(Sora::Compute::RuntimeRecoveryError{
@@ -1226,7 +1231,7 @@ TEST_CASE("ComputeContext owns the plan-materialize-submit path behind one "
     Sora::Compute::Buffer plannedOutput;
     auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext& planning,
                        Sora::Compute::GraphPlanningServices services) noexcept
-        -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
         static_assert(std::same_as<decltype(services.packages), const Sora::Compute::ProgramCatalogSnapshot&>);
         static_assert(std::same_as<decltype(services.resources), const Sora::Compute::PhysicalResourceInventory&>);
         static_assert(std::same_as<decltype(services.artifacts), const Sora::Compute::ArtifactAvailabilitySnapshot&>);
@@ -1241,7 +1246,7 @@ TEST_CASE("ComputeContext owns the plan-materialize-submit path behind one "
         }
         auto fixture = MakeFillCopyPlanStorage(state);
         plannedOutput = fixture.output;
-        return std::move(fixture.storage);
+        return SelectPlan(std::move(fixture.storage));
     };
     static_assert(Sora::Compute::GraphPlanningEngine<decltype(planner)>);
 
@@ -1275,7 +1280,7 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
         uint32_t planningCalls = 0;
         auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             ++planningCalls;
             const auto* invocation =
                 graph.NodeCount() == 1 ? std::get_if<Sora::Compute::KernelInvocation>(&graph.Operation({0})) : nullptr;
@@ -1283,7 +1288,7 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
                 !services.packages.Resolve(invocation->ProgramHash())) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(MakeDispatchPlanStorage(state).storage);
+            return SelectPlan(std::move(MakeDispatchPlanStorage(state).storage));
         };
         auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
                                                            planner, RejectRuntimeRecovery);
@@ -1311,12 +1316,12 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
         uint32_t planningCalls = 0;
         auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             ++planningCalls;
             if (graph.NodeCount() != 2 || services.packages.GeneratedProgramCount() != 0) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(MakeDispatchPlanStorage(state).storage);
+            return SelectPlan(std::move(MakeDispatchPlanStorage(state).storage));
         };
         const Sora::Compute::GraphFusionPolicy policy{
             .launchLatencyNanoseconds = 0,
@@ -1343,12 +1348,12 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
         uint32_t planningCalls = 0;
         auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             ++planningCalls;
             if (graph.NodeCount() != 2 || services.packages.GeneratedProgramCount() != 0) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(MakeDispatchPlanStorage(state).storage);
+            return SelectPlan(std::move(MakeDispatchPlanStorage(state).storage));
         };
         auto policy = ForcedFusionPolicy();
         policy.maximumGeneratedBytes = 1;
@@ -1374,7 +1379,7 @@ TEST_CASE("ComputeContext presents maximal chains and independent fusion regions
         uint32_t planningCalls = 0;
         auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             ++planningCalls;
             if (graph.NodeCount() != 1 || services.packages.GeneratedProgramCount() != 1) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
@@ -1383,7 +1388,7 @@ TEST_CASE("ComputeContext presents maximal chains and independent fusion regions
             if (invocation == nullptr || !services.packages.Resolve(invocation->ProgramHash())) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(MakeDispatchPlanStorage(state).storage);
+            return SelectPlan(std::move(MakeDispatchPlanStorage(state).storage));
         };
         auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
                                                            planner, RejectRuntimeRecovery);
@@ -1405,7 +1410,7 @@ TEST_CASE("ComputeContext presents maximal chains and independent fusion regions
         uint32_t planningCalls = 0;
         auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             ++planningCalls;
             if (graph.NodeCount() != 2 || graph.EdgeCount() != 0 || services.packages.GeneratedProgramCount() != 1) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
@@ -1416,7 +1421,7 @@ TEST_CASE("ComputeContext presents maximal chains and independent fusion regions
                     return std::unexpected(TestGraphPlanningError::InvalidInput);
                 }
             }
-            return std::move(MakeDispatchPlanStorage(state).storage);
+            return SelectPlan(std::move(MakeDispatchPlanStorage(state).storage));
         };
         auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
                                                            planner, RejectRuntimeRecovery);
@@ -1441,13 +1446,13 @@ TEST_CASE("ComputeContext recovery retries reuse one prepared fused graph",
     uint32_t planningCalls = 0;
     auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext& planning,
                        Sora::Compute::GraphPlanningServices services) noexcept
-        -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
         ++planningCalls;
         if (graph.NodeCount() != 1 || services.packages.GeneratedProgramCount() != 1 ||
             planning.attempt + 1 != planningCalls) {
             return std::unexpected(TestGraphPlanningError::InvalidInput);
         }
-        return std::move(MakeDispatchPlanStorage(state, false, false, false, 70 + planningCalls).storage);
+        return SelectPlan(std::move(MakeDispatchPlanStorage(state, false, false, false, 70 + planningCalls).storage));
     };
     auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
                                                        planner, RejectRuntimeRecovery);
@@ -1474,11 +1479,11 @@ TEST_CASE("ComputeContext resolves exact portable-package seeds and JITs target 
         auto planner = [storage = std::move(fixture.storage)](
                            const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) mutable noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             if (services.packages.ArtifactCount() != 1) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(storage);
+            return SelectPlan(std::move(storage));
         };
         auto context =
             Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {}, std::move(planner), RejectRuntimeRecovery);
@@ -1507,11 +1512,11 @@ TEST_CASE("ComputeContext resolves exact portable-package seeds and JITs target 
         auto planner = [storage = std::move(fixture.storage)](
                            const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) mutable noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             if (services.packages.ArtifactCount() != 2) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(storage);
+            return SelectPlan(std::move(storage));
         };
         auto context =
             Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state, Sora::Compute::ArtifactKind::DevicePipeline),
@@ -1565,11 +1570,11 @@ TEST_CASE("ComputeContext resolves exact portable-package seeds and JITs target 
         auto planner = [storage = std::move(fixture.storage)](
                            const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices services) mutable noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             if (services.packages.ArtifactCount() != 2) {
                 return std::unexpected(TestGraphPlanningError::InvalidInput);
             }
-            return std::move(storage);
+            return SelectPlan(std::move(storage));
         };
         auto context =
             Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state, Sora::Compute::ArtifactKind::DevicePipeline),
@@ -1595,8 +1600,8 @@ TEST_CASE("ComputeContext reuses persistent target artifacts across independent 
         auto planner = [storage = std::move(fixture.storage)](const Sora::Compute::ExecutionGraph&,
                                                               const Sora::Compute::GraphPlanningContext&,
                                                               Sora::Compute::GraphPlanningServices) mutable noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
-            return std::move(storage);
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
+            return SelectPlan(std::move(storage));
         };
         Sora::Compute::ComputeContextConfig config{
             .artifactCacheCapacity = 0,
@@ -1649,7 +1654,7 @@ TEST_CASE("ComputeContext archive registration preserves trust and publication e
 
     auto planner = [](const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                       Sora::Compute::GraphPlanningServices) noexcept
-        -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
         return std::unexpected(TestGraphPlanningError::InvalidInput);
     };
     auto context = Sora::Compute::CreateComputeContext(
@@ -1691,7 +1696,7 @@ TEST_CASE("ComputeContext preserves planning and materialization failures "
         uint32_t planningCalls = 0;
         auto planner = [&](const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             ++planningCalls;
             return std::unexpected(TestGraphPlanningError::InvalidInput);
         };
@@ -1720,9 +1725,9 @@ TEST_CASE("ComputeContext preserves planning and materialization failures "
         state.overlapAllocations = true;
         auto planner = [&](const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                            Sora::Compute::GraphPlanningServices) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
             auto fixture = MakeFillCopyPlanStorage(state);
-            return std::move(fixture.storage);
+            return SelectPlan(std::move(fixture.storage));
         };
         auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {}, planner, RejectRuntimeRecovery);
         REQUIRE(context.has_value());
@@ -1747,7 +1752,7 @@ TEST_CASE("ComputeContext preserves planning and materialization failures "
         MockState state;
         auto planner = [](const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
                           Sora::Compute::GraphPlanningServices) noexcept
-            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> { return {}; };
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> { return {}; };
         auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {}, planner, RejectRuntimeRecovery);
         REQUIRE(context.has_value());
         using Context = typename decltype(context)::value_type;

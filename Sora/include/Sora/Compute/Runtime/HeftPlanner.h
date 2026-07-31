@@ -102,7 +102,6 @@ namespace Sora::Compute {
      */
     struct HeftPlanningStatistics {
         uint64_t baselineMakespanNanoseconds = 0;
-        uint64_t optimizedMakespanNanoseconds = 0;
         uint64_t partitionSearches = 0;
         uint64_t partitionEvaluationBudget = 0;
         uint64_t partitionEvaluations = 0;
@@ -110,18 +109,18 @@ namespace Sora::Compute {
         uint32_t neighborEvaluations = 0;
         uint32_t acceptedMoves = 0;
 
-        /** @brief Return whether bounded search found a strictly shorter predicted makespan. */
-        [[nodiscard]] constexpr bool Improved() const noexcept {
-            return optimizedMakespanNanoseconds < baselineMakespanNanoseconds;
-        }
-
         friend constexpr bool operator==(HeftPlanningStatistics, HeftPlanningStatistics) noexcept = default;
     };
 
     /** @brief Pure physical-plan storage and optimization evidence from one HEFT invocation. */
     struct HeftPlanningResult {
-        PhysicalGraphPlanStorage storage{};
+        GraphPlanSelection selection{};
         HeftPlanningStatistics statistics{};
+
+        /** @brief Return whether bounded search found a strictly shorter predicted makespan. */
+        [[nodiscard]] constexpr bool Improved() const noexcept {
+            return selection.predictedMakespanNanoseconds < statistics.baselineMakespanNanoseconds;
+        }
     };
 
     /** @brief Stable stage at which dispatch-DAG HEFT planning failed. */
@@ -175,8 +174,8 @@ namespace Sora::Compute {
         Plan(const ExecutionGraph& graph, const GraphPlanningContext& context,
              GraphPlanningServices services) const noexcept;
 
-        /** @brief Build a deterministic HEFT schedule and lower it to pure physical-plan storage. */
-        [[nodiscard]] std::expected<PhysicalGraphPlanStorage, HeftPlanningError>
+        /** @brief Build a deterministic HEFT schedule and return its selected physical plan and objective. */
+        [[nodiscard]] std::expected<GraphPlanSelection, HeftPlanningError>
         operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,
                    GraphPlanningServices services) const noexcept;
 

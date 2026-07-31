@@ -200,7 +200,7 @@ namespace {
         template<typename Planner>
         [[nodiscard]] bool Validate(const Planner& planner) noexcept {
             const auto planned = Plan(planner);
-            if (!planned || !Sora::Compute::PhysicalGraphPlan::Create(*planned, *catalog_)) {
+            if (!planned || !Sora::Compute::PhysicalGraphPlan::Create(planned->storage, *catalog_)) {
                 failed_ = true;
             }
             return !failed_;
@@ -210,7 +210,7 @@ namespace {
         [[nodiscard]] bool ValidateLocalSearch(const Planner& planner, uint32_t expectedEvaluations) noexcept {
             const auto planned = DetailedPlan(planner);
             if (!planned || planned->statistics.neighborEvaluations != expectedEvaluations ||
-                !Sora::Compute::PhysicalGraphPlan::Create(planned->storage, *catalog_)) {
+                !Sora::Compute::PhysicalGraphPlan::Create(planned->selection.storage, *catalog_)) {
                 failed_ = true;
             }
             return !failed_;
@@ -221,7 +221,7 @@ namespace {
             const auto planned = DetailedPlan(planner);
             if (!planned || planned->statistics.partitionSearches == 0 ||
                 planned->statistics.partitionEvaluationBudget == 0 ||
-                !Sora::Compute::PhysicalGraphPlan::Create(planned->storage, *catalog_)) {
+                !Sora::Compute::PhysicalGraphPlan::Create(planned->selection.storage, *catalog_)) {
                 failed_ = true;
             } else {
                 automaticPartitionBudget_ = planned->statistics.partitionEvaluationBudget;
@@ -237,7 +237,8 @@ namespace {
                 failed_ = true;
                 return;
             }
-            checksum_ += planned->allocations.size() + planned->segments.size() + planned->edges.size() + 1;
+            checksum_ += planned->storage.allocations.size() + planned->storage.segments.size() +
+                         planned->storage.edges.size() + planned->predictedMakespanNanoseconds + 1;
         }
 
         void InvokeAutomaticPartition(const Sora::Compute::AutomaticPartitionPolicy& policy) noexcept {
@@ -840,6 +841,7 @@ namespace {
         }
 
         std::println("metric,value,unit");
+        std::println("graph_plan_selection_size,{},bytes", sizeof(Sora::Compute::GraphPlanSelection));
         std::println("chain_1_destination_1,{:.6f},ns/plan", timing.MedianTime(0));
         std::println("chain_8_destination_1,{:.6f},ns/plan", timing.MedianTime(1));
         std::println("chain_8_destination_2,{:.6f},ns/plan", timing.MedianTime(2));
@@ -937,6 +939,7 @@ namespace {
         };
 
         std::println("metric,value,unit");
+        std::println("graph_plan_selection_size,{},bytes", sizeof(Sora::Compute::GraphPlanSelection));
         std::println("chain_1_destination_1,{:.6f},ns/plan", timing.MedianTime(0));
         std::println("chain_8_destination_1,{:.6f},ns/plan", timing.MedianTime(1));
         std::println("chain_8_destination_2,{:.6f},ns/plan", timing.MedianTime(2));

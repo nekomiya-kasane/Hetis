@@ -145,7 +145,7 @@ namespace {
         return result;
     }
 
-    std::expected<PhysicalGraphPlanStorage, LinearChainPlanningError>
+    std::expected<GraphPlanSelection, LinearChainPlanningError>
     PlanSingleService(const ExecutionGraph& graph, PlanningFixture& fixture, LinearChainPlanningPolicy policy = {}) {
         const auto availability = fixture.artifacts.SnapshotAvailability();
         REQUIRE(availability.has_value());
@@ -160,7 +160,7 @@ namespace {
                                            .performance = *performance});
     }
 
-    std::expected<PhysicalGraphPlanStorage, LinearChainPlanningError>
+    std::expected<GraphPlanSelection, LinearChainPlanningError>
     PlanTwoServices(const ExecutionGraph& graph, PlanningFixture& fixture, LinearChainPlanningPolicy policy = {}) {
         const auto availability = fixture.artifacts.SnapshotAvailability();
         REQUIRE(availability.has_value());
@@ -205,14 +205,15 @@ TEST_CASE("Linear chain DP selects the global path instead of the greedy first "
 
     const auto planned = PlanTwoServices(graph, fixture);
     REQUIRE(planned.has_value());
-    const auto dispatches = Dispatches(*planned);
+    const auto dispatches = Dispatches(planned->storage);
     REQUIRE(dispatches.size() == 2);
     REQUIRE(dispatches[0]->queue.device == kGpuB);
     REQUIRE(dispatches[1]->queue.device == kGpuB);
     REQUIRE(dispatches[0]->queue.queue == kQueueB);
     REQUIRE(dispatches[1]->queue.queue == kQueueB);
 
-    auto validated = PhysicalGraphPlan::Create(*planned, fixture.resources);
+    REQUIRE(planned->predictedMakespanNanoseconds == 35);
+    auto validated = PhysicalGraphPlan::Create(planned->storage, fixture.resources);
     REQUIRE(validated.has_value());
 }
 
@@ -242,11 +243,11 @@ TEST_CASE("Linear chain frontier preserves baseline replicas that change a later
 
     const auto planned = PlanTwoServices(graph, fixture);
     REQUIRE(planned.has_value());
-    const auto dispatches = Dispatches(*planned);
+    const auto dispatches = Dispatches(planned->storage);
     REQUIRE(dispatches.size() == 3);
     REQUIRE(std::ranges::all_of(dispatches,
                                 [](const PlannedDispatch* dispatch) { return dispatch->queue.device == kGpuB; }));
-    REQUIRE(PhysicalGraphPlan::Create(*planned, fixture.resources).has_value());
+    REQUIRE(PhysicalGraphPlan::Create(planned->storage, fixture.resources).has_value());
 }
 
 TEST_CASE("Linear chain planner deterministically resolves equal-cost queue "
@@ -264,15 +265,16 @@ TEST_CASE("Linear chain planner deterministically resolves equal-cost queue "
     const auto second = PlanSingleService(graph, fixture);
     REQUIRE(first.has_value());
     REQUIRE(second.has_value());
-    const auto firstDispatches = Dispatches(*first);
-    const auto secondDispatches = Dispatches(*second);
+    const auto firstDispatches = Dispatches(first->storage);
+    const auto secondDispatches = Dispatches(second->storage);
     REQUIRE(firstDispatches.size() == 1);
     REQUIRE(secondDispatches.size() == 1);
     const QueueId expected = kQueue < kAlternativeQueue ? kQueue : kAlternativeQueue;
     REQUIRE(firstDispatches.front()->queue.queue == expected);
     REQUIRE(secondDispatches.front()->queue.queue == expected);
-    REQUIRE(PhysicalGraphPlan::Create(*first, fixture.resources).has_value());
-    REQUIRE(PhysicalGraphPlan::Create(*second, fixture.resources).has_value());
+    REQUIRE(first->predictedMakespanNanoseconds == second->predictedMakespanNanoseconds);
+    REQUIRE(PhysicalGraphPlan::Create(first->storage, fixture.resources).has_value());
+    REQUIRE(PhysicalGraphPlan::Create(second->storage, fixture.resources).has_value());
 }
 
 TEST_CASE("Linear chain planner reports absent placements and "
@@ -413,16 +415,16 @@ TEST_CASE("Linear chain planner accepts graph-local partial bindings and rejects
         policy.dispatch.memory.publication = DestinationPublication::GraphLocal;
         const auto planned = PlanSingleService(graph, fixture, policy);
         REQUIRE(planned.has_value());
-        const auto dispatches = Dispatches(*planned);
+        const auto dispatches = Dispatches(planned->storage);
         REQUIRE(dispatches.size() == 1);
         const PlannedAllocationId outputAllocation = dispatches.front()->bufferStorage[1].output;
         REQUIRE(outputAllocation.Valid());
-        const PlannedAllocation& outputState = planned->allocations[outputAllocation.index];
+        const PlannedAllocation& outputState = planned->storage.allocations[outputAllocation.index];
         const ByteCoverageView expectedCoverage = ByteCoverageView::Affine(outputFootprint);
         REQUIRE(outputState.Coverage().Contains(expectedCoverage) == CoverageContainment::Yes);
         REQUIRE(expectedCoverage.Contains(outputState.Coverage()) == CoverageContainment::Yes);
         REQUIRE_FALSE(outputState.publication.has_value());
-        REQUIRE(PhysicalGraphPlan::Create(*planned, fixture.resources).has_value());
+        REQUIRE(PhysicalGraphPlan::Create(planned->storage, fixture.resources).has_value());
     }
 
     SECTION("read-write") {
@@ -455,10 +457,10 @@ TEST_CASE("Linear chain planner prices cold executable materialization in "
 
     const auto planned = PlanTwoServices(graph, fixture);
     REQUIRE(planned.has_value());
-    const auto dispatches = Dispatches(*planned);
+    const auto dispatches = Dispatches(planned->storage);
     REQUIRE(dispatches.size() == 1);
     REQUIRE(dispatches.front()->queue.device == kGpuB);
-    REQUIRE(PhysicalGraphPlan::Create(*planned, fixture.resources).has_value());
+    REQUIRE(PhysicalGraphPlan::Create(planned->storage, fixture.resources).has_value());
 }
 
 TEST_CASE("Linear chain planner prices cold pipeline materialization in "
@@ -477,9 +479,9 @@ TEST_CASE("Linear chain planner prices cold pipeline materialization in "
 
     const auto planned = PlanSingleService(graph, fixture);
     REQUIRE(planned.has_value());
-    const auto dispatches = Dispatches(*planned);
+    const auto dispatches = Dispatches(planned->storage);
     REQUIRE(dispatches.size() == 1);
     REQUIRE(dispatches.front()->pipeline.has_value());
     REQUIRE(dispatches.front()->pipeline->state == kPipelineStateB);
-    REQUIRE(PhysicalGraphPlan::Create(*planned, fixture.resources).has_value());
+    REQUIRE(PhysicalGraphPlan::Create(planned->storage, fixture.resources).has_value());
 }

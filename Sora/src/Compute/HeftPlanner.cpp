@@ -1283,7 +1283,6 @@ namespace Sora::Compute {
                 return std::unexpected(schedule.error());
             }
             statistics.baselineMakespanNanoseconds = schedule->makespanNanoseconds;
-            statistics.optimizedMakespanNanoseconds = schedule->makespanNanoseconds;
             if (policy_.localSearch.Enabled()) {
                 schedule = OptimizeSchedule(graph, context, services, policy_,
                                             planningCalibration ? std::addressof(*planningCalibration) : nullptr,
@@ -1292,7 +1291,6 @@ namespace Sora::Compute {
                 if (!schedule) {
                     return std::unexpected(schedule.error());
                 }
-                statistics.optimizedMakespanNanoseconds = schedule->makespanNanoseconds;
             }
             auto selections = BuildEmissionOrder(graph, *topology, *schedule);
             if (!selections) {
@@ -1307,20 +1305,22 @@ namespace Sora::Compute {
             if (!lowered) {
                 return std::unexpected(CommonError(lowered.error()));
             }
-            return HeftPlanningResult{.storage = std::move(*lowered), .statistics = statistics};
+            return HeftPlanningResult{.selection = {.storage = std::move(*lowered),
+                                                    .predictedMakespanNanoseconds = schedule->makespanNanoseconds},
+                                      .statistics = statistics};
         } catch (const std::bad_alloc&) {
             return std::unexpected(Error(HeftPlanningErrorCode::OutOfMemory));
         }
     }
 
-    std::expected<PhysicalGraphPlanStorage, HeftPlanningError>
+    std::expected<GraphPlanSelection, HeftPlanningError>
     HeftPlanner::operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,
                             GraphPlanningServices services) const noexcept {
         auto result = Plan(graph, context, services);
         if (!result) {
             return std::unexpected(result.error());
         }
-        return std::move(result->storage);
+        return std::move(result->selection);
     }
 
 } // namespace Sora::Compute

@@ -1367,7 +1367,9 @@ flowchart LR
     Inventory --> Services["GraphPlanningServices"]
     Context --> Planner
     Services --> Planner
-    Planner --> Storage["PhysicalGraphPlanStorage"]
+    Planner --> Selection["GraphPlanSelection"]
+    Selection --> Storage["PhysicalGraphPlanStorage"]
+    Selection --> Objective["predicted makespan"]
     Storage --> Freeze["PhysicalGraphPlan::Create"]
     Catalog --> Freeze
     Freeze --> Plan["PhysicalGraphPlan + DeviceLease"]
@@ -1396,8 +1398,8 @@ lease、LRU 状态或 cache mutex；performance snapshot 则是一个 planning a
 始终描述同一物理设备。`RefreshDeviceSnapshots()` 只返回新的 `vector<DeviceSnapshot>`，不复制 target 或 descriptor。后续 candidate
 synthesis 必须在请求边界按索引联结两类事实，再叠加 artifact availability 与 calibration；不得重新引入 combined device record。
 
-`GraphPlanningEngine` 用 concept 约束 `noexcept` 调用及 `expected<PhysicalGraphPlanStorage, E>` 形状。planner 只能产生尚未获得运行时
-权柄的 plan storage；`ComputeContext` 随后调用 `PhysicalGraphPlan::Create(storage, catalog)`，完成 catalog 一致性验证并捕获
+`GraphPlanningEngine` 用 concept 约束 `noexcept` 调用及 `expected<GraphPlanSelection, E>` 形状。selection 将尚未获得运行时权柄的 plan
+storage 与选择该 storage 的预测 makespan 绑定；`ComputeContext` 随后调用 `PhysicalGraphPlan::Create(selection.storage, catalog)`，完成 catalog 一致性验证并捕获
 `DeviceLease`。若 planner 直接返回 `PhysicalGraphPlan`，则纯规划阶段必须查询 catalog 并取得 lease，纯函数边界与设备代际权限将发生
 矛盾。当前两阶段构造消除了这一矛盾。planner 的线程安全仍是语义契约，C++ concept 无法证明多个 invocation 之间不存在数据竞争。
 
@@ -1410,8 +1412,8 @@ synthesis 必须在请求边界按索引联结两类事实，再叠加 artifact 
 `ComputeContext::Submit(scheduler, graph[, policy])` 在每次 fresh attempt 中依次执行四项操作：
 
 1. 向 `RuntimeInvalidationRegistry` 注册 logical graph 持有的全部 buffer。
-2. 用纯值 planning context 与 inventory 调用 planner，获得 `PhysicalGraphPlanStorage`。
-3. 由 context 根据 catalog 验证 storage、捕获 `DeviceLease`，再注册 plan allocation 对应的 logical buffer。
+2. 用纯值 planning context 与 inventory 调用 planner，获得 `GraphPlanSelection`。
+3. 由 context 根据 catalog 验证 `selection.storage`、捕获 `DeviceLease`，再注册 plan allocation 对应的 logical buffer。
 4. 事务式物化物理图，再交给 `RecoveringSubmitOn` 提交或恢复后重建。
 
 该顺序保证 device-loss tombstone 在线性化注册之后覆盖 planner 新建的 buffer，避免晚到 replica 复活 retired service。准备阶段错误为
@@ -1871,9 +1873,9 @@ alternatives 必须在 directive 过滤前按 `PlacementPolicy` 完整收集。�
 两个方向，后续 pass 无法直接转向第三个 placement，局部邻域会随搜索历史错误收缩。实现现已先验证并记录全部可行
 placement/destination decision，再应用 directive 选择；默认禁用路径不收集 alternatives，也不构造 decision。
 
-`HeftPlanner::Plan` 返回 `HeftPlanningResult`，其中 storage 与 `HeftPlanningStatistics` 分离。现有 `operator()` 仍满足
-`GraphPlanningEngine`，只返回 storage；调用者不承担额外接口分支。统计量记录 baseline/optimized makespan、实际 evaluation 数与
-accepted move 数，均是纯值，不持有 planner 内部状态。
+`HeftPlanner::Plan` 返回 `HeftPlanningResult`，其中标准 `GraphPlanSelection` 与 `HeftPlanningStatistics` 分离。现有 `operator()` 仍满足
+`GraphPlanningEngine`，返回 selection；调用者不承担额外接口分支。最终 makespan 只存于 selection，统计量记录 baseline makespan、实际
+evaluation 数与 accepted move 数。`HeftPlanningResult::Improved()` 跨 selection 与 statistics 比较，因而不存在两份 optimized makespan 漂移的状态。
 
 设一次完整 schedule 重建成本为 `C_schedule`、节点数为 `N`、evaluation 上界为 `L`、pass 上界为 `P`。搜索时间上界为
 `O((L + 1) C_schedule + P N log N)`；邻居顺序求值并立即释放，空间不乘以 `L`。当前实现没有使用反射、consteval block、
@@ -4107,3 +4109,105 @@ stdexec 继续承担 lazy preparation、stopped/error propagation 与 recovery c
 
 本扩展可冻结为 `structural chain -> maximal feasible partition -> unique-program activation -> budgeted transactional publication -> graph
 replacement`。GPU 专用 fusion、跨设备联合代价与 remote execution 仍属于后续里程碑，不进入本次收束边界。
+
+## 58. 2026-08-01 扩展：物理计划与选择证据形成同一协议值
+
+### 58.1 storage 不能独立表达规划结果
+
+`PhysicalGraphPlanStorage` 只描述 allocation、segment 与 dependency，不包含产生该拓扑时使用的执行、传输、artifact materialization 与
+queue contention 代价。HEFT 在 schedule 中计算最终 makespan，LinearChain 在获胜 frontier state 中计算精确累计代价；旧协议却在 lowering
+之后只返回 storage，两个 planner 均丢弃了已经获得的物理目标证据。后续若比较原图与融合图，只能从 storage 重新估算，估算结果既不等价于
+planner 目标，也无法恢复搜索时的 calendar 与 residency 状态。
+
+标准协议值现定义为：
+
+```cpp
+struct GraphPlanSelection {
+    PhysicalGraphPlanStorage storage{};
+    uint64_t predictedMakespanNanoseconds = 0;
+};
+```
+
+`GraphPlanningEngine` 只接受 success value 严格等于 `GraphPlanSelection` 的 expected-like 结果，不保留从旧 storage 返回类型隐式升级的兼容入口。
+该约束使“一个物理计划及其选择证据”成为不可拆分的值。`ComputeContext` 目前消费 `selection.storage` 完成验证和物化；objective 暂不参与提交，
+但已经可供上层 portfolio 做同一物理模型下的选择。
+
+### 58.2 objective 必须来自获胜状态，不得从 lowered storage 反推
+
+HEFT 在 local search、emission ordering 与 lowering 完成后，把最终 schedule 的 `makespanNanoseconds` 写入 selection。HEFT 专属统计只保留 baseline
+makespan 与搜索工作量，最终 makespan 不再重复存储。LinearChain 在移动 frontier layers 和执行 lowering 之前保存获胜 state 的
+`cumulativeNanoseconds`，selection 因而保持动态规划的精确加性目标。
+
+定向测试建立两类证据：LinearChain 的已知双节点路径严格返回 `35 ns`，该值由两段 compute、两次 launch、两次 artifact production 与一次
+host-to-device transfer 组成；HEFT 的无搜索、接受 move、重复规划、多 pass 与阈值拒绝路径均验证最终 objective 与 baseline/改进关系。测试没有
+遍历 physical segment 重算代价，因而直接约束证据来源。
+
+### 58.3 graph portfolio 的正确偏序是冻结事实后比较多个 selection
+
+目标架构不应在 physical placement 之前永久提交 fusion。原图、融合图及后续 device-specific transform 应形成有界 planning portfolio，每个
+variant 在同一组冻结 runtime facts 上独立规划，再按标准 objective 选择：
+
+```mermaid
+flowchart LR
+    Logical["logical graph"] --> Portfolio["bounded graph variants"]
+    Portfolio --> Original["original"]
+    Portfolio --> Fused["fused regions"]
+    Portfolio --> Specialized["device-specific transform"]
+    Frozen["frozen devices, artifacts, performance, calibration"] --> Original
+    Frozen --> Fused
+    Frozen --> Specialized
+    Original --> O["GraphPlanSelection"]
+    Fused --> F["GraphPlanSelection"]
+    Specialized --> S["GraphPlanSelection"]
+    O --> Choose["deterministic physical objective"]
+    F --> Choose
+    S --> Choose
+    Choose --> Validate["PhysicalGraphPlan::Create"]
+```
+
+该 portfolio 尚未实现，原因有两个。第一，HEFT 的 automatic-partition calibration 在 planning 期间发布 observation；若多个 variant 顺序执行且共享
+可变 calibration，后规划者会读取前规划者产生的新信息，variant 顺序将污染选择。下一阶段必须共享同一 frozen calibration snapshot，并在选定或
+全部评估结束后统一发布 observation。第二，candidate synthesis 当前只检查单 dispatch 的 `availableMemoryBytes >= requiredDeviceMemoryBytes`，无法
+证明整图峰值显存可行。portfolio objective 之前必须按设备跟踪 allocation live range 与 peak resident bytes；简单累加 workload bytes 同样不正确，
+因为不同 allocation 的生命周期可以重叠或互斥。
+
+### 58.4 C++26 特性仍服从信息边界
+
+本扩展使用 concept 约束 expected-like planner 协议，使用普通 move-only/value storage 传递运行时结果。objective 依赖设备健康、artifact
+availability、calibration、residency 与 graph topology，reflection、annotation 和 consteval block 无法把这些事实前移到 translation phase；
+coroutine 也不改变选择证据的所有权。stdexec 继续位于 submission/recovery composition 层。该边界保留 C++26 静态 schema 的收益，同时避免为
+运行时组合优化引入无信息增益的模板实例化或异步状态机。
+
+### 58.5 选择证据协议没有引入可重复的控制面性能退化
+
+正式 A/B 以 `f09dbd4` 为 parent，在同一 Release `-O3 -march=haswell` 构建上比较 parent/current。每个 planner 与
+revision 先丢弃一个完整预热进程，再运行五个独立进程；每轮按 parent/current 与 current/parent 交替顺序配对。进程固定到
+逻辑 CPU 2（affinity mask `4`）并使用 High priority，runner 每 50 ms 检查 Ninja、`clang++`、`clang-cl` 与构建型 CMake；
+本次 20 个正式样本均未与编译重叠。表中 ratio 为 current 五进程中位数除以 parent 五进程中位数，`slower` 是五个配对轮次中
+current 较慢的轮数。
+
+| planner / graph | parent | current | ratio | slower |
+|---|---:|---:|---:|---:|
+| LinearChain 1 / 1 | `8.307788 us` | `8.256958 us` | `0.993882x` | 1 / 5 |
+| LinearChain 8 / 1 | `62.410840 us` | `61.945313 us` | `0.992541x` | 1 / 5 |
+| LinearChain 8 / 2 | `120.009766 us` | `122.230078 us` | `1.018501x` | 4 / 5 |
+| LinearChain 32 / 2 | `607.246094 us` | `613.717969 us` | `1.010658x` | 2 / 5 |
+| LinearChain residency-sensitive 3 / 2 | `64.773828 us` | `65.423730 us` | `1.010033x` | 3 / 5 |
+| HEFT whole 1 / 1 | `13.789136 us` | `14.004639 us` | `1.015628x` | 5 / 5 |
+| HEFT whole 8 / 1 | `86.645508 us` | `87.645703 us` | `1.011544x` | 4 / 5 |
+| HEFT whole 8 / 2 | `110.051953 us` | `111.178906 us` | `1.010240x` | 4 / 5 |
+| HEFT whole 32 / 2 | `566.060938 us` | `575.775000 us` | `1.017161x` | 4 / 5 |
+| HEFT forced automatic 1 / 2 | `59.247852 us` | `59.596387 us` | `1.005883x` | 4 / 5 |
+| HEFT forced automatic 8 / 2 | `461.349219 us` | `462.120313 us` | `1.001671x` | 3 / 5 |
+| HEFT forced automatic 32 / 2 | `2197.412500 us` | `2202.696875 us` | `1.002405x` | 3 / 5 |
+| HEFT rejected partition 1 / 2 | `50.812109 us` | `51.122461 us` | `1.006108x` | 4 / 5 |
+| HEFT amortization gate 1 / 2 | `16.260327 us` | `16.455249 us` | `1.011988x` | 5 / 5 |
+| HEFT independent 8 / shared engine | `112.458594 us` | `112.088281 us` | `0.996707x` | 3 / 5 |
+| HEFT independent 8 / distinct engines | `116.081836 us` | `115.828711 us` | `0.997819x` | 3 / 5 |
+| HEFT local search / 1 evaluation | `169.267969 us` | `171.471680 us` | `1.013019x` | 5 / 5 |
+| HEFT local search / 8 evaluations | `553.403125 us` | `561.381250 us` | `1.014416x` | 4 / 5 |
+| HEFT adaptive reuse 1000 | `225.567187 us` | `218.180859 us` | `0.967254x` | 1 / 5 |
+
+全部 planner 墙钟指标落在 `0.967254x..1.018501x`。若按既有 gate 仅把“中位数退化超过 15% 且至少四个配对轮次
+同向”认定为可重复回归，则本次没有触发项；最坏中位数增量为 `1.8501%`。`GraphPlanSelection` 在当前 ABI 下为 80 bytes，
+新增 objective 只随 move-only 结果越过一次 planner 边界，测量也没有显示与该值传递相关的尺度增长。

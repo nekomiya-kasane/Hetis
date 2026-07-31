@@ -222,7 +222,7 @@ namespace Sora::Compute {
 
     } // namespace
 
-    std::expected<PhysicalGraphPlanStorage, LinearChainPlanningError>
+    std::expected<GraphPlanSelection, LinearChainPlanningError>
     LinearChainPlanner::operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,
                                    GraphPlanningServices services) const noexcept {
         if (!policy_.Valid()) {
@@ -254,6 +254,7 @@ namespace Sora::Compute {
                     return StableDispatchPlacementLess(WholeShard(left.selected).placement,
                                                        WholeShard(right.selected).placement);
                 });
+            const uint64_t predictedMakespanNanoseconds = best->cumulativeNanoseconds;
             std::vector<DispatchGraphSelection> selected(graph.NodeCount());
             uint32_t frontier = static_cast<uint32_t>(best - final.begin());
             for (size_t layer = layers->size(); layer-- != 0;) {
@@ -265,7 +266,8 @@ namespace Sora::Compute {
             if (!lowered) {
                 return std::unexpected(CommonError(lowered.error()));
             }
-            return std::move(*lowered);
+            return GraphPlanSelection{.storage = std::move(*lowered),
+                                      .predictedMakespanNanoseconds = predictedMakespanNanoseconds};
         } catch (const std::bad_alloc&) {
             return std::unexpected(Error(LinearChainPlanningErrorCode::OutOfMemory));
         }

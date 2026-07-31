@@ -71,9 +71,8 @@ namespace Sora::Compute {
     public:
         constexpr explicit LinearChainPlanner(LinearChainPlanningPolicy policy = {}) noexcept : policy_(policy) {}
 
-        /** @brief Select the globally minimum additive calibrated path and lower it
-         * to pure physical-plan storage. */
-        [[nodiscard]] std::expected<PhysicalGraphPlanStorage, LinearChainPlanningError>
+        /** @brief Select the globally minimum additive calibrated path and return its plan and exact objective. */
+        [[nodiscard]] std::expected<GraphPlanSelection, LinearChainPlanningError>
         operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,
                    GraphPlanningServices services) const noexcept;
 

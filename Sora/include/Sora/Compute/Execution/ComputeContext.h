@@ -490,7 +490,7 @@ namespace Sora::Compute {
                     return std::unexpected(
                         PreparationError{GraphPlanningFailure<PlanningError>{std::move(planned.error())}});
                 }
-                auto plan = PhysicalGraphPlan::Create(std::move(*planned), attempt.epoch->Resources());
+                auto plan = PhysicalGraphPlan::Create(std::move(planned->storage), attempt.epoch->Resources());
                 if (!plan) {
                     return std::unexpected(PreparationError{GraphPlanValidationFailure{plan.error()}});
                 }

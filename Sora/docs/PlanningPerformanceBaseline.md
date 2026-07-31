@@ -203,7 +203,7 @@ local-search case 与默认 `8 nodes / 2 destinations` 使用相同图、设备�
 | 1 pass / 8 evaluations | `558.173438 us/plan` | `5.538981` | `58.006079 us/evaluation` |
 
 搜索成本随 evaluation 预算近似线性。单 evaluation 包含固定的 alternatives 收集与最终 lowering，故其摊销增量高于八次预算。
-`HeftPlanningStatistics::optimizedMakespanNanoseconds` 是校准模型预测的设备 schedule makespan；表中 `us/plan` 是主机控制面墙钟时间。
+`HeftPlanningResult::selection.predictedMakespanNanoseconds` 是校准模型预测的设备 schedule makespan；表中 `us/plan` 是主机控制面墙钟时间。
 二者量纲虽同为时间，但描述不同对象，不得相互替代。
 
 candidate 分层的 TU-private prepared-buffer 复用经过同会话 A/B。关闭复用时，完整 dispatch enumeration 的五进程中位数为
