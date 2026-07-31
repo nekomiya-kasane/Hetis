@@ -21,7 +21,7 @@
  */
 #pragma once
 
-#include "Mashiro/Core/SpscByteRing.h"
+#include "Mashiro/Core/RecordRingBuffer.h"
 #include "Mashiro/Core/TypeTraits.h"
 
 #include <array>
@@ -246,7 +246,7 @@ namespace Mashiro {
     // =========================================================================
 
     enum class BackpressurePolicy : uint8_t {
-        Drop,  ///< Silently drop oldest entries.
+        Drop,  ///< Drop the current entry when its thread-local ring has insufficient space.
         Block, ///< Producer spins until space is available.
     };
 
@@ -316,8 +316,8 @@ namespace Mashiro {
 
     /// @}
 
-    /// @brief Logger's internal 64 KB byte ring.
-    using LogRing = SpscByteRing<64 * 1024>;
+    /** @brief Logger's thread-local 64 KiB packed-record ring. */
+    using LogRing = RecordRingBuffer<64 * 1024, Concurrency::QueueTopologies::Spsc>;
 
     // =========================================================================
     // StructuredLogger
