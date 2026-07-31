@@ -753,3 +753,34 @@ variant 的最终 merge 成本。
 正确性门禁为 Release 与组合 ASan + UBSan 各 `Sora.Compute 475 / 475`，两种配置均显式重建 50 个 Compute test executable。
 sanitizer compile database 确认 `HeftPlanner.cpp` 与 `HeftPlannerTest.cpp` 同时带有 address、undefined sanitizer、
 `-freflection-latest` 与 `-std=gnu++26`。定向 `HeftPlannerTest` 为 `28 cases / 1664 assertions`。
+
+## Whole-graph physical-memory reservation 基线
+
+该基线约束 graph portfolio 的第二个运行时前置条件：计划必须通过真实 allocator 与 coherent-import callback 获取全部 storage handle，才能
+视为当前物理状态下可行。测量对象是 `PhysicalGraphMemoryReservationBenchmark` 的 synthetic backend control plane，不包含 JIT、pipeline、
+transfer 或 submission，也不代表 Vulkan driver allocation latency。
+
+每个 timed invocation 复制一个已验证的 `PhysicalGraphPlan`。`plan_copy_N` 随即销毁副本；
+`plan_copy_reserve_release_N` 继续获取并释放 N 个 allocation。两者相减得到 reservation increment，从而排除 move-only API 必需的计划复制
+成本。正式样本为五个独立 Release `-O3 -march=haswell` 进程，固定逻辑 CPU 2，使用 High priority；结果目录为
+`C:\tmp\sora-physical-graph-memory-reservation-20260801-033158`。
+
+| metric | five-process range | median |
+|---|---:|---:|
+| plan copy, 1 allocation | `177.405..185.382 ns/graph` | `182.710 ns/graph` |
+| copy + reserve/release, 1 | `401.492..419.913 ns/graph` | `414.593 ns/graph` |
+| reservation increment, 1 | `223.282..238.850 ns/graph` | `231.782 ns/graph` |
+| plan copy, 8 allocations | `469.233..511.185 ns/graph` | `494.856 ns/graph` |
+| copy + reserve/release, 8 | `1.652..1.765 us/graph` | `1.735 us/graph` |
+| reservation increment, 8 | `1.183..1.286 us/graph` | `1.227 us/graph` |
+| plan copy, 32 allocations | `1.740..1.818 us/graph` | `1.801 us/graph` |
+| copy + reserve/release, 32 | `7.029..7.433 us/graph` | `7.415 us/graph` |
+| reservation increment, 32 | `5.278..5.679 us/graph` | `5.599 us/graph` |
+
+reservation 单位成本中位数为 `231.782 / 153.379 / 174.961 ns/allocation`。1 allocation 固定成本占比更高；8 与 32 allocation
+保持同一数量级，当前实现没有超线性增长证据。后续同机同配置若 reservation increment 中位数退化超过 15%，或 32 allocation 的单位成本
+相对 8 allocation 增长超过 25%，必须审查 vector capacity、shared-control allocation、callback dispatch 与逆序释放路径。
+
+正确性门禁为 Release 与组合 ASan + UBSan 各 `Sora.Compute 477 / 477`，两种配置均显式重建当前 CMake 定义的 50 个 Compute test
+executable。`PhysicalGraphMaterializerTest` 为 `25 cases / 1593 assertions`。sanitizer compile database 确认 materializer 源码与测试
+同时带有 address、undefined、`-fno-sanitize-recover=all`、`-std=gnu++26` 与 `-freflection-latest`。

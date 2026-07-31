@@ -48,6 +48,11 @@ namespace Sora::Compute {
         PhysicalGraphMaterializationError error{};
     };
 
+    /** @brief Exact whole-graph physical storage acquisition failure. */
+    struct GraphMemoryReservationFailure {
+        PhysicalGraphMemoryReservationError error{};
+    };
+
     /** @brief Pure planner output failed catalog validation or device-lease
      * capture. */
     struct GraphPlanValidationFailure {
@@ -70,7 +75,8 @@ namespace Sora::Compute {
     template<typename PlanningError>
     using GraphPreparationError =
         std::variant<GraphResourceRegistrationFailure, GraphPlanningInputFailure, GraphProgramCatalogFailure,
-                     GraphPlanningFailure<PlanningError>, GraphPlanValidationFailure, GraphMaterializationFailure>;
+                     GraphPlanningFailure<PlanningError>, GraphPlanValidationFailure, GraphMemoryReservationFailure,
+                     GraphMaterializationFailure>;
 
     /** @brief Failure policy for an explicitly configured artifact store. */
     enum class ArtifactStoreInitializationPolicy : uint8_t {
@@ -498,8 +504,13 @@ namespace Sora::Compute {
                     return std::unexpected(PreparationError{GraphResourceRegistrationFailure{registered.error()}});
                 }
 
+                auto reservation = ReservePhysicalGraphMemory(std::move(*plan), attempt.epoch->Resources());
+                if (!reservation) {
+                    return std::unexpected(PreparationError{GraphMemoryReservationFailure{reservation.error()}});
+                }
+
                 auto materialized = MaterializePhysicalGraph(
-                    *plan, attempt.epoch->Resources(),
+                    std::move(*reservation), attempt.epoch->Resources(),
                     ArtifactResolutionServices{state->compiler, state->pipeline, state->performance.KernelObserver()});
                 if (!materialized) {
                     return std::unexpected(PreparationError{GraphMaterializationFailure{materialized.error()}});

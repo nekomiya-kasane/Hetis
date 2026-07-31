@@ -1,7 +1,6 @@
 /**
  * @file PhysicalGraphMaterializer.cpp
- * @brief Transactional physical allocation, compilation, binding, and
- * executable-graph construction.
+ * @brief Exact memory reservation, compilation, binding, and executable-graph construction.
  * @ingroup Compute
  */
 
@@ -27,6 +26,8 @@ namespace Sora::Compute {
 
         using Error = PhysicalGraphMaterializationError;
         using ErrorCode = PhysicalGraphMaterializationErrorCode;
+        using ReservationError = PhysicalGraphMemoryReservationError;
+        using ReservationErrorCode = PhysicalGraphMemoryReservationErrorCode;
 
         [[nodiscard]] constexpr Error Failure(ErrorCode code, uint32_t segment = kInvalidPhysicalPlanIndex,
                                               uint32_t subject = kInvalidPhysicalPlanIndex, uint32_t cause = 0,
@@ -39,23 +40,31 @@ namespace Sora::Compute {
             return static_cast<uint32_t>(std::to_underlying(value));
         }
 
+        [[nodiscard]] constexpr ReservationError ReservationFailure(ReservationErrorCode code,
+                                                                    uint32_t subject = kInvalidPhysicalPlanIndex,
+                                                                    uint32_t cause = 0, uint64_t detail = 0) noexcept {
+            return {code, subject, cause, detail};
+        }
+
+        void ReleaseAllocationsReverse(std::vector<Allocation>& allocations) noexcept {
+            for (auto allocation = allocations.rbegin(); allocation != allocations.rend(); ++allocation) {
+                *allocation = {};
+            }
+        }
+
         class AllocationJournal final {
         public:
             AllocationJournal() = default;
             AllocationJournal(const AllocationJournal&) = delete;
             AllocationJournal& operator=(const AllocationJournal&) = delete;
 
-            ~AllocationJournal() noexcept {
-                for (auto allocation = allocations_.rbegin(); allocation != allocations_.rend(); ++allocation) {
-                    *allocation = {};
-                }
-            }
+            ~AllocationJournal() noexcept { ReleaseAllocationsReverse(allocations_); }
 
             void Reserve(size_t count) { allocations_.reserve(count); }
             void Append(Allocation allocation) { allocations_.push_back(std::move(allocation)); }
 
-            [[nodiscard]] size_t Size() const noexcept { return allocations_.size(); }
-            [[nodiscard]] const Allocation& operator[](size_t index) const noexcept { return allocations_[index]; }
+            [[nodiscard]] std::span<const Allocation> View() const noexcept { return allocations_; }
+            [[nodiscard]] std::vector<Allocation> Commit() && noexcept { return std::move(allocations_); }
 
         private:
             std::vector<Allocation> allocations_{};
@@ -68,7 +77,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<ResolvedStorage, Error>
         ResolveStorage(const PlannedStorageRef& storage, ByteRegion requested,
-                       std::span<const PlannedAllocation> planned, const AllocationJournal& materialized,
+                       std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized,
                        uint32_t segment, uint32_t subject) noexcept {
             if (const auto* ready = std::get_if<ReadyStorageRef>(&storage)) {
                 const auto offset = ready->replica.ResolveAllocationOffset(requested);
@@ -79,7 +88,7 @@ namespace Sora::Compute {
             }
             const PlannedAllocationRef produced = std::get<PlannedAllocationRef>(storage);
             if (!produced.allocation.Valid() || produced.allocation.index >= planned.size() ||
-                produced.allocation.index >= materialized.Size()) {
+                produced.allocation.index >= materialized.size()) {
                 return std::unexpected(Failure(ErrorCode::InvalidPlan, segment, subject));
             }
             const PlannedAllocation& mapping = planned[produced.allocation.index];
@@ -96,8 +105,8 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<ResolvedStorage, Error>
         ResolveAllocation(PlannedAllocationId id, ByteRegion requested, std::span<const PlannedAllocation> planned,
-                          const AllocationJournal& materialized, uint32_t segment, uint32_t subject) noexcept {
-            if (!id.Valid() || id.index >= planned.size() || id.index >= materialized.Size()) {
+                          std::span<const Allocation> materialized, uint32_t segment, uint32_t subject) noexcept {
+            if (!id.Valid() || id.index >= planned.size() || id.index >= materialized.size()) {
                 return std::unexpected(Failure(ErrorCode::InvalidPlan, segment, subject));
             }
             const PlannedAllocation& mapping = planned[id.index];
@@ -114,9 +123,9 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PendingReplica, Error> PendingFor(PlannedAllocationId id,
                                                                       std::span<const PlannedAllocation> planned,
-                                                                      const AllocationJournal& materialized,
+                                                                      std::span<const Allocation> materialized,
                                                                       uint32_t segment, uint32_t subject) noexcept {
-            if (!id.Valid() || id.index >= planned.size() || id.index >= materialized.Size()) {
+            if (!id.Valid() || id.index >= planned.size() || id.index >= materialized.size()) {
                 return std::unexpected(Failure(ErrorCode::InvalidPlan, segment, subject));
             }
             const PlannedAllocation& mapping = planned[id.index];
@@ -129,7 +138,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalBufferSource, Error>
         ReadSource(const PlannedStorageRef& storage, std::span<const PlannedAllocation> planned,
-                   const AllocationJournal& materialized, uint32_t segment, uint32_t subject) noexcept {
+                   std::span<const Allocation> materialized, uint32_t segment, uint32_t subject) noexcept {
             if (const auto* ready = std::get_if<ReadyStorageRef>(&storage)) {
                 return PhysicalBufferSource{ready->replica};
             }
@@ -140,7 +149,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<ResolvedStorage, Error>
         ResolveCoverageStorage(const PlannedStorageRef& storage, ByteCoverageView coverage,
-                               std::span<const PlannedAllocation> planned, const AllocationJournal& materialized,
+                               std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized,
                                uint32_t segment, uint32_t subject) noexcept {
             if (const auto* ready = std::get_if<ReadyStorageRef>(&storage)) {
                 const auto offset = ready->replica.ResolveAllocationOffset(coverage);
@@ -151,7 +160,7 @@ namespace Sora::Compute {
             }
             const PlannedAllocationRef produced = std::get<PlannedAllocationRef>(storage);
             if (!produced.allocation.Valid() || produced.allocation.index >= planned.size() ||
-                produced.allocation.index >= materialized.Size()) {
+                produced.allocation.index >= materialized.size()) {
                 return std::unexpected(Failure(ErrorCode::InvalidPlan, segment, subject));
             }
             const PlannedAllocation& mapping = planned[produced.allocation.index];
@@ -167,7 +176,7 @@ namespace Sora::Compute {
         }
 
         [[nodiscard]] std::expected<std::optional<CompletionTransaction>, Error>
-        BuildCompletion(std::span<const PlannedAllocation> planned, const AllocationJournal& materialized) noexcept {
+        BuildCompletion(std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized) noexcept {
             CompletionTransaction transaction;
             for (size_t index = 0; index < planned.size(); ++index) {
                 const PlannedAllocation& allocation = planned[index];
@@ -233,7 +242,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalSegment, Error>
         MaterializeDispatch(const PlannedDispatch& dispatch, uint32_t segment,
-                            std::span<const PlannedAllocation> planned, const AllocationJournal& materialized,
+                            std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized,
                             const PhysicalResourceCatalog& resources, ArtifactResolutionServices services) {
             const Queue* queue = resources.FindQueue(dispatch.queue.service, dispatch.queue.backend,
                                                      dispatch.queue.device, dispatch.queue.queue);
@@ -373,7 +382,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalSegment, Error> MaterializeCopy(const PlannedCopy& copy, uint32_t segment,
                                                                             std::span<const PlannedAllocation> planned,
-                                                                            const AllocationJournal& materialized,
+                                                                            std::span<const Allocation> materialized,
                                                                             const PhysicalResourceCatalog& resources) {
             const Queue* queue =
                 resources.FindQueue(copy.queue.service, copy.queue.backend, copy.queue.device, copy.queue.queue);
@@ -408,7 +417,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalSegment, Error> MaterializeFill(const PlannedFill& fill, uint32_t segment,
                                                                             std::span<const PlannedAllocation> planned,
-                                                                            const AllocationJournal& materialized,
+                                                                            std::span<const Allocation> materialized,
                                                                             const PhysicalResourceCatalog& resources) {
             const Queue* queue =
                 resources.FindQueue(fill.queue.service, fill.queue.backend, fill.queue.device, fill.queue.queue);
@@ -441,13 +450,13 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalSegment, Error>
         MaterializeAssembly(const PlannedAssembly& assembly, uint32_t segment,
-                            std::span<const PlannedAllocation> planned, const AllocationJournal& materialized,
+                            std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized,
                             const PhysicalResourceCatalog& resources) {
             constexpr size_t commandCapacity = 256;
             const Queue* queue = resources.FindQueue(assembly.queue.service, assembly.queue.backend,
                                                      assembly.queue.device, assembly.queue.queue);
             if (queue == nullptr || !assembly.destination.Valid() || assembly.destination.index >= planned.size() ||
-                assembly.destination.index >= materialized.Size()) {
+                assembly.destination.index >= materialized.size()) {
                 return std::unexpected(Failure(ErrorCode::InvalidPlan, segment));
             }
             const PlannedAllocation& destinationMapping = planned[assembly.destination.index];
@@ -525,7 +534,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalSegment, Error>
         MaterializeTransfer(const PlannedTransfer& transfer, uint32_t segment,
-                            std::span<const PlannedAllocation> planned, const AllocationJournal& materialized,
+                            std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized,
                             const PhysicalResourceCatalog& resources) {
             constexpr size_t regionCapacity = 256;
             const TransferEngine* engine = resources.FindTransferEngine(transfer.service, transfer.engine);
@@ -569,7 +578,7 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<PhysicalSegment, Error>
         MaterializeSegment(const PhysicalPlanSegment& segment, uint32_t index,
-                           std::span<const PlannedAllocation> planned, const AllocationJournal& materialized,
+                           std::span<const PlannedAllocation> planned, std::span<const Allocation> materialized,
                            const PhysicalResourceCatalog& resources, ArtifactResolutionServices services) {
             return std::visit(
                 [&]<typename Segment>(const Segment& value) -> std::expected<PhysicalSegment, Error> {
@@ -593,8 +602,7 @@ namespace Sora::Compute {
                                        [service](const DeviceLease& lease) { return lease.Service() == service; });
         }
 
-        [[nodiscard]] bool ResourcesMatchPlan(const PhysicalGraphPlan& plan,
-                                              const PhysicalResourceCatalog& resources) noexcept {
+        [[nodiscard]] bool PlanServicesCoveredByLeases(const PhysicalGraphPlan& plan) noexcept {
             const std::span<const DeviceLease> leases = plan.DeviceLeases();
             for (const PlannedAllocation& allocation : plan.Allocations()) {
                 const BackendServiceId service = allocation.service;
@@ -622,20 +630,24 @@ namespace Sora::Compute {
 
     } // namespace
 
-    std::expected<ExecutableGraph, PhysicalGraphMaterializationError>
-    MaterializePhysicalGraph(const PhysicalGraphPlan& plan, const PhysicalResourceCatalog& resources,
-                             ArtifactResolutionServices services) noexcept {
+    PhysicalGraphMemoryReservation::~PhysicalGraphMemoryReservation() noexcept {
+        ReleaseAllocationsReverse(allocations_);
+    }
+
+    std::expected<PhysicalGraphMemoryReservation, PhysicalGraphMemoryReservationError>
+    ReservePhysicalGraphMemory(PhysicalGraphPlan&& plan, const PhysicalResourceCatalog& resources) noexcept {
         try {
-            if (!ResourcesMatchPlan(plan, resources)) {
-                return std::unexpected(Failure(ErrorCode::DeviceInvalidated));
+            if (!PlanServicesCoveredByLeases(plan)) {
+                return std::unexpected(ReservationFailure(ReservationErrorCode::InvalidPlan));
             }
             for (uint32_t index = 0; index < plan.DeviceLeases().size(); ++index) {
                 auto current = plan.DeviceLeases()[index].Validate();
                 if (!current) {
-                    return std::unexpected(Failure(ErrorCode::DeviceInvalidated, kInvalidPhysicalPlanIndex, index,
-                                                   Cause(current.error())));
+                    return std::unexpected(
+                        ReservationFailure(ReservationErrorCode::DeviceInvalidated, index, Cause(current.error())));
                 }
             }
+
             const std::span<const PlannedAllocation> planned = plan.Allocations();
             AllocationJournal materialized;
             materialized.Reserve(planned.size());
@@ -646,7 +658,7 @@ namespace Sora::Compute {
                     const MemoryAllocator* allocator = resources.FindAllocator(allocation.service, allocation.location);
                     if (allocator == nullptr) {
                         return std::unexpected(
-                            Failure(ErrorCode::MissingPhysicalResource, kInvalidPhysicalPlanIndex, allocationIndex));
+                            ReservationFailure(ReservationErrorCode::MissingPhysicalResource, allocationIndex));
                     }
                     auto storage = allocator->Allocate({.location = allocation.location,
                                                         .requiredProperties = request->requiredProperties,
@@ -654,9 +666,9 @@ namespace Sora::Compute {
                                                         .sizeBytes = allocation.bufferRegion.Size(),
                                                         .alignment = request->alignment});
                     if (!storage) {
-                        return std::unexpected(Failure(ErrorCode::AllocationFailed, kInvalidPhysicalPlanIndex,
-                                                       allocationIndex, Cause(storage.error().code),
-                                                       storage.error().detail));
+                        return std::unexpected(ReservationFailure(ReservationErrorCode::AllocationFailed,
+                                                                  allocationIndex, Cause(storage.error().code),
+                                                                  storage.error().detail));
                     }
                     materialized.Append(std::move(*storage));
                     continue;
@@ -666,23 +678,44 @@ namespace Sora::Compute {
                 const TransferEngine* engine = resources.FindTransferEngine(allocation.service, alias.engine);
                 if (engine == nullptr) {
                     return std::unexpected(
-                        Failure(ErrorCode::MissingPhysicalResource, kInvalidPhysicalPlanIndex, allocationIndex));
+                        ReservationFailure(ReservationErrorCode::MissingPhysicalResource, allocationIndex));
                 }
-                auto source = ResolveStorage(alias.source, allocation.bufferRegion, planned, materialized,
+                auto source = ResolveStorage(alias.source, allocation.bufferRegion, planned, materialized.View(),
                                              kInvalidPhysicalPlanIndex, allocationIndex);
                 if (!source) {
-                    return std::unexpected(source.error());
+                    return std::unexpected(ReservationFailure(ReservationErrorCode::InvalidPlan, allocationIndex));
                 }
                 auto imported =
                     engine->ImportAlias(std::move(source->allocation), source->offset, allocation.bufferRegion.Size());
                 if (!imported) {
-                    return std::unexpected(Failure(ErrorCode::AliasImportFailed, kInvalidPhysicalPlanIndex,
-                                                   allocationIndex, Cause(imported.error().code),
-                                                   imported.error().detail));
+                    return std::unexpected(ReservationFailure(ReservationErrorCode::AliasImportFailed, allocationIndex,
+                                                              Cause(imported.error().code), imported.error().detail));
                 }
                 materialized.Append(std::move(*imported));
             }
+            return PhysicalGraphMemoryReservation{std::move(plan), std::move(materialized).Commit()};
+        } catch (const std::bad_alloc&) {
+            return std::unexpected(ReservationFailure(ReservationErrorCode::OutOfMemory));
+        }
+    }
 
+    std::expected<ExecutableGraph, PhysicalGraphMaterializationError>
+    MaterializePhysicalGraph(PhysicalGraphMemoryReservation reservation, const PhysicalResourceCatalog& resources,
+                             ArtifactResolutionServices services) noexcept {
+        try {
+            const PhysicalGraphPlan& plan = reservation.Plan();
+            const std::span<const Allocation> materialized = reservation.Allocations();
+            if (!PlanServicesCoveredByLeases(plan) || materialized.size() != plan.Allocations().size()) {
+                return std::unexpected(Failure(ErrorCode::InvalidPlan));
+            }
+            for (uint32_t index = 0; index < plan.DeviceLeases().size(); ++index) {
+                auto current = plan.DeviceLeases()[index].Validate();
+                if (!current) {
+                    return std::unexpected(Failure(ErrorCode::DeviceInvalidated, kInvalidPhysicalPlanIndex, index,
+                                                   Cause(current.error())));
+                }
+            }
+            const std::span<const PlannedAllocation> planned = plan.Allocations();
             auto completion = BuildCompletion(planned, materialized);
             if (!completion) {
                 return std::unexpected(completion.error());

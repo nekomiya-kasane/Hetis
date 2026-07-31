@@ -61,14 +61,14 @@ namespace Sora::Compute {
     /** @brief Ready retained storage or a graph-local planned allocation reference. */
     using PlannedStorageRef = std::variant<ReadyStorageRef, PlannedAllocationRef>;
 
-    /** @brief Backend allocation request evaluated during materialization. */
+    /** @brief Backend allocation request evaluated during whole-graph memory reservation. */
     struct PlannedAllocate {
         MemoryPropertyMask requiredProperties{};
         MemoryPropertyMask preferredProperties{};
         uint64_t alignment = 1;
     };
 
-    /** @brief Synchronous coherent import evaluated during materialization without
+    /** @brief Synchronous coherent import evaluated during memory reservation without
      * creating a graph segment. */
     struct PlannedCoherentAlias {
         TransferEngineId engine{};
@@ -93,7 +93,7 @@ namespace Sora::Compute {
         uint32_t partitionCount = 0;
     };
 
-    /** @brief Closed allocation-handle materialization mechanisms. */
+    /** @brief Closed physical-storage acquisition mechanisms. */
     using PlannedAllocationMaterialization = std::variant<PlannedAllocate, PlannedCoherentAlias>;
 
     /** @brief Semantic role controlling version and publication invariants of one planned allocation. */

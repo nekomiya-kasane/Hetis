@@ -167,6 +167,7 @@ namespace {
         Sora::Compute::BackendKind transferCompletionBackend = Sora::Compute::BackendKind::Vulkan;
         uint32_t nextAllocationId = 1;
         uint64_t nextMemory = 1;
+        uint32_t failAllocation = UINT32_MAX;
         uint32_t submissionFailuresRemaining = 0;
         Sora::Compute::SubmissionErrorCode submissionFailure = Sora::Compute::SubmissionErrorCode::QueueUnavailable;
         bool failCompile = false;
@@ -274,6 +275,10 @@ namespace {
                   Sora::Compute::BackendAllocationResult* result) noexcept {
         auto& state = *static_cast<MockState*>(opaque);
         ++state.allocateCount;
+        if (state.allocateCount == state.failAllocation) {
+            result->error = {Sora::Compute::MemoryAllocationErrorCode::OutOfMemory, request->sizeBytes};
+            return;
+        }
         auto native = std::unique_ptr<NativeAllocation>{new (std::nothrow)
                                                             NativeAllocation{&state, state.nextAllocationId++, true}};
         if (!native) {
@@ -1218,6 +1223,14 @@ namespace {
         return std::move(*observed);
     }
 
+    [[nodiscard]] std::expected<Sora::Compute::ExecutableGraph, Sora::Compute::PhysicalGraphMaterializationError>
+    MaterializeReserved(Sora::Compute::PhysicalGraphPlan&& plan, const Sora::Compute::PhysicalResourceCatalog& catalog,
+                        Sora::Compute::ArtifactResolutionServices services) {
+        auto reservation = Sora::Compute::ReservePhysicalGraphMemory(std::move(plan), catalog);
+        REQUIRE(reservation.has_value());
+        return Sora::Compute::MaterializePhysicalGraph(std::move(*reservation), catalog, services);
+    }
+
 } // namespace
 
 TEST_CASE("ComputeContext owns the plan-materialize-submit path behind one "
@@ -1748,6 +1761,38 @@ TEST_CASE("ComputeContext preserves planning and materialization failures "
         REQUIRE(state.destroyedAllocationCount == 2);
     }
 
+    SECTION("whole-graph memory reservation failure") {
+        MockState state;
+        state.failAllocation = 2;
+        auto planner = [&](const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
+                           Sora::Compute::GraphPlanningServices) noexcept
+            -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
+            auto fixture = MakeFillCopyPlanStorage(state);
+            return SelectPlan(std::move(fixture.storage));
+        };
+        auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {}, planner, RejectRuntimeRecovery);
+        REQUIRE(context.has_value());
+        using Context = typename decltype(context)::value_type;
+
+        exec::static_thread_pool pool{1};
+        auto failure = WaitForContextError<typename Context::Error>(
+            context->Submit(pool.get_scheduler(), MakeLogicalFillGraph({94, 1})));
+        const auto* build =
+            std::get_if<Sora::Compute::GraphAttemptBuildFailure<typename Context::PreparationError>>(&failure);
+        REQUIRE(build != nullptr);
+        const auto* reservation = std::get_if<Sora::Compute::GraphMemoryReservationFailure>(&build->error);
+        REQUIRE(reservation != nullptr);
+        REQUIRE(reservation->error.code == Sora::Compute::PhysicalGraphMemoryReservationErrorCode::AllocationFailed);
+        REQUIRE(reservation->error.subject == 1);
+        REQUIRE(reservation->error.cause ==
+                static_cast<uint32_t>(Sora::Compute::MemoryAllocationErrorCode::OutOfMemory));
+        REQUIRE(state.allocateCount == 2);
+        REQUIRE(state.compileCount == 0);
+        REQUIRE(state.submitCount == 0);
+        REQUIRE(state.destroyedAllocationCount == 1);
+        REQUIRE(state.destroyedAllocations[0] == 1);
+    }
+
     SECTION("pure plan validation failure") {
         MockState state;
         auto planner = [](const Sora::Compute::ExecutionGraph&, const Sora::Compute::GraphPlanningContext&,
@@ -1771,6 +1816,61 @@ TEST_CASE("ComputeContext preserves planning and materialization failures "
     }
 }
 
+TEST_CASE("PhysicalGraphMemoryReservation acquires the whole graph before JIT and releases in reverse order",
+          "[Sora][Compute][Runtime][PhysicalGraphMemoryReservation]") {
+    MockState state;
+    auto catalog = MakeCatalog(state);
+    auto fixture = MakeDispatchPlan(state, catalog);
+
+    {
+        auto reservation = Sora::Compute::ReservePhysicalGraphMemory(std::move(fixture.plan), catalog);
+        REQUIRE(reservation.has_value());
+        REQUIRE(reservation->Plan().Allocations().size() == 2);
+        REQUIRE(reservation->Allocations().size() == 2);
+        REQUIRE(state.allocateCount == 2);
+        REQUIRE(state.compileCount == 0);
+        REQUIRE(state.transferCount == 0);
+        REQUIRE(state.submitCount == 0);
+        REQUIRE(state.destroyedAllocationCount == 0);
+    }
+
+    REQUIRE(state.destroyedAllocationCount == 2);
+    REQUIRE(state.destroyedAllocations[0] == 2);
+    REQUIRE(state.destroyedAllocations[1] == 1);
+}
+
+TEST_CASE("PhysicalGraphMemoryReservation rollback leaves the next portfolio candidate feasible",
+          "[Sora][Compute][Runtime][PhysicalGraphMemoryReservation]") {
+    MockState state;
+    auto catalog = MakeCatalog(state);
+    state.failAllocation = 2;
+
+    auto rejected = MakeFillCopyPlan(state, catalog);
+    auto failed = Sora::Compute::ReservePhysicalGraphMemory(std::move(rejected.plan), catalog);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().code == Sora::Compute::PhysicalGraphMemoryReservationErrorCode::AllocationFailed);
+    REQUIRE(failed.error().subject == 1);
+    REQUIRE(state.allocateCount == 2);
+    REQUIRE(state.destroyedAllocationCount == 1);
+    REQUIRE(state.destroyedAllocations[0] == 1);
+    REQUIRE(state.compileCount == 0);
+
+    state.failAllocation = UINT32_MAX;
+    auto accepted = MakeFillCopyPlan(state, catalog);
+    {
+        auto reservation = Sora::Compute::ReservePhysicalGraphMemory(std::move(accepted.plan), catalog);
+        REQUIRE(reservation.has_value());
+        REQUIRE(reservation->Allocations().size() == 2);
+        REQUIRE(state.allocateCount == 4);
+        REQUIRE(state.destroyedAllocationCount == 1);
+        REQUIRE(state.compileCount == 0);
+    }
+
+    REQUIRE(state.destroyedAllocationCount == 3);
+    REQUIRE(state.destroyedAllocations[1] == 3);
+    REQUIRE(state.destroyedAllocations[2] == 2);
+}
+
 TEST_CASE("PhysicalGraphMaterializer builds and executes transfer-dispatch "
           "publication transactionally",
           "[Sora][Compute][Runtime][PhysicalGraphMaterializer]") {
@@ -1781,7 +1881,7 @@ TEST_CASE("PhysicalGraphMaterializer builds and executes transfer-dispatch "
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 2);
     REQUIRE(state.allocateCount == 2);
@@ -1818,7 +1918,7 @@ TEST_CASE("PhysicalGraphMaterializer preserves and publishes an exact affine par
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 2);
     REQUIRE(state.allocateCount == 2);
@@ -1887,7 +1987,7 @@ TEST_CASE("PhysicalGraphMaterializer projects an exact affine transfer into one 
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(*plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(*plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 1);
     auto submitted = std::move(*graph).Submit();
@@ -1911,7 +2011,7 @@ TEST_CASE("PhysicalGraphMaterializer assembles an affine partition cover into on
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 2);
     REQUIRE(state.allocateCount == 2);
@@ -1968,7 +2068,7 @@ TEST_CASE("PhysicalGraphMaterializer joins two direct-fill transfers with a sign
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 4);
     REQUIRE(state.allocateCount == 2);
@@ -2002,7 +2102,7 @@ TEST_CASE("PhysicalGraphMaterializer combines a remote prefill with one local as
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 3);
     auto submitted = std::move(*graph).Submit();
@@ -2035,7 +2135,7 @@ TEST_CASE("PhysicalGraphMaterializer resolves and submits a driver pipeline "
     Sora::Compute::PipelineService pipelineService{cache};
 
     {
-        auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+        auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
         REQUIRE(graph.has_value());
         REQUIRE(state.compileCount == 1);
         REQUIRE(state.pipelineCreateCount == 1);
@@ -2062,7 +2162,7 @@ TEST_CASE("PhysicalGraphMaterializer lowers cross-domain dependencies to host "
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     auto submitted = std::move(*graph).Submit();
     REQUIRE(submitted.has_value());
@@ -2084,7 +2184,7 @@ TEST_CASE("PhysicalGraphMaterializer imports coherent aliases as graph-local "
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
 
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     REQUIRE(graph->SegmentCount() == 1);
     REQUIRE(state.aliasCount == 1);
@@ -2111,8 +2211,7 @@ TEST_CASE("PhysicalGraphMaterializer validates bindings before JIT and rolls "
         Sora::Compute::CompilerService compilerService{cache};
         Sora::Compute::PipelineService pipelineService{cache};
 
-        const auto graph =
-            Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+        const auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
         REQUIRE_FALSE(graph.has_value());
         REQUIRE(graph.error().code == Sora::Compute::PhysicalGraphMaterializationErrorCode::BindingFailed);
         REQUIRE(graph.error().subject == 2);
@@ -2132,8 +2231,7 @@ TEST_CASE("PhysicalGraphMaterializer validates bindings before JIT and rolls "
         Sora::Compute::CompilerService compilerService{cache};
         Sora::Compute::PipelineService pipelineService{cache};
 
-        const auto graph =
-            Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+        const auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
         REQUIRE_FALSE(graph.has_value());
         REQUIRE(graph.error().code == Sora::Compute::PhysicalGraphMaterializationErrorCode::CompilationFailed);
         REQUIRE(state.compileCount == 1);
@@ -2153,8 +2251,7 @@ TEST_CASE("PhysicalGraphMaterializer validates bindings before JIT and rolls "
         Sora::Compute::CompilerService compilerService{cache};
         Sora::Compute::PipelineService pipelineService{cache};
 
-        const auto graph =
-            Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+        const auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
         REQUIRE_FALSE(graph.has_value());
         REQUIRE(graph.error().code == Sora::Compute::PhysicalGraphMaterializationErrorCode::PipelineResolutionFailed);
         REQUIRE(graph.error().cause == static_cast<uint32_t>(Sora::Compute::PipelineErrorCode::CreationFailed));
@@ -2180,7 +2277,7 @@ TEST_CASE("PhysicalGraphMaterializer materializes fill-copy batches and "
         Sora::Compute::CompilerService compilerService{cache};
         Sora::Compute::PipelineService pipelineService{cache};
 
-        auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+        auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
         REQUIRE(graph.has_value());
         auto submitted = std::move(*graph).Submit();
         REQUIRE(submitted.has_value());
@@ -2201,8 +2298,7 @@ TEST_CASE("PhysicalGraphMaterializer materializes fill-copy batches and "
         Sora::Compute::CompilerService compilerService{cache};
         Sora::Compute::PipelineService pipelineService{cache};
 
-        const auto graph =
-            Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+        const auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
         REQUIRE_FALSE(graph.has_value());
         REQUIRE(graph.error().code == Sora::Compute::PhysicalGraphMaterializationErrorCode::BatchConstructionFailed);
         REQUIRE(graph.error().segment == 1);
@@ -2220,15 +2316,11 @@ TEST_CASE("PhysicalGraphMaterializer reports coherent import failure without "
     state.failAlias = true;
     auto catalog = MakeCatalog(state);
     auto fixture = MakeDispatchPlan(state, catalog, false, true);
-    Sora::Compute::ArtifactCache cache{0};
-    Sora::Compute::CompilerService compilerService{cache};
-    Sora::Compute::PipelineService pipelineService{cache};
 
-    const auto graph =
-        Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
-    REQUIRE_FALSE(graph.has_value());
-    REQUIRE(graph.error().code == Sora::Compute::PhysicalGraphMaterializationErrorCode::AliasImportFailed);
-    REQUIRE(graph.error().subject == 0);
+    const auto reservation = Sora::Compute::ReservePhysicalGraphMemory(std::move(fixture.plan), catalog);
+    REQUIRE_FALSE(reservation.has_value());
+    REQUIRE(reservation.error().code == Sora::Compute::PhysicalGraphMemoryReservationErrorCode::AliasImportFailed);
+    REQUIRE(reservation.error().subject == 0);
     REQUIRE(state.aliasCount == 1);
     REQUIRE(state.allocateCount == 0);
     REQUIRE(state.compileCount == 0);
@@ -2242,15 +2334,12 @@ TEST_CASE("PhysicalGraphMaterializer rejects an invalidated device generation be
     auto catalog = MakeCatalog(state);
     auto fixture = MakeDispatchPlan(state, catalog);
     ++state.deviceGeneration;
-    Sora::Compute::ArtifactCache cache{4};
-    Sora::Compute::CompilerService compilerService{cache};
-    Sora::Compute::PipelineService pipelineService{cache};
 
-    const auto graph =
-        Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
-    REQUIRE_FALSE(graph.has_value());
-    REQUIRE(graph.error().code == Sora::Compute::PhysicalGraphMaterializationErrorCode::DeviceInvalidated);
-    REQUIRE(graph.error().cause == static_cast<uint32_t>(Sora::Compute::DeviceObservationError::GenerationChanged));
+    const auto reservation = Sora::Compute::ReservePhysicalGraphMemory(std::move(fixture.plan), catalog);
+    REQUIRE_FALSE(reservation.has_value());
+    REQUIRE(reservation.error().code == Sora::Compute::PhysicalGraphMemoryReservationErrorCode::DeviceInvalidated);
+    REQUIRE(reservation.error().cause ==
+            static_cast<uint32_t>(Sora::Compute::DeviceObservationError::GenerationChanged));
     REQUIRE(state.allocateCount == 0);
     REQUIRE(state.aliasCount == 0);
     REQUIRE(state.compileCount == 0);
@@ -2265,7 +2354,7 @@ TEST_CASE("ExecutableGraph rejects device loss before accepting its first segmen
     Sora::Compute::ArtifactCache cache{4};
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     state.deviceState = Sora::Compute::DeviceState::Lost;
     ++state.deviceGeneration;
@@ -2288,7 +2377,7 @@ TEST_CASE("GraphSubmission rejects device loss before publishing completed repli
     Sora::Compute::ArtifactCache cache{4};
     Sora::Compute::CompilerService compilerService{cache};
     Sora::Compute::PipelineService pipelineService{cache};
-    auto graph = Sora::Compute::MaterializePhysicalGraph(fixture.plan, catalog, {compilerService, pipelineService});
+    auto graph = MaterializeReserved(std::move(fixture.plan), catalog, {compilerService, pipelineService});
     REQUIRE(graph.has_value());
     auto submitted = std::move(*graph).Submit();
     REQUIRE(submitted.has_value());

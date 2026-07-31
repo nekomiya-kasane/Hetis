@@ -268,6 +268,23 @@ endif()
 
 vk_tp_deploy_runtime(Benchmark.Sora.Compute.GraphResidency)
 
+add_executable(Benchmark.Sora.Compute.PhysicalGraphMemoryReservation EXCLUDE_FROM_ALL
+    Compute/PhysicalGraphMemoryReservationBenchmark.cpp
+)
+target_include_directories(Benchmark.Sora.Compute.PhysicalGraphMemoryReservation PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(Benchmark.Sora.Compute.PhysicalGraphMemoryReservation PRIVATE Sora.Compute.Runtime)
+set_target_properties(Benchmark.Sora.Compute.PhysicalGraphMemoryReservation PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    FOLDER "Sora/Benchmarks/Compute"
+)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(Benchmark.Sora.Compute.PhysicalGraphMemoryReservation PRIVATE -O3 -march=haswell)
+endif()
+
+vk_tp_deploy_runtime(Benchmark.Sora.Compute.PhysicalGraphMemoryReservation)
+
 add_executable(Benchmark.Sora.Compute.LinearChainPlanning EXCLUDE_FROM_ALL
     Compute/LinearChainPlanningBenchmark.cpp
 )

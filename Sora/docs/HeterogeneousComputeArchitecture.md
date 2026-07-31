@@ -4165,10 +4165,9 @@ flowchart LR
     Choose --> Validate["PhysicalGraphPlan::Create"]
 ```
 
-该 portfolio 尚未实现。第 59 节已经解决 calibration 顺序污染：全部 variant 可读取同一 frozen snapshot，并把 observation 延迟到比较结束
-后再发布。剩余阻塞条件只有整图显存可行性。candidate synthesis 当前只检查单 dispatch 的
-`availableMemoryBytes >= requiredDeviceMemoryBytes`，无法证明整图峰值显存可行。portfolio objective 之前必须按设备跟踪 allocation
-live range 与 peak resident bytes；简单累加 workload bytes 同样不正确，因为不同 allocation 的生命周期可以重叠或互斥。
+该 portfolio 尚未实现。第 59 节解决 calibration 顺序污染，第 60 节提供整图物理存储的精确获取原语。两者共同消除了 portfolio 的两个
+硬前置条件，但还没有生成、排序并依次尝试多个 graph variant。`availableMemoryBytes`、live range 与 peak resident bytes 仍可用于候选排序和
+保守剪枝，不能作为可行性证明；allocator policy、memory type、heap、block、fragmentation 与外部占用均不由一个字节总量完整描述。
 
 ### 58.4 C++26 特性仍服从信息边界
 
@@ -4274,5 +4273,92 @@ adaptive 的逐进程 paired ratio 中位数为 `0.946953x`，范围 `0.891632x.
 引入控制面回归。paired case 同时包含 shared model 的持续更新与 deferred snapshot 的冻结语义，不能把约 `5.3%` 的差异单独归因于
 atomic publication。
 
-本切片只消除了 calibration 顺序污染。graph portfolio 仍须先建立 per-device graph-wide peak live allocation memory 模型，随后才能
-安全比较 original、fused 与 device-specific selection 并提交获胜计划。
+本切片只消除了 calibration 顺序污染。第 60 节以事务化资源获取取代 peak-memory 预测作为可行性证明；graph portfolio 编排器仍是后续
+里程碑，其职责是生成 original、fused 与 device-specific selection，按 objective 排序，并依次获取首个可行 selection 的 memory
+reservation。
+
+## 60. 2026-08-01 实现：整图物理存储可行性由 capability acquisition 证明
+
+### 60.1 容量快照不能证明物理可行性
+
+物理存储可行性依赖 allocator 的真实接受条件。CPU aligned allocation 受进程地址空间、OS commit 与 overcommit 语义约束；Vulkan/VMA
+还受 memory type、heap、block、fragmentation 与 dedicated-allocation policy 约束。`VK_EXT_memory_budget::heapBudget` 本身是驱动给出的
+指导值，读取预算与后续分配之间也存在 TOCTOU。因此，下列信息只能构成 heuristic：
+
+| 信息 | 合法用途 | 不能证明的性质 |
+|---|---|---|
+| `availableMemoryBytes` | 单 dispatch 候选剪枝 | 整图 allocation 集可同时获取 |
+| allocation 字节和 | 粗粒度容量下界 | memory type、对齐、block 与 fragmentation 可行性 |
+| live range / peak bytes | 计划器比较与未来 storage reuse | 当前 backend 能接受具体 allocation 请求 |
+| VMA heap budget | Vulkan 候选排序与诊断 | 分配提交时仍有同等预算 |
+
+精确判据是一次真实的资源获取：若 backend 接受计划中的全部 allocation 与 coherent alias 请求，且运行时持续持有所得 handle，则该计划在
+当前物理状态下可行。此判据直接消费 allocator policy，不需要在 runtime 层复制并近似 backend 的内存模型。
+
+### 60.2 `PhysicalGraphMemoryReservation` 是整图存储能力
+
+`ReservePhysicalGraphMemory` 在 JIT、pipeline resolution 与 submission 之前执行三步事务：验证计划持有的 device lease，按计划顺序获取全部
+`PlannedAllocate` 与 `PlannedCoherentAlias`，成功后把 immutable `PhysicalGraphPlan` 和 allocation handle 一并移入
+`PhysicalGraphMemoryReservation`。任一请求失败时，allocation journal 按逆序释放已获取 handle；成功 reservation 的析构也遵守同一逆序。
+
+reservation 只允许 move construction，禁止复制与 move assignment。前者使 capability 可以进入 `std::expected` 和 materializer，后两项
+排除重复所有权与赋值覆盖旧资源时的释放顺序歧义。`MaterializePhysicalGraph` 必须按值消费 reservation，不再访问 allocator；创建成功的
+`ExecutableGraph` 通过共享 allocation owner 延长资源生命周期，创建失败则由 reservation 回滚。
+
+`ComputeContext` 的准备顺序现为：
+
+```mermaid
+flowchart LR
+    Plan["planner selection"] --> Validate["PhysicalGraphPlan::Create"]
+    Validate --> Register["register logical buffers"]
+    Register --> Reserve["exact whole-graph reservation"]
+    Reserve --> Materialize["JIT / pipeline / command materialization"]
+    Materialize --> Submit["queue submission"]
+```
+
+`GraphMemoryReservationFailure` 与 `GraphMaterializationFailure` 分离。allocation、alias import 与 host-side reservation OOM 属于资源获取阶段；
+compilation、pipeline、binding 与 executable-graph construction 属于 materialization 阶段。错误类型由此对应真实失败边界。
+
+### 60.3 portfolio 应按 objective 顺序获取首个可行 capability
+
+设候选集按确定性 total order 排为 `p_0, p_1, ..., p_n`，排序主键是 planner 发布的 objective，稳定 tie-breaker 由 variant identity 给出。
+portfolio 依次调用 `ReservePhysicalGraphMemory`；失败事务完全回滚，首个成功 reservation 对应当前物理状态下的 feasible argmin。成功 handle
+已经持有实际资源，因而后续本进程提交与外部进程的容量变化不能超售这部分存储。
+
+```mermaid
+flowchart LR
+    Variants["frozen graph variants"] --> Plans["validated selections"]
+    Plans --> Order["deterministic objective order"]
+    Order --> A["reserve candidate A"]
+    A -->|failure and rollback| B["reserve candidate B"]
+    B -->|success| Capability["held memory capability"]
+    Capability --> JIT["materialize winner only"]
+```
+
+当前 `ComputeContext` 仍只消费一个 planner selection；它已采用 exact reservation，但尚未实现上述候选循环。未来 portfolio 可以把
+`availableMemoryBytes` 与 peak-live 模型放在 reservation 之前减少无效 backend 调用，但最终 admission 必须保留 capability acquisition。
+
+### 60.4 C++26 特性服从动态资源边界
+
+此处采用 `std::expected`、move-only RAII、`std::span`、concept 既有边界与编译期类型性质断言。reflection、annotation、consteval block 与
+expansion statement 无法预知运行时 allocator 状态；coroutine 和 stdexec 只能改变多个候选的编排方式，不能替代资源获取证明。并行
+portfolio 若以后采用 sender pipeline，每个候选仍须持有独立 reservation，并在 structured join 后按确定顺序选择或释放。
+
+### 60.5 正确性与控制面性能证据
+
+定向测试证明四项性质：reservation 在 JIT 前持有整图 allocation；析构按逆序释放；第二次 allocation OOM 时第一项立即回滚且 compile
+count 保持零；失败候选回滚后，同一 catalog 上的下一候选可以成功获取全部资源。device invalidation 与 coherent alias failure 也在
+reservation 阶段返回独立错误。`PhysicalGraphMaterializerTest` 为 `25 cases / 1593 assertions`；Release 与组合 ASan + UBSan 均显式重建
+50 个 Compute test executable，并通过 `Sora.Compute 477 / 477`。
+
+`PhysicalGraphMemoryReservationBenchmark` 测量 plan copy 基线与 `plan copy + synthetic backend reserve/release`。五个独立 Release 进程固定
+逻辑 CPU 2 并使用 High priority。reservation 增量中位数如下：
+
+| allocation count | reservation increment | increment / allocation |
+|---:|---:|---:|
+| 1 | `231.782 ns/graph` | `231.782 ns` |
+| 8 | `1.227 us/graph` | `153.379 ns` |
+| 32 | `5.599 us/graph` | `174.961 ns` |
+
+8 与 32 allocation 的单位成本处于 `153..175 ns`，未出现超线性控制面增长。该 benchmark 使用 synthetic backend，结论只约束框架的计划
+复制、callback、allocation wrapper 与逆序释放成本；真实 CPU/Vulkan allocation 延迟属于 backend 与驱动性能，须分别建立设备基线。
