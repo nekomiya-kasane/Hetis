@@ -5,6 +5,7 @@
  */
 
 #include <Sora/Core/StructuredLogger.h>
+#include <Sora/Core/Concurrency/RecordRingBuffer.h>
 #include <Sora/Core/Path.h>
 #include <Sora/Core/PAL/Thread.h>
 #include <Sora/Core/ToJson.h>
@@ -13,11 +14,15 @@
 #include <array>
 #include <cstring>
 #include <ctime>
+#include <limits>
+#include <memory>
 #include <span>
 
 namespace Sora {
 
     namespace {
+
+        using LogRing = Concurrency::RecordRingBuffer<64 * 1024, Concurrency::QueueTopologies::Spsc>;
 
         /** @brief Format @p time as local wall-clock time with millisecond precision. */
         [[nodiscard]] std::string FormatTimestamp(std::chrono::system_clock::time_point time) {
@@ -119,76 +124,39 @@ namespace Sora {
         uint32_t messageSize = 0;
     };
 
-    /** @brief Single-producer/single-consumer byte ring used by one producer thread and the logger drain thread. */
-    struct StructuredLogger::ThreadRing {
-        static constexpr size_t kCapacity = size_t{64} * 1024;
+    struct StructuredLogger::RingRegistry {
+        struct RingEntry {
+            std::mutex consumerMutex{};
+            LogRing ring{};
+            std::atomic<bool> retired{false};
+        };
 
-        [[nodiscard]] bool TryWrite(std::span<const std::byte> payload) noexcept {
-            const size_t totalSize = sizeof(uint32_t) + payload.size_bytes();
-            if (totalSize > kCapacity) {
-                return false;
-            }
+        static inline std::atomic<uint64_t> nextId{1};
 
-            const size_t write = writeIndex_.load(std::memory_order_relaxed);
-            const size_t read = readIndex_.load(std::memory_order_acquire);
-            if (kCapacity - (write - read) < totalSize) {
-                return false;
-            }
-
-            const uint32_t payloadSize = static_cast<uint32_t>(payload.size_bytes());
-            WriteBytes(write, std::as_bytes(std::span{&payloadSize, 1}));
-            WriteBytes(write + sizeof(payloadSize), payload);
-            writeIndex_.store(write + totalSize, std::memory_order_release);
-            return true;
+        void Register(const std::shared_ptr<RingEntry>& entry) {
+            std::lock_guard lock(mutex);
+            rings.push_back(entry);
         }
 
-        template<typename Fn>
-        uint32_t ReadAll(Fn&& fn) {
-            uint32_t count = 0;
-            size_t read = readIndex_.load(std::memory_order_relaxed);
-            const size_t write = writeIndex_.load(std::memory_order_acquire);
-
-            while (read + sizeof(uint32_t) <= write) {
-                uint32_t payloadSize = 0;
-                ReadBytes(read, std::as_writable_bytes(std::span{&payloadSize, 1}));
-                if (read + sizeof(uint32_t) + payloadSize > write) {
-                    break;
-                }
-
-                scratch_.resize(payloadSize);
-                ReadBytes(read + sizeof(uint32_t), std::span<std::byte>{scratch_.data(), scratch_.size()});
-                fn(std::span<const std::byte>{scratch_.data(), scratch_.size()});
-                read += sizeof(uint32_t) + payloadSize;
-                ++count;
-            }
-
-            readIndex_.store(read, std::memory_order_release);
-            return count;
+        void Retire(const std::shared_ptr<RingEntry>& entry) noexcept {
+            entry->retired.store(true, std::memory_order_release);
         }
 
-    private:
-        void WriteBytes(size_t index, std::span<const std::byte> bytes) noexcept {
-            const size_t offset = index % kCapacity;
-            const size_t first = std::min(bytes.size_bytes(), kCapacity - offset);
-            std::memcpy(storage_.data() + offset, bytes.data(), first);
-            if (first < bytes.size_bytes()) {
-                std::memcpy(storage_.data(), bytes.data() + first, bytes.size_bytes() - first);
-            }
+        [[nodiscard]] std::vector<std::shared_ptr<RingEntry>> Snapshot() const {
+            std::lock_guard lock(mutex);
+            return rings;
         }
 
-        void ReadBytes(size_t index, std::span<std::byte> bytes) noexcept {
-            const size_t offset = index % kCapacity;
-            const size_t first = std::min(bytes.size_bytes(), kCapacity - offset);
-            std::memcpy(bytes.data(), storage_.data() + offset, first);
-            if (first < bytes.size_bytes()) {
-                std::memcpy(bytes.data() + first, storage_.data(), bytes.size_bytes() - first);
-            }
+        void CollectRetired() {
+            std::lock_guard lock(mutex);
+            std::erase_if(rings, [](const std::shared_ptr<RingEntry>& entry) {
+                return entry->retired.load(std::memory_order_acquire) && entry->ring.IsEmpty();
+            });
         }
 
-        alignas(64) std::atomic<size_t> readIndex_{0};
-        alignas(64) std::atomic<size_t> writeIndex_{0};
-        alignas(64) std::array<std::byte, kCapacity> storage_{};
-        std::vector<std::byte> scratch_{};
+        uint64_t id = nextId.fetch_add(1, std::memory_order_relaxed);
+        mutable std::mutex mutex{};
+        std::vector<std::shared_ptr<RingEntry>> rings{};
     };
 
     std::string_view SourceLocation::FileName() const noexcept {
@@ -299,7 +267,7 @@ namespace Sora {
         return logger;
     }
 
-    StructuredLogger::StructuredLogger() {
+    StructuredLogger::StructuredLogger() : ringRegistry_(std::make_shared<RingRegistry>()) {
         for (std::atomic<uint8_t>& level : categoryLevels_) {
             level.store(static_cast<uint8_t>(LogLevel::Trace), std::memory_order_relaxed);
         }
@@ -381,15 +349,24 @@ namespace Sora {
     void StructuredLogger::WriteToRing(const LogRecord& record) {
         const auto timestampNs =
             std::chrono::duration_cast<std::chrono::nanoseconds>(record.timestamp.time_since_epoch()).count();
-        const SerializedLogHeader header{.level = static_cast<uint8_t>(record.level),
-                                         .category = static_cast<uint16_t>(record.category),
-                                         .line = record.source.line,
-                                         .column = record.source.column,
-                                         .timestampNs = static_cast<uint64_t>(timestampNs),
-                                         .threadId = record.threadId,
-                                         .fileSize = static_cast<uint32_t>(record.source.file.size()),
-                                         .functionSize = static_cast<uint32_t>(record.source.function.size()),
-                                         .messageSize = static_cast<uint32_t>(record.message.size())};
+        SerializedLogHeader header{.level = static_cast<uint8_t>(record.level),
+                                   .category = static_cast<uint16_t>(record.category),
+                                   .line = record.source.line,
+                                   .column = record.source.column,
+                                   .timestampNs = static_cast<uint64_t>(timestampNs),
+                                   .threadId = record.threadId};
+        static_assert(LogRing::kMaxPayloadBytes >= sizeof(SerializedLogHeader));
+        size_t remaining = LogRing::kMaxPayloadBytes - sizeof(SerializedLogHeader);
+        const auto takeLength = [&remaining](size_t requested) {
+            const size_t length = std::min({requested, remaining, size_t{std::numeric_limits<uint32_t>::max()}});
+            remaining -= length;
+            return static_cast<uint32_t>(length);
+        };
+
+        // Preserve the diagnostic payload first when direct submissions contain pathological source strings.
+        header.messageSize = takeLength(record.message.size());
+        header.fileSize = takeLength(record.source.file.size());
+        header.functionSize = takeLength(record.source.function.size());
         const size_t payloadSize = sizeof(header) + header.fileSize + header.functionSize + header.messageSize;
         thread_local std::vector<std::byte> payload;
         payload.resize(payloadSize);
@@ -403,15 +380,14 @@ namespace Sora {
         cursor += header.functionSize;
         std::memcpy(cursor, record.message.data(), header.messageSize);
 
-        ThreadRing& ring = GetThreadRing();
         const std::span<const std::byte> bytes{payload.data(), payload.size()};
-        if (ring.TryWrite(bytes)) {
+        if (TryWriteThreadRecord(bytes)) {
             drainCv_.notify_one();
             return;
         }
 
         if (backpressurePolicy_.load(std::memory_order_relaxed) == LogBackpressurePolicy::Block) {
-            while (!ring.TryWrite(bytes)) {
+            while (!TryWriteThreadRecord(bytes)) {
                 std::this_thread::yield();
             }
             drainCv_.notify_one();
@@ -460,13 +436,17 @@ namespace Sora {
 
     uint32_t StructuredLogger::DrainOnce() {
         uint32_t total = 0;
-        std::lock_guard lock(ringsMutex_);
-        for (RegisteredRing& registration : rings_) {
-            if (registration.ring != nullptr) {
-                total += registration.ring->ReadAll(
-                    [this](std::span<const std::byte> payload) { DispatchSerialized(payload); });
-            }
+        for (const std::shared_ptr<RingRegistry::RingEntry>& entry : ringRegistry_->Snapshot()) {
+            std::lock_guard lock(entry->consumerMutex);
+            total += static_cast<uint32_t>(entry->ring.Drain([this](std::span<const std::byte> payload) noexcept {
+                try {
+                    DispatchSerialized(payload);
+                } catch (...) {
+                    droppedCount_.fetch_add(1, std::memory_order_relaxed);
+                }
+            }));
         }
+        ringRegistry_->CollectRetired();
         return total;
     }
 
@@ -501,38 +481,40 @@ namespace Sora {
         }
     }
 
-    StructuredLogger::ThreadRing& StructuredLogger::GetThreadRing() {
-        struct RingGuard {
-            ThreadRing ring{};
+    bool StructuredLogger::TryWriteThreadRecord(std::span<const std::byte> payload) {
+        struct ProducerCache {
+            const RingRegistry* identity = nullptr;
+            uint64_t registryId = 0;
+            std::weak_ptr<RingRegistry> registry{};
+            std::shared_ptr<RingRegistry::RingEntry> entry{};
 
-            ~RingGuard() noexcept {
-                try {
-                    StructuredLogger& logger = StructuredLogger::Default();
-                    std::lock_guard lock(logger.ringsMutex_);
-                    std::erase_if(logger.rings_,
-                                  [this](const RegisteredRing& registration) { return registration.ring == &ring; });
-                    try {
-                        ring.ReadAll(
-                            [&logger](std::span<const std::byte> payload) { logger.DispatchSerialized(payload); });
-                    } catch (...) {
-                        logger.droppedCount_.fetch_add(1, std::memory_order_relaxed);
+            ~ProducerCache() { Release(); }
+
+            void Release() noexcept {
+                if (entry != nullptr) {
+                    if (const std::shared_ptr<RingRegistry> locked = registry.lock()) {
+                        locked->Retire(entry);
                     }
-                } catch (...) {
-                    return;
+                    entry.reset();
                 }
+                registry.reset();
+                identity = nullptr;
+                registryId = 0;
             }
         };
 
-        thread_local RingGuard guard;
-        thread_local bool registered = false;
-        if (!registered) {
-            registered = true;
-            StructuredLogger& logger = StructuredLogger::Default();
-            std::lock_guard lock(logger.ringsMutex_);
-            auto threadId = PAL::CurrentNativeThreadId();
-            logger.rings_.push_back({.ring = &guard.ring, .threadId = threadId ? threadId->Value() : 0});
+        thread_local ProducerCache cache;
+        RingRegistry& registry = *ringRegistry_;
+        if (cache.identity != &registry || cache.registryId != registry.id) [[unlikely]] {
+            cache.Release();
+            auto entry = std::make_shared<RingRegistry::RingEntry>();
+            registry.Register(entry);
+            cache.identity = &registry;
+            cache.registryId = registry.id;
+            cache.registry = ringRegistry_;
+            cache.entry = std::move(entry);
         }
-        return guard.ring;
+        return cache.entry->ring.TryWrite(payload);
     }
 
     void StructuredLogger::Flush() {

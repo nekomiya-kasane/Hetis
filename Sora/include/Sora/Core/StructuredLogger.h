@@ -20,8 +20,10 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <source_location>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -242,25 +244,20 @@ namespace Sora {
     private:
         static constexpr size_t kCategoryStorageSize = 64;
 
-        struct ThreadRing;
-        struct RegisteredRing {
-            ThreadRing* ring = nullptr; /**< Thread-local producer ring. */
-            uint64_t threadId = 0;      /**< Stable hash of the producing thread id. */
-        };
+        struct RingRegistry;
 
         void WriteToRing(const LogRecord& record);
+        [[nodiscard]] bool TryWriteThreadRecord(std::span<const std::byte> payload);
         void DispatchSerialized(std::span<const std::byte> payload);
         void DispatchToSinks(const LogRecord& record);
         uint32_t DrainOnce();
         void DrainLoop();
-        [[nodiscard]] static ThreadRing& GetThreadRing();
 
         mutable std::mutex mutex_{};
         std::vector<LogSink> sinks_{};
         std::array<std::atomic<uint8_t>, kCategoryStorageSize> categoryLevels_{};
 
-        std::mutex ringsMutex_{};
-        std::vector<RegisteredRing> rings_{};
+        std::shared_ptr<RingRegistry> ringRegistry_{};
 
         std::atomic<LogBackpressurePolicy> backpressurePolicy_{LogBackpressurePolicy::Drop};
         std::atomic<uint64_t> droppedCount_{0};
