@@ -281,6 +281,30 @@ TEST_CASE("Automatic partition planning calibration is bounded and shape-specifi
     REQUIRE(estimate->GuardedNanosecondsPerEvaluation() == 2'048);
     REQUIRE(estimate->sampleCount == 2);
     REQUIRE_FALSE(snapshot.Estimate(twoInputRoutes).has_value());
+
+    AutomaticPartitionPlanningCalibration deferred;
+    auto batch = deferred.BeginBatch();
+    REQUIRE_FALSE(batch.Estimate(computeOnly).has_value());
+    REQUIRE_FALSE(batch.Record({}));
+    REQUIRE(batch.Record({.shape = computeOnly, .evaluationCount = 4, .elapsedNanoseconds = 4'000}));
+    REQUIRE(batch.Record({.shape = computeOnly, .evaluationCount = 2, .elapsedNanoseconds = 4'000}));
+    REQUIRE(batch.Observations().size() == 2);
+    REQUIRE(batch.DroppedObservationCount() == 0);
+    REQUIRE_FALSE(deferred.Snapshot().Estimate(computeOnly).has_value());
+    REQUIRE(deferred.Observe({.shape = computeOnly, .evaluationCount = 1, .elapsedNanoseconds = 8'000}));
+    REQUIRE_FALSE(batch.Estimate(computeOnly).has_value());
+    REQUIRE(batch.PublishTo(deferred) ==
+            AutomaticPartitionPlanningCalibrationPublication{.published = 2, .dropped = 0});
+    REQUIRE(batch.Observations().empty());
+    REQUIRE(batch.PublishTo(deferred) == AutomaticPartitionPlanningCalibrationPublication{});
+    const auto deferredEstimate = deferred.Snapshot().Estimate(computeOnly);
+    REQUIRE(deferredEstimate.has_value());
+    REQUIRE(deferredEstimate->sampleCount == 3);
+    REQUIRE(batch.Record({.shape = computeOnly, .evaluationCount = 1, .elapsedNanoseconds = 1'000}));
+    batch.Discard();
+    REQUIRE(batch.Observations().empty());
+    REQUIRE(batch.DroppedObservationCount() == 0);
+
     REQUIRE(calibration.Observe({.shape = twoInputRoutes, .evaluationCount = 1, .elapsedNanoseconds = 1'000}));
     REQUIRE(calibration.Observe({.shape = sixteenInputRoutes, .evaluationCount = 1, .elapsedNanoseconds = 1'000}));
     REQUIRE(calibration.Snapshot().Estimate(twoInputRoutes).has_value());
@@ -399,6 +423,62 @@ TEST_CASE("HEFT publishes partition-search timing only after the frozen planning
     REQUIRE(estimate->meanNanosecondsPerEvaluation != 0);
     REQUIRE(first->selection.predictedMakespanNanoseconds != 0);
     REQUIRE(PhysicalGraphPlan::Create(first->selection.storage, fixture.resources).has_value());
+}
+
+TEST_CASE("HEFT defers portfolio calibration observations behind one frozen batch",
+          "[Sora][Compute][Runtime][HeftPlanner][Calibration][Batch]") {
+    std::atomic<uint32_t> destroyCount = 0;
+    PlanningFixture fixture{{.includeSecondDevice = true}, false};
+    ObserveKernel(fixture.performance, kCopyProgram.Hash(), Target(), kQueue, 1'000);
+    ObserveKernel(fixture.performance, kCopyProgram.Hash(), Target(kGpuB), kQueueB, 10);
+    ObserveTransfer(fixture.performance, Sora::Test::TestBackendService().Id(), kTransfer, kHost, kDevice, 10);
+    ObserveTransfer(fixture.performance, kServiceB, kTransferB, kHost, kDeviceB, 100);
+    Buffer input = MakeBuffer({93, 111});
+    Buffer output = MakeBuffer({93, 112});
+    REQUIRE(input.CommitWholeWrite(MakeAllocation(kHost, destroyCount)).has_value());
+    const ExecutionGraph graph = MakeGraph(Invocation(input, output));
+    const auto availability = fixture.artifacts.SnapshotAvailability();
+    REQUIRE(availability.has_value());
+    const auto performance = fixture.performance.Snapshot();
+    const auto packages = FreezeProgramCatalog(fixture.packages);
+    const std::array devices{fixture.device, RuntimeDeviceBinding{.service = kServiceB,
+                                                                  .descriptor = Descriptor(kGpuB),
+                                                                  .target = RuntimeTarget(Target(kGpuB))}};
+    const std::array snapshots{fixture.snapshot, DeviceSnapshot{.id = kGpuB,
+                                                                .state = DeviceState::Available,
+                                                                .generation = 1,
+                                                                .availableMemoryBytes = uint64_t{8} << 30U}};
+    const GraphPlanningContext context{.epochSequence = 1, .devices = devices, .snapshots = snapshots};
+    const GraphPlanningServices services{.packages = *packages,
+                                         .resources = fixture.resources.Inventory(),
+                                         .artifacts = *availability,
+                                         .performance = *performance};
+    auto immediate = std::make_shared<AutomaticPartitionPlanningCalibration>();
+    AutomaticPartitionPlanningCalibration deferred;
+    auto batch = deferred.BeginBatch();
+    const HeftPlanner planner{SmallPartitionPolicy(), immediate};
+
+    const auto first = planner.Plan(graph, context, services, batch);
+    const auto second = planner.Plan(graph, context, services, batch);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(first->statistics.partitionEvaluationBudget == 8);
+    REQUIRE(second->statistics.partitionEvaluationBudget == first->statistics.partitionEvaluationBudget);
+    REQUIRE(first->selection.predictedMakespanNanoseconds == second->selection.predictedMakespanNanoseconds);
+    REQUIRE(batch.Observations().size() == 2);
+    constexpr AutomaticPartitionPlanningShape shape{.axisCount = 1, .placementCount = 2, .inputRouteCount = 2};
+    REQUIRE_FALSE(batch.Estimate(shape).has_value());
+    REQUIRE_FALSE(immediate->Snapshot().Estimate(shape).has_value());
+    REQUIRE_FALSE(deferred.Snapshot().Estimate(shape).has_value());
+
+    REQUIRE(batch.PublishTo(deferred) ==
+            AutomaticPartitionPlanningCalibrationPublication{.published = 2, .dropped = 0});
+    const auto estimate = deferred.Snapshot().Estimate(shape);
+    REQUIRE(estimate.has_value());
+    REQUIRE(estimate->sampleCount == 2);
+    REQUIRE(batch.Observations().empty());
+    REQUIRE(PhysicalGraphPlan::Create(first->selection.storage, fixture.resources).has_value());
+    REQUIRE(PhysicalGraphPlan::Create(second->selection.storage, fixture.resources).has_value());
 }
 
 TEST_CASE("HEFT schedules and validates a fork-join DAG in upward-rank order",

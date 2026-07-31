@@ -14,8 +14,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <optional>
+#include <span>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace Sora::Compute {
 
@@ -68,6 +72,15 @@ namespace Sora::Compute {
         [[nodiscard]] constexpr bool Valid() const noexcept {
             return shape.Valid() && evaluationCount != 0 && elapsedNanoseconds != 0;
         }
+    };
+
+    /** @brief Outcome of publishing one deferred calibration batch. */
+    struct AutomaticPartitionPlanningCalibrationPublication {
+        size_t published = 0;
+        size_t dropped = 0;
+
+        friend constexpr bool operator==(AutomaticPartitionPlanningCalibrationPublication,
+                                         AutomaticPartitionPlanningCalibrationPublication) noexcept = default;
     };
 
     namespace Detail {
@@ -150,6 +163,80 @@ namespace Sora::Compute {
         std::array<uint64_t, Detail::kAutomaticPlanningCalibrationBucketCount> buckets_{};
     };
 
+    class AutomaticPartitionPlanningCalibration;
+
+    /**
+     * @brief One request-local frozen calibration view with explicitly deferred observations.
+     * @details Independent graph variants may each use a batch created from the same snapshot. Planning decisions then
+     * observe identical calibration facts, while completed search timings remain invisible to later variants until the
+     * caller publishes batches in canonical order. A batch is intentionally not thread-safe; parallel variants own
+     * separate batches.
+     */
+    class AutomaticPartitionPlanningCalibrationBatch final {
+    public:
+        constexpr explicit AutomaticPartitionPlanningCalibrationBatch(
+            AutomaticPartitionPlanningSnapshot snapshot) noexcept
+            : snapshot_(std::move(snapshot)) {}
+
+        /** @brief Return the frozen estimate for @p shape. */
+        [[nodiscard]] constexpr std::optional<AutomaticPartitionPlanningEstimate>
+        Estimate(AutomaticPartitionPlanningShape shape) const noexcept {
+            return snapshot_.Estimate(shape);
+        }
+
+        /** @brief Return the immutable calibration snapshot shared by this batch's planning evaluations. */
+        [[nodiscard]] constexpr const AutomaticPartitionPlanningSnapshot& FrozenSnapshot() const noexcept {
+            return snapshot_;
+        }
+
+        /** @brief Record one valid observation without allowing optional telemetry allocation to fail planning. */
+        [[nodiscard]] bool Record(AutomaticPartitionPlanningObservation observation) noexcept {
+            if (!observation.Valid()) {
+                return false;
+            }
+            if (observations_.size() == observations_.max_size()) {
+                CountDroppedObservation();
+                return false;
+            }
+            try {
+                observations_.push_back(observation);
+                return true;
+            } catch (const std::bad_alloc&) {
+                CountDroppedObservation();
+                return false;
+            }
+        }
+
+        /** @brief Return deferred observations in their deterministic recording order. */
+        [[nodiscard]] std::span<const AutomaticPartitionPlanningObservation> Observations() const noexcept {
+            return observations_;
+        }
+
+        /** @brief Return the number of valid observations dropped because the deferred buffer could not grow. */
+        [[nodiscard]] size_t DroppedObservationCount() const noexcept { return dropped_; }
+
+        /** @brief Publish every deferred observation exactly once and retain allocated capacity for reuse. */
+        [[nodiscard]] AutomaticPartitionPlanningCalibrationPublication
+        PublishTo(AutomaticPartitionPlanningCalibration& calibration) noexcept;
+
+        /** @brief Discard deferred observations while retaining allocated capacity. */
+        void Discard() noexcept {
+            observations_.clear();
+            dropped_ = 0;
+        }
+
+    private:
+        void CountDroppedObservation() noexcept {
+            if (dropped_ != std::numeric_limits<size_t>::max()) {
+                ++dropped_;
+            }
+        }
+
+        AutomaticPartitionPlanningSnapshot snapshot_{};
+        std::vector<AutomaticPartitionPlanningObservation> observations_{};
+        size_t dropped_ = 0;
+    };
+
     /**
      * @brief Fixed-capacity atomic telemetry for process-local partition-search cost.
      * @details Shape coordinates are compile-time bounded and map directly to atomic cells, so observation performs no
@@ -166,6 +253,11 @@ namespace Sora::Compute {
                 result.buckets_[index] = buckets_[index].load(std::memory_order_relaxed);
             }
             return result;
+        }
+
+        /** @brief Begin one deferred-observation batch from the current frozen calibration state. */
+        [[nodiscard]] AutomaticPartitionPlanningCalibrationBatch BeginBatch() const noexcept {
+            return AutomaticPartitionPlanningCalibrationBatch{Snapshot()};
         }
 
         /** @brief Publish one completed search observation; invalid observations are rejected without mutation. */
@@ -205,9 +297,23 @@ namespace Sora::Compute {
         std::array<std::atomic<uint64_t>, Detail::kAutomaticPlanningCalibrationBucketCount> buckets_{};
     };
 
+    inline AutomaticPartitionPlanningCalibrationPublication
+    AutomaticPartitionPlanningCalibrationBatch::PublishTo(AutomaticPartitionPlanningCalibration& calibration) noexcept {
+        const AutomaticPartitionPlanningCalibrationPublication result{.published = observations_.size(),
+                                                                      .dropped = dropped_};
+        for (const AutomaticPartitionPlanningObservation observation : observations_) {
+            static_cast<void>(calibration.Observe(observation));
+        }
+        observations_.clear();
+        dropped_ = 0;
+        return result;
+    }
+
     static_assert(std::is_trivially_copyable_v<AutomaticPartitionPlanningShape>);
     static_assert(std::is_trivially_copyable_v<AutomaticPartitionPlanningEstimate>);
     static_assert(std::is_trivially_copyable_v<AutomaticPartitionPlanningObservation>);
+    static_assert(std::is_trivially_copyable_v<AutomaticPartitionPlanningCalibrationPublication>);
     static_assert(std::is_trivially_copyable_v<AutomaticPartitionPlanningSnapshot>);
+    static_assert(std::is_nothrow_move_constructible_v<AutomaticPartitionPlanningCalibrationBatch>);
 
 } // namespace Sora::Compute

@@ -11,6 +11,7 @@
 #include <Sora/Compute/KernelBuilder.h>
 #include <Sora/Compute/KernelProgramBuilder.h>
 #include <Sora/Compute/Runtime/AutomaticDispatchPlanning.h>
+#include <Sora/Compute/Runtime/AutomaticPartitionPlanningCalibration.h>
 #include <Sora/Compute/Runtime/DispatchGraphPlanning.h>
 #include <Sora/Compute/Runtime/GraphPlanner.h>
 #include <Sora/Compute/Runtime/PhysicalGraphPlan.h>
@@ -231,6 +232,22 @@ namespace {
         }
 
         template<typename Planner>
+        [[nodiscard]] bool ValidateDeferredAutomaticTuning(
+            const Planner& planner, Sora::Compute::AutomaticPartitionPlanningCalibrationBatch& calibration) noexcept {
+            const auto planned = DetailedPlan(planner, calibration);
+            if (!planned || planned->statistics.partitionSearches == 0 ||
+                planned->statistics.partitionEvaluationBudget == 0 || calibration.Observations().empty() ||
+                !Sora::Compute::PhysicalGraphPlan::Create(planned->selection.storage, *catalog_)) {
+                failed_ = true;
+            } else {
+                automaticPartitionBudget_ = planned->statistics.partitionEvaluationBudget;
+                automaticPartitionEvaluations_ = planned->statistics.partitionEvaluations;
+            }
+            calibration.Discard();
+            return !failed_;
+        }
+
+        template<typename Planner>
         void Invoke(const Planner& planner) noexcept {
             const auto planned = Plan(planner);
             if (!planned) {
@@ -239,6 +256,20 @@ namespace {
             }
             checksum_ += planned->storage.allocations.size() + planned->storage.segments.size() +
                          planned->storage.edges.size() + planned->predictedMakespanNanoseconds + 1;
+        }
+
+        template<typename Planner>
+        void InvokeDeferred(const Planner& planner,
+                            Sora::Compute::AutomaticPartitionPlanningCalibrationBatch& calibration) noexcept {
+            const auto planned = DetailedPlan(planner, calibration);
+            if (!planned) {
+                failed_ = true;
+                calibration.Discard();
+                return;
+            }
+            checksum_ += planned->selection.storage.allocations.size() + planned->selection.storage.segments.size() +
+                         planned->selection.storage.edges.size() + planned->selection.predictedMakespanNanoseconds + 1;
+            calibration.Discard();
         }
 
         void InvokeAutomaticPartition(const Sora::Compute::AutomaticPartitionPolicy& policy) noexcept {
@@ -786,6 +817,18 @@ namespace {
                                  .performance = *performanceSnapshot_});
         }
 
+        template<typename Planner>
+        [[nodiscard]] auto
+        DetailedPlan(const Planner& planner,
+                     Sora::Compute::AutomaticPartitionPlanningCalibrationBatch& calibration) const noexcept {
+            return planner.Plan(*graph_, {.epochSequence = 1, .devices = devices_, .snapshots = snapshots_},
+                                {.packages = *programCatalog_,
+                                 .resources = catalog_->Inventory(),
+                                 .artifacts = *availability_,
+                                 .performance = *performanceSnapshot_},
+                                calibration);
+        }
+
         Sora::Compute::BackendService serviceA_{};
         Sora::Compute::BackendService serviceB_{};
         Sora::Compute::ArtifactCache artifacts_;
@@ -857,10 +900,12 @@ namespace {
     }
 
     template<typename Planner>
-    [[nodiscard]] int RunHeftPlanningBenchmark(const Planner& wholeOnlyPlanner, const Planner& automaticPlanner,
-                                               const Planner& amortizedPlanner, const Planner& rejectedPartitionPlanner,
-                                               const Planner& oneNeighborPlanner, const Planner& eightNeighborPlanner,
-                                               const Planner& adaptivePlanner) {
+    [[nodiscard]] int
+    RunHeftPlanningBenchmark(const Planner& wholeOnlyPlanner, const Planner& automaticPlanner,
+                             const Planner& amortizedPlanner, const Planner& rejectedPartitionPlanner,
+                             const Planner& oneNeighborPlanner, const Planner& eightNeighborPlanner,
+                             const Planner& adaptivePlanner,
+                             Sora::Compute::AutomaticPartitionPlanningCalibrationBatch& deferredCalibration) {
         DispatchPlanningBenchmarkFixture chain1Destination1{1, 1};
         DispatchPlanningBenchmarkFixture chain8Destination1{8, 1};
         DispatchPlanningBenchmarkFixture chain8Destination2{8, 2};
@@ -872,6 +917,7 @@ namespace {
         DispatchPlanningBenchmarkFixture chain8Destination2LocalSearch1{8, 2};
         DispatchPlanningBenchmarkFixture chain8Destination2LocalSearch8{8, 2};
         DispatchPlanningBenchmarkFixture adaptiveChain1Destination2{1, 2};
+        DispatchPlanningBenchmarkFixture deferredAdaptiveChain1Destination2{1, 2};
         DispatchPlanningBenchmarkFixture chain32Destination2{32, 2};
         DispatchPlanningBenchmarkFixture independent8Shared{8, 1, DispatchPlanningGraph::IndependentSharedTransfer};
         DispatchPlanningBenchmarkFixture independent8Distinct{8, 1,
@@ -886,7 +932,8 @@ namespace {
             !independent8Distinct.Validate(wholeOnlyPlanner) ||
             !chain8Destination2LocalSearch1.ValidateLocalSearch(oneNeighborPlanner, 1) ||
             !chain8Destination2LocalSearch8.ValidateLocalSearch(eightNeighborPlanner, 8) ||
-            !adaptiveChain1Destination2.ValidateAutomaticTuning(adaptivePlanner)) {
+            !adaptiveChain1Destination2.ValidateAutomaticTuning(adaptivePlanner) ||
+            !deferredAdaptiveChain1Destination2.ValidateDeferredAutomaticTuning(adaptivePlanner, deferredCalibration)) {
             return 2;
         }
         auto case1x1 = [&]() noexcept { chain1Destination1.Invoke(wholeOnlyPlanner); };
@@ -903,20 +950,25 @@ namespace {
         auto caseLocalSearch1 = [&]() noexcept { chain8Destination2LocalSearch1.Invoke(oneNeighborPlanner); };
         auto caseLocalSearch8 = [&]() noexcept { chain8Destination2LocalSearch8.Invoke(eightNeighborPlanner); };
         auto caseAdaptive1x2 = [&]() noexcept { adaptiveChain1Destination2.Invoke(adaptivePlanner); };
-        const std::array cases{Sora::Benchmark::MakeCase("chain_1_destination_1", case1x1),
-                               Sora::Benchmark::MakeCase("chain_8_destination_1", case8x1),
-                               Sora::Benchmark::MakeCase("chain_8_destination_2", case8x2),
-                               Sora::Benchmark::MakeCase("chain_32_destination_2", case32x2),
-                               Sora::Benchmark::MakeCase("automatic_chain_1_destination_2", caseAutomatic1x2),
-                               Sora::Benchmark::MakeCase("automatic_chain_8_destination_2", caseAutomatic8x2),
-                               Sora::Benchmark::MakeCase("automatic_chain_32_destination_2", caseAutomatic32x2),
-                               Sora::Benchmark::MakeCase("rejected_partition_chain_1_destination_2", caseRejected1x2),
-                               Sora::Benchmark::MakeCase("amortized_gate_chain_1_destination_2", caseAmortized1x2),
-                               Sora::Benchmark::MakeCase("independent_8_shared_transfer_engine", caseShared),
-                               Sora::Benchmark::MakeCase("independent_8_distinct_transfer_engines", caseDistinct),
-                               Sora::Benchmark::MakeCase("chain_8_destination_2_local_search_1", caseLocalSearch1),
-                               Sora::Benchmark::MakeCase("chain_8_destination_2_local_search_8", caseLocalSearch8),
-                               Sora::Benchmark::MakeCase("adaptive_reuse_1000_chain_1_destination_2", caseAdaptive1x2)};
+        auto caseDeferredAdaptive1x2 = [&]() noexcept {
+            deferredAdaptiveChain1Destination2.InvokeDeferred(adaptivePlanner, deferredCalibration);
+        };
+        const std::array cases{
+            Sora::Benchmark::MakeCase("chain_1_destination_1", case1x1),
+            Sora::Benchmark::MakeCase("chain_8_destination_1", case8x1),
+            Sora::Benchmark::MakeCase("chain_8_destination_2", case8x2),
+            Sora::Benchmark::MakeCase("chain_32_destination_2", case32x2),
+            Sora::Benchmark::MakeCase("automatic_chain_1_destination_2", caseAutomatic1x2),
+            Sora::Benchmark::MakeCase("automatic_chain_8_destination_2", caseAutomatic8x2),
+            Sora::Benchmark::MakeCase("automatic_chain_32_destination_2", caseAutomatic32x2),
+            Sora::Benchmark::MakeCase("rejected_partition_chain_1_destination_2", caseRejected1x2),
+            Sora::Benchmark::MakeCase("amortized_gate_chain_1_destination_2", caseAmortized1x2),
+            Sora::Benchmark::MakeCase("independent_8_shared_transfer_engine", caseShared),
+            Sora::Benchmark::MakeCase("independent_8_distinct_transfer_engines", caseDistinct),
+            Sora::Benchmark::MakeCase("chain_8_destination_2_local_search_1", caseLocalSearch1),
+            Sora::Benchmark::MakeCase("chain_8_destination_2_local_search_8", caseLocalSearch8),
+            Sora::Benchmark::MakeCase("adaptive_reuse_1000_chain_1_destination_2", caseAdaptive1x2),
+            Sora::Benchmark::MakeCase("deferred_adaptive_reuse_1000_chain_1_destination_2", caseDeferredAdaptive1x2)};
         const auto timing = Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(cases, 1, kMinimumSampleTime);
         const uint64_t checksum = chain1Destination1.Checksum() + chain8Destination1.Checksum() +
                                   chain8Destination2.Checksum() + chain32Destination2.Checksum() +
@@ -924,7 +976,8 @@ namespace {
                                   automaticChain32Destination2.Checksum() + rejectedChain1Destination2.Checksum() +
                                   amortizedChain1Destination2.Checksum() + independent8Shared.Checksum() +
                                   independent8Distinct.Checksum() + chain8Destination2LocalSearch1.Checksum() +
-                                  chain8Destination2LocalSearch8.Checksum() + adaptiveChain1Destination2.Checksum();
+                                  chain8Destination2LocalSearch8.Checksum() + adaptiveChain1Destination2.Checksum() +
+                                  deferredAdaptiveChain1Destination2.Checksum();
         if (checksum == 0 || checksum == std::numeric_limits<uint64_t>::max()) {
             return 3;
         }
@@ -954,11 +1007,13 @@ namespace {
         std::println("chain_8_destination_2_local_search_1,{:.6f},ns/plan", timing.MedianTime(11));
         std::println("chain_8_destination_2_local_search_8,{:.6f},ns/plan", timing.MedianTime(12));
         std::println("adaptive_reuse_1000_chain_1_destination_2,{:.6f},ns/plan", timing.MedianTime(13));
+        std::println("deferred_adaptive_reuse_1000_chain_1_destination_2,{:.6f},ns/plan", timing.MedianTime(14));
         std::println("automatic_chain_8_destination_2_over_whole,{:.6f},ratio", timing.PairedRatio(5, 2));
         std::println("automatic_chain_32_destination_2_over_whole,{:.6f},ratio", timing.PairedRatio(6, 3));
         std::println("rejected_partition_over_selected_partition,{:.6f},ratio", timing.PairedRatio(7, 4));
         std::println("amortized_gate_over_forced_search,{:.6f},ratio", timing.PairedRatio(8, 4));
         std::println("adaptive_over_forced_search,{:.6f},ratio", timing.PairedRatio(13, 4));
+        std::println("deferred_adaptive_over_immediate_adaptive,{:.6f},ratio", timing.PairedRatio(14, 13));
         std::println("adaptive_resolved_evaluation_budget,{},count",
                      adaptiveChain1Destination2.AutomaticPartitionBudget());
         std::println("adaptive_consumed_evaluations,{},count",
@@ -985,6 +1040,7 @@ namespace {
         std::println("chain_8_destination_2_local_search_1_repetitions,{},count", timing.repetitions[11]);
         std::println("chain_8_destination_2_local_search_8_repetitions,{},count", timing.repetitions[12]);
         std::println("adaptive_reuse_1000_chain_1_destination_2_repetitions,{},count", timing.repetitions[13]);
+        std::println("deferred_adaptive_reuse_1000_chain_1_destination_2_repetitions,{},count", timing.repetitions[14]);
         std::println("checksum,{},value", checksum);
         return 0;
     }

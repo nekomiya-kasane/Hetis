@@ -174,6 +174,16 @@ namespace Sora::Compute {
         Plan(const ExecutionGraph& graph, const GraphPlanningContext& context,
              GraphPlanningServices services) const noexcept;
 
+        /**
+         * @brief Build a plan from @p calibration's frozen view and defer every new search observation into it.
+         * @details This overload never reads or publishes through the planner's shared calibration model. Graph
+         * portfolio evaluation can therefore give each variant a batch derived from one common snapshot and publish
+         * the batches only after all physical objectives have been compared.
+         */
+        [[nodiscard]] std::expected<HeftPlanningResult, HeftPlanningError>
+        Plan(const ExecutionGraph& graph, const GraphPlanningContext& context, GraphPlanningServices services,
+             AutomaticPartitionPlanningCalibrationBatch& calibration) const noexcept;
+
         /** @brief Build a deterministic HEFT schedule and return its selected physical plan and objective. */
         [[nodiscard]] std::expected<GraphPlanSelection, HeftPlanningError>
         operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,

@@ -36,11 +36,12 @@ int main() {
             return 2;
         }
     }
+    auto deferredCalibration = adaptiveCalibration->BeginBatch();
     Sora::Compute::HeftPlanningPolicy adaptivePolicy;
     adaptivePolicy.dispatch.expectedReuseCount = 1'000;
     return RunHeftPlanningBenchmark(
         Sora::Compute::HeftPlanner{wholeOnlyPolicy}, Sora::Compute::HeftPlanner{automaticPolicy},
         Sora::Compute::HeftPlanner{}, Sora::Compute::HeftPlanner{rejectedPartitionPolicy},
         Sora::Compute::HeftPlanner{oneNeighborPolicy}, Sora::Compute::HeftPlanner{eightNeighborPolicy},
-        Sora::Compute::HeftPlanner{adaptivePolicy, std::move(adaptiveCalibration)});
+        Sora::Compute::HeftPlanner{adaptivePolicy, std::move(adaptiveCalibration)}, deferredCalibration);
 }

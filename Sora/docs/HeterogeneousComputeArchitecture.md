@@ -4165,11 +4165,10 @@ flowchart LR
     Choose --> Validate["PhysicalGraphPlan::Create"]
 ```
 
-该 portfolio 尚未实现，原因有两个。第一，HEFT 的 automatic-partition calibration 在 planning 期间发布 observation；若多个 variant 顺序执行且共享
-可变 calibration，后规划者会读取前规划者产生的新信息，variant 顺序将污染选择。下一阶段必须共享同一 frozen calibration snapshot，并在选定或
-全部评估结束后统一发布 observation。第二，candidate synthesis 当前只检查单 dispatch 的 `availableMemoryBytes >= requiredDeviceMemoryBytes`，无法
-证明整图峰值显存可行。portfolio objective 之前必须按设备跟踪 allocation live range 与 peak resident bytes；简单累加 workload bytes 同样不正确，
-因为不同 allocation 的生命周期可以重叠或互斥。
+该 portfolio 尚未实现。第 59 节已经解决 calibration 顺序污染：全部 variant 可读取同一 frozen snapshot，并把 observation 延迟到比较结束
+后再发布。剩余阻塞条件只有整图显存可行性。candidate synthesis 当前只检查单 dispatch 的
+`availableMemoryBytes >= requiredDeviceMemoryBytes`，无法证明整图峰值显存可行。portfolio objective 之前必须按设备跟踪 allocation
+live range 与 peak resident bytes；简单累加 workload bytes 同样不正确，因为不同 allocation 的生命周期可以重叠或互斥。
 
 ### 58.4 C++26 特性仍服从信息边界
 
@@ -4211,3 +4210,69 @@ current 较慢的轮数。
 全部 planner 墙钟指标落在 `0.967254x..1.018501x`。若按既有 gate 仅把“中位数退化超过 15% 且至少四个配对轮次
 同向”认定为可重复回归，则本次没有触发项；最坏中位数增量为 `1.8501%`。`GraphPlanSelection` 在当前 ABI 下为 80 bytes，
 新增 objective 只随 move-only 结果越过一次 planner 边界，测量也没有显示与该值传递相关的尺度增长。
+
+## 59. 2026-08-01 实现：graph portfolio 共享冻结 calibration 并延迟发布 observation
+
+### 59.1 batch 表示一次比较事务的 calibration 视图
+
+`AutomaticPartitionPlanningCalibrationBatch` 同时拥有一个 frozen `AutomaticPartitionPlanningSnapshot` 和一列按记录顺序排列的
+`AutomaticPartitionPlanningObservation`。`Estimate` 始终读取 frozen snapshot；`Record` 只写 request-local 连续缓冲区，不更新进程共享
+模型。于是多个 graph variant 的目标值都以同一组经验事实为条件，评价顺序不再进入 planner objective。
+
+observation 属于可选 telemetry。`Record` 在 vector 增长失败时捕获 `std::bad_alloc`，以饱和计数记录 dropped observation，物理规划仍可
+成功。`PublishTo` 按确定顺序发布全部有效 observation，然后清空逻辑大小与 dropped count，但保留 vector capacity；再次调用不会重复
+发布。`Discard` 提供同样的 exactly-once 终止边界而不更新模型，benchmark 和被取消的 portfolio 可以复用已分配容量。
+
+### 59.2 HEFT 明确区分即时发布与延迟发布
+
+`HeftPlanner` 保留原有默认接口。默认 `Plan` 在顶层调用开始时冻结 shared calibration，搜索结束后立即向该模型发布 observation；未配置模型
+时不分配 deferred buffer。新增 overload 接收 batch，忽略 planner 构造时携带的 shared model，只读取 `FrozenSnapshot()`，并把全部新
+observation 写入 batch。两条路径在 translation unit 内共享 `PlanningCalibrationAccess`，schedule、local search、lowering 与 objective
+计算没有重复实现。
+
+该分层把 planner 与 portfolio 的职责分开。planner 产生一个 selection 和一组 observation；portfolio 决定何时以及向哪个模型提交
+observation。后者属于请求级事务策略，不应进入 HEFT 的 DAG 调度算法。
+
+### 59.3 顺序与并行 portfolio 具有不同的 batch 所有权
+
+顺序评价可复用一个 batch：每个 variant 读取同一 frozen snapshot，observation 依次追加，全部 selection 比较完成后统一
+`PublishTo`。并行评价不能并发写同一个 batch；每个 variant 必须从共同 snapshot 构造独立 batch，待全部任务完成后再按 canonical variant
+顺序发布。该规则使 publication 顺序确定，同时不在 planner 热路径引入锁。
+
+```mermaid
+flowchart LR
+    Model["process calibration"] --> Freeze["one frozen snapshot"]
+    Freeze --> Original["original graph batch"]
+    Freeze --> Fused["fused graph batch"]
+    Freeze --> Specialized["device-specific batch"]
+    Original --> Compare["compare GraphPlanSelection"]
+    Fused --> Compare
+    Specialized --> Compare
+    Original --> Publish["canonical deferred publication"]
+    Fused --> Publish
+    Specialized --> Publish
+    Compare --> Publish
+    Publish --> Model
+```
+
+### 59.4 C++26 特性服从运行时信息边界
+
+calibration sample、clock timing 与 graph variant 都是运行时事实。reflection、annotation、consteval block 与 expansion statement 无法
+前移这些信息；stdexec 和 coroutine 只应在 portfolio 并行执行与结构化 join 层出现。当前切片使用普通值类型、`std::span`、
+`std::expected`、RAII 与 `noexcept` 边界，避免为顺序 HEFT 路径增加异步状态机或无信息增益的模板实例化。
+
+### 59.5 正确性与性能证据
+
+Release 与组合 ASan + UBSan 均显式重建 50 个 Compute test executable，随后通过 `Sora.Compute 475 / 475`。定向
+`HeftPlannerTest` 为 `28 cases / 1664 assertions`。测试覆盖 frozen snapshot、invalid observation、deferred visibility、
+exactly-once publish、discard、两次 HEFT variant 的相同 budget/objective，以及显式 batch overload 不写 planner shared model。
+
+默认 HEFT 路径以 `925be79` 为 parent，在逻辑 CPU 2、High priority 和全程构建负载监测下完成五轮交错 A/B。14 项
+current/parent 中位数为 `0.989479x..1.013273x`，最慢项 `chain_8_destination_2_local_search_8` 为 `1.013273x`，远低于 15%
+回归阈值。新增 deferred case 的五进程绝对中位数为 `207.571 us/plan`，范围 `199.738..207.984 us/plan`；相对 immediate
+adaptive 的逐进程 paired ratio 中位数为 `0.946953x`，范围 `0.891632x..0.984296x`。当前证据表明 request-local 延迟记录没有
+引入控制面回归。paired case 同时包含 shared model 的持续更新与 deferred snapshot 的冻结语义，不能把约 `5.3%` 的差异单独归因于
+atomic publication。
+
+本切片只消除了 calibration 顺序污染。graph portfolio 仍须先建立 per-device graph-wide peak live allocation memory 模型，随后才能
+安全比较 original、fused 与 device-specific selection 并提交获胜计划。

@@ -109,6 +109,28 @@ namespace Sora::Compute {
             std::vector<TransferCalendar> transfers{};
         };
 
+        /** Frozen calibration read view paired with exactly one observation-publication mode. */
+        struct PlanningCalibrationAccess {
+            const AutomaticPartitionPlanningSnapshot* snapshot = nullptr;
+            AutomaticPartitionPlanningCalibration* immediate = nullptr;
+            AutomaticPartitionPlanningCalibrationBatch* deferred = nullptr;
+
+            [[nodiscard]] bool Enabled() const noexcept { return snapshot != nullptr; }
+
+            [[nodiscard]] std::optional<AutomaticPartitionPlanningEstimate>
+            Estimate(AutomaticPartitionPlanningShape shape) const noexcept {
+                return snapshot != nullptr ? snapshot->Estimate(shape) : std::nullopt;
+            }
+
+            void Record(AutomaticPartitionPlanningObservation observation) const {
+                if (immediate != nullptr) {
+                    static_cast<void>(immediate->Observe(observation));
+                } else if (deferred != nullptr) {
+                    static_cast<void>(deferred->Record(observation));
+                }
+            }
+        };
+
         [[nodiscard]] constexpr HeftPlanningError CommonError(const DispatchGraphPlanningError& error) noexcept {
             HeftPlanningErrorCode code = HeftPlanningErrorCode::ResidencyLoweringFailed;
             switch (error.code) {
@@ -688,11 +710,11 @@ namespace Sora::Compute {
 
         [[nodiscard]] std::expected<ScheduleResult, HeftPlanningError> BuildScheduleAttempt(
             const ExecutionGraph& graph, const GraphPlanningContext& context, GraphPlanningServices services,
-            const HeftPlanningPolicy& policy, const AutomaticPartitionPlanningSnapshot* planningCalibration,
-            AutomaticPartitionPlanningCalibration* planningCalibrationModel, const GraphTopology& topology,
-            std::span<const uint64_t> ranks, GraphResidencyState residency, std::span<const uint8_t> partitionDisabled,
-            GraphNodeId& partitionFallback, HeftPlanningStatistics& statistics,
-            std::span<const std::optional<PlacementDecision>> directives = {}, bool collectAlternatives = false) {
+            const HeftPlanningPolicy& policy, PlanningCalibrationAccess planningCalibration,
+            const GraphTopology& topology, std::span<const uint64_t> ranks, GraphResidencyState residency,
+            std::span<const uint8_t> partitionDisabled, GraphNodeId& partitionFallback,
+            HeftPlanningStatistics& statistics, std::span<const std::optional<PlacementDecision>> directives = {},
+            bool collectAlternatives = false) {
             try {
                 if (!directives.empty() && directives.size() != graph.NodeCount()) {
                     return std::unexpected(Error(HeftPlanningErrorCode::SchedulingFailed));
@@ -804,9 +826,8 @@ namespace Sora::Compute {
                     const bool directed = !directives.empty() && directives[node.index].has_value();
                     const auto planningShape =
                         DescribeAutomaticPartitionPlanning(invocation, *candidates, policy.automaticPartition);
-                    const auto planningEstimate = planningShape && planningCalibration != nullptr
-                                                      ? planningCalibration->Estimate(*planningShape)
-                                                      : std::nullopt;
+                    const auto planningEstimate =
+                        planningShape ? planningCalibration.Estimate(*planningShape) : std::nullopt;
                     const auto partitionResolution =
                         planningShape
                             ? ResolveHeftAutomaticPartitionPolicy(
@@ -829,13 +850,13 @@ namespace Sora::Compute {
                                                          .replicas = replicas};
                         ++statistics.partitionSearches;
                         statistics.partitionEvaluationBudget += partitionPolicy.maximumPartitionEvaluations;
-                        const auto searchStart = planningCalibrationModel != nullptr
+                        const auto searchStart = planningCalibration.Enabled()
                                                      ? std::chrono::steady_clock::now()
                                                      : std::chrono::steady_clock::time_point{};
                         auto searched = Detail::SearchAutomaticDispatchPartitions(
                             invocation, *candidates, services, residency, partitionPolicy,
                             Detail::AutomaticPartitionSchedulerRef{scheduler});
-                        const auto searchElapsed = planningCalibrationModel != nullptr
+                        const auto searchElapsed = planningCalibration.Enabled()
                                                        ? std::chrono::duration_cast<std::chrono::nanoseconds>(
                                                              std::chrono::steady_clock::now() - searchStart)
                                                              .count()
@@ -853,12 +874,10 @@ namespace Sora::Compute {
                             return std::unexpected(Error(code, node, {}, static_cast<uint64_t>(searched.error())));
                         }
                         statistics.partitionEvaluations += searched->partitionEvaluations;
-                        if (planningCalibrationModel != nullptr && searched->partitionEvaluations != 0 &&
-                            searchElapsed > 0) {
-                            static_cast<void>(planningCalibrationModel->Observe(
-                                {.shape = *planningShape,
-                                 .evaluationCount = searched->partitionEvaluations,
-                                 .elapsedNanoseconds = static_cast<uint64_t>(searchElapsed)}));
+                        if (planningCalibration.Enabled() && searched->partitionEvaluations != 0 && searchElapsed > 0) {
+                            planningCalibration.Record({.shape = *planningShape,
+                                                        .evaluationCount = searched->partitionEvaluations,
+                                                        .elapsedNanoseconds = static_cast<uint64_t>(searchElapsed)});
                         }
                         if (searched->bestPartition &&
                             PartitionSufficientlyImproves(predecessorReady, best.finishNanoseconds,
@@ -981,19 +1000,20 @@ namespace Sora::Compute {
             }
         }
 
-        [[nodiscard]] std::expected<ScheduleResult, HeftPlanningError> BuildSchedule(
-            const ExecutionGraph& graph, const GraphPlanningContext& context, GraphPlanningServices services,
-            const HeftPlanningPolicy& policy, const AutomaticPartitionPlanningSnapshot* planningCalibration,
-            AutomaticPartitionPlanningCalibration* planningCalibrationModel, const GraphTopology& topology,
-            std::span<const uint64_t> ranks, const GraphResidencyState& residency, HeftPlanningStatistics& statistics,
-            std::span<const std::optional<PlacementDecision>> directives = {}, bool collectAlternatives = false) {
+        [[nodiscard]] std::expected<ScheduleResult, HeftPlanningError>
+        BuildSchedule(const ExecutionGraph& graph, const GraphPlanningContext& context, GraphPlanningServices services,
+                      const HeftPlanningPolicy& policy, PlanningCalibrationAccess planningCalibration,
+                      const GraphTopology& topology, std::span<const uint64_t> ranks,
+                      const GraphResidencyState& residency, HeftPlanningStatistics& statistics,
+                      std::span<const std::optional<PlacementDecision>> directives = {},
+                      bool collectAlternatives = false) {
             try {
                 std::vector<uint8_t> partitionDisabled(graph.NodeCount());
                 for (uint32_t attempt = 0; attempt <= graph.NodeCount(); ++attempt) {
                     GraphNodeId fallback{};
-                    auto result = BuildScheduleAttempt(
-                        graph, context, services, policy, planningCalibration, planningCalibrationModel, topology,
-                        ranks, residency, partitionDisabled, fallback, statistics, directives, collectAlternatives);
+                    auto result = BuildScheduleAttempt(graph, context, services, policy, planningCalibration, topology,
+                                                       ranks, residency, partitionDisabled, fallback, statistics,
+                                                       directives, collectAlternatives);
                     if (result || result.error().code != HeftPlanningErrorCode::NoCandidate || !fallback.Valid()) {
                         return result;
                     }
@@ -1013,8 +1033,7 @@ namespace Sora::Compute {
         [[nodiscard]] std::expected<ScheduleResult, HeftPlanningError>
         OptimizeSchedule(const ExecutionGraph& graph, const GraphPlanningContext& context,
                          GraphPlanningServices services, const HeftPlanningPolicy& policy,
-                         const AutomaticPartitionPlanningSnapshot* planningCalibration,
-                         AutomaticPartitionPlanningCalibration* planningCalibrationModel, const GraphTopology& topology,
+                         PlanningCalibrationAccess planningCalibration, const GraphTopology& topology,
                          std::span<const uint64_t> ranks, const GraphResidencyState& baseline, ScheduleResult incumbent,
                          HeftPlanningStatistics& statistics) {
             try {
@@ -1042,9 +1061,8 @@ namespace Sora::Compute {
                         const std::optional<PlacementDecision> candidateDirective = proposed;
                         const std::optional<PlacementDecision> original = directives[node.index];
                         directives[node.index] = std::move(proposed);
-                        auto neighbor = BuildSchedule(graph, context, services, policy, planningCalibration,
-                                                      planningCalibrationModel, topology, ranks, baseline, statistics,
-                                                      directives, true);
+                        auto neighbor = BuildSchedule(graph, context, services, policy, planningCalibration, topology,
+                                                      ranks, baseline, statistics, directives, true);
                         directives[node.index] = original;
                         ++statistics.neighborEvaluations;
                         if (!neighbor) {
@@ -1242,75 +1260,92 @@ namespace Sora::Compute {
         return result;
     }
 
-    std::expected<HeftPlanningResult, HeftPlanningError>
-    HeftPlanner::Plan(const ExecutionGraph& graph, const GraphPlanningContext& context,
-                      GraphPlanningServices services) const noexcept {
-        if (!policy_.localSearch.Valid() || !policy_.automaticPartition.Valid() ||
-            !policy_.automaticPartitionTuning.Valid()) {
-            return std::unexpected(Error(HeftPlanningErrorCode::InvalidPolicy));
-        }
-        if (auto valid = ValidateDispatchGraph(graph); !valid) {
-            return std::unexpected(CommonError(valid.error()));
-        }
-        auto baseline = FreezeGraphResidency(graph);
-        if (!baseline) {
-            const auto code = baseline.error().code == GraphResidencySnapshotErrorCode::OutOfMemory
-                                  ? HeftPlanningErrorCode::OutOfMemory
-                                  : HeftPlanningErrorCode::ResidencySnapshotFailed;
-            return std::unexpected(Error(code, baseline.error().node, {},
-                                         baseline.error().cause != 0 ? baseline.error().cause
-                                                                     : static_cast<uint64_t>(baseline.error().code)));
-        }
-        try {
-            auto topology = BuildTopology(graph.View());
-            if (!topology) {
-                return std::unexpected(topology.error());
+    namespace {
+
+        [[nodiscard]] std::expected<HeftPlanningResult, HeftPlanningError>
+        PlanHeft(const ExecutionGraph& graph, const GraphPlanningContext& context, GraphPlanningServices services,
+                 const HeftPlanningPolicy& policy, PlanningCalibrationAccess planningCalibration) noexcept {
+            if (!policy.localSearch.Valid() || !policy.automaticPartition.Valid() ||
+                !policy.automaticPartitionTuning.Valid()) {
+                return std::unexpected(Error(HeftPlanningErrorCode::InvalidPolicy));
             }
-            auto ranks = BuildUpwardRanks(graph, context, services, policy_);
-            if (!ranks) {
-                return std::unexpected(ranks.error());
+            if (auto valid = ValidateDispatchGraph(graph); !valid) {
+                return std::unexpected(CommonError(valid.error()));
             }
-            std::optional<AutomaticPartitionPlanningSnapshot> planningCalibration;
-            if (automaticPlanningCalibration_ != nullptr) {
-                planningCalibration.emplace(automaticPlanningCalibration_->Snapshot());
+            auto baseline = FreezeGraphResidency(graph);
+            if (!baseline) {
+                const auto code = baseline.error().code == GraphResidencySnapshotErrorCode::OutOfMemory
+                                      ? HeftPlanningErrorCode::OutOfMemory
+                                      : HeftPlanningErrorCode::ResidencySnapshotFailed;
+                return std::unexpected(Error(code, baseline.error().node, {},
+                                             baseline.error().cause != 0
+                                                 ? baseline.error().cause
+                                                 : static_cast<uint64_t>(baseline.error().code)));
             }
-            HeftPlanningStatistics statistics;
-            auto schedule = BuildSchedule(graph, context, services, policy_,
-                                          planningCalibration ? std::addressof(*planningCalibration) : nullptr,
-                                          automaticPlanningCalibration_.get(), *topology, *ranks, *baseline, statistics,
-                                          {}, policy_.localSearch.Enabled());
-            if (!schedule) {
-                return std::unexpected(schedule.error());
-            }
-            statistics.baselineMakespanNanoseconds = schedule->makespanNanoseconds;
-            if (policy_.localSearch.Enabled()) {
-                schedule = OptimizeSchedule(graph, context, services, policy_,
-                                            planningCalibration ? std::addressof(*planningCalibration) : nullptr,
-                                            automaticPlanningCalibration_.get(), *topology, *ranks, *baseline,
-                                            std::move(*schedule), statistics);
+            try {
+                auto topology = BuildTopology(graph.View());
+                if (!topology) {
+                    return std::unexpected(topology.error());
+                }
+                auto ranks = BuildUpwardRanks(graph, context, services, policy);
+                if (!ranks) {
+                    return std::unexpected(ranks.error());
+                }
+                HeftPlanningStatistics statistics;
+                auto schedule = BuildSchedule(graph, context, services, policy, planningCalibration, *topology, *ranks,
+                                              *baseline, statistics, {}, policy.localSearch.Enabled());
                 if (!schedule) {
                     return std::unexpected(schedule.error());
                 }
+                statistics.baselineMakespanNanoseconds = schedule->makespanNanoseconds;
+                if (policy.localSearch.Enabled()) {
+                    schedule = OptimizeSchedule(graph, context, services, policy, planningCalibration, *topology,
+                                                *ranks, *baseline, std::move(*schedule), statistics);
+                    if (!schedule) {
+                        return std::unexpected(schedule.error());
+                    }
+                }
+                auto selections = BuildEmissionOrder(graph, *topology, *schedule);
+                if (!selections) {
+                    return std::unexpected(selections.error());
+                }
+                auto transferConstraints = BuildTransferConstraints(*schedule);
+                if (!transferConstraints) {
+                    return std::unexpected(transferConstraints.error());
+                }
+                auto lowered = LowerDispatchGraph(graph, services, policy.dispatch.memory, *baseline, *selections,
+                                                  *transferConstraints);
+                if (!lowered) {
+                    return std::unexpected(CommonError(lowered.error()));
+                }
+                return HeftPlanningResult{.selection = {.storage = std::move(*lowered),
+                                                        .predictedMakespanNanoseconds = schedule->makespanNanoseconds},
+                                          .statistics = statistics};
+            } catch (const std::bad_alloc&) {
+                return std::unexpected(Error(HeftPlanningErrorCode::OutOfMemory));
             }
-            auto selections = BuildEmissionOrder(graph, *topology, *schedule);
-            if (!selections) {
-                return std::unexpected(selections.error());
-            }
-            auto transferConstraints = BuildTransferConstraints(*schedule);
-            if (!transferConstraints) {
-                return std::unexpected(transferConstraints.error());
-            }
-            auto lowered = LowerDispatchGraph(graph, services, policy_.dispatch.memory, *baseline, *selections,
-                                              *transferConstraints);
-            if (!lowered) {
-                return std::unexpected(CommonError(lowered.error()));
-            }
-            return HeftPlanningResult{.selection = {.storage = std::move(*lowered),
-                                                    .predictedMakespanNanoseconds = schedule->makespanNanoseconds},
-                                      .statistics = statistics};
-        } catch (const std::bad_alloc&) {
-            return std::unexpected(Error(HeftPlanningErrorCode::OutOfMemory));
         }
+
+    } // namespace
+
+    std::expected<HeftPlanningResult, HeftPlanningError>
+    HeftPlanner::Plan(const ExecutionGraph& graph, const GraphPlanningContext& context,
+                      GraphPlanningServices services) const noexcept {
+        std::optional<AutomaticPartitionPlanningSnapshot> snapshot;
+        if (automaticPlanningCalibration_ != nullptr) {
+            snapshot.emplace(automaticPlanningCalibration_->Snapshot());
+        }
+        return PlanHeft(graph, context, services, policy_,
+                        {.snapshot = snapshot ? std::addressof(*snapshot) : nullptr,
+                         .immediate = automaticPlanningCalibration_.get()});
+    }
+
+    std::expected<HeftPlanningResult, HeftPlanningError>
+    HeftPlanner::Plan(const ExecutionGraph& graph, const GraphPlanningContext& context, GraphPlanningServices services,
+                      AutomaticPartitionPlanningCalibrationBatch& calibration) const noexcept {
+        return PlanHeft(
+            graph, context, services, policy_,
+            {.snapshot = std::addressof(calibration.FrozenSnapshot()), .deferred = std::addressof(calibration)});
     }
 
     std::expected<GraphPlanSelection, HeftPlanningError>

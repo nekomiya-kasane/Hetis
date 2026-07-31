@@ -715,3 +715,41 @@ kernel 数据面均不读取 prior。benchmark 输入继续同时覆盖单/双 c
 正确性门禁为 Release 与组合 ASan + UBSan 各 `Sora.Compute 448 / 448`。定向 `PerformanceModelTest` 为
 `7 cases / 81 assertions`，`KernelInvocationTest` 为 `7 / 96`，`PhysicalResourceCatalogTest` 为 `10 / 262`。测试同时固定
 observed-over-prior 偏序、invalid workload 拒绝、真实 strided refinement 与全 64 位输入域内的无溢出比例算术。
+
+## Frozen calibration batch 与 deferred HEFT 基线
+
+本基线约束 graph portfolio 的第一个运行时前置条件：多个 variant 必须读取同一 frozen automatic-partition calibration，并把搜索计时
+延迟到全部 objective 比较结束后再发布。默认 HEFT 路径仍立即写共享模型；显式 batch 路径把 observation 写入 request-local vector，
+每次 timed invocation 后调用 `Discard()`，清空逻辑大小但保留 capacity。测量不包含最终 `PublishTo`，因为 publication 属于 portfolio
+事务提交阶段。
+
+默认路径 A/B 以 `925be79` 为 parent。parent/current 各丢弃一个完整预热进程，再运行五轮交错独立进程；进程固定逻辑 CPU 2，使用
+High priority，runner 每 50 ms 排除 `ninja`、`clang++`、`clang-cl` 与构建型 CMake。10 个正式进程均未受构建负载污染。
+
+| default HEFT metric | current / parent |
+|---|---:|
+| whole chain 1 / 1 | `0.989479x` |
+| whole chain 8 / 2 | `0.999521x` |
+| whole chain 32 / 2 | `1.001247x` |
+| automatic chain 32 / 2 | `0.995200x` |
+| adaptive reuse 1000 | `0.999604x` |
+| local search 8 evaluations | `1.013273x` (`542.819 -> 550.023 us`) |
+
+全部 14 项 current/parent 中位数位于 `0.989479x..1.013273x`，最慢项有 4/5 个配对轮次同向，但增量只有 `1.3273%`，
+未触发“中位数退化超过 15%”的审查阈值。表中 baseline/current 未保存绝对值的项目只记录正式 ratio，不用后续单次运行补造绝对值。
+
+新增 deferred case 使用同一已成熟 calibration 的 frozen snapshot，和 immediate adaptive case 在一个 15-case interleaved benchmark 内
+配对。五个独立 Release 进程同样固定逻辑 CPU 2、High priority，并每 50 ms 检查构建污染。
+
+| deferred metric | five-process range | median |
+|---|---:|---:|
+| deferred adaptive reuse 1000 | `199.738..207.984 us/plan` | `207.571 us/plan` |
+| deferred / immediate adaptive | `0.891632x..0.984296x` | `0.946953x` |
+
+deferred 路径没有性能退化。paired case 同时包含 request-local append、capacity reuse、shared model 的持续更新与 deferred snapshot 的
+冻结语义，因此不能把约 `5.3%` 的差异单独归因于 atomic publication。该结果只描述当前单线程 portfolio 控制面，不外推到并行
+variant 的最终 merge 成本。
+
+正确性门禁为 Release 与组合 ASan + UBSan 各 `Sora.Compute 475 / 475`，两种配置均显式重建 50 个 Compute test executable。
+sanitizer compile database 确认 `HeftPlanner.cpp` 与 `HeftPlannerTest.cpp` 同时带有 address、undefined sanitizer、
+`-freflection-latest` 与 `-std=gnu++26`。定向 `HeftPlannerTest` 为 `28 cases / 1664 assertions`。
