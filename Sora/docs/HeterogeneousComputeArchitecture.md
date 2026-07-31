@@ -3955,16 +3955,16 @@ flowchart LR
     Registry["frozen admitted registry snapshot"] --> Catalog["ProgramCatalogSnapshot"]
     Parents["admitted parent programs"] --> Optimizer["GraphOptimizer"]
     Graph["submission ExecutionGraph"] --> Optimizer
-    Optimizer --> Derived["one generated ProgramPackage"]
+    Optimizer --> Derived["bounded generated ProgramPackages"]
     Derived --> Catalog
     Catalog --> Planner["GraphPlanningServices"]
     Planner --> Plan["PhysicalGraphPlan owns program bytes"]
     Plan --> Materializer["materialization / import / JIT"]
 ```
 
-catalog 的 generated 容量由 `optional<ProgramPackage>` 在类型结构上限定为 1，与
-`OptimizeExecutionGraph` 每次最多替换一个 producer-consumer pair 的语义一致。重复加入同一 program 为幂等操作；加入第二个不同
-program 返回 `CapacityExceeded`。该边界消除了无界 `vector` 和隐含缓存策略，也不在 planner 热路径增加虚调用、锁或堆分配。
+catalog 的 generated 容量由 `ProgramCatalogLimits` 显式限定。程序数与 canonical bytes 均有独立上界；重复加入同一 program 为幂等操作，
+不同 program identity 按 hash 有序存储。多程序 publication 是强事务：全部 program 通过 identity、容量与字节预算校验后才产生新 snapshot，
+任一失败均保留原 catalog。planner 的解析接口仍为不可变值语义，不增加虚调用与锁。
 
 ### 56.2 图优化是规划前的强事务
 
@@ -4032,6 +4032,78 @@ start、盈利与非盈利路径、planner 可见性、recovery 复用和 move-o
 `14.771 ns/element`，LLVM JIT `0.581 ns/element`，pipeline round-trip/dispatch `0.992x`。上述结果没有越过既有 15% 回归阈值，Vec3
 比例仍高于 `1.8x` 门槛。
 
-本切片可冻结为 `frozen admission -> submission catalog -> graph fusion -> physical planning -> materialization/JIT`。多 pair fusion、GPU
+本切片可冻结为 `frozen admission -> submission catalog -> graph fusion -> physical planning -> materialization/JIT`。GPU
 专用融合规则、跨设备 memory pressure、remote worker admission 与结构化异步编译编排属于后续里程碑，不应反向扩大全局 registry 的
 信任权限。
+
+## 57. 2026-07-31 扩展：maximal feasible region 与唯一程序成本选择
+
+### 57.1 结构链与可编译区域是两个不同层次
+
+机会发现层只输出 canonical node identifier 相邻、intermediate 具有唯一写者和唯一读者的 elementwise edge。相邻约束使每条结构链对应一个
+连续 node-id 区间，`ReplaceRegions` 因而可以按区间替换而不删除无关节点。该约束是替换正确性的前提；未来若允许非相邻 fusion，region 必须
+改为显式 node set，不能沿用区间语义。
+
+结构链不等于一个可编译 kernel。optimizer 从链首开始线性追加节点；domain、policy、intermediate 或 compiler capacity 不兼容时，当前
+maximal feasible region 结束，失败 edge 被跳过，并从后继 edge 继续扫描。非法 producer/consumer 属于图与机会发现层之间的不变量破坏，
+allocation failure 属于 OOM，两者均保留原图并报告 `Failed`。该分类保证晚出现的 capacity boundary 不会丢弃已经形成的 profitable prefix。
+
+### 57.2 成本单位是唯一 program identity
+
+一个 maximal region 产生一个 `FusionRegionCandidate`。多个独立 region 可能生成相同 canonical program；若按 region 重复收取 JIT 成本，
+收益模型会系统性低估程序复用。当前选择器先按 program hash 排序 candidate index，再以一个扁平 index 数组和连续 group range 表示等价类。
+相同 hash 的 bytes 必须完全相等，否则报告 identity collision。
+
+设 program group 为 `G`，单次提交的判据为
+
+```text
+group_benefit(G) = sum(region_benefit(r) for r in selected(G))
+activation_cost(G) = compilation_latency / expected_reuse_count
+select G iff group_benefit(G) > activation_cost(G)
+```
+
+activation cost 每个唯一 program 只收取一次；后续同 identity region 只增加其 launch 与 traffic 收益。已存在于 submission catalog 的 identity
+不消耗新的 publication slot 或 byte budget，但仍保留一次 backend activation cost，因为 program 可解析不等于当前目标已经存在 executable
+artifact。若后续 artifact service 提供 exact live-hit 证明，该成本应由 artifact resolution model 覆盖，而不能由 catalog existence 推断为零。
+
+### 57.3 选择器是有界确定性启发式，不是精确 knapsack
+
+program、region 与 byte 三类预算共同约束选择。一般路径按边际净收益密度选择 activation action；密度相同则比较净收益与 program hash，结果
+不依赖注册顺序。该算法是有界确定性启发式，不承诺全局 knapsack 最优。全局精确选择需要把每个 program 的一次激活成本与其 region 前缀建模为
+带组启动代价的组合优化问题；在当前默认 `maximumFusionRegions == 64` 的控制面预算下，求精确解没有实测收益依据。
+
+预算不足属于合法决策，report 返回 `SkippedBudget`，`ComputeContext` 单独累计 `skippedBudget`。publication 先校验全部新 identity，再生成新
+catalog；图替换也在独立 `GraphBuilder` 中完成。catalog 或 graph 任一阶段失败，调用者仍获得原图与原 catalog，二者不会形成半提交状态。
+
+### 57.4 扁平分组与单候选快路径恢复 pair 基线
+
+第一版一般选择器为每个 program group 持有独立 candidate vector，pair 也进入 group selection；控制面由冻结记录约 `6.9 us/graph` 上升至
+`10.8 us/graph`。当前实现包含三项结构优化：单 candidate 绕过分组与密度选择；所有 group 共享一个按 hash 排序的 candidate-index 数组；
+`ReplaceRegions` 仅在首次遇到未折叠的外部 edge 时分配 projected-edge storage。最后一项保留多区域的 `O(E log E)` canonical deduplication，
+同时消除 pair 与整链全部 edge 折叠为 self-edge 时的空容器分配。
+
+正式样本使用 Release `-O3 -march=haswell` benchmark。PowerShell host 固定到逻辑 CPU 2，priority 为 High；先丢弃一个预热进程，再运行五个
+独立进程。每个样本前后均确认不存在 Ninja、`clang++` 或 `clang-cl`，出现并发构建的样本立即丢弃。五进程中位数如下。
+
+| graph | control-plane median | normalized increment |
+|---|---:|---:|
+| disabled pair | `0.689 us/graph` | baseline |
+| enabled no-op | `0.702 us/graph` | `0.012 us/graph` paired median |
+| profitable pair | `7.070 us/graph` | `6.388 us/graph` |
+| maximal chain, 8 dispatches | `25.951 us/graph` | `3.159 us/input dispatch` |
+| 4 independent regions | `26.391 us/graph` | `6.423 us/input region` |
+| region budget, 2 of 4 | `30.533 us/graph` | budgeted selection included |
+
+pair 净增量相对冻结记录约 `6.2 us` 增加约 `3.0%`，低于 15% 审查门槛。pair、8-dispatch chain 与 4-region graph 的控制面成本分别约为
+预测提交收益的 `1.5%`、`0.87%` 与 `1.55%`。因此当前收益模型足以摊销 optimizer；若 program 数、region 上限或 graph edge 数量显著增加，
+后续基准应分别扩展 identity cardinality 与 surviving-edge density，不能只增加 dispatch 数。
+
+### 57.5 C++26 机制服从信息可得性
+
+本扩展没有新增 reflection、annotation、consteval block 或 coroutine。program equivalence、catalog budget、trust snapshot、expected reuse 与运行时
+graph topology 都是提交时事实，静态反射无法把它们前移到 translation phase。既有 consteval kernel builder 继续生成静态 kernel schema，
+stdexec 继续承担 lazy preparation、stopped/error propagation 与 recovery composition；运行时选择器保持普通值类型、连续容器与
+`noexcept std::expected` 边界。该分工避免把语言特性变成装饰性抽象，也没有牺牲编译期已有的 schema 校验能力。
+
+本扩展可冻结为 `structural chain -> maximal feasible partition -> unique-program activation -> budgeted transactional publication -> graph
+replacement`。GPU 专用 fusion、跨设备联合代价与 remote execution 仍属于后续里程碑，不进入本次收束边界。

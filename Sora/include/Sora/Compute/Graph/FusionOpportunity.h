@@ -33,7 +33,8 @@ namespace Sora::Compute {
     /**
      * @brief Discover canonical elementwise fusion opportunities without consulting compiler or runtime services.
      * @details An intermediate logical buffer must have exactly one producer write and one consumer read in the
-     * complete graph. This conservative v1 rule excludes fanout, in-place updates, and disjoint subregion sharing.
+     * complete graph, and the producer and consumer must have adjacent canonical node identifiers. This conservative
+     * v1 rule excludes fanout, in-place updates, disjoint subregion sharing, and non-contiguous replacement regions.
      */
     [[nodiscard]] std::expected<std::vector<ElementwiseFusionOpportunity>, FusionOpportunityError>
     FindElementwiseFusionOpportunities(const ExecutionGraph& graph) noexcept;

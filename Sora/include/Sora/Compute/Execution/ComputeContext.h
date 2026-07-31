@@ -215,6 +215,7 @@ namespace Sora::Compute {
                         .disabled = disabled.load(std::memory_order_relaxed),
                         .fused = fused.load(std::memory_order_relaxed),
                         .skippedUnprofitable = skippedUnprofitable.load(std::memory_order_relaxed),
+                        .skippedBudget = skippedBudget.load(std::memory_order_relaxed),
                         .failed = failed.load(std::memory_order_relaxed)};
             }
 
@@ -229,6 +230,8 @@ namespace Sora::Compute {
                         return fused;
                     case GraphOptimizationStatus::SkippedUnprofitable:
                         return skippedUnprofitable;
+                    case GraphOptimizationStatus::SkippedBudget:
+                        return skippedBudget;
                     case GraphOptimizationStatus::Failed:
                         return failed;
                 }
@@ -240,6 +243,7 @@ namespace Sora::Compute {
             std::atomic<uint64_t> disabled = 0;
             std::atomic<uint64_t> fused = 0;
             std::atomic<uint64_t> skippedUnprofitable = 0;
+            std::atomic<uint64_t> skippedBudget = 0;
             std::atomic<uint64_t> failed = 0;
         };
 
@@ -450,7 +454,9 @@ namespace Sora::Compute {
                 [state, preparation](
                     const GraphAttemptContext& attempt) noexcept -> std::expected<ExecutableGraph, PreparationError> {
                 if (!preparation->prepared.has_value()) {
-                    auto programs = ProgramCatalogSnapshot::Create(state->packages.Snapshot());
+                    auto programs = ProgramCatalogSnapshot::Create(
+                        state->packages.Snapshot(), {.maximumGeneratedPrograms = state->fusion.maximumFusionRegions,
+                                                     .maximumGeneratedBytes = state->fusion.maximumGeneratedBytes});
                     if (!programs) {
                         return std::unexpected(PreparationError{GraphProgramCatalogFailure{programs.error()}});
                     }

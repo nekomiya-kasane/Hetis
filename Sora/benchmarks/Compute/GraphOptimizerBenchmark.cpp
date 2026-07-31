@@ -27,8 +27,11 @@ namespace {
     constexpr size_t kSamples = 9;
     constexpr auto kMinimumSampleTime = std::chrono::milliseconds(50);
     constexpr uint64_t kElementCount = uint64_t{1} << 20U;
+    constexpr size_t kLongChainDispatches = 8;
+    constexpr size_t kIndependentRegions = 4;
     constexpr Sora::Compute::ValueType kFloat{Sora::Compute::ScalarKind::Float32, 1};
     constexpr Sora::Compute::GraphFusionPolicy kFusionPolicy{};
+    constexpr Sora::Compute::GraphFusionPolicy kRegionBudgetPolicy{.maximumFusionRegions = 2};
 
     consteval auto MakeCopyKernel() {
         Sora::Compute::KernelBuilder<1, 1> scalar;
@@ -86,33 +89,75 @@ namespace {
         }
     }
 
-    [[nodiscard]] std::optional<Sora::Compute::ExecutionGraph> MakeProfitableGraph() noexcept {
-        auto source = MakeBuffer({1, 1});
-        auto intermediate = MakeBuffer({1, 2});
-        auto output = MakeBuffer({1, 3});
-        if (!source || !intermediate || !output) {
+    [[nodiscard]] std::optional<Sora::Compute::ExecutionGraph> MakeChainGraph(uint64_t identity,
+                                                                              size_t dispatches) noexcept {
+        auto source = MakeBuffer({identity, 1});
+        if (!source || dispatches < 2) {
             return std::nullopt;
         }
-        auto sourceView = View(std::move(*source));
-        auto intermediateView = View(std::move(*intermediate));
-        auto outputView = View(std::move(*output));
-        if (!sourceView || !intermediateView || !outputView) {
-            return std::nullopt;
-        }
-        auto producer = Invoke(std::move(*sourceView), *intermediateView);
-        auto consumer = Invoke(std::move(*intermediateView), std::move(*outputView));
-        if (!producer || !consumer) {
+        auto previous = View(std::move(*source));
+        if (!previous) {
             return std::nullopt;
         }
         Sora::Compute::GraphBuilder builder;
-        if (!builder.AddDispatch(std::move(*producer)) || !builder.AddDispatch(std::move(*consumer))) {
-            return std::nullopt;
+        for (size_t index = 0; index < dispatches; ++index) {
+            auto buffer = MakeBuffer({identity, index + 2});
+            if (!buffer) {
+                return std::nullopt;
+            }
+            auto next = View(std::move(*buffer));
+            if (!next) {
+                return std::nullopt;
+            }
+            auto invocation = Invoke(*previous, *next);
+            if (!invocation || !builder.AddDispatch(std::move(*invocation))) {
+                return std::nullopt;
+            }
+            previous = std::move(next);
         }
         auto graph = std::move(builder).Finish();
         if (!graph) {
             return std::nullopt;
         }
         return std::move(*graph);
+    }
+
+    [[nodiscard]] std::optional<Sora::Compute::ExecutionGraph> MakeIndependentRegionGraph(uint64_t identity,
+                                                                                          size_t regions) noexcept {
+        if (regions == 0) {
+            return std::nullopt;
+        }
+        Sora::Compute::GraphBuilder builder;
+        for (size_t region = 0; region < regions; ++region) {
+            const uint64_t first = region * 3 + 1;
+            auto source = MakeBuffer({identity, first});
+            auto intermediate = MakeBuffer({identity, first + 1});
+            auto output = MakeBuffer({identity, first + 2});
+            if (!source || !intermediate || !output) {
+                return std::nullopt;
+            }
+            auto sourceView = View(std::move(*source));
+            auto intermediateView = View(std::move(*intermediate));
+            auto outputView = View(std::move(*output));
+            if (!sourceView || !intermediateView || !outputView) {
+                return std::nullopt;
+            }
+            auto producer = Invoke(std::move(*sourceView), *intermediateView);
+            auto consumer = Invoke(std::move(*intermediateView), std::move(*outputView));
+            if (!producer || !consumer || !builder.AddDispatch(std::move(*producer)) ||
+                !builder.AddDispatch(std::move(*consumer))) {
+                return std::nullopt;
+            }
+        }
+        auto graph = std::move(builder).Finish();
+        if (!graph) {
+            return std::nullopt;
+        }
+        return std::move(*graph);
+    }
+
+    [[nodiscard]] std::optional<Sora::Compute::ExecutionGraph> MakeProfitableGraph() noexcept {
+        return MakeChainGraph(1, 2);
     }
 
     [[nodiscard]] std::optional<Sora::Compute::ExecutionGraph> MakeNoOpGraph() noexcept {
@@ -169,13 +214,17 @@ namespace {
             auto catalog = Sora::Compute::ProgramCatalogSnapshot::Create(packages_.Snapshot());
             auto profitable = MakeProfitableGraph();
             auto noOp = MakeNoOpGraph();
-            if (!catalog || !profitable || !noOp) {
+            auto longChain = MakeChainGraph(3, kLongChainDispatches);
+            auto independent = MakeIndependentRegionGraph(4, kIndependentRegions);
+            if (!catalog || !profitable || !noOp || !longChain || !independent) {
                 failed_ = true;
                 return;
             }
             catalog_.emplace(std::move(*catalog));
             profitable_.emplace(std::move(*profitable));
             noOp_.emplace(std::move(*noOp));
+            longChain_.emplace(std::move(*longChain));
+            independent_.emplace(std::move(*independent));
             Validate();
         }
 
@@ -185,10 +234,25 @@ namespace {
 
         void ProfitableFusion() noexcept { InvokeCase(*profitable_, kFusionPolicy); }
 
+        void LongChain() noexcept { InvokeCase(*longChain_, kFusionPolicy); }
+
+        void IndependentRegions() noexcept { InvokeCase(*independent_, kFusionPolicy); }
+
+        void RegionBudget() noexcept { InvokeCase(*independent_, kRegionBudgetPolicy); }
+
         [[nodiscard]] bool Failed() const noexcept { return failed_; }
         [[nodiscard]] uint64_t Checksum() const noexcept { return checksum_; }
         [[nodiscard]] const Sora::Compute::GraphOptimizationReport& FusionReport() const noexcept {
             return fusionReport_;
+        }
+        [[nodiscard]] const Sora::Compute::GraphOptimizationReport& LongChainReport() const noexcept {
+            return longChainReport_;
+        }
+        [[nodiscard]] const Sora::Compute::GraphOptimizationReport& IndependentReport() const noexcept {
+            return independentReport_;
+        }
+        [[nodiscard]] const Sora::Compute::GraphOptimizationReport& RegionBudgetReport() const noexcept {
+            return regionBudgetReport_;
         }
 
     private:
@@ -207,16 +271,33 @@ namespace {
                 auto disabled = Sora::Compute::OptimizeExecutionGraph(*profitable_, *catalog_, {.enabled = false});
                 auto noOp = Sora::Compute::OptimizeExecutionGraph(*noOp_, *catalog_, kFusionPolicy);
                 auto fused = Sora::Compute::OptimizeExecutionGraph(*profitable_, *catalog_, kFusionPolicy);
+                auto longChain = Sora::Compute::OptimizeExecutionGraph(*longChain_, *catalog_, kFusionPolicy);
+                auto independent = Sora::Compute::OptimizeExecutionGraph(*independent_, *catalog_, kFusionPolicy);
+                auto budget = Sora::Compute::OptimizeExecutionGraph(*independent_, *catalog_, kRegionBudgetPolicy);
                 if (disabled.report.status != Sora::Compute::GraphOptimizationStatus::Disabled ||
                     disabled.graph.NodeCount() != 2 ||
                     noOp.report.status != Sora::Compute::GraphOptimizationStatus::Unchanged ||
                     noOp.graph.NodeCount() != 2 ||
                     fused.report.status != Sora::Compute::GraphOptimizationStatus::Fused ||
-                    fused.graph.NodeCount() != 1 || fused.programs.GeneratedProgramCount() != 1) {
+                    fused.graph.NodeCount() != 1 || fused.programs.GeneratedProgramCount() != 1 ||
+                    longChain.report.status != Sora::Compute::GraphOptimizationStatus::Fused ||
+                    longChain.graph.NodeCount() != 1 || longChain.report.launchesRemoved != kLongChainDispatches - 1 ||
+                    longChain.programs.GeneratedProgramCount() != 1 ||
+                    independent.report.status != Sora::Compute::GraphOptimizationStatus::Fused ||
+                    independent.graph.NodeCount() != kIndependentRegions ||
+                    independent.report.regionsFused != kIndependentRegions ||
+                    independent.programs.GeneratedProgramCount() != 1 ||
+                    budget.report.status != Sora::Compute::GraphOptimizationStatus::Fused ||
+                    budget.graph.NodeCount() != kIndependentRegions * 2 - kRegionBudgetPolicy.maximumFusionRegions ||
+                    budget.report.regionsFused != kRegionBudgetPolicy.maximumFusionRegions ||
+                    budget.programs.GeneratedProgramCount() != 1) {
                     failed_ = true;
                     return;
                 }
                 fusionReport_ = fused.report;
+                longChainReport_ = longChain.report;
+                independentReport_ = independent.report;
+                regionBudgetReport_ = budget.report;
             } catch (const std::bad_alloc&) {
                 failed_ = true;
             }
@@ -226,7 +307,12 @@ namespace {
         std::optional<Sora::Compute::ProgramCatalogSnapshot> catalog_{};
         std::optional<Sora::Compute::ExecutionGraph> profitable_{};
         std::optional<Sora::Compute::ExecutionGraph> noOp_{};
+        std::optional<Sora::Compute::ExecutionGraph> longChain_{};
+        std::optional<Sora::Compute::ExecutionGraph> independent_{};
         Sora::Compute::GraphOptimizationReport fusionReport_{};
+        Sora::Compute::GraphOptimizationReport longChainReport_{};
+        Sora::Compute::GraphOptimizationReport independentReport_{};
+        Sora::Compute::GraphOptimizationReport regionBudgetReport_{};
         uint64_t checksum_ = 0;
         bool failed_ = false;
     };
@@ -242,9 +328,15 @@ int main() {
     auto disabled = [&]() noexcept { fixture.Disabled(); };
     auto noOp = [&]() noexcept { fixture.NoOp(); };
     auto profitableFusion = [&]() noexcept { fixture.ProfitableFusion(); };
+    auto longChain = [&]() noexcept { fixture.LongChain(); };
+    auto independentRegions = [&]() noexcept { fixture.IndependentRegions(); };
+    auto regionBudget = [&]() noexcept { fixture.RegionBudget(); };
     const std::array cases{Sora::Benchmark::MakeCase("disabled", disabled),
                            Sora::Benchmark::MakeCase("enabled_no_op", noOp),
-                           Sora::Benchmark::MakeCase("profitable_fusion", profitableFusion)};
+                           Sora::Benchmark::MakeCase("profitable_fusion", profitableFusion),
+                           Sora::Benchmark::MakeCase("long_chain", longChain),
+                           Sora::Benchmark::MakeCase("independent_regions", independentRegions),
+                           Sora::Benchmark::MakeCase("region_budget", regionBudget)};
     const auto timing = Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(cases, 1, kMinimumSampleTime);
     if (fixture.Failed() || fixture.Checksum() == 0) {
         return 3;
@@ -253,29 +345,63 @@ int main() {
     const double disabledNanoseconds = timing.MedianTime(0);
     const double noOpNanoseconds = timing.MedianTime(1);
     const double fusionNanoseconds = timing.MedianTime(2);
-    const auto& report = fixture.FusionReport();
-    const uint64_t crossover =
-        MinimumProfitableReuseCount(kFusionPolicy.compilationLatencyNanoseconds, report.estimatedBenefitNanoseconds);
+    const double longChainNanoseconds = timing.MedianTime(3);
+    const double independentNanoseconds = timing.MedianTime(4);
+    const double budgetNanoseconds = timing.MedianTime(5);
+    const auto& fusionReport = fixture.FusionReport();
+    const auto& longChainReport = fixture.LongChainReport();
+    const auto& independentReport = fixture.IndependentReport();
+    const auto& budgetReport = fixture.RegionBudgetReport();
+    const uint64_t crossover = MinimumProfitableReuseCount(kFusionPolicy.compilationLatencyNanoseconds,
+                                                           fusionReport.estimatedBenefitNanoseconds);
 
     std::println("metric,value,unit");
     std::println("disabled,{:.6f},ns/graph", disabledNanoseconds);
     std::println("enabled_no_op,{:.6f},ns/graph", noOpNanoseconds);
     std::println("profitable_fusion,{:.6f},ns/graph", fusionNanoseconds);
+    std::println("long_chain_8,{:.6f},ns/graph", longChainNanoseconds);
+    std::println("independent_regions_4,{:.6f},ns/graph", independentNanoseconds);
+    std::println("region_budget_2_of_4,{:.6f},ns/graph", budgetNanoseconds);
     std::println("no_op_discovery_increment,{:.6f},ns/graph", std::max(0.0, noOpNanoseconds - disabledNanoseconds));
     std::println("fusion_increment,{:.6f},ns/graph", std::max(0.0, fusionNanoseconds - disabledNanoseconds));
+    std::println("long_chain_increment_per_dispatch,{:.6f},ns/input_dispatch",
+                 std::max(0.0, longChainNanoseconds - disabledNanoseconds) / kLongChainDispatches);
+    std::println("independent_increment_per_region,{:.6f},ns/input_region",
+                 std::max(0.0, independentNanoseconds - disabledNanoseconds) / kIndependentRegions);
     std::println("enabled_no_op_over_disabled,{:.6f},ratio", timing.PairedRatio(1, 0));
     std::println("profitable_fusion_over_disabled,{:.6f},ratio", timing.PairedRatio(2, 0));
-    std::println("launches_before,2,count");
-    std::println("launches_after,1,count");
-    std::println("launches_removed,1,count");
-    std::println("intermediate_bytes_saved,{},bytes", report.intermediateBytesSaved);
-    std::println("estimated_benefit,{},ns/submission", report.estimatedBenefitNanoseconds);
-    std::println("amortized_compilation,{},ns/submission", report.amortizedCompilationNanoseconds);
+    std::println("long_chain_over_disabled,{:.6f},ratio", timing.PairedRatio(3, 0));
+    std::println("independent_regions_over_disabled,{:.6f},ratio", timing.PairedRatio(4, 0));
+    std::println("region_budget_over_disabled,{:.6f},ratio", timing.PairedRatio(5, 0));
+    std::println("pair_launches,2 -> 1,count");
+    std::println("pair_intermediate_bytes_saved,{},bytes", fusionReport.intermediateBytesSaved);
+    std::println("pair_estimated_benefit,{},ns/submission", fusionReport.estimatedBenefitNanoseconds);
+    std::println("pair_amortized_compilation,{},ns/submission", fusionReport.amortizedCompilationNanoseconds);
+    std::println("long_chain_launches,{} -> {},count", kLongChainDispatches,
+                 kLongChainDispatches - longChainReport.launchesRemoved);
+    std::println("long_chain_unique_programs,{},count", longChainReport.generatedPrograms);
+    std::println("long_chain_intermediate_bytes_saved,{},bytes", longChainReport.intermediateBytesSaved);
+    std::println("long_chain_estimated_benefit,{},ns/submission", longChainReport.estimatedBenefitNanoseconds);
+    std::println("long_chain_amortized_compilation,{},ns/submission", longChainReport.amortizedCompilationNanoseconds);
+    std::println("independent_launches,{} -> {},count", kIndependentRegions * 2,
+                 kIndependentRegions * 2 - independentReport.launchesRemoved);
+    std::println("independent_regions_fused,{},count", independentReport.regionsFused);
+    std::println("independent_unique_programs,{},count", independentReport.generatedPrograms);
+    std::println("independent_intermediate_bytes_saved,{},bytes", independentReport.intermediateBytesSaved);
+    std::println("independent_estimated_benefit,{},ns/submission", independentReport.estimatedBenefitNanoseconds);
+    std::println("independent_amortized_compilation,{},ns/submission",
+                 independentReport.amortizedCompilationNanoseconds);
+    std::println("budget_regions_fused,{},count", budgetReport.regionsFused);
+    std::println("budget_launches_removed,{},count", budgetReport.launchesRemoved);
+    std::println("budget_unique_programs,{},count", budgetReport.generatedPrograms);
     std::println("minimum_profitable_reuse,{},submissions", crossover);
     std::println("policy_expected_reuse,{},submissions", kFusionPolicy.expectedReuseCount);
     std::println("disabled_repetitions,{},count", timing.repetitions[0]);
     std::println("enabled_no_op_repetitions,{},count", timing.repetitions[1]);
     std::println("profitable_fusion_repetitions,{},count", timing.repetitions[2]);
+    std::println("long_chain_repetitions,{},count", timing.repetitions[3]);
+    std::println("independent_regions_repetitions,{},count", timing.repetitions[4]);
+    std::println("region_budget_repetitions,{},count", timing.repetitions[5]);
     std::println("checksum,{},value", fixture.Checksum());
     return 0;
 }

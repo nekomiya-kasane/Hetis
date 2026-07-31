@@ -1156,14 +1156,38 @@ namespace {
         return std::move(*invocation);
     }
 
-    Sora::Compute::ExecutionGraph MakeLogicalFusionGraph(uint64_t identity) {
-        auto source = MakeStridedBuffer({identity, 1});
-        auto intermediate = MakeStridedBuffer({identity, 2});
-        auto output = MakeStridedBuffer({identity, 3});
-        const auto intermediateView = StridedView(intermediate);
+    Sora::Compute::ExecutionGraph MakeLogicalFusionChainGraph(uint64_t identity, size_t dispatches) {
+        REQUIRE(dispatches >= 2);
         Sora::Compute::GraphBuilder builder;
-        REQUIRE(builder.AddDispatch(InvokeStridedCopy(StridedView(source), intermediateView)).has_value());
-        REQUIRE(builder.AddDispatch(InvokeStridedCopy(intermediateView, StridedView(output))).has_value());
+        auto previous = StridedView(MakeStridedBuffer({identity, 1}));
+        for (size_t index = 0; index < dispatches; ++index) {
+            auto next = StridedView(MakeStridedBuffer({identity, index + 2}));
+            REQUIRE(builder.AddDispatch(InvokeStridedCopy(previous, next)).has_value());
+            previous = std::move(next);
+        }
+        auto graph = std::move(builder).Finish();
+        REQUIRE(graph.has_value());
+        return std::move(*graph);
+    }
+
+    Sora::Compute::ExecutionGraph MakeLogicalFusionGraph(uint64_t identity) {
+        return MakeLogicalFusionChainGraph(identity, 2);
+    }
+
+    Sora::Compute::ExecutionGraph MakeLogicalIndependentFusionGraph(uint64_t identity) {
+        auto firstSource = MakeStridedBuffer({identity, 1});
+        auto firstIntermediate = MakeStridedBuffer({identity, 2});
+        auto firstOutput = MakeStridedBuffer({identity, 3});
+        auto secondSource = MakeStridedBuffer({identity, 4});
+        auto secondIntermediate = MakeStridedBuffer({identity, 5});
+        auto secondOutput = MakeStridedBuffer({identity, 6});
+        const auto firstIntermediateView = StridedView(firstIntermediate);
+        const auto secondIntermediateView = StridedView(secondIntermediate);
+        Sora::Compute::GraphBuilder builder;
+        REQUIRE(builder.AddDispatch(InvokeStridedCopy(StridedView(firstSource), firstIntermediateView)).has_value());
+        REQUIRE(builder.AddDispatch(InvokeStridedCopy(firstIntermediateView, StridedView(firstOutput))).has_value());
+        REQUIRE(builder.AddDispatch(InvokeStridedCopy(StridedView(secondSource), secondIntermediateView)).has_value());
+        REQUIRE(builder.AddDispatch(InvokeStridedCopy(secondIntermediateView, StridedView(secondOutput))).has_value());
         auto graph = std::move(builder).Finish();
         REQUIRE(graph.has_value());
         return std::move(*graph);
@@ -1311,6 +1335,101 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
         REQUIRE(planningCalls == 1);
         REQUIRE(context->OptimizationStatistics() ==
                 Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .skippedUnprofitable = 1});
+        REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
+    }
+
+    SECTION("publication budget exhaustion preserves the original graph and records a normal skip") {
+        MockState state;
+        uint32_t planningCalls = 0;
+        auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                           Sora::Compute::GraphPlanningServices services) noexcept
+            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            ++planningCalls;
+            if (graph.NodeCount() != 2 || services.packages.GeneratedProgramCount() != 0) {
+                return std::unexpected(TestGraphPlanningError::InvalidInput);
+            }
+            return std::move(MakeDispatchPlanStorage(state).storage);
+        };
+        auto policy = ForcedFusionPolicy();
+        policy.maximumGeneratedBytes = 1;
+        auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = policy}, planner,
+                                                           RejectRuntimeRecovery);
+        REQUIRE(context.has_value());
+        REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+        exec::static_thread_pool pool{1};
+        const auto completed = stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionGraph(98)));
+        REQUIRE(completed.has_value());
+        REQUIRE(planningCalls == 1);
+        REQUIRE(context->OptimizationStatistics() ==
+                Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .skippedBudget = 1});
+        REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
+    }
+}
+
+TEST_CASE("ComputeContext presents maximal chains and independent fusion regions through one submission catalog",
+          "[Sora][Compute][Runtime][ComputeContext][GraphOptimizer][Regions]") {
+    SECTION("a three-dispatch chain reaches planning as one generated dispatch") {
+        MockState state;
+        uint32_t planningCalls = 0;
+        auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                           Sora::Compute::GraphPlanningServices services) noexcept
+            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            ++planningCalls;
+            if (graph.NodeCount() != 1 || services.packages.GeneratedProgramCount() != 1) {
+                return std::unexpected(TestGraphPlanningError::InvalidInput);
+            }
+            const auto* invocation = std::get_if<Sora::Compute::KernelInvocation>(&graph.Operation({0}));
+            if (invocation == nullptr || !services.packages.Resolve(invocation->ProgramHash())) {
+                return std::unexpected(TestGraphPlanningError::InvalidInput);
+            }
+            return std::move(MakeDispatchPlanStorage(state).storage);
+        };
+        auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
+                                                           planner, RejectRuntimeRecovery);
+        REQUIRE(context.has_value());
+        REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+        exec::static_thread_pool pool{1};
+        const auto completed =
+            stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionChainGraph(99, 3)));
+        REQUIRE(completed.has_value());
+        REQUIRE(planningCalls == 1);
+        REQUIRE(context->OptimizationStatistics() ==
+                Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .fused = 1});
+        REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
+    }
+
+    SECTION("two independent regions share one generated program identity") {
+        MockState state;
+        uint32_t planningCalls = 0;
+        auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                           Sora::Compute::GraphPlanningServices services) noexcept
+            -> std::expected<Sora::Compute::PhysicalGraphPlanStorage, TestGraphPlanningError> {
+            ++planningCalls;
+            if (graph.NodeCount() != 2 || graph.EdgeCount() != 0 || services.packages.GeneratedProgramCount() != 1) {
+                return std::unexpected(TestGraphPlanningError::InvalidInput);
+            }
+            for (uint32_t index = 0; index < graph.NodeCount(); ++index) {
+                const auto* invocation = std::get_if<Sora::Compute::KernelInvocation>(&graph.Operation({index}));
+                if (invocation == nullptr || !services.packages.Resolve(invocation->ProgramHash())) {
+                    return std::unexpected(TestGraphPlanningError::InvalidInput);
+                }
+            }
+            return std::move(MakeDispatchPlanStorage(state).storage);
+        };
+        auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
+                                                           planner, RejectRuntimeRecovery);
+        REQUIRE(context.has_value());
+        REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+        exec::static_thread_pool pool{1};
+        const auto completed =
+            stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalIndependentFusionGraph(100)));
+        REQUIRE(completed.has_value());
+        REQUIRE(planningCalls == 1);
+        REQUIRE(context->OptimizationStatistics() ==
+                Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .fused = 1});
         REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
     }
 }
