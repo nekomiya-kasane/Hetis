@@ -449,10 +449,10 @@ TEST_CASE("HEFT defers portfolio calibration observations behind one frozen batc
                                                                 .generation = 1,
                                                                 .availableMemoryBytes = uint64_t{8} << 30U}};
     const GraphPlanningContext context{.epochSequence = 1, .devices = devices, .snapshots = snapshots};
-    const GraphPlanningServices services{.packages = *packages,
-                                         .resources = fixture.resources.Inventory(),
-                                         .artifacts = *availability,
-                                         .performance = *performance};
+    GraphPlanningServices services{.packages = *packages,
+                                   .resources = fixture.resources.Inventory(),
+                                   .artifacts = *availability,
+                                   .performance = *performance};
     auto immediate = std::make_shared<AutomaticPartitionPlanningCalibration>();
     AutomaticPartitionPlanningCalibration deferred;
     auto batch = deferred.BeginBatch();
@@ -460,25 +460,30 @@ TEST_CASE("HEFT defers portfolio calibration observations behind one frozen batc
 
     const auto first = planner.Plan(graph, context, services, batch);
     const auto second = planner.Plan(graph, context, services, batch);
+    services.automaticPartitionCalibration = &batch;
+    const auto selected = planner(graph, context, services);
     REQUIRE(first.has_value());
     REQUIRE(second.has_value());
+    REQUIRE(selected.has_value());
     REQUIRE(first->statistics.partitionEvaluationBudget == 8);
     REQUIRE(second->statistics.partitionEvaluationBudget == first->statistics.partitionEvaluationBudget);
     REQUIRE(first->selection.predictedMakespanNanoseconds == second->selection.predictedMakespanNanoseconds);
-    REQUIRE(batch.Observations().size() == 2);
+    REQUIRE(selected->predictedMakespanNanoseconds == first->selection.predictedMakespanNanoseconds);
+    REQUIRE(batch.Observations().size() == 3);
     constexpr AutomaticPartitionPlanningShape shape{.axisCount = 1, .placementCount = 2, .inputRouteCount = 2};
     REQUIRE_FALSE(batch.Estimate(shape).has_value());
     REQUIRE_FALSE(immediate->Snapshot().Estimate(shape).has_value());
     REQUIRE_FALSE(deferred.Snapshot().Estimate(shape).has_value());
 
     REQUIRE(batch.PublishTo(deferred) ==
-            AutomaticPartitionPlanningCalibrationPublication{.published = 2, .dropped = 0});
+            AutomaticPartitionPlanningCalibrationPublication{.published = 3, .dropped = 0});
     const auto estimate = deferred.Snapshot().Estimate(shape);
     REQUIRE(estimate.has_value());
-    REQUIRE(estimate->sampleCount == 2);
+    REQUIRE(estimate->sampleCount == 3);
     REQUIRE(batch.Observations().empty());
     REQUIRE(PhysicalGraphPlan::Create(first->selection.storage, fixture.resources).has_value());
     REQUIRE(PhysicalGraphPlan::Create(second->selection.storage, fixture.resources).has_value());
+    REQUIRE(PhysicalGraphPlan::Create(selected->storage, fixture.resources).has_value());
 }
 
 TEST_CASE("HEFT schedules and validates a fork-join DAG in upward-rank order",

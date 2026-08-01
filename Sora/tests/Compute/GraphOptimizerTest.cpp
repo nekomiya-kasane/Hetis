@@ -1,7 +1,7 @@
 #include <Sora/Compute/Graph/GraphBuilder.h>
 #include <Sora/Compute/KernelBuilder.h>
 #include <Sora/Compute/KernelProgramBuilder.h>
-#include <Sora/Compute/Runtime/GraphOptimizer.h>
+#include <Sora/Compute/Runtime/GraphPortfolio.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -513,4 +513,46 @@ TEST_CASE("GraphOptimizer reports exhausted generated-program budgets as a norma
     REQUIRE(optimized.report.regionsFused == 0);
     REQUIRE(optimized.graph.NodeCount() == 2);
     REQUIRE(optimized.programs.GeneratedProgramCount() == 0);
+}
+
+TEST_CASE("GraphPortfolio retains original and fused graphs with variant-local program catalogs",
+          "[Sora][Compute][Runtime][GraphPortfolio]") {
+    Sora::Compute::PortablePackageRegistry packages;
+    REQUIRE(packages.Register(kCopyKernel).has_value());
+    auto portfolio = Sora::Compute::GraphPortfolio::Create(
+        TwoNodeGraph(MakeBuffer({17, 1}), MakeBuffer({17, 2}), MakeBuffer({17, 3})), Catalog(packages), AlwaysFuse());
+
+    REQUIRE(portfolio.Optimization().status == Sora::Compute::GraphOptimizationStatus::Fused);
+    REQUIRE(portfolio.VariantCount() == 2);
+    REQUIRE(portfolio.Variant(0).identity ==
+            Sora::Compute::GraphVariantIdentity{Sora::Compute::GraphVariantKind::Original, 0});
+    REQUIRE(portfolio.Variant(0).graph.NodeCount() == 2);
+    REQUIRE(portfolio.Variant(0).programs.GeneratedProgramCount() == 0);
+    REQUIRE(portfolio.Variant(1).identity ==
+            Sora::Compute::GraphVariantIdentity{Sora::Compute::GraphVariantKind::Fused, 0});
+    REQUIRE(portfolio.Variant(1).graph.NodeCount() == 1);
+    REQUIRE(portfolio.Variant(1).programs.GeneratedProgramCount() == 1);
+}
+
+TEST_CASE("GraphPortfolio disables optional transforms and orders exact objective ties canonically",
+          "[Sora][Compute][Runtime][GraphPortfolio][Determinism]") {
+    Sora::Compute::PortablePackageRegistry packages;
+    REQUIRE(packages.Register(kCopyKernel).has_value());
+    auto policy = AlwaysFuse();
+    policy.enabled = false;
+    auto portfolio = Sora::Compute::GraphPortfolio::Create(
+        TwoNodeGraph(MakeBuffer({18, 1}), MakeBuffer({18, 2}), MakeBuffer({18, 3})), Catalog(packages), policy);
+
+    REQUIRE(portfolio.Optimization().status == Sora::Compute::GraphOptimizationStatus::Disabled);
+    REQUIRE(portfolio.VariantCount() == 1);
+    const Sora::Compute::GraphPortfolioPlanCandidate original{
+        .variant = {Sora::Compute::GraphVariantKind::Original, 0},
+        .selection = {.predictedMakespanNanoseconds = 100},
+    };
+    const Sora::Compute::GraphPortfolioPlanCandidate fused{
+        .variant = {Sora::Compute::GraphVariantKind::Fused, 0},
+        .selection = {.predictedMakespanNanoseconds = 100},
+    };
+    REQUIRE(Sora::Compute::BetterGraphPortfolioCandidate(original, fused));
+    REQUIRE_FALSE(Sora::Compute::BetterGraphPortfolioCandidate(fused, original));
 }

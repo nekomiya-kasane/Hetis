@@ -8,6 +8,7 @@
 
 #include <Sora/Compute/ArtifactCache.h>
 #include <Sora/Compute/Graph/ExecutionGraph.h>
+#include <Sora/Compute/Runtime/AutomaticPartitionPlanningCalibration.h>
 #include <Sora/Compute/Runtime/ExecutableGraph.h>
 #include <Sora/Compute/Runtime/PerformanceModel.h>
 #include <Sora/Compute/Runtime/PerformancePrior.h>
@@ -42,6 +43,7 @@ namespace Sora::Compute {
         const ArtifactAvailabilitySnapshot& artifacts;
         const PerformanceSnapshot& performance;
         const PerformancePriorModel* priors = nullptr;
+        AutomaticPartitionPlanningCalibrationBatch* automaticPartitionCalibration = nullptr;
     };
 
     /** @brief One pure physical plan paired with the planner objective that selected it. */

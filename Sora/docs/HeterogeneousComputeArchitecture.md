@@ -4362,3 +4362,78 @@ reservation 阶段返回独立错误。`PhysicalGraphMaterializerTest` 为 `25 c
 
 8 与 32 allocation 的单位成本处于 `153..175 ns`，未出现超线性控制面增长。该 benchmark 使用 synthetic backend，结论只约束框架的计划
 复制、callback、allocation wrapper 与逆序释放成本；真实 CPU/Vulkan allocation 延迟属于 backend 与驱动性能，须分别建立设备基线。
+
+## 61. 2026-08-01 实现：graph portfolio 在物理可行集合上选择确定性最优计划
+
+### 61.1 portfolio 拥有逻辑变体，不拥有物理能力
+
+`GraphPortfolio` 是一次 logical submission 的 request-local 有界所有者。它始终保留 authoritative original graph 及其
+`ProgramCatalogSnapshot`，并在 fusion 成功时额外保留 fused graph 与派生程序 catalog。fusion 是可选优化：invalid policy 与 transform
+OOM 都只写入 `GraphOptimizationReport`，不会删除 original，也不会使原本可提交的 graph 失败。
+
+每个变体使用稳定的 `GraphVariantIdentity { kind, ordinal }`。identity 不依赖地址、容器位置、规划结束顺序或设备枚举顺序；当前 canonical
+顺序为 original 后接 fused，类型域预留 `DeviceSpecific` 供后续有界设备专化。portfolio 不缓存 `PhysicalGraphPlan`、reservation、artifact
+或 queue capability，因为这些值只在一个 runtime attempt 的 epoch 与设备状态下成立。
+
+### 61.2 一次 attempt 冻结事实并延迟发布 calibration
+
+每次 preparation attempt 只读取一次 artifact availability 与 performance snapshot，并从 planner 的 process-local automatic-partition
+calibration 构造一个 frozen batch。所有 graph variant 接收同一组 frozen facts；HEFT callable 发现
+`GraphPlanningServices::automaticPartitionCalibration` 后，把 observation 写入 batch，而不立即污染 shared calibration。
+
+`GraphPortfolioCalibration` 以 RAII 形成 attempt 级 publication 边界。正常获胜、全部规划失败、validation/reservation 失败、materialization
+失败以及 retry 前退出都会恰好析构一次并发布 batch；`PublishTo` 清空逻辑内容，所以同一 batch 不会重复发布。publication 在所有 variant
+完成 objective 计算之后发生，因而 variant 评价顺序不进入本 attempt 的目标函数。若 planner 没有 adaptive calibration，整个设施退化为
+空状态，不分配 deferred buffer。
+
+### 61.3 选择算法是物理可行集合上的 deterministic argmin
+
+每个成功规划的 variant 产生一个 `GraphPlanSelection`。候选以
+`(predictedMakespanNanoseconds, GraphVariantIdentity)` 排成严格全序，再按该顺序执行 validation、logical-buffer registration 与 exact
+whole-graph reservation。validation 或 reservation 失败不会触发 JIT；reservation 的事务回滚完成后继续下一个候选。首个成功 reservation
+已经持有真实 backend allocation，因此它恰好是当前物理状态下可行候选集合的确定性最小元。
+
+```mermaid
+flowchart LR
+    Portfolio["owning original + optional fused"] --> Frozen["one attempt, frozen facts"]
+    Frozen --> Plan["plan every variant"]
+    Plan --> Sort["sort by objective + identity"]
+    Sort --> Validate["validate candidate"]
+    Validate -->|invalid| Next["next candidate"]
+    Validate --> Reserve["exact reservation"]
+    Reserve -->|rollback on failure| Next
+    Next --> Validate
+    Reserve -->|first success| Materialize["materialize winner only"]
+    Materialize --> Submit["submit executable graph"]
+```
+
+若所有 variant 都无法规划，错误选择 canonical evaluation 中第一个 planning failure；若存在计划但全部物理不可行，则返回 objective 最优候选
+的第一个 validation 或 reservation failure。planning、validation、reservation 与 materialization failure 都携带 variant identity，诊断
+不需要从 graph shape 或派生程序数量反推候选来源。
+
+### 61.4 retry 复用逻辑 portfolio，但重新获取全部物理事实与能力
+
+QueueUnavailable 等可恢复 submission failure 会进入新的 attempt。logical portfolio 与派生 program catalog 保持不变，新的 attempt 重新读取
+epoch inventory、artifact snapshot、performance snapshot 与 calibration，并重新规划、排序、validation 和 reservation；上一 attempt 的
+selection、device lease 与 allocation handle 均不复用。因此，设备状态或 queue contention 改变后，winner 可以从 fused 翻转为 original，
+也可以反向变化。
+
+当前测试 fixture 使用进程级单例 `BackendService`，不能在同一进程内合法构造“同一 backend identity、全新 service generation”的 device-loss
+replacement。现有 recovery 反例通过 QueueUnavailable 证明完整重规划、重新 reservation 与 winner 翻转，但不把它误称为 replacement-epoch
+集成测试。后续应给 runtime fixture 增加显式 service-generation factory，再验证 replacement epoch 的 inventory 与 device lease 确实替换；
+在该 fixture 完成前，生产路径的 epoch 重建协议与 portfolio attempt 隔离已有结构保证，但 device replacement 仍是测试证据缺口。
+
+### 61.5 C++26 特性只用于能够增加静态信息或组合保证的层
+
+本切片使用 concept 约束 planner callable、`std::expected` 表达失败域、move-only RAII 表达 reservation 能力，并以固定上界
+`std::array` 保存最多两个候选，避免 request-time heap allocation。reflection、annotation、consteval block 与 expansion statement 适合
+kernel schema、静态布局变换和代码生成，无法预知 runtime epoch、allocator fragmentation 或 calibration；把 portfolio 写成模板生成器不会增加
+信息，只会扩大实例化面。stdexec 已位于 recovery/submission composition 层；当前两个轻量 variant 顺序规划避免了 scheduler 与 join 开销。
+只有设备专化使候选数和单候选规划成本足以摊销并行调度后，才应引入 per-variant sender 与 structured join。coroutine 不改善这里的所有权或
+确定性，因此没有加入热路径。
+
+定向 Release 证据为 `GraphOptimizerTest 16 cases / 456 assertions`、`HeftPlannerTest 28 / 1667` 与
+`PhysicalGraphMaterializerTest 29 / 2044`。反例覆盖 disabled portfolio、original/fused objective 胜出、tie 时 original 胜出、最优候选
+OOM 后回退、全部不可行错误 identity、retry 后 winner 翻转、variant-local program catalog 与 deferred HEFT callable。完整 Release 与组合
+ASan + UBSan 均显式重建 51 个 Compute test executable，并通过 `Sora.Compute 483 / 483`。组合配置同时启用 address、undefined、
+`-fno-sanitize-recover=all`、`-std=gnu++26` 与 `-freflection-latest`。

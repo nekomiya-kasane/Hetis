@@ -189,6 +189,12 @@ namespace Sora::Compute {
         operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,
                    GraphPlanningServices services) const noexcept;
 
+        /** @brief Borrow the optional process-local model used to coordinate request-wide deferred observations. */
+        [[nodiscard]] const std::shared_ptr<AutomaticPartitionPlanningCalibration>&
+        AutomaticPlanningCalibration() const noexcept {
+            return automaticPlanningCalibration_;
+        }
+
     private:
         HeftPlanningPolicy policy_{};
         std::shared_ptr<AutomaticPartitionPlanningCalibration> automaticPlanningCalibration_{};

@@ -1,6 +1,6 @@
 /**
  * @file GraphOptimizerBenchmark.cpp
- * @brief Submission-scoped graph-fusion control-plane and profitability baseline.
+ * @brief Submission-scoped graph-fusion and bounded logical-portfolio control-plane baseline.
  * @ingroup Compute
  */
 
@@ -8,7 +8,7 @@
 #include <Sora/Compute/Graph/GraphBuilder.h>
 #include <Sora/Compute/KernelBuilder.h>
 #include <Sora/Compute/KernelProgramBuilder.h>
-#include <Sora/Compute/Runtime/GraphOptimizer.h>
+#include <Sora/Compute/Runtime/GraphPortfolio.h>
 
 #include <algorithm>
 #include <array>
@@ -240,6 +240,10 @@ namespace {
 
         void RegionBudget() noexcept { InvokeCase(*independent_, kRegionBudgetPolicy); }
 
+        void PortfolioDisabled() noexcept { InvokePortfolio(*profitable_, {.enabled = false}); }
+
+        void PortfolioFused() noexcept { InvokePortfolio(*profitable_, kFusionPolicy); }
+
         [[nodiscard]] bool Failed() const noexcept { return failed_; }
         [[nodiscard]] uint64_t Checksum() const noexcept { return checksum_; }
         [[nodiscard]] const Sora::Compute::GraphOptimizationReport& FusionReport() const noexcept {
@@ -261,6 +265,17 @@ namespace {
                 auto result = Sora::Compute::OptimizeExecutionGraph(graph, *catalog_, policy);
                 checksum_ += result.graph.NodeCount() + result.programs.PackageCount() +
                              static_cast<uint64_t>(result.report.status) + result.report.intermediateBytesSaved;
+            } catch (const std::bad_alloc&) {
+                failed_ = true;
+            }
+        }
+
+        void InvokePortfolio(const Sora::Compute::ExecutionGraph& graph,
+                             Sora::Compute::GraphFusionPolicy policy) noexcept {
+            try {
+                auto portfolio = Sora::Compute::GraphPortfolio::Create(graph, *catalog_, policy);
+                checksum_ += portfolio.VariantCount() + portfolio.Original().graph.NodeCount() +
+                             static_cast<uint64_t>(portfolio.Optimization().status);
             } catch (const std::bad_alloc&) {
                 failed_ = true;
             }
@@ -331,12 +346,16 @@ int main() {
     auto longChain = [&]() noexcept { fixture.LongChain(); };
     auto independentRegions = [&]() noexcept { fixture.IndependentRegions(); };
     auto regionBudget = [&]() noexcept { fixture.RegionBudget(); };
+    auto portfolioDisabled = [&]() noexcept { fixture.PortfolioDisabled(); };
+    auto portfolioFused = [&]() noexcept { fixture.PortfolioFused(); };
     const std::array cases{Sora::Benchmark::MakeCase("disabled", disabled),
                            Sora::Benchmark::MakeCase("enabled_no_op", noOp),
                            Sora::Benchmark::MakeCase("profitable_fusion", profitableFusion),
                            Sora::Benchmark::MakeCase("long_chain", longChain),
                            Sora::Benchmark::MakeCase("independent_regions", independentRegions),
-                           Sora::Benchmark::MakeCase("region_budget", regionBudget)};
+                           Sora::Benchmark::MakeCase("region_budget", regionBudget),
+                           Sora::Benchmark::MakeCase("portfolio_disabled", portfolioDisabled),
+                           Sora::Benchmark::MakeCase("portfolio_fused", portfolioFused)};
     const auto timing = Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(cases, 1, kMinimumSampleTime);
     if (fixture.Failed() || fixture.Checksum() == 0) {
         return 3;
@@ -348,6 +367,8 @@ int main() {
     const double longChainNanoseconds = timing.MedianTime(3);
     const double independentNanoseconds = timing.MedianTime(4);
     const double budgetNanoseconds = timing.MedianTime(5);
+    const double portfolioDisabledNanoseconds = timing.MedianTime(6);
+    const double portfolioFusedNanoseconds = timing.MedianTime(7);
     const auto& fusionReport = fixture.FusionReport();
     const auto& longChainReport = fixture.LongChainReport();
     const auto& independentReport = fixture.IndependentReport();
@@ -362,6 +383,10 @@ int main() {
     std::println("long_chain_8,{:.6f},ns/graph", longChainNanoseconds);
     std::println("independent_regions_4,{:.6f},ns/graph", independentNanoseconds);
     std::println("region_budget_2_of_4,{:.6f},ns/graph", budgetNanoseconds);
+    std::println("portfolio_disabled,{:.6f},ns/graph", portfolioDisabledNanoseconds);
+    std::println("portfolio_fused,{:.6f},ns/graph", portfolioFusedNanoseconds);
+    std::println("portfolio_original_retention_increment,{:.6f},ns/graph",
+                 std::max(0.0, portfolioFusedNanoseconds - fusionNanoseconds));
     std::println("no_op_discovery_increment,{:.6f},ns/graph", std::max(0.0, noOpNanoseconds - disabledNanoseconds));
     std::println("fusion_increment,{:.6f},ns/graph", std::max(0.0, fusionNanoseconds - disabledNanoseconds));
     std::println("long_chain_increment_per_dispatch,{:.6f},ns/input_dispatch",
@@ -373,6 +398,8 @@ int main() {
     std::println("long_chain_over_disabled,{:.6f},ratio", timing.PairedRatio(3, 0));
     std::println("independent_regions_over_disabled,{:.6f},ratio", timing.PairedRatio(4, 0));
     std::println("region_budget_over_disabled,{:.6f},ratio", timing.PairedRatio(5, 0));
+    std::println("portfolio_disabled_over_disabled,{:.6f},ratio", timing.PairedRatio(6, 0));
+    std::println("portfolio_fused_over_profitable_fusion,{:.6f},ratio", timing.PairedRatio(7, 2));
     std::println("pair_launches,2 -> 1,count");
     std::println("pair_intermediate_bytes_saved,{},bytes", fusionReport.intermediateBytesSaved);
     std::println("pair_estimated_benefit,{},ns/submission", fusionReport.estimatedBenefitNanoseconds);
@@ -402,6 +429,8 @@ int main() {
     std::println("long_chain_repetitions,{},count", timing.repetitions[3]);
     std::println("independent_regions_repetitions,{},count", timing.repetitions[4]);
     std::println("region_budget_repetitions,{},count", timing.repetitions[5]);
+    std::println("portfolio_disabled_repetitions,{},count", timing.repetitions[6]);
+    std::println("portfolio_fused_repetitions,{},count", timing.repetitions[7]);
     std::println("checksum,{},value", fixture.Checksum());
     return 0;
 }

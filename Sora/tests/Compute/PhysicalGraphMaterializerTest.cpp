@@ -168,6 +168,7 @@ namespace {
         uint32_t nextAllocationId = 1;
         uint64_t nextMemory = 1;
         uint32_t failAllocation = UINT32_MAX;
+        bool failEveryAllocation = false;
         uint32_t submissionFailuresRemaining = 0;
         Sora::Compute::SubmissionErrorCode submissionFailure = Sora::Compute::SubmissionErrorCode::QueueUnavailable;
         bool failCompile = false;
@@ -275,7 +276,7 @@ namespace {
                   Sora::Compute::BackendAllocationResult* result) noexcept {
         auto& state = *static_cast<MockState*>(opaque);
         ++state.allocateCount;
-        if (state.allocateCount == state.failAllocation) {
+        if (state.failEveryAllocation || state.allocateCount == state.failAllocation) {
             result->error = {Sora::Compute::MemoryAllocationErrorCode::OutOfMemory, request->sizeBytes};
             return;
         }
@@ -1121,7 +1122,7 @@ namespace {
     Sora::Compute::RuntimeEpoch
     MakeRuntimeEpoch(MockState& state,
                      Sora::Compute::ArtifactKind dispatchArtifactKind = Sora::Compute::ArtifactKind::DeviceExecutable,
-                     bool persistentArtifacts = false) {
+                     bool persistentArtifacts = false, uint64_t sequence = 1) {
         auto catalog = MakeCatalog(state, dispatchArtifactKind, persistentArtifacts);
         constexpr Sora::Compute::DeviceDescriptor descriptor{.id = kGpu,
                                                              .backend = Sora::Compute::BackendKind::Vulkan,
@@ -1134,7 +1135,7 @@ namespace {
                                                              .subgroupWidthMinimum = 32,
                                                              .subgroupWidthMaximum = 32,
                                                              .maximumWorkgroupInvocations = 1024};
-        auto epoch = Sora::Compute::RuntimeEpoch::Create(1, std::move(catalog),
+        auto epoch = Sora::Compute::RuntimeEpoch::Create(sequence, std::move(catalog),
                                                          {{.service = Sora::Test::TestBackendService().Id(),
                                                            .descriptor = descriptor,
                                                            .target = Sora::Compute::RuntimeTarget(kGpuTarget)}});
@@ -1318,7 +1319,7 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
 
         const auto completed = stdexec::sync_wait(std::move(sender));
         REQUIRE(completed.has_value());
-        REQUIRE(planningCalls == 1);
+        REQUIRE(planningCalls == 2);
         REQUIRE(context->OptimizationStatistics() ==
                 Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .fused = 1});
         REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
@@ -1385,6 +1386,149 @@ TEST_CASE("ComputeContext applies graph fusion lazily without mutating authorita
     }
 }
 
+TEST_CASE("ComputeContext orders graph variants by physical objective and stable identity",
+          "[Sora][Compute][Runtime][ComputeContext][GraphPortfolio][Objective]") {
+    uint64_t originalObjective = 100;
+    uint64_t fusedObjective = 200;
+    bool expectOriginal = true;
+    SECTION("original has the smaller physical objective") {}
+    SECTION("fused has the smaller physical objective") {
+        originalObjective = 200;
+        fusedObjective = 100;
+        expectOriginal = false;
+    }
+    SECTION("stable original identity breaks an exact objective tie") {
+        fusedObjective = originalObjective;
+    }
+
+    MockState state;
+    uint32_t planningCalls = 0;
+    Sora::Compute::Buffer originalOutput;
+    Sora::Compute::Buffer fusedOutput;
+    auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                       Sora::Compute::GraphPlanningServices services) noexcept
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
+        ++planningCalls;
+        const bool original = graph.NodeCount() == 2 && services.packages.GeneratedProgramCount() == 0;
+        const bool fused = graph.NodeCount() == 1 && services.packages.GeneratedProgramCount() == 1;
+        if (!original && !fused) {
+            return std::unexpected(TestGraphPlanningError::InvalidInput);
+        }
+        auto fixture = MakeDispatchPlanStorage(state, false, false, false, original ? 920 : 921);
+        (original ? originalOutput : fusedOutput) = fixture.output;
+        return SelectPlan(std::move(fixture.storage), original ? originalObjective : fusedObjective);
+    };
+    auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
+                                                       planner, RejectRuntimeRecovery);
+    REQUIRE(context.has_value());
+    REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+    exec::static_thread_pool pool{1};
+    const auto completed = stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionGraph(120)));
+    REQUIRE(completed.has_value());
+    REQUIRE(planningCalls == 2);
+    REQUIRE(originalOutput.CurrentVersion() == (expectOriginal ? 1 : 0));
+    REQUIRE(fusedOutput.CurrentVersion() == (expectOriginal ? 0 : 1));
+    REQUIRE(state.allocateCount == 2);
+    REQUIRE(state.compileCount == 1);
+}
+
+TEST_CASE("ComputeContext disables graph variants without changing the logical submission interface",
+          "[Sora][Compute][Runtime][ComputeContext][GraphPortfolio][Disabled]") {
+    MockState state;
+    uint32_t planningCalls = 0;
+    auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                       Sora::Compute::GraphPlanningServices services) noexcept
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
+        ++planningCalls;
+        if (graph.NodeCount() != 2 || services.packages.GeneratedProgramCount() != 0) {
+            return std::unexpected(TestGraphPlanningError::InvalidInput);
+        }
+        return SelectPlan(std::move(MakeDispatchPlanStorage(state).storage), 10);
+    };
+    auto fusion = ForcedFusionPolicy();
+    fusion.enabled = false;
+    auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = fusion}, planner,
+                                                       RejectRuntimeRecovery);
+    REQUIRE(context.has_value());
+    REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+    exec::static_thread_pool pool{1};
+    REQUIRE(stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionGraph(122))).has_value());
+    REQUIRE(planningCalls == 1);
+    REQUIRE(context->OptimizationStatistics() ==
+            Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .disabled = 1});
+}
+
+TEST_CASE("ComputeContext falls back after the objective-best graph variant cannot reserve memory",
+          "[Sora][Compute][Runtime][ComputeContext][GraphPortfolio][Reservation]") {
+    MockState state;
+    state.failAllocation = 2;
+    Sora::Compute::Buffer originalOutput;
+    Sora::Compute::Buffer fusedOutput;
+    auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                       Sora::Compute::GraphPlanningServices services) noexcept
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
+        const bool original = graph.NodeCount() == 2 && services.packages.GeneratedProgramCount() == 0;
+        const bool fused = graph.NodeCount() == 1 && services.packages.GeneratedProgramCount() == 1;
+        if (!original && !fused) {
+            return std::unexpected(TestGraphPlanningError::InvalidInput);
+        }
+        auto fixture = MakeDispatchPlanStorage(state, false, false, false, original ? 923 : 924);
+        (original ? originalOutput : fusedOutput) = fixture.output;
+        return SelectPlan(std::move(fixture.storage), fused ? 10 : 20);
+    };
+    auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
+                                                       planner, RejectRuntimeRecovery);
+    REQUIRE(context.has_value());
+    REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+    exec::static_thread_pool pool{1};
+    REQUIRE(stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionGraph(123))).has_value());
+    REQUIRE(fusedOutput.CurrentVersion() == 0);
+    REQUIRE(originalOutput.CurrentVersion() == 1);
+    REQUIRE(state.allocateCount == 4);
+    REQUIRE(state.destroyedAllocationCount >= 1);
+    REQUIRE(state.destroyedAllocations[0] == 1);
+    REQUIRE(state.compileCount == 1);
+}
+
+TEST_CASE("ComputeContext reports the objective-best failure after every graph variant is infeasible",
+          "[Sora][Compute][Runtime][ComputeContext][GraphPortfolio][Reservation][Error]") {
+    MockState state;
+    state.failEveryAllocation = true;
+    auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext&,
+                       Sora::Compute::GraphPlanningServices services) noexcept
+        -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
+        const bool original = graph.NodeCount() == 2 && services.packages.GeneratedProgramCount() == 0;
+        const bool fused = graph.NodeCount() == 1 && services.packages.GeneratedProgramCount() == 1;
+        if (!original && !fused) {
+            return std::unexpected(TestGraphPlanningError::InvalidInput);
+        }
+        return SelectPlan(std::move(MakeDispatchPlanStorage(state, false, false, false, fused ? 926 : 925).storage),
+                          fused ? 10 : 20);
+    };
+    auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
+                                                       planner, RejectRuntimeRecovery);
+    REQUIRE(context.has_value());
+    using Context = typename decltype(context)::value_type;
+    REQUIRE(context->RegisterProgram(kStridedCopy).has_value());
+
+    exec::static_thread_pool pool{1};
+    auto failure = WaitForContextError<typename Context::Error>(
+        context->Submit(pool.get_scheduler(), MakeLogicalFusionGraph(125)));
+    const auto* build =
+        std::get_if<Sora::Compute::GraphAttemptBuildFailure<typename Context::PreparationError>>(&failure);
+    REQUIRE(build != nullptr);
+    const auto* reservation = std::get_if<Sora::Compute::GraphMemoryReservationFailure>(&build->error);
+    REQUIRE(reservation != nullptr);
+    REQUIRE(reservation->variant == Sora::Compute::GraphVariantIdentity{Sora::Compute::GraphVariantKind::Fused, 0});
+    REQUIRE(reservation->error.code == Sora::Compute::PhysicalGraphMemoryReservationErrorCode::AllocationFailed);
+    REQUIRE(state.allocateCount == 2);
+    REQUIRE(state.compileCount == 0);
+    REQUIRE(state.submitCount == 0);
+}
+
 TEST_CASE("ComputeContext presents maximal chains and independent fusion regions through one submission catalog",
           "[Sora][Compute][Runtime][ComputeContext][GraphOptimizer][Regions]") {
     SECTION("a three-dispatch chain reaches planning as one generated dispatch") {
@@ -1412,7 +1556,7 @@ TEST_CASE("ComputeContext presents maximal chains and independent fusion regions
         const auto completed =
             stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionChainGraph(99, 3)));
         REQUIRE(completed.has_value());
-        REQUIRE(planningCalls == 1);
+        REQUIRE(planningCalls == 2);
         REQUIRE(context->OptimizationStatistics() ==
                 Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .fused = 1});
         REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
@@ -1445,27 +1589,34 @@ TEST_CASE("ComputeContext presents maximal chains and independent fusion regions
         const auto completed =
             stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalIndependentFusionGraph(100)));
         REQUIRE(completed.has_value());
-        REQUIRE(planningCalls == 1);
+        REQUIRE(planningCalls == 2);
         REQUIRE(context->OptimizationStatistics() ==
                 Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .fused = 1});
         REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
     }
 }
 
-TEST_CASE("ComputeContext recovery retries reuse one prepared fused graph",
-          "[Sora][Compute][Runtime][ComputeContext][GraphOptimizer][Recovery]") {
+TEST_CASE("ComputeContext retry replans and reserves the graph portfolio from a fresh physical attempt",
+          "[Sora][Compute][Runtime][ComputeContext][GraphPortfolio][Recovery]") {
     MockState state;
     state.submissionFailuresRemaining = 1;
     uint32_t planningCalls = 0;
+    std::array<Sora::Compute::Buffer, 2> originalOutputs;
+    std::array<Sora::Compute::Buffer, 2> fusedOutputs;
     auto planner = [&](const Sora::Compute::ExecutionGraph& graph, const Sora::Compute::GraphPlanningContext& planning,
                        Sora::Compute::GraphPlanningServices services) noexcept
         -> std::expected<Sora::Compute::GraphPlanSelection, TestGraphPlanningError> {
         ++planningCalls;
-        if (graph.NodeCount() != 1 || services.packages.GeneratedProgramCount() != 1 ||
-            planning.attempt + 1 != planningCalls) {
+        const bool original = graph.NodeCount() == 2 && services.packages.GeneratedProgramCount() == 0;
+        const bool fused = graph.NodeCount() == 1 && services.packages.GeneratedProgramCount() == 1;
+        if ((!original && !fused) || planning.attempt >= originalOutputs.size() || planning.epochSequence != 1) {
             return std::unexpected(TestGraphPlanningError::InvalidInput);
         }
-        return SelectPlan(std::move(MakeDispatchPlanStorage(state, false, false, false, 70 + planningCalls).storage));
+        auto fixture =
+            MakeDispatchPlanStorage(state, false, false, false, 130 + planning.attempt * 2 + (fused ? 1 : 0));
+        (original ? originalOutputs[planning.attempt] : fusedOutputs[planning.attempt]) = fixture.output;
+        const uint64_t objective = planning.attempt == 0 ? (fused ? 10 : 20) : (original ? 10 : 20);
+        return SelectPlan(std::move(fixture.storage), objective);
     };
     auto context = Sora::Compute::CreateComputeContext(MakeRuntimeEpoch(state), {.fusion = ForcedFusionPolicy()},
                                                        planner, RejectRuntimeRecovery);
@@ -1475,7 +1626,10 @@ TEST_CASE("ComputeContext recovery retries reuse one prepared fused graph",
     exec::static_thread_pool pool{1};
     const auto completed = stdexec::sync_wait(context->Submit(pool.get_scheduler(), MakeLogicalFusionGraph(97)));
     REQUIRE(completed.has_value());
-    REQUIRE(planningCalls == 2);
+    REQUIRE(planningCalls == 4);
+    REQUIRE(state.allocateCount == 4);
+    REQUIRE(fusedOutputs[0].CurrentVersion() == 0);
+    REQUIRE(originalOutputs[1].CurrentVersion() == 1);
     REQUIRE(context->OptimizationStatistics() == Sora::Compute::GraphOptimizationStatistics{.attempts = 1, .fused = 1});
     REQUIRE(context->Packages().Snapshot()->PackageCount() == 1);
 }

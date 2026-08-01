@@ -784,3 +784,36 @@ reservation 单位成本中位数为 `231.782 / 153.379 / 174.961 ns/allocation`
 正确性门禁为 Release 与组合 ASan + UBSan 各 `Sora.Compute 477 / 477`，两种配置均显式重建当前 CMake 定义的 50 个 Compute test
 executable。`PhysicalGraphMaterializerTest` 为 `25 cases / 1593 assertions`。sanitizer compile database 确认 materializer 源码与测试
 同时带有 address、undefined、`-fno-sanitize-recover=all`、`-std=gnu++26` 与 `-freflection-latest`。
+
+## Bounded graph portfolio 基线
+
+该基线约束 `GraphPortfolio::Create` 的 request-local 控制面成本。`portfolio_disabled` 保留 original graph 与 catalog，不运行 fusion；
+`portfolio_fused` 同时保留 original 和 fused variant。后者相对既有 `profitable_fusion` 的差值近似 original ownership 与 portfolio metadata
+增量，不包含 planner、exact reservation、JIT、pipeline 或 submission。
+
+正式样本使用五个独立 Release `-O3 -march=haswell` 进程，固定逻辑 CPU 2，使用 High priority；每个进程前后排除构建负载。结果目录为
+`C:\tmp\sora-graph-portfolio-20260801-043000`。表中 ratio 使用五个独立进程结果的中位数；retained-original increment 先在每个进程内
+计算 `portfolio_fused - profitable_fusion`，再取五进程中位数。
+
+| metric | five-process median |
+|---|---:|
+| `portfolio_disabled` | `636.929321 ns/graph` |
+| `portfolio_fused` | `7.739062500 us/graph` |
+| retained-original increment | `999.621582 ns/graph` |
+| disabled portfolio / disabled optimizer | `1.017228x` |
+| fused portfolio / fused optimizer | `1.154378x` |
+
+retained-original 的五个独立样本为 `1039.318848 / 994.934082 / 986.596680 / 1088.439941 / 999.621582 ns/graph`。
+约 1 us 是双候选模式为保留 authoritative original graph 与 catalog 支付的 submission-scoped 固定成本；该数值不得外推为 kernel 数据面
+成本，也不能与 SIMD/GPU throughput 加速比相比较。
+
+后续同机同配置采用三个正交 gate：retained-original increment 中位数相对本基线退化超过 15% 时审查 ownership/copy 路径；
+`portfolio_disabled_over_disabled` 超过 `1.15x` 时审查禁用快路径；`portfolio_fused_over_profitable_fusion` 超过 `1.30x` 时先分解 absolute
+increment、graph/catalog copy 与 transform 成本，再判断是否回归。第三项阈值高于当前 `1.154378x` 且保留测量噪声，但它不是放宽性能要求：
+只要 retained-original 独立指标触发 15%，即使 fused ratio 未到 `1.30x` 也必须审查。正式判断仍要求五个独立进程且至少四个样本方向一致；
+共享机器存在编译、测试或其他 benchmark 负载时必须废弃整轮样本。
+
+正确性定向证据为 `GraphOptimizerTest 16 cases / 456 assertions`、`HeftPlannerTest 28 / 1667` 与
+`PhysicalGraphMaterializerTest 29 / 2044`。完整 Release 与组合 ASan + UBSan 均显式重建 51 个 Compute test executable，并通过
+`Sora.Compute 483 / 483`；组合配置包含 address、undefined、no-recover、C++26 与 reflection flags。benchmark 成功不能替代 sanitizer
+与 recovery/error-path 证明。

@@ -1351,7 +1351,9 @@ namespace Sora::Compute {
     std::expected<GraphPlanSelection, HeftPlanningError>
     HeftPlanner::operator()(const ExecutionGraph& graph, const GraphPlanningContext& context,
                             GraphPlanningServices services) const noexcept {
-        auto result = Plan(graph, context, services);
+        auto result = services.automaticPartitionCalibration != nullptr
+                          ? Plan(graph, context, services, *services.automaticPartitionCalibration)
+                          : Plan(graph, context, services);
         if (!result) {
             return std::unexpected(result.error());
         }

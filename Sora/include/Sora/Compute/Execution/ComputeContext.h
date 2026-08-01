@@ -10,11 +10,13 @@
 #include <Sora/Compute/CompilerService.h>
 #include <Sora/Compute/Execution/RecoveringSubmitSender.h>
 #include <Sora/Compute/PipelineService.h>
-#include <Sora/Compute/Runtime/GraphOptimizer.h>
+#include <Sora/Compute/Runtime/GraphPortfolio.h>
 #include <Sora/Compute/Runtime/GraphPlanner.h>
 #include <Sora/Compute/Runtime/PhysicalGraphMaterializer.h>
 #include <Sora/Compute/Runtime/PortablePackageArchive.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -40,22 +42,26 @@ namespace Sora::Compute {
      * engine. */
     template<typename Error>
     struct GraphPlanningFailure {
+        GraphVariantIdentity variant{};
         Error error;
     };
 
     /** @brief Transactional physical graph materialization failure. */
     struct GraphMaterializationFailure {
+        GraphVariantIdentity variant{};
         PhysicalGraphMaterializationError error{};
     };
 
     /** @brief Exact whole-graph physical storage acquisition failure. */
     struct GraphMemoryReservationFailure {
+        GraphVariantIdentity variant{};
         PhysicalGraphMemoryReservationError error{};
     };
 
     /** @brief Pure planner output failed catalog validation or device-lease
      * capture. */
     struct GraphPlanValidationFailure {
+        GraphVariantIdentity variant{};
         PhysicalGraphPlanError error{};
     };
 
@@ -193,6 +199,50 @@ namespace Sora::Compute {
             }
             return {};
         }
+
+        template<typename Planner>
+        [[nodiscard]] std::shared_ptr<AutomaticPartitionPlanningCalibration>
+        AutomaticPlanningCalibration(const Planner& planner) noexcept {
+            if constexpr (requires {
+                              {
+                                  planner.AutomaticPlanningCalibration()
+                              } noexcept -> std::same_as<const std::shared_ptr<AutomaticPartitionPlanningCalibration>&>;
+                          }) {
+                return planner.AutomaticPlanningCalibration();
+            } else {
+                return {};
+            }
+        }
+
+        /** @brief Attempt-local deferred calibration observations published only after portfolio evaluation ends. */
+        class GraphPortfolioCalibration final {
+        public:
+            explicit GraphPortfolioCalibration(
+                std::shared_ptr<AutomaticPartitionPlanningCalibration> calibration) noexcept
+                : calibration_(std::move(calibration)) {
+                if (calibration_ != nullptr) {
+                    batch_.emplace(calibration_->Snapshot());
+                }
+            }
+
+            GraphPortfolioCalibration(const GraphPortfolioCalibration&) = delete;
+            GraphPortfolioCalibration& operator=(const GraphPortfolioCalibration&) = delete;
+
+            ~GraphPortfolioCalibration() noexcept {
+                if (batch_) {
+                    static_cast<void>(batch_->PublishTo(*calibration_));
+                }
+            }
+
+            /** @brief Borrow the shared frozen batch, or null when the planner has no adaptive calibration. */
+            [[nodiscard]] AutomaticPartitionPlanningCalibrationBatch* Batch() noexcept {
+                return batch_ ? std::addressof(*batch_) : nullptr;
+            }
+
+        private:
+            std::shared_ptr<AutomaticPartitionPlanningCalibration> calibration_{};
+            std::optional<AutomaticPartitionPlanningCalibrationBatch> batch_{};
+        };
 
     } // namespace Detail
 
@@ -451,7 +501,7 @@ namespace Sora::Compute {
                 explicit GraphPreparationState(ExecutionGraph source) noexcept : source(std::move(source)) {}
 
                 ExecutionGraph source;
-                std::optional<GraphOptimizationResult> prepared{};
+                std::optional<GraphPortfolio> portfolio{};
             };
 
             auto state = state_;
@@ -459,21 +509,22 @@ namespace Sora::Compute {
             auto factory =
                 [state, preparation](
                     const GraphAttemptContext& attempt) noexcept -> std::expected<ExecutableGraph, PreparationError> {
-                if (!preparation->prepared.has_value()) {
+                if (!preparation->portfolio.has_value()) {
                     auto programs = ProgramCatalogSnapshot::Create(
                         state->packages.Snapshot(), {.maximumGeneratedPrograms = state->fusion.maximumFusionRegions,
                                                      .maximumGeneratedBytes = state->fusion.maximumGeneratedBytes});
                     if (!programs) {
                         return std::unexpected(PreparationError{GraphProgramCatalogFailure{programs.error()}});
                     }
-                    auto optimized =
-                        OptimizeExecutionGraph(std::move(preparation->source), std::move(*programs), state->fusion);
-                    state->optimization.Observe(optimized.report);
-                    preparation->prepared.emplace(std::move(optimized));
+                    auto portfolio =
+                        GraphPortfolio::Create(std::move(preparation->source), std::move(*programs), state->fusion);
+                    state->optimization.Observe(portfolio.Optimization());
+                    preparation->portfolio.emplace(std::move(portfolio));
                 }
-                const ExecutionGraph& preparedGraph = preparation->prepared->graph;
+                const GraphPortfolio& portfolio = *preparation->portfolio;
                 RuntimeInvalidationRegistry& invalidation = state->coordinator->InvalidationRegistry();
-                if (auto registered = Detail::RegisterGraphBuffers(invalidation, preparedGraph); !registered) {
+                if (auto registered = Detail::RegisterGraphBuffers(invalidation, portfolio.Original().graph);
+                    !registered) {
                     return std::unexpected(PreparationError{GraphResourceRegistrationFailure{registered.error()}});
                 }
 
@@ -487,35 +538,74 @@ namespace Sora::Compute {
                     return std::unexpected(PreparationError{GraphPlanningInputFailure{artifacts.error()}});
                 }
                 const auto performance = state->performance.Snapshot();
-                auto planned =
-                    std::invoke(state->planner, preparedGraph, planningContext,
-                                GraphPlanningServices{
-                                    preparation->prepared->programs, attempt.epoch->Resources().Inventory(), *artifacts,
-                                    performance ? *performance : PerformanceSnapshot::Empty(), &state->priors});
-                if (!planned) {
-                    return std::unexpected(
-                        PreparationError{GraphPlanningFailure<PlanningError>{std::move(planned.error())}});
+                Detail::GraphPortfolioCalibration planningCalibration{
+                    Detail::AutomaticPlanningCalibration(state->planner)};
+                std::array<GraphPortfolioPlanCandidate, GraphPortfolio::kMaximumVariantCount> candidates{};
+                size_t candidateCount = 0;
+                std::optional<PlanningError> firstPlanningError;
+                GraphVariantIdentity firstPlanningFailureVariant{};
+                for (size_t variantIndex = 0; variantIndex < portfolio.VariantCount(); ++variantIndex) {
+                    const GraphPortfolioVariant& variant = portfolio.Variant(variantIndex);
+                    auto planned = std::invoke(
+                        state->planner, variant.graph, planningContext,
+                        GraphPlanningServices{variant.programs, attempt.epoch->Resources().Inventory(), *artifacts,
+                                              performance ? *performance : PerformanceSnapshot::Empty(), &state->priors,
+                                              planningCalibration.Batch()});
+                    if (!planned) {
+                        if (!firstPlanningError) {
+                            firstPlanningFailureVariant = variant.identity;
+                            firstPlanningError.emplace(std::move(planned.error()));
+                        }
+                        continue;
+                    }
+                    candidates[candidateCount++] = GraphPortfolioPlanCandidate{
+                        .variant = variant.identity,
+                        .selection = std::move(*planned),
+                    };
                 }
-                auto plan = PhysicalGraphPlan::Create(std::move(planned->storage), attempt.epoch->Resources());
-                if (!plan) {
-                    return std::unexpected(PreparationError{GraphPlanValidationFailure{plan.error()}});
+                if (candidateCount == 0) {
+                    return std::unexpected(PreparationError{GraphPlanningFailure<PlanningError>{
+                        .variant = firstPlanningFailureVariant,
+                        .error = std::move(*firstPlanningError),
+                    }});
                 }
-                if (auto registered = Detail::RegisterPlanBuffers(invalidation, *plan); !registered) {
-                    return std::unexpected(PreparationError{GraphResourceRegistrationFailure{registered.error()}});
-                }
+                std::ranges::sort(std::span{candidates}.first(candidateCount), BetterGraphPortfolioCandidate);
 
-                auto reservation = ReservePhysicalGraphMemory(std::move(*plan), attempt.epoch->Resources());
-                if (!reservation) {
-                    return std::unexpected(PreparationError{GraphMemoryReservationFailure{reservation.error()}});
-                }
+                std::optional<PreparationError> bestInfeasible;
+                for (size_t candidateIndex = 0; candidateIndex < candidateCount; ++candidateIndex) {
+                    GraphPortfolioPlanCandidate& candidate = candidates[candidateIndex];
+                    auto plan =
+                        PhysicalGraphPlan::Create(std::move(candidate.selection.storage), attempt.epoch->Resources());
+                    if (!plan) {
+                        if (!bestInfeasible) {
+                            bestInfeasible.emplace(GraphPlanValidationFailure{candidate.variant, plan.error()});
+                        }
+                        continue;
+                    }
+                    if (auto registered = Detail::RegisterPlanBuffers(invalidation, *plan); !registered) {
+                        return std::unexpected(PreparationError{GraphResourceRegistrationFailure{registered.error()}});
+                    }
 
-                auto materialized = MaterializePhysicalGraph(
-                    std::move(*reservation), attempt.epoch->Resources(),
-                    ArtifactResolutionServices{state->compiler, state->pipeline, state->performance.KernelObserver()});
-                if (!materialized) {
-                    return std::unexpected(PreparationError{GraphMaterializationFailure{materialized.error()}});
+                    auto reservation = ReservePhysicalGraphMemory(std::move(*plan), attempt.epoch->Resources());
+                    if (!reservation) {
+                        if (!bestInfeasible) {
+                            bestInfeasible.emplace(
+                                GraphMemoryReservationFailure{candidate.variant, reservation.error()});
+                        }
+                        continue;
+                    }
+
+                    auto materialized =
+                        MaterializePhysicalGraph(std::move(*reservation), attempt.epoch->Resources(),
+                                                 ArtifactResolutionServices{state->compiler, state->pipeline,
+                                                                            state->performance.KernelObserver()});
+                    if (!materialized) {
+                        return std::unexpected(
+                            PreparationError{GraphMaterializationFailure{candidate.variant, materialized.error()}});
+                    }
+                    return std::move(*materialized);
                 }
-                return std::move(*materialized);
+                return std::unexpected(std::move(*bestInfeasible));
             };
             auto recoveryProvider = [state](const RuntimeRecoveryRequest& request) noexcept {
                 auto replacement = std::invoke(state->rebuildEpoch, request);

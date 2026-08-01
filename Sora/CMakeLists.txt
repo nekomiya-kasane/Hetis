@@ -125,6 +125,7 @@ add_library(Sora.Compute.Runtime STATIC
     src/Compute/DispatchGraphPlanning.cpp
     src/Compute/GraphResidency.cpp
     src/Compute/GraphOptimizer.cpp
+    src/Compute/GraphPortfolio.cpp
     src/Compute/HeftPlanner.cpp
     src/Compute/HeftRanking.cpp
     src/Compute/HostTransferBridge.cpp
