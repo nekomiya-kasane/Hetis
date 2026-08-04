@@ -36,3 +36,4 @@ CMakeFiles/
 # Third-party dependencies — managed externally, not tracked in this repo.
 # Only thirdparty/CMakeLists.txt (the integration wrapper) is committed.
 /thirdparty/*/
+results

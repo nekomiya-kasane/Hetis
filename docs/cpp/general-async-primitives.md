@@ -2993,7 +2993,7 @@ EventPump 是本仓库**最稠密**的异步原语聚合点。把上面分散的
   bookkeep 调用。运行期 `std::visit` 落到对应 case，没有"`if (kind == ...)`"枚举开
   关。
 - **`Beacon<Schema>` (诊断回路)**——`StructuredLogger` 的 thread-local
-  `SpscByteRing` + 后台 drain 完整对应 Beacon "热路径写入仅碰 TLS、冷路径串行处
+  `RecordRingBuffer<64_KiB, Spsc>` + 后台 drain 完整对应 Beacon "热路径写入仅碰 TLS、冷路径串行处
   理"的本意。其 schema 由 `LogAnno::DefaultLevel` / `LogAnno::LevelColor` 驱动，
   也是反射用得**合适处**的样本。
 
@@ -3068,7 +3068,7 @@ hash 表持久化、哪个 ring 的容量怎么定）就全部可以**沿原语�
 | Pipe | ⊂ | `EventPump` 的 bookkeep+broadcast 是 2-stage 实例 |
 | Topic | ⊂ | "Unified Event Writer + N×SpscRing" 是固定 fan-out 实例 |
 | Channel (MPSC) | = | `MpscQueue` |
-| Channel (SPSC) | = | `SpscQueue` / `SpscByteRing` |
+| Channel (SPSC) | = | `RingBuffer<T, N, Spsc>` / `RecordRingBuffer<Bytes, Spsc>` |
 | Saga | – | （未引入） |
 | Cache | – | （未引入） |
 | Snapshot (SeqLock) | = | `SeqLock<T>` |
@@ -3093,4 +3093,3 @@ hash 表持久化、哪个 ring 的容量怎么定）就全部可以**沿原语�
 
 一个通用异步框架不是"这些原语的总和"，而是"这些原语**互不重叠**的最小覆盖"。框架
 的成熟度，靠的不是原语数量，而是这些原语之间是否清晰地各司其职。
-

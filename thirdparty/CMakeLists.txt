@@ -709,6 +709,9 @@ if(VK_TP_BUILD_TBB)
     # Deploy the runtime DLL beside consumers with vk_tp_deploy_tbb().
     set(BUILD_SHARED_LIBS ON)
     add_subdirectory(tbb)
+    # CMake owns the configuration-specific import library. Match oneTBB's installed Windows targets and prevent
+    # its headers from injecting an independent /DEFAULTLIB choice based on the compiler's _DEBUG convention.
+    target_compile_definitions(tbb INTERFACE __TBB_NO_IMPLICIT_LINKAGE=1)
     unset(BUILD_SHARED_LIBS)
 endif()
 
