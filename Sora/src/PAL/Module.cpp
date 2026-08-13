@@ -10,6 +10,7 @@
 #include <Sora/Core/PAL/SystemAPI.h>
 
 #include <Sora/Core/Path.h>
+#include <Sora/Core/Unicode.h>
 #include <Sora/Core/Wire.h>
 #include <Sora/ErrorCode.h>
 #include <Sora/Platform.h>
@@ -633,8 +634,8 @@ namespace Sora::PAL {
 
     ModuleLoader::ModuleLoader() = default;
 
-    std::vector<std::filesystem::path> ModuleLoader::GenerateCandidates(std::span<const std::string_view> names,
-                                                                        ModuleLoadOptions options) const {
+    Result<std::vector<std::filesystem::path>> ModuleLoader::GenerateCandidates(std::span<const std::string_view> names,
+                                                                                ModuleLoadOptions options) const {
         // 1. Snapshot configured roots under the lock, then append per-call roots.
         std::vector<std::filesystem::path> roots;
         {
@@ -651,8 +652,18 @@ namespace Sora::PAL {
             std::vector<std::string> decorated = DecorateName(name, options);
             const bool exact = options.nameKind == ModuleNameKind::ExactPath || Sora::HasPathSeparator(name);
             for (const std::string& candidate : decorated) {
-                const std::u8string utf8Candidate{candidate.begin(), candidate.end()};
-                const std::filesystem::path nativeCandidate{utf8Candidate};
+#ifdef PLATFORM_WINDOWS
+                auto nativeText = Unicode::Utf8ToWide(candidate);
+                if (!nativeText) {
+                    return std::unexpected{nativeText.error()};
+                }
+                const std::filesystem::path nativeCandidate{std::move(*nativeText)};
+#else
+                if (auto valid = Unicode::ValidateUtf8(candidate); !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                const std::filesystem::path nativeCandidate{candidate};
+#endif
                 if (!exact) {
                     for (const std::filesystem::path& root : roots) {
                         AddCandidate(candidates, root / nativeCandidate);
@@ -667,8 +678,11 @@ namespace Sora::PAL {
 
     Result<ModulePtr> ModuleLoader::Load(std::span<const std::string_view> names, ModuleLoadOptions options) {
         auto attempted = GenerateCandidates(names, options);
+        if (!attempted) {
+            return std::unexpected{attempted.error()};
+        }
 
-        for (const std::filesystem::path& candidate : attempted) {
+        for (const std::filesystem::path& candidate : *attempted) {
             CacheKey key;
 
             // 1. See if the module is already cached and return it if so.

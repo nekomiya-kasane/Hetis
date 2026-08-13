@@ -252,7 +252,8 @@ namespace Sora::PAL {
          * @brief Load the first available dynamic module from @p names.
          * @param[in] names UTF-8 candidate module spellings in priority order.
          * @param[in] options Candidate-generation, cache, search, and native-loader options.
-         * @return Shared loaded module, or @ref ErrorCode::ModuleLoadFailed when no candidate can be loaded.
+         * @return Shared loaded module, a Unicode decoding error, or @ref ErrorCode::ModuleLoadFailed when no candidate
+         * can be loaded.
          */
         [[nodiscard]] Result<ModulePtr> Load(std::span<const std::string_view> names, ModuleLoadOptions options = {});
 
@@ -302,8 +303,8 @@ namespace Sora::PAL {
             }
         };
 
-        [[nodiscard]] std::vector<std::filesystem::path> GenerateCandidates(std::span<const std::string_view> names,
-                                                                            ModuleLoadOptions options) const;
+        [[nodiscard]] Result<std::vector<std::filesystem::path>>
+        GenerateCandidates(std::span<const std::string_view> names, ModuleLoadOptions options) const;
 
         mutable std::mutex mutex_;
         std::vector<std::filesystem::path> searchPaths_;
