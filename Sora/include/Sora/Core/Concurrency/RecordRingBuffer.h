@@ -45,12 +45,6 @@ namespace Sora::Concurrency {
 
         inline constexpr uint32_t kPaddingRecord = std::numeric_limits<uint32_t>::max();
 
-        /** @brief Writers participating in the same multi-producer reservation protocol. */
-        struct RecordProducerContention : $::ContentionDomain {};
-
-        /** @brief Readers participating in the same multi-consumer claim and reclaim protocol. */
-        struct RecordConsumerContention : $::ContentionDomain {};
-
         /** @brief Physical roles used to give every compile-time-erased cursor a distinct empty type. */
         enum class RecordRingBufferField : uint8_t {
             CachedReclaimPosition,
@@ -100,13 +94,14 @@ namespace Sora::Concurrency {
             using ConsumerReclaimPosition = std::conditional_t<kLocal, uint64_t, std::atomic<uint64_t>>;
 
             using ProducerDomain =
-                std::conditional_t<kLocal, $::Immutable,
-                                   std::conditional_t<kMultipleProducers, RecordProducerContention, $::ProducerOwned>>;
+                std::conditional_t<kLocal, $::Inactive,
+                                   std::conditional_t<kMultipleProducers, $::Contended, $::ProducerOwned>>;
             using CachedReclaimDomain = ProducerDomain;
-            using ConsumerClaimDomain = std::conditional_t<kMultipleConsumers, RecordConsumerContention, $::Immutable>;
+            using ConsumerClaimDomain = std::conditional_t<kMultipleConsumers, $::Contended, $::Inactive>;
             using ConsumerReclaimDomain =
-                std::conditional_t<kLocal, $::Immutable,
-                                   std::conditional_t<kMultipleConsumers, RecordConsumerContention, $::ConsumerOwned>>;
+                std::conditional_t<kLocal, $::Inactive,
+                                   std::conditional_t<kMultipleConsumers, $::Contended, $::ConsumerOwned>>;
+            using StorageDomain = std::conditional_t<kLocal, $::Inactive, $::SharedStorage>;
 
             struct Reservation {
                 uint64_t position;
@@ -543,13 +538,17 @@ namespace Sora::Concurrency {
             }
 
             // clang-format off
-            [[= ProducerDomain{}]] alignas(kPositionAlignment) ProducerPosition producerPosition_{0};
-            [[= CachedReclaimDomain{}]] SORA_NO_UNIQUE_ADDRESS CachedReclaimPosition cachedReclaimPosition_{};
-            [[= ConsumerClaimDomain{}]] SORA_NO_UNIQUE_ADDRESS alignas(kPositionAlignment)
+            [[= ProducerDomain{}]] [[= $::CohesiveContentionRegion{}]]
+                alignas(kPositionAlignment) ProducerPosition producerPosition_{0};
+            [[= CachedReclaimDomain{}]] [[= $::CohesiveContentionRegion{}]]
+                SORA_NO_UNIQUE_ADDRESS alignas(kPositionAlignment) CachedReclaimPosition cachedReclaimPosition_{};
+            [[= ConsumerClaimDomain{}]] [[= $::CohesiveContentionRegion{}]]
+                SORA_NO_UNIQUE_ADDRESS alignas(kPositionAlignment)
                 ConsumerClaimPosition consumerClaimPosition_{};
-            [[= ConsumerReclaimDomain{}]] alignas(kPositionAlignment)
+            [[= ConsumerReclaimDomain{}]] [[= $::CohesiveContentionRegion{}]]
+                alignas(kPositionAlignment)
                 ConsumerReclaimPosition consumerReclaimPosition_{0};
-            [[= $::SharedStorage{}]] alignas(Platform::kCacheLineSize) std::array<uint64_t, kWordCount> words_{};
+            [[= StorageDomain{}]] alignas(Platform::kCacheLineSize) std::array<uint64_t, kWordCount> words_{};
             // clang-format on
         };
 
@@ -565,10 +564,10 @@ namespace Sora::Concurrency {
 
     /** @cond INTERNAL */
     consteval {
-        static_assert(Meta::AuditFalseSharing<RecordRingBuffer<4096, QueueTopologies::Spsc>>());
-        static_assert(Meta::AuditFalseSharing<RecordRingBuffer<4096, QueueTopologies::Mpsc>>());
-        static_assert(Meta::AuditFalseSharing<RecordRingBuffer<4096, QueueTopologies::Spmc>>());
-        static_assert(Meta::AuditFalseSharing<RecordRingBuffer<4096, QueueTopologies::Mpmc>>());
+        static_assert(Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, QueueTopologies::Spsc>>());
+        static_assert(Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, QueueTopologies::Mpsc>>());
+        static_assert(Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, QueueTopologies::Spmc>>());
+        static_assert(Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, QueueTopologies::Mpmc>>());
     }
     /** @endcond */
 

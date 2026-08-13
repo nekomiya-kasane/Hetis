@@ -23,10 +23,11 @@
  * s1 = seq_.load(std::memory_order_relaxed);
  * @endcode
  *
- * The payload is represented as independently atomic 64-bit words, so snapshots that overlap writes remain valid atomic
- * accesses under the C++ memory model and are discarded when sequence validation fails. Both members belong to the
- * @ref Sora::Concurrency::$::ProducerOwned contention domain because only the writer mutates them. Representative
- * instantiations are audited at translation time through the project-wide false-sharing analyzer.
+ * The payload is represented as independently atomic 64-bit words, so snapshots that overlap writes remain valid
+ * atomic accesses under the C++ memory model and are discarded when sequence validation fails. The counter and payload
+ * form one cohesive sequence-publication domain: the writer mutates both and readers observe both as one validation
+ * protocol.
+ * Representative instantiations are audited at translation time through the project-wide false-sharing analyzer.
  * @ingroup Core
  */
 #pragma once
@@ -48,6 +49,13 @@
 #include <utility>
 
 namespace Sora::Concurrency {
+
+    namespace Detail {
+
+        /** @brief Counter and payload participating in one sequence-publication protocol. */
+        struct SequencePublicationContention : $::CohesiveSingleWriterContentionDomain {};
+
+    } // namespace Detail
 
     /**
      * @brief Publish a trivially copyable value through a single-writer, multi-reader sequence protocol.
@@ -205,8 +213,12 @@ namespace Sora::Concurrency {
             return bytes;
         }
 
-        [[= $::ProducerOwned{}]] alignas(Platform::kCacheLineSize) std::atomic<SequenceType> seq_{0};
-        [[= $::ProducerOwned{}]] std::array<std::atomic<StorageWord>, kStorageWordCount> payload_{};
+        // clang-format off
+        [[= Detail::SequencePublicationContention{}]] [[= $::CohesiveContentionRegion{}]]
+        alignas(Platform::kCacheLineSize) std::atomic<SequenceType> seq_{0};
+        [[= Detail::SequencePublicationContention{}]] [[= $::CohesiveContentionRegion{}]]
+        std::array<std::atomic<StorageWord>, kStorageWordCount> payload_{};
+        // clang-format on
 
         static_assert(std::atomic<SequenceType>::is_always_lock_free,
                       "SequenceLock requires a lock-free sequence counter");
@@ -217,25 +229,25 @@ namespace Sora::Concurrency {
     /** @cond INTERNAL */
     consteval {
 
-        using Concurrency::$::ProducerOwned;
         using Concurrency::Meta::AuditFalseSharing;
         using Concurrency::Traits::DomainLineSpanOf;
         using Concurrency::Traits::IsDomainStartsAlignedToCacheLine;
         using Concurrency::Traits::IsOccupyingWholeLines;
+        using Detail::SequencePublicationContention;
 
-        // The counter and payload share one writer domain, so their co-location does not create write-write contention.
+        // The counter and payload share one publication protocol, so their co-location is intentional.
         static_assert(AuditFalseSharing<SequenceLock<std::uint64_t>>(),
-                      "SequenceLock<uint64_t> failed the internal false-sharing audit");
+                      "SequenceLock<uint64_t> failed the complete false-sharing audit");
         static_assert(AuditFalseSharing<SequenceLock<double>>(),
-                      "SequenceLock<double> failed the internal false-sharing audit");
+                      "SequenceLock<double> failed the complete false-sharing audit");
         // Whole-line occupancy prevents neighboring array elements from sharing a boundary cache line.
         static_assert(IsOccupyingWholeLines<SequenceLock<std::uint64_t>>,
                       "SequenceLock<uint64_t> must occupy whole cache lines");
         // The writer-owned state begins at a cache-line boundary.
-        static_assert(IsDomainStartsAlignedToCacheLine<SequenceLock<std::uint64_t>, ProducerOwned>,
+        static_assert(IsDomainStartsAlignedToCacheLine<SequenceLock<std::uint64_t>, SequencePublicationContention>,
                       "SequenceLock counter must start a cache line");
         // A small payload shares the counter's cache line, allowing the reader fast path to touch one line.
-        static_assert(Traits::DomainLineSpanOf<SequenceLock<std::uint64_t>, ProducerOwned> == 1,
+        static_assert(Traits::DomainLineSpanOf<SequenceLock<std::uint64_t>, SequencePublicationContention> == 1,
                       "small SequenceLock payloads must share the counter's cache line");
     }
     /** @endcond */

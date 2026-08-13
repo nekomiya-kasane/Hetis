@@ -187,16 +187,24 @@ namespace Sora {
                                                  std::conditional_t<kProtocol == RingBufferProtocol::SequenceCell,
                                                                     CellsArena<T, Capacity, CacheLineAligned>,
                                                                     EmptyRingBufferField<RingBufferField::Arena>>>;
-                using WriteDomain =
-                    std::conditional_t<Topo.producers == QueueCardinality::Multiple, $::Contended, $::ProducerOwned>;
-                using ReadDomain =
-                    std::conditional_t<Topo.consumers == QueueCardinality::Multiple, $::Contended, $::ConsumerOwned>;
-                using CachedReadDomain = std::conditional_t<kProtocol == RingBufferProtocol::PublishedCursor,
-                                                            $::ProducerOwned, $::Immutable>;
-                using CachedWriteDomain = std::conditional_t<kProtocol == RingBufferProtocol::PublishedCursor,
-                                                             $::ConsumerOwned, $::Immutable>;
-                using ArenaDomain = std::conditional_t<kProtocol == RingBufferProtocol::PublishedCursor, $::Immutable,
-                                                       $::SharedStorage>;
+                using WriteDomain = std::conditional_t<
+                    kProtocol == RingBufferProtocol::Local, $::Inactive,
+                    std::conditional_t<Topo.producers == QueueCardinality::Multiple, $::Contended, $::ProducerOwned>>;
+                using ReadDomain = std::conditional_t<
+                    kProtocol == RingBufferProtocol::Local, $::Inactive,
+                    std::conditional_t<Topo.consumers == QueueCardinality::Multiple, $::Contended, $::ConsumerOwned>>;
+                using CachedReadDomain =
+                    std::conditional_t<kProtocol == RingBufferProtocol::PublishedCursor, $::ProducerOwned, $::Inactive>;
+                using CachedWriteDomain =
+                    std::conditional_t<kProtocol == RingBufferProtocol::PublishedCursor, $::ConsumerOwned, $::Inactive>;
+                using PublishedMetadataDomain =
+                    std::conditional_t<kProtocol == RingBufferProtocol::PublishedCursor, $::Immutable, $::Inactive>;
+                using ArenaDomain =
+                    std::conditional_t<kProtocol == RingBufferProtocol::SequenceCell, $::SharedStorage, $::Inactive>;
+                struct UnprovenArenaCoverage {};
+                using ArenaCoverage =
+                    std::conditional_t<kProtocol == RingBufferProtocol::SequenceCell && CacheLineAligned,
+                                       $::InternallyIsolatedContentionRegion, UnprovenArenaCoverage>;
                 using Cell = SequenceCell<T, CacheLineAligned>;
 
                 class SuccessfulPopCommit {
@@ -634,21 +642,31 @@ namespace Sora {
                 }
 
                 // clang-format off
-                [[= $::Immutable{}]]
+                [[= PublishedMetadataDomain{}]]
                 SORA_NO_UNIQUE_ADDRESS PublishedSlotCount slotCount_ = InitialSlotCount();
-                [[= $::Immutable{}]]
+
+                [[= PublishedMetadataDomain{}]]
                 SORA_NO_UNIQUE_ADDRESS AllocatedSlots allocatedSlots_{};
-                [[= $::Immutable{}]]
+
+                [[= $::Inactive{}]]
                 SORA_NO_UNIQUE_ADDRESS Allocator allocator_{};
+
                 [[= WriteDomain{}]]
+                [[= $::CohesiveContentionRegion{}]]
                 alignas(kPositionAlignment) Position writePosition_{0};
+
                 [[= CachedReadDomain{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kCacheAlignment) CachedReadPosition cachedReadPosition_{};
+                
                 [[= ReadDomain{}]]
+                [[= $::CohesiveContentionRegion{}]]
                 alignas(kPositionAlignment) Position readPosition_{0};
+
                 [[= CachedWriteDomain{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kCacheAlignment) CachedWritePosition cachedWritePosition_{};
+                
                 [[= ArenaDomain{}]]
+                [[= ArenaCoverage{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kArenaAlignment) Arena arena_{};
                 // clang-format on
             };
