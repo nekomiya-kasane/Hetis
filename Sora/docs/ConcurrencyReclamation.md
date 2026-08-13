@@ -1,6 +1,6 @@
 # Sora stamped publication and safe reclamation
 
-ABA identity and object lifetime are related but distinct. `PointerStamp.h` assigns a bounded publication identity to
+ABA identity and object lifetime are related but distinct. `StampedValue.h` assigns a bounded publication identity to
 one atomic word. The safe-reclamation headers determine when an unlinked object may be destroyed. Neither layer makes
 an arbitrary data structure linearizable; the data structure still owns its linearization point and ownership transfer.
 
@@ -9,7 +9,7 @@ an arbitrary data structure linearizable; the data structure still owns its line
 ```mermaid
 flowchart TD
     U["Concurrent data structure"] --> P["std::atomic<T*> / AtomicStampedValue"]
-    P --> O["ProtectedPointer / ProtectedStampedValue"]
+    P --> O["ProtectedPointer / ProtectedStampedPointer"]
     O --> H["HazardDomain::HazardPointer"]
     O --> E["EpochDomain::ReadGuard"]
     O --> R["RcuDomain::ReadGuard"]
@@ -55,7 +55,7 @@ participant record alive after the registration handle is destroyed; release/acq
 recheck prevent premature reuse.
 
 Hazard, epoch, and RCU protection directly accept `std::atomic<T*>`. They also accept `AtomicStampedValue` whose payload
-is a pointer and return `ProtectedStampedValue`, preserving both pointee lifetime and the exact identity required by a
+is a pointer and return `ProtectedStampedPointer`, preserving both pointee lifetime and the exact identity required by a
 later CAS. QSBR deliberately has no scoped protection wrapper: its references remain valid only until that participant's
 next quiescent-state report.
 
@@ -67,50 +67,64 @@ that either validation observes the unlink or the scan observes the protection p
 
 Epoch and RCU entry first announce the candidate generation or phase, publish active state in the SC order, and then
 validate the global state. A failed validation withdraws the announcement before any protected load. Exit uses release,
-and reclaim-side acquire observes completion. QSBR membership and generation advance share the SC order so a collector
-cannot miss a pre-advance participant; acknowledgements remain release/acquire boundaries around quiescence.
+and reclaim-side acquire observes completion. Nested epoch entry also publishes its depth with release so a scanner that
+reads that later store still observes the original generation announcement. Epoch and QSBR retirement capture the
+immediate predecessor in the global atomic's modification order with one read-modify-write operation per call or batch.
+An ordinary atomic load could legally observe an older generation and shorten the required grace interval. QSBR
+membership and generation advance share the SC order so a collector cannot miss a pre-advance participant;
+acknowledgements remain release/acquire boundaries around quiescence.
 
 `Retire` transfers ownership to the domain. The default deleter is `std::default_delete<T>`; a custom deleter must be
-`noexcept`, be nothrow-constructible in domain storage, and fit `InlineFunction<void() noexcept, 32>`. A non-null
-pointer
-is consumed even if retirement allocation fails: its deleter runs outside the lock before the allocation exception is
-re-thrown. Deleters may re-enter the domain. Deferred batches are reattached without allocation, so a collection failure
-cannot lose ownership. Domain destruction requires all participation and protection objects to have ended, then drains
-retained ownership.
+`noexcept`, transfer without throwing, and fit `InlineFunction<void() noexcept, 32>`. Batch deleters must additionally
+copy without throwing because every object owns an independent callback. Every non-null pointer is consumed exactly
+once even if retirement allocation fails: already staged callbacks and unconsumed inputs form disjoint rollback sets.
+Deleters run outside the lock and may re-enter the domain. Deferred batches are reattached without allocation, so a
+collection failure cannot lose ownership. Domain destruction requires all participation and protection objects to have
+ended, then drains retained ownership.
 
 ## Performance and evidence boundary
 
-Participant records are stable, reusable, and cache-line isolated. Registry scans are allocation-free. Retire uses a
-mutex-protected batch and can allocate; it is a cold-path ownership operation, not a lock-free claim. Hazard collection
-allocates its sorted address set. A production data structure should batch retire calls and reuse read-side
-capabilities.
+Participant records are stable, reusable, and cache-line isolated. Registry scans are allocation-free. Retired objects
+use domain-owned blocks of 64 intrusive nodes: a cold block expansion allocates, while warmed retirement reuses nodes
+and detach/requeue remain O(1). The queue is mutex protected and makes no lock-free claim. `Retire(span)` acquires that
+mutex once and captures one epoch or generation for the entire batch. Hazard collection allocates its sorted address
+set. A measured `std::inplace_vector<void*, 64>` hybrid was not retained because it regressed the tested collection
+path; availability in the active libc++ does not make it the right storage policy here.
 
 `Benchmark.Sora.Core.Reclamation` measures reusable-holder read cost, pointer versus versioned CAS, hazard reader
-scaling, and batched retire/collect cost. Results apply only to the recorded compiler, CPU, optimization level,
-workload,
-and allocator. Competitor comparisons require identical memory ordering, ownership protocol, pinning, warm-up, and
-correctness checks. Debug, Release, ASan, and UBSan test runs do not replace a TSan run; the current Windows COCA matrix
-does not provide a working TSan configuration for this target.
+scaling, allocation cost, cold and warmed retirement metadata, and hazard collection across record and batch counts.
+Results apply only to the recorded compiler, CPU, optimization level, workload, and allocator. Competitor comparisons
+require identical memory ordering, ownership protocol, pinning, warm-up, and correctness checks. Debug, Release, ASan,
+and UBSan test runs do not replace a TSan run; the current Windows COCA matrix does not provide a working TSan
+configuration for this target.
 
-The 2026-08-14 Windows x64 Release run with COCA clang-p2996 measured the following medians on the current workstation:
+The 2026-08-14 Windows x64 Release run used COCA clang-p2996, `-O3 -march=haswell`, and CPU affinity mask `4`. One
+pinned run measured the following medians on the current workstation:
 
 | Boundary | Median |
 | --- | ---: |
-| raw acquire load | 3.15 ns |
-| reusable hazard protection | 12.13 ns |
-| epoch protected observation | 25.17 ns |
-| RCU protected observation | 18.93 ns |
-| plain pointer CAS | 13.53 ns |
-| manually packed pointer/version CAS | 14.78 ns |
-| `AtomicVersionedPointer` CAS | 13.84 ns |
-| hazard retire, batch of 16,384 | 173.34 ns/object |
-| hazard collect, batch of 16,384 | 185.10 ns/object |
+| raw acquire load | 2.46 ns |
+| reusable hazard protection | 7.73 ns |
+| epoch protected observation | 11.88 ns |
+| RCU protected observation | 11.89 ns |
+| plain pointer CAS | 10.37 ns |
+| manually packed pointer/version CAS | 11.22 ns |
+| `AtomicVersionedPointer` CAS | 11.31 ns |
+| `new Node` baseline | 34.11 ns/object |
+| `delete Node` baseline | 17.34 ns/object |
+| cold `Retire(span)`, 16,384 objects | 30.73 ns/object |
+| warmed single-object `Retire`, 16,384 objects | 21.50 ns/object |
+| warmed `Retire(span)`, 16,384 objects | 10.25 ns/object |
+| hazard collect, 8 objects / 0 records | 12.93 ns/object |
+| hazard collect, 8 objects / 64 records | 313.23 ns/object |
+| hazard collect, 16,384 objects / 64 records | 14.89 ns/object |
 
-The versioned wrapper did not measure slower than the same-semantics manually packed CAS in this run. That and its
-single-word layout support a zero-overhead representation claim on this target, but timing noise prevents interpreting
-the 6.4% difference as a speedup. The portable hazard read path uses standard SC ordering and measured 12.13 ns. Folly
-uses platform-specific asymmetric fences to shift the expensive barrier to reclaimers, so this baseline does not claim
-to match Folly's documented sub-nanosecond reused-holder path.
+The versioned wrapper did not measure slower than the same-semantics manually packed CAS in this run. Disassembly shows
+one `lock cmpxchg` for both representations, supporting a zero-overhead representation claim on this target; timing
+noise prevents interpreting their small difference as a speedup. Epoch and RCU exits compile to ordinary stores under
+their affine single-writer contract, while entry retains the required SC `xchg`. The portable hazard read path uses
+standard SC ordering. Folly uses platform-specific asymmetric fences to shift the expensive barrier to reclaimers, so
+this baseline does not claim to match Folly's documented sub-nanosecond reused-holder path.
 
 ## Primary references
 

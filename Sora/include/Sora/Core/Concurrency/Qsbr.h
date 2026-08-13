@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -89,12 +90,37 @@ namespace Sora::Concurrency {
         [[nodiscard]] Participant Register() { return Participant(*this); }
 
         template<typename T>
-        void Retire(T* pointer) { retired_.Retire(pointer, generation_.load(std::memory_order_acquire)); }
+        void Retire(T* pointer) {
+            if (pointer != nullptr) {
+                retired_.Retire(pointer, CaptureGeneration());
+            }
+        }
         template<typename T, typename Deleter>
             requires std::is_nothrow_constructible_v<std::remove_cvref_t<Deleter>, Deleter&&> &&
+                     std::is_nothrow_move_constructible_v<std::remove_cvref_t<Deleter>> &&
                      std::is_nothrow_invocable_v<std::remove_cvref_t<Deleter>&, T*>
         void Retire(T* pointer, Deleter&& deleter) {
-            retired_.Retire(pointer, std::forward<Deleter>(deleter), generation_.load(std::memory_order_acquire));
+            if (pointer != nullptr) {
+                retired_.Retire(pointer, std::forward<Deleter>(deleter), CaptureGeneration());
+            }
+        }
+        template<typename Pointer, std::size_t Extent>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+        void Retire(std::span<Pointer, Extent> pointers) {
+            if (!pointers.empty()) {
+                retired_.Retire(pointers, CaptureGeneration());
+            }
+        }
+        template<typename Pointer, std::size_t Extent, typename Deleter>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_copy_constructible_v<Deleter> && std::is_nothrow_move_constructible_v<Deleter> &&
+                     std::is_nothrow_invocable_v<Deleter&, std::remove_cv_t<Pointer>>
+        void Retire(std::span<Pointer, Extent> pointers, Deleter deleter) {
+            if (!pointers.empty()) {
+                retired_.Retire(pointers, std::move(deleter), CaptureGeneration());
+            }
         }
 
         [[nodiscard]] std::uint64_t Advance() noexcept {
@@ -141,6 +167,11 @@ namespace Sora::Concurrency {
         [[nodiscard]] std::size_t RetiredCount() const noexcept { return retired_.Size(); }
 
     private:
+        /** @brief Read the immediate predecessor in generation modification order before transferring ownership. */
+        [[nodiscard]] std::uint64_t CaptureGeneration() noexcept {
+            return generation_.fetch_add(0, std::memory_order_acquire);
+        }
+
         std::atomic<std::uint64_t> generation_{1};
         Detail::StableRecordRegistry<Record> records_;
         Detail::RetiredList retired_;

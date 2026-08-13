@@ -6,7 +6,7 @@
 #pragma once
 
 #include <Sora/Core/Concurrency/Detail/Reclamation.h>
-#include <Sora/Core/Concurrency/PointerStamp.h>
+#include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Protection.h>
 
 #include <atomic>
@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <type_traits>
 #include <utility>
 
@@ -78,7 +79,9 @@ namespace Sora::Concurrency {
                 if (record_ == nullptr) {
                     return;
                 }
-                record_->depth.fetch_sub(1, std::memory_order_release);
+                const std::size_t depth = record_->depth.load(std::memory_order_relaxed);
+                assert(depth != 0);
+                record_->depth.store(depth - 1, std::memory_order_release);
                 record_ = nullptr;
             }
             [[nodiscard]] explicit operator bool() const noexcept { return record_ != nullptr; }
@@ -110,8 +113,9 @@ namespace Sora::Concurrency {
 
             [[nodiscard]] ReadGuard Enter() noexcept {
                 assert(record_ != nullptr);
-                if (record_->depth.load(std::memory_order_relaxed) != 0) {
-                    record_->depth.fetch_add(1, std::memory_order_relaxed);
+                const std::size_t depth = record_->depth.load(std::memory_order_relaxed);
+                if (depth != 0) {
+                    record_->depth.store(depth + 1, std::memory_order_release);
                     return ReadGuard(record_);
                 }
 
@@ -134,11 +138,11 @@ namespace Sora::Concurrency {
             }
             template<typename Stamped>
                 requires std::is_pointer_v<typename Stamped::ValueType>
-            [[nodiscard]] ProtectedStampedValue<Stamped, ReadGuard>
+            [[nodiscard]] ProtectedStampedPointer<Stamped, ReadGuard>
             Protect(const AtomicStampedValue<Stamped>& source) noexcept {
                 ReadGuard guard = Enter();
                 Stamped snapshot = guard.Load(source);
-                return ProtectedStampedValue<Stamped, ReadGuard>(snapshot, std::move(guard));
+                return ProtectedStampedPointer<Stamped, ReadGuard>(snapshot, std::move(guard));
             }
 
         private:
@@ -170,12 +174,37 @@ namespace Sora::Concurrency {
         [[nodiscard]] Participant Register() { return Participant(*this); }
 
         template<typename T>
-        void Retire(T* pointer) { retired_.Retire(pointer, epoch_.load(std::memory_order_acquire)); }
+        void Retire(T* pointer) {
+            if (pointer != nullptr) {
+                retired_.Retire(pointer, CaptureEpoch());
+            }
+        }
         template<typename T, typename Deleter>
             requires std::is_nothrow_constructible_v<std::remove_cvref_t<Deleter>, Deleter&&> &&
+                     std::is_nothrow_move_constructible_v<std::remove_cvref_t<Deleter>> &&
                      std::is_nothrow_invocable_v<std::remove_cvref_t<Deleter>&, T*>
         void Retire(T* pointer, Deleter&& deleter) {
-            retired_.Retire(pointer, std::forward<Deleter>(deleter), epoch_.load(std::memory_order_acquire));
+            if (pointer != nullptr) {
+                retired_.Retire(pointer, std::forward<Deleter>(deleter), CaptureEpoch());
+            }
+        }
+        template<typename Pointer, std::size_t Extent>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+        void Retire(std::span<Pointer, Extent> pointers) {
+            if (!pointers.empty()) {
+                retired_.Retire(pointers, CaptureEpoch());
+            }
+        }
+        template<typename Pointer, std::size_t Extent, typename Deleter>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_copy_constructible_v<Deleter> && std::is_nothrow_move_constructible_v<Deleter> &&
+                     std::is_nothrow_invocable_v<Deleter&, std::remove_cv_t<Pointer>>
+        void Retire(std::span<Pointer, Extent> pointers, Deleter deleter) {
+            if (!pointers.empty()) {
+                retired_.Retire(pointers, std::move(deleter), CaptureEpoch());
+            }
         }
 
         /** @brief Attempt one epoch advance; active readers from an older generation defer it. */
@@ -199,15 +228,18 @@ namespace Sora::Concurrency {
         [[nodiscard]] std::size_t Collect() {
             auto candidates = retired_.DetachAll();
             const std::uint64_t current = epoch_.load(std::memory_order_acquire);
-            return Detail::ReclaimDetached(
-                retired_, std::move(candidates), [&](const Detail::RetiredObject& object) noexcept {
-                    return Detail::GenerationReached(current, object.generation + 2);
-                });
+            return Detail::ReclaimDetached(retired_, std::move(candidates),
+                                           [&](const Detail::RetiredObject& object) noexcept {
+                                               return Detail::GenerationReached(current, object.generation + 2);
+                                           });
         }
 
         [[nodiscard]] std::size_t RetiredCount() const noexcept { return retired_.Size(); }
 
     private:
+        /** @brief Read the immediate predecessor in epoch modification order, avoiding a stale retirement epoch. */
+        [[nodiscard]] std::uint64_t CaptureEpoch() noexcept { return epoch_.fetch_add(0, std::memory_order_acquire); }
+
         std::atomic<std::uint64_t> epoch_{1};
         Detail::StableRecordRegistry<Record> records_;
         Detail::RetiredList retired_;

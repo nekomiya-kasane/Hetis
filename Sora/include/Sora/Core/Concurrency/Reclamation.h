@@ -10,3 +10,4 @@
 #include <Sora/Core/Concurrency/Protection.h>
 #include <Sora/Core/Concurrency/Qsbr.h>
 #include <Sora/Core/Concurrency/Rcu.h>
+#include <Sora/Core/Concurrency/StampedValue.h>

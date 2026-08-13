@@ -5,7 +5,7 @@
  */
 #pragma once
 
-#include <Sora/Core/Concurrency/PointerStamp.h>
+#include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Detail/Reclamation.h>
 #include <Sora/Core/Concurrency/Protection.h>
 
@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -53,7 +54,7 @@ namespace Sora::Concurrency {
             /** @brief Protect the pointer value validated from @p source using the hazard publication protocol. */
             template<typename T>
             [[nodiscard]] T* Protect(const std::atomic<T*>& source) noexcept {
-                T* pointer = source.load(std::memory_order_seq_cst);
+                T* pointer = source.load(std::memory_order_relaxed);
                 for (;;) {
                     ResetProtection(pointer);
                     T* validated = source.load(std::memory_order_seq_cst);
@@ -68,7 +69,7 @@ namespace Sora::Concurrency {
             template<typename Stamped>
                 requires std::is_pointer_v<typename Stamped::ValueType>
             [[nodiscard]] Stamped Protect(const AtomicStampedValue<Stamped>& source) noexcept {
-                Stamped snapshot = source.Load(std::memory_order_seq_cst);
+                Stamped snapshot = source.Load(std::memory_order_relaxed);
                 for (;;) {
                     ResetProtection(snapshot.Value());
                     Stamped validated = source.Load(std::memory_order_seq_cst);
@@ -86,7 +87,7 @@ namespace Sora::Concurrency {
             }
             void ResetProtection(std::nullptr_t = nullptr) noexcept {
                 assert(record_ != nullptr);
-                record_->protectedAddress.store(nullptr, std::memory_order_seq_cst);
+                record_->protectedAddress.store(nullptr, std::memory_order_release);
             }
             [[nodiscard]] explicit operator bool() const noexcept { return record_ != nullptr; }
 
@@ -98,7 +99,7 @@ namespace Sora::Concurrency {
                 if (record_ == nullptr) {
                     return;
                 }
-                record_->protectedAddress.store(nullptr, std::memory_order_seq_cst);
+                record_->protectedAddress.store(nullptr, std::memory_order_release);
                 record_->owned.store(false, std::memory_order_release);
                 record_ = nullptr;
             }
@@ -129,18 +130,38 @@ namespace Sora::Concurrency {
 
         template<typename Stamped>
             requires std::is_pointer_v<typename Stamped::ValueType>
-        [[nodiscard]] ProtectedStampedValue<Stamped, HazardPointer> Protect(const AtomicStampedValue<Stamped>& source) {
+        [[nodiscard]] ProtectedStampedPointer<Stamped, HazardPointer>
+        Protect(const AtomicStampedValue<Stamped>& source) {
             HazardPointer hazard = MakeHazardPointer();
             Stamped snapshot = hazard.Protect(source);
-            return ProtectedStampedValue<Stamped, HazardPointer>(snapshot, std::move(hazard));
+            return ProtectedStampedPointer<Stamped, HazardPointer>(snapshot, std::move(hazard));
         }
 
         template<typename T>
-        void Retire(T* pointer) { retired_.Retire(pointer); }
+        void Retire(T* pointer) {
+            retired_.Retire(pointer);
+        }
         template<typename T, typename Deleter>
             requires std::is_nothrow_constructible_v<std::remove_cvref_t<Deleter>, Deleter&&> &&
+                     std::is_nothrow_move_constructible_v<std::remove_cvref_t<Deleter>> &&
                      std::is_nothrow_invocable_v<std::remove_cvref_t<Deleter>&, T*>
-        void Retire(T* pointer, Deleter&& deleter) { retired_.Retire(pointer, std::forward<Deleter>(deleter)); }
+        void Retire(T* pointer, Deleter&& deleter) {
+            retired_.Retire(pointer, std::forward<Deleter>(deleter));
+        }
+        template<typename Pointer, std::size_t Extent>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+        void Retire(std::span<Pointer, Extent> pointers) {
+            retired_.Retire(pointers);
+        }
+        template<typename Pointer, std::size_t Extent, typename Deleter>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_copy_constructible_v<Deleter> && std::is_nothrow_move_constructible_v<Deleter> &&
+                     std::is_nothrow_invocable_v<Deleter&, std::remove_cv_t<Pointer>>
+        void Retire(std::span<Pointer, Extent> pointers, Deleter deleter) {
+            retired_.Retire(pointers, std::move(deleter));
+        }
 
         /** @brief Reclaim the batch retired before this call when no scanned record protects its address. */
         [[nodiscard]] std::size_t Collect() {
@@ -163,10 +184,10 @@ namespace Sora::Concurrency {
                 throw;
             }
             std::ranges::sort(protectedAddresses);
-            return Detail::ReclaimDetached(
-                retired_, std::move(candidates), [&](const Detail::RetiredObject& object) noexcept {
-                    return !std::ranges::binary_search(protectedAddresses, object.pointer);
-                });
+            return Detail::ReclaimDetached(retired_, std::move(candidates),
+                                           [&](const Detail::RetiredObject& object) noexcept {
+                                               return !std::ranges::binary_search(protectedAddresses, object.pointer);
+                                           });
         }
 
         [[nodiscard]] std::size_t RetiredCount() const noexcept { return retired_.Size(); }

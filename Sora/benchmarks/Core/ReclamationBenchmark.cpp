@@ -2,7 +2,7 @@
  * @file ReclamationBenchmark.cpp
  * @brief Measure stamped publication and safe-reclamation operation boundaries.
  */
-#include <Sora/Core/Concurrency/PointerStamp.h>
+#include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Reclamation.h>
 
 #include <BenchmarkHarness.h>
@@ -13,7 +13,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <memory>
 #include <print>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -25,15 +28,169 @@ namespace {
 
     constexpr std::size_t kSamples = 9;
     constexpr std::size_t kOperations = 1'000'000;
+    constexpr std::size_t kRetireBatch = 16'384;
+
+    struct KeepAlive {
+        void operator()(Node*) const noexcept {}
+    };
+
+    void Require(bool condition) noexcept {
+        if (!condition) {
+            std::abort();
+        }
+    }
 
     template<std::size_t CaseCount>
     void PrintGroup(std::string_view name, const std::array<Sora::Benchmark::Case, CaseCount>& cases,
                     const Sora::Benchmark::IndependentResult<CaseCount, kSamples>& result) {
         std::println("{}", name);
         for (std::size_t index = 0; index < cases.size(); ++index) {
-            std::println("  {:24} median {:8.2f} ns/op  p95 {:8.2f}", cases[index].name,
-                         result.MedianTime(index), result.P95Time(index));
+            std::println("  {:24} median {:8.2f} ns/op  p95 {:8.2f}", cases[index].name, result.MedianTime(index),
+                         result.P95Time(index));
         }
+    }
+
+    template<typename Operation, typename Cleanup>
+    [[nodiscard]] double MeasurePrepared(Operation&& operation, Cleanup&& cleanup) {
+        std::array<double, kSamples> samples{};
+        for (std::size_t sample = 0; sample < kSamples; ++sample) {
+            std::atomic_signal_fence(std::memory_order_seq_cst);
+            const auto begin = std::chrono::steady_clock::now();
+            operation();
+            const auto end = std::chrono::steady_clock::now();
+            std::atomic_signal_fence(std::memory_order_seq_cst);
+            samples[sample] = std::chrono::duration<double, std::nano>(end - begin).count();
+            cleanup();
+        }
+        return Sora::Benchmark::Median(samples);
+    }
+
+    [[nodiscard]] std::vector<Node*> MakePointers(std::vector<Node>& nodes) {
+        std::vector<Node*> pointers;
+        pointers.reserve(nodes.size());
+        for (Node& node : nodes) {
+            pointers.push_back(std::addressof(node));
+        }
+        return pointers;
+    }
+
+    void MeasureRetirementBoundaries() {
+        std::vector<Node> nodes(kRetireBatch);
+        std::vector<Node*> pointers = MakePointers(nodes);
+        const std::span<Node* const> batch{pointers};
+
+        std::vector<Node*> allocated(kRetireBatch);
+        const double allocate = MeasurePrepared(
+            [&] {
+                for (Node*& pointer : allocated) {
+                    pointer = new Node;
+                }
+            },
+            [&] {
+                for (Node* pointer : allocated) {
+                    delete pointer;
+                }
+            });
+        for (Node*& pointer : allocated) {
+            pointer = new Node;
+        }
+        const double deallocate = MeasurePrepared(
+            [&] {
+                for (Node*& pointer : allocated) {
+                    delete pointer;
+                    pointer = nullptr;
+                }
+            },
+            [&] {
+                for (Node*& pointer : allocated) {
+                    pointer = new Node;
+                }
+            });
+        for (Node* pointer : allocated) {
+            delete pointer;
+        }
+
+        std::array<double, kSamples> coldSamples{};
+        for (std::size_t sample = 0; sample < kSamples; ++sample) {
+            Sora::Concurrency::HazardDomain coldDomain;
+            std::atomic_signal_fence(std::memory_order_seq_cst);
+            const auto begin = std::chrono::steady_clock::now();
+            coldDomain.Retire(batch, KeepAlive{});
+            const auto end = std::chrono::steady_clock::now();
+            std::atomic_signal_fence(std::memory_order_seq_cst);
+            coldSamples[sample] = std::chrono::duration<double, std::nano>(end - begin).count();
+            Require(coldDomain.Collect() == batch.size());
+        }
+
+        Sora::Concurrency::HazardDomain singleDomain;
+        for (Node* pointer : batch) {
+            singleDomain.Retire(pointer, KeepAlive{});
+        }
+        (void)singleDomain.Collect();
+        const double singleRetire = MeasurePrepared(
+            [&] {
+                for (Node* pointer : batch) {
+                    singleDomain.Retire(pointer, KeepAlive{});
+                }
+            },
+            [&] { Require(singleDomain.Collect() == batch.size()); });
+
+        Sora::Concurrency::HazardDomain batchDomain;
+        batchDomain.Retire(batch, KeepAlive{});
+        (void)batchDomain.Collect();
+        const double batchRetire = MeasurePrepared([&] { batchDomain.Retire(batch, KeepAlive{}); },
+                                                   [&] { Require(batchDomain.Collect() == batch.size()); });
+
+        std::println("allocation and retirement boundaries");
+        std::println("  {:24} median {:8.2f} ns/object", "new Node", allocate / batch.size());
+        std::println("  {:24} median {:8.2f} ns/object", "delete Node", deallocate / batch.size());
+        std::println("  {:24} median {:8.2f} ns/object", "cold batch Retire",
+                     Sora::Benchmark::Median(coldSamples) / batch.size());
+        std::println("  {:24} median {:8.2f} ns/object", "single Retire", singleRetire / batch.size());
+        std::println("  {:24} median {:8.2f} ns/object", "batch Retire(span)", batchRetire / batch.size());
+    }
+
+    void MeasureHazardCollection(std::size_t recordCount, std::size_t batchSize) {
+        struct CollectState {
+            std::unique_ptr<Sora::Concurrency::HazardDomain> domain;
+            std::vector<Sora::Concurrency::HazardDomain::HazardPointer> hazards;
+        };
+
+        std::vector<Node> nodes(batchSize);
+        std::vector<Node*> pointers = MakePointers(nodes);
+        const std::span<Node* const> batch{pointers};
+        Node protectedNode;
+        std::atomic<Node*> protectedSource{std::addressof(protectedNode)};
+        const std::size_t rounds = batchSize <= 8 ? 1'024 : 9;
+        std::vector<CollectState> states;
+        states.reserve(rounds);
+        for (std::size_t round = 0; round < rounds; ++round) {
+            CollectState& state = states.emplace_back(std::make_unique<Sora::Concurrency::HazardDomain>());
+            state.hazards.reserve(recordCount);
+            for (std::size_t index = 0; index < recordCount; ++index) {
+                state.hazards.push_back(state.domain->MakeHazardPointer());
+                (void)state.hazards.back().Protect(protectedSource);
+            }
+            state.domain->Retire(batch, KeepAlive{});
+        }
+        const double collect = MeasurePrepared(
+            [&] {
+                std::size_t reclaimed = 0;
+                for (CollectState& state : states) {
+                    reclaimed += state.domain->Collect();
+                }
+                Require(reclaimed == rounds * batch.size());
+            },
+            [&] {
+                for (CollectState& state : states) {
+                    state.domain->Retire(batch, KeepAlive{});
+                }
+            });
+        for (CollectState& state : states) {
+            (void)state.domain->Collect();
+        }
+        std::println("  records {:3}, batch {:5}: {:8.2f} ns/object", recordCount, batchSize,
+                     collect / static_cast<double>(rounds * batchSize));
     }
 
 } // namespace
@@ -62,8 +219,8 @@ int main() {
         Sora::Benchmark::MakeCase("epoch protect", epochRead),
         Sora::Benchmark::MakeCase("RCU protect", rcuRead),
     };
-    const auto readResult = Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(
-        readCases, 1, std::chrono::milliseconds{30});
+    const auto readResult =
+        Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(readCases, 1, std::chrono::milliseconds{30});
     PrintGroup("single-thread read-side fixed cost", readCases, readResult);
 
     auto plainCas = [&]() noexcept {
@@ -85,8 +242,8 @@ int main() {
         Sora::Benchmark::MakeCase("manual packed CAS", packedCas),
         Sora::Benchmark::MakeCase("versioned pointer CAS", versionedCas),
     };
-    const auto casResult = Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(
-        casCases, 1, std::chrono::milliseconds{30});
+    const auto casResult =
+        Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(casCases, 1, std::chrono::milliseconds{30});
     PrintGroup("single-thread publication cost", casCases, casResult);
 
     for (std::size_t readerCount : {std::size_t{1}, std::size_t{2}, std::size_t{4}, std::size_t{8}}) {
@@ -109,23 +266,17 @@ int main() {
         start.arrive_and_wait();
         readers.clear();
         const auto elapsed = std::chrono::steady_clock::now() - begin;
-        const double nsPerOperation = std::chrono::duration<double, std::nano>(elapsed).count() /
-                                      static_cast<double>(readerCount * kOperations);
+        const double nsPerOperation =
+            std::chrono::duration<double, std::nano>(elapsed).count() / static_cast<double>(readerCount * kOperations);
         std::println("hazard readers {:2}: {:8.2f} ns/op aggregate, checksum {}", readerCount, nsPerOperation,
                      total.load(std::memory_order_relaxed));
     }
 
-    constexpr std::size_t kRetireBatch = 16'384;
-    const auto retireBegin = std::chrono::steady_clock::now();
-    for (std::size_t index = 0; index < kRetireBatch; ++index) {
-        hazards.Retire(new Node{index});
+    MeasureRetirementBoundaries();
+    std::println("hazard collection scan");
+    for (std::size_t recordCount : {std::size_t{0}, std::size_t{1}, std::size_t{8}, std::size_t{64}}) {
+        MeasureHazardCollection(recordCount, 8);
+        MeasureHazardCollection(recordCount, kRetireBatch);
     }
-    const auto collectBegin = std::chrono::steady_clock::now();
-    const std::size_t reclaimed = hazards.Collect();
-    const auto collectEnd = std::chrono::steady_clock::now();
-    std::println("hazard retire batch: {:.2f} ns/object; collect: {:.2f} ns/object; reclaimed {}",
-                 std::chrono::duration<double, std::nano>(collectBegin - retireBegin).count() / kRetireBatch,
-                 std::chrono::duration<double, std::nano>(collectEnd - collectBegin).count() / kRetireBatch,
-                 reclaimed);
     return sink == 0;
 }

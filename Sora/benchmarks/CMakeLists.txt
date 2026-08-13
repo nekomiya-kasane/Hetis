@@ -380,3 +380,6 @@ set_target_properties(Benchmark.Sora.Core.Reclamation PROPERTIES
     CXX_STANDARD_REQUIRED ON
     FOLDER "Sora/Benchmarks/Core"
 )
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(Benchmark.Sora.Core.Reclamation PRIVATE -O3 -march=haswell)
+endif()

@@ -6,7 +6,7 @@
 #pragma once
 
 #include <Sora/Core/Concurrency/Detail/Reclamation.h>
-#include <Sora/Core/Concurrency/PointerStamp.h>
+#include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Protection.h>
 
 #include <array>
@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -83,7 +84,9 @@ namespace Sora::Concurrency {
                 if (record_ == nullptr) {
                     return;
                 }
-                record_->readers[phase_].fetch_sub(1, std::memory_order_release);
+                const std::size_t readers = record_->readers[phase_].load(std::memory_order_relaxed);
+                assert(readers != 0);
+                record_->readers[phase_].store(readers - 1, std::memory_order_release);
                 record_ = nullptr;
             }
             [[nodiscard]] explicit operator bool() const noexcept { return record_ != nullptr; }
@@ -118,11 +121,12 @@ namespace Sora::Concurrency {
                 assert(record_ != nullptr);
                 for (;;) {
                     const unsigned observed = phase_->load(std::memory_order_acquire);
-                    record_->readers[observed].fetch_add(1, std::memory_order_seq_cst);
+                    const std::size_t readers = record_->readers[observed].load(std::memory_order_relaxed);
+                    record_->readers[observed].store(readers + 1, std::memory_order_seq_cst);
                     if (phase_->load(std::memory_order_seq_cst) == observed) {
                         return ReadGuard(record_, observed);
                     }
-                    record_->readers[observed].fetch_sub(1, std::memory_order_release);
+                    record_->readers[observed].store(readers, std::memory_order_release);
                 }
             }
 
@@ -134,11 +138,11 @@ namespace Sora::Concurrency {
             }
             template<typename Stamped>
                 requires std::is_pointer_v<typename Stamped::ValueType>
-            [[nodiscard]] ProtectedStampedValue<Stamped, ReadGuard>
+            [[nodiscard]] ProtectedStampedPointer<Stamped, ReadGuard>
             Protect(const AtomicStampedValue<Stamped>& source) noexcept {
                 ReadGuard guard = Read();
                 Stamped snapshot = guard.Load(source);
-                return ProtectedStampedValue<Stamped, ReadGuard>(snapshot, std::move(guard));
+                return ProtectedStampedPointer<Stamped, ReadGuard>(snapshot, std::move(guard));
             }
 
         private:
@@ -171,11 +175,30 @@ namespace Sora::Concurrency {
         [[nodiscard]] Participant Register() { return Participant(*this); }
 
         template<typename T>
-        void Retire(T* pointer) { retired_.Retire(pointer); }
+        void Retire(T* pointer) {
+            retired_.Retire(pointer);
+        }
         template<typename T, typename Deleter>
             requires std::is_nothrow_constructible_v<std::remove_cvref_t<Deleter>, Deleter&&> &&
+                     std::is_nothrow_move_constructible_v<std::remove_cvref_t<Deleter>> &&
                      std::is_nothrow_invocable_v<std::remove_cvref_t<Deleter>&, T*>
-        void Retire(T* pointer, Deleter&& deleter) { retired_.Retire(pointer, std::forward<Deleter>(deleter)); }
+        void Retire(T* pointer, Deleter&& deleter) {
+            retired_.Retire(pointer, std::forward<Deleter>(deleter));
+        }
+        template<typename Pointer, std::size_t Extent>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+        void Retire(std::span<Pointer, Extent> pointers) {
+            retired_.Retire(pointers);
+        }
+        template<typename Pointer, std::size_t Extent, typename Deleter>
+            requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_copy_constructible_v<Deleter> && std::is_nothrow_move_constructible_v<Deleter> &&
+                     std::is_nothrow_invocable_v<Deleter&, std::remove_cv_t<Pointer>>
+        void Retire(std::span<Pointer, Extent> pointers, Deleter deleter) {
+            retired_.Retire(pointers, std::move(deleter));
+        }
 
         /** @brief Wait for all read-side regions that began before this grace period. */
         void Synchronize() {
@@ -199,7 +222,7 @@ namespace Sora::Concurrency {
             }
             std::size_t count = 0;
             count = reclaimable.size();
-            Detail::RetiredList::Destroy(std::move(reclaimable));
+            retired_.Destroy(std::move(reclaimable));
             return count;
         }
 

@@ -1,5 +1,5 @@
 /**
- * @file PointerStamp.h
+ * @file StampedValue.h
  * @brief Canonical single-word tagged and versioned values.
  * @ingroup Core
  */
@@ -15,19 +15,32 @@
 
 namespace Sora::Concurrency {
 
+    namespace Concept {
+
+        /** @brief Codec contract for one payload and a disjoint stamp encoded in an unsigned atomic word. */
+        template<typename Codec>
+        concept StampedWordCodec = std::unsigned_integral<typename Codec::Word> &&
+                                   requires(typename Codec::Value value, typename Codec::Word word) {
+                                       { Codec::Encode(value) } noexcept -> std::same_as<typename Codec::Word>;
+                                       { Codec::Decode(word) } noexcept -> std::same_as<typename Codec::Value>;
+                                       { Codec::PayloadMask } -> std::convertible_to<typename Codec::Word>;
+                                       { Codec::StampMask } -> std::convertible_to<typename Codec::Word>;
+                                       { Codec::StampShift } -> std::convertible_to<std::size_t>;
+                                   };
+
+        /** @brief Canonical unsigned-word value accepted by atomic stamped publication. */
+        template<typename Stamped>
+        concept StampedWord = requires(Stamped value, typename Stamped::Word word) {
+            requires std::unsigned_integral<typename Stamped::Word>;
+            { value.Representation() } noexcept -> std::same_as<typename Stamped::Word>;
+            { Stamped::FromRepresentation(word) } noexcept -> std::same_as<Stamped>;
+        };
+
+    } // namespace Concept
+
     namespace Detail {
 
         struct FromRepresentationTag {};
-
-        template<typename Codec>
-        concept StampedWordCodec = std::unsigned_integral<typename Codec::Word> && requires(typename Codec::Value value,
-                                                                                           typename Codec::Word word) {
-            { Codec::Encode(value) } noexcept -> std::same_as<typename Codec::Word>;
-            { Codec::Decode(word) } noexcept -> std::same_as<typename Codec::Value>;
-            { Codec::PayloadMask } -> std::convertible_to<typename Codec::Word>;
-            { Codec::StampMask } -> std::convertible_to<typename Codec::Word>;
-            { Codec::StampShift } -> std::convertible_to<std::size_t>;
-        };
 
         /** @brief Encode an aligned pointer as payload bits and use its zero low bits for a stamp. */
         template<typename T, std::size_t StampBits>
@@ -73,66 +86,56 @@ namespace Sora::Concurrency {
             [[nodiscard]] static constexpr Value Decode(Word word) noexcept { return word & PayloadMask; }
         };
 
-        template<StampedWordCodec Codec>
+        template<Concept::StampedWordCodec Codec>
         class StampedValueStorage {
         public:
             using ValueType = typename Codec::Value;
             using Word = typename Codec::Word;
 
             static constexpr Word RepresentationMask = Codec::PayloadMask | Codec::StampMask;
-            static_assert((Codec::PayloadMask & Codec::StampMask) == 0,
-                          "payload and stamp fields must not overlap");
+            static_assert((Codec::PayloadMask & Codec::StampMask) == 0, "payload and stamp fields must not overlap");
 
             constexpr StampedValueStorage() noexcept = default;
-            explicit StampedValueStorage(ValueType value, Word stamp = 0) noexcept : word_(Pack(value, stamp)) {}
+            explicit constexpr StampedValueStorage(ValueType value, Word stamp = 0) noexcept
+                : word_(Pack(value, stamp)) {}
 
-            [[nodiscard]] ValueType Value() const noexcept { return Codec::Decode(word_); }
+            [[nodiscard]] constexpr ValueType Value() const noexcept { return Codec::Decode(word_); }
             [[nodiscard]] constexpr Word Stamp() const noexcept {
                 return (word_ & Codec::StampMask) >> Codec::StampShift;
             }
             [[nodiscard]] constexpr Word Representation() const noexcept { return word_; }
-            [[nodiscard]] static constexpr Word MaxStamp() noexcept {
-                return Codec::StampMask >> Codec::StampShift;
-            }
+            [[nodiscard]] static constexpr Word MaxStamp() noexcept { return Codec::StampMask >> Codec::StampShift; }
 
         protected:
             explicit constexpr StampedValueStorage(FromRepresentationTag, Word word) noexcept
                 : word_(word & RepresentationMask) {}
-            [[nodiscard]] static Word Pack(ValueType value, Word stamp) noexcept {
+            [[nodiscard]] static constexpr Word Pack(ValueType value, Word stamp) noexcept {
                 assert(stamp <= MaxStamp() && "stamp exceeds its declared bit width");
-                return (Codec::Encode(value) & Codec::PayloadMask) |
-                       ((stamp & MaxStamp()) << Codec::StampShift);
+                return (Codec::Encode(value) & Codec::PayloadMask) | ((stamp & MaxStamp()) << Codec::StampShift);
             }
 
         private:
             Word word_ = 0;
         };
 
-        template<typename Stamped>
-        concept StampedWord = requires(Stamped value, typename Stamped::Word word) {
-            requires std::unsigned_integral<typename Stamped::Word>;
-            { value.Representation() } noexcept -> std::same_as<typename Stamped::Word>;
-            { Stamped::FromRepresentation(word) } noexcept -> std::same_as<Stamped>;
-        };
-
     } // namespace Detail
 
     /** @brief A value coupled to an application-controlled tag in one canonical unsigned word. */
-    template<Detail::StampedWordCodec Codec>
+    template<Concept::StampedWordCodec Codec>
     class TaggedValue : private Detail::StampedValueStorage<Codec> {
         using Base = Detail::StampedValueStorage<Codec>;
 
     public:
-        using typename Base::ValueType;
-        using typename Base::Word;
         using Base::Base;
         using Base::Representation;
         using Base::Value;
+        using typename Base::ValueType;
+        using typename Base::Word;
         constexpr TaggedValue() noexcept = default;
 
         [[nodiscard]] constexpr Word Tag() const noexcept { return Base::Stamp(); }
         [[nodiscard]] static constexpr Word MaxTag() noexcept { return Base::MaxStamp(); }
-        [[nodiscard]] TaggedValue WithTag(Word tag) const noexcept {
+        [[nodiscard]] constexpr TaggedValue WithTag(Word tag) const noexcept {
             return FromRepresentation(Base::Pack(Base::Value(), tag));
         }
         [[nodiscard]] static constexpr TaggedValue FromRepresentation(Word word) noexcept {
@@ -147,24 +150,24 @@ namespace Sora::Concurrency {
     };
 
     /** @brief A value whose publication identity advances modulo the encoded version width. */
-    template<Detail::StampedWordCodec Codec>
+    template<Concept::StampedWordCodec Codec>
     class VersionedValue : private Detail::StampedValueStorage<Codec> {
         using Base = Detail::StampedValueStorage<Codec>;
 
     public:
-        using typename Base::ValueType;
-        using typename Base::Word;
         using Base::Base;
         using Base::Representation;
         using Base::Value;
+        using typename Base::ValueType;
+        using typename Base::Word;
         constexpr VersionedValue() noexcept = default;
 
         [[nodiscard]] constexpr Word Version() const noexcept { return Base::Stamp(); }
         [[nodiscard]] static constexpr Word MaxVersion() noexcept { return Base::MaxStamp(); }
-        [[nodiscard]] VersionedValue NextVersion(ValueType value) const noexcept {
+        [[nodiscard]] constexpr VersionedValue NextVersion(ValueType value) const noexcept {
             return FromRepresentation(Base::Pack(value, (Version() + 1) & Base::MaxStamp()));
         }
-        [[nodiscard]] VersionedValue NextVersion() const noexcept { return NextVersion(Base::Value()); }
+        [[nodiscard]] constexpr VersionedValue NextVersion() const noexcept { return NextVersion(Base::Value()); }
         [[nodiscard]] static constexpr VersionedValue FromRepresentation(Word word) noexcept {
             return VersionedValue(Detail::FromRepresentationTag{}, word);
         }
@@ -177,7 +180,7 @@ namespace Sora::Concurrency {
     };
 
     /** @brief Lock-free atomic publication for a canonical single-word tagged or versioned value. */
-    template<Detail::StampedWord Stamped>
+    template<Concept::StampedWord Stamped>
     class AtomicStampedValue {
     public:
         using ValueType = Stamped;
@@ -200,13 +203,13 @@ namespace Sora::Concurrency {
             return Stamped::FromRepresentation(word_.exchange(value.Representation(), order));
         }
         [[nodiscard]] bool CompareExchangeWeak(Stamped& expected, Stamped desired,
-                                                std::memory_order success = std::memory_order_acq_rel,
-                                                std::memory_order failure = std::memory_order_acquire) noexcept {
+                                               std::memory_order success = std::memory_order_acq_rel,
+                                               std::memory_order failure = std::memory_order_acquire) noexcept {
             return CompareExchange(expected, desired, true, success, failure);
         }
         [[nodiscard]] bool CompareExchangeStrong(Stamped& expected, Stamped desired,
-                                                  std::memory_order success = std::memory_order_acq_rel,
-                                                  std::memory_order failure = std::memory_order_acquire) noexcept {
+                                                 std::memory_order success = std::memory_order_acq_rel,
+                                                 std::memory_order failure = std::memory_order_acquire) noexcept {
             return CompareExchange(expected, desired, false, success, failure);
         }
         [[nodiscard]] static consteval bool IsAlwaysLockFree() noexcept {
@@ -216,12 +219,11 @@ namespace Sora::Concurrency {
 
     private:
         [[nodiscard]] bool CompareExchange(Stamped& expected, Stamped desired, bool weak, std::memory_order success,
-                                            std::memory_order failure) noexcept {
+                                           std::memory_order failure) noexcept {
             Word expectedWord = expected.Representation();
-            const bool exchanged = weak ? word_.compare_exchange_weak(expectedWord, desired.Representation(), success,
-                                                                       failure)
-                                        : word_.compare_exchange_strong(expectedWord, desired.Representation(), success,
-                                                                         failure);
+            const bool exchanged =
+                weak ? word_.compare_exchange_weak(expectedWord, desired.Representation(), success, failure)
+                     : word_.compare_exchange_strong(expectedWord, desired.Representation(), success, failure);
             if (!exchanged) {
                 expected = Stamped::FromRepresentation(expectedWord);
             }

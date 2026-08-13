@@ -16,8 +16,7 @@ namespace Sora::Concurrency {
     /** @brief A pointer whose dereference lifetime is coupled to a move-only protection object. */
     template<typename T, typename Protection>
     class ProtectedPointer {
-        static_assert(std::is_nothrow_move_constructible_v<Protection> &&
-                      std::is_nothrow_move_assignable_v<Protection>,
+        static_assert(std::is_nothrow_move_constructible_v<Protection> && std::is_nothrow_move_assignable_v<Protection>,
                       "a protection capability must transfer without failure");
 
     public:
@@ -56,23 +55,22 @@ namespace Sora::Concurrency {
     /** @brief A stamped pointer snapshot whose pointee remains protected for the observation lifetime. */
     template<typename Stamped, typename Protection>
         requires std::is_pointer_v<typename Stamped::ValueType>
-    class ProtectedStampedValue {
-        static_assert(std::is_nothrow_move_constructible_v<Protection> &&
-                      std::is_nothrow_move_assignable_v<Protection>,
+    class ProtectedStampedPointer {
+        static_assert(std::is_nothrow_move_constructible_v<Protection> && std::is_nothrow_move_assignable_v<Protection>,
                       "a protection capability must transfer without failure");
 
     public:
         using ElementType = std::remove_pointer_t<typename Stamped::ValueType>;
 
-        ProtectedStampedValue() noexcept = default;
-        ProtectedStampedValue(Stamped snapshot, Protection protection) noexcept
+        ProtectedStampedPointer() noexcept = default;
+        ProtectedStampedPointer(Stamped snapshot, Protection protection) noexcept
             : snapshot_(snapshot), protection_(std::move(protection)) {}
 
-        ProtectedStampedValue(const ProtectedStampedValue&) = delete;
-        ProtectedStampedValue& operator=(const ProtectedStampedValue&) = delete;
-        ProtectedStampedValue(ProtectedStampedValue&& other) noexcept
+        ProtectedStampedPointer(const ProtectedStampedPointer&) = delete;
+        ProtectedStampedPointer& operator=(const ProtectedStampedPointer&) = delete;
+        ProtectedStampedPointer(ProtectedStampedPointer&& other) noexcept
             : snapshot_(std::exchange(other.snapshot_, {})), protection_(std::move(other.protection_)) {}
-        ProtectedStampedValue& operator=(ProtectedStampedValue&& other) noexcept {
+        ProtectedStampedPointer& operator=(ProtectedStampedPointer&& other) noexcept {
             if (this != &other) {
                 snapshot_ = std::exchange(other.snapshot_, {});
                 protection_ = std::move(other.protection_);

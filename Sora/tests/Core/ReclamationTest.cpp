@@ -3,17 +3,19 @@
  * @brief Verify stamped publication and safe-reclamation lifetime protocols.
  * @ingroup Testing
  */
-#include <Sora/Core/Concurrency/PointerStamp.h>
+#include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Reclamation.h>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <cstddef>
 #include <cstdint>
 #include <latch>
 #include <memory>
+#include <span>
 #include <thread>
 #include <type_traits>
 
@@ -25,6 +27,24 @@ namespace {
         ~Node() { destroyed.fetch_add(1, std::memory_order_relaxed); }
     };
 
+    enum class SlotState : std::uint8_t { Empty, Ready, Consumed };
+
+    struct SlotStateCodec {
+        using Value = SlotState;
+        using Word = std::uint8_t;
+
+        static constexpr Word PayloadMask = 0x03;
+        static constexpr Word StampMask = 0xfc;
+        static constexpr std::size_t StampShift = 2;
+
+        [[nodiscard]] static constexpr Word Encode(Value value) noexcept { return static_cast<Word>(value); }
+        [[nodiscard]] static constexpr Value Decode(Word word) noexcept {
+            return static_cast<Value>(word & PayloadMask);
+        }
+    };
+
+    static_assert(Sora::Concurrency::Concept::StampedWordCodec<SlotStateCodec>);
+
     template<typename Domain>
     void CheckDomainDrainsRetiredObjects() {
         Node::destroyed.store(0, std::memory_order_relaxed);
@@ -33,6 +53,21 @@ namespace {
             domain.Retire(new Node{1});
         }
         REQUIRE(Node::destroyed.load(std::memory_order_relaxed) == 1);
+    }
+
+    template<typename Domain>
+    void CheckBatchRetirementConsumesEachNonNullPointerOnce() {
+        std::atomic<std::size_t> reclaimed = 0;
+        {
+            Domain domain;
+            std::array pointers{new int{1}, static_cast<int*>(nullptr), new int{2}, new int{3}};
+            domain.Retire(std::span{pointers}, [&](int* pointer) noexcept {
+                delete pointer;
+                reclaimed.fetch_add(1, std::memory_order_relaxed);
+            });
+            REQUIRE(domain.RetiredCount() == 3);
+        }
+        REQUIRE(reclaimed.load(std::memory_order_relaxed) == 3);
     }
 
 } // namespace
@@ -52,6 +87,9 @@ TEST_CASE("Stamped values preserve pointer and bounded unsigned semantics",
     REQUIRE(versioned.NextVersion().Version() == 0);
 
     using VersionedIndex = Sora::Concurrency::VersionedUnsigned<std::uint32_t, 24, 8>;
+    constexpr VersionedIndex compileTimeIndex{19, 7};
+    STATIC_REQUIRE(compileTimeIndex.Value() == 19);
+    STATIC_REQUIRE(compileTimeIndex.NextVersion().Version() == 8);
     VersionedIndex index{0x00ab'cdef, 7};
     REQUIRE(index.Value() == 0x00ab'cdef);
     REQUIRE(index.Version() == 7);
@@ -60,6 +98,11 @@ TEST_CASE("Stamped values preserve pointer and bounded unsigned semantics",
 
     using SparseIndex = Sora::Concurrency::VersionedUnsigned<std::uint32_t, 20, 8>;
     REQUIRE(SparseIndex::FromRepresentation(~std::uint32_t{0}).Representation() == 0x0fff'ffff);
+
+    using TaggedState = Sora::Concurrency::TaggedValue<SlotStateCodec>;
+    constexpr TaggedState state{SlotState::Ready, 9};
+    STATIC_REQUIRE(state.Value() == SlotState::Ready);
+    STATIC_REQUIRE(state.Tag() == 9);
 
     Sora::Concurrency::AtomicStampedValue atomic{versioned};
     auto expected = atomic.Load();
@@ -118,8 +161,7 @@ TEST_CASE("Hazard protection preserves a stamped pointer's exact publication ide
     REQUIRE_FALSE(protectedValue);
     protectedValue = std::move(moved);
     REQUIRE_FALSE(moved);
-    const Pointer removed = source.Exchange(protectedValue.Snapshot().NextVersion(nullptr),
-                                            std::memory_order_seq_cst);
+    const Pointer removed = source.Exchange(protectedValue.Snapshot().NextVersion(nullptr), std::memory_order_seq_cst);
     domain.Retire(removed.Value());
     REQUIRE(domain.Collect() == 0);
     protectedValue = {};
@@ -230,9 +272,7 @@ TEST_CASE("RCU guard keeps its record leased after its participant handle is des
 
     domain.Retire(new int{1});
     std::atomic<std::size_t> reclaimed = 0;
-    std::jthread reclaimer([&] {
-        reclaimed.store(domain.Reclaim(), std::memory_order_release);
-    });
+    std::jthread reclaimer([&] { reclaimed.store(domain.Reclaim(), std::memory_order_release); });
     while (domain.RetiredCount() != 0) {
         std::this_thread::yield();
     }
@@ -286,9 +326,7 @@ TEST_CASE("RCU grace period waits for an old reader while new read regions conti
     domain.Retire(new Node{17});
 
     std::atomic<std::size_t> reclaimed = 0;
-    std::jthread synchronizer([&] {
-        reclaimed.store(domain.Reclaim(), std::memory_order_release);
-    });
+    std::jthread synchronizer([&] { reclaimed.store(domain.Reclaim(), std::memory_order_release); });
     while (domain.RetiredCount() != 0) {
         std::this_thread::yield();
     }
@@ -315,6 +353,30 @@ TEST_CASE("Reclamation domains drain uncollected ownership at destruction",
     CheckDomainDrainsRetiredObjects<Sora::Concurrency::EpochDomain>();
     CheckDomainDrainsRetiredObjects<Sora::Concurrency::QsbrDomain>();
     CheckDomainDrainsRetiredObjects<Sora::Concurrency::RcuDomain>();
+}
+
+TEST_CASE("Reclamation domains batch-retire non-null pointers exactly once",
+          "[Sora.Core.Concurrency.Reclamation][Batch]") {
+    CheckBatchRetirementConsumesEachNonNullPointerOnce<Sora::Concurrency::HazardDomain>();
+    CheckBatchRetirementConsumesEachNonNullPointerOnce<Sora::Concurrency::EpochDomain>();
+    CheckBatchRetirementConsumesEachNonNullPointerOnce<Sora::Concurrency::QsbrDomain>();
+    CheckBatchRetirementConsumesEachNonNullPointerOnce<Sora::Concurrency::RcuDomain>();
+}
+
+TEST_CASE("Batch retirement invokes reentrant deleters outside its lock",
+          "[Sora.Core.Concurrency.Reclamation][Batch][Reentrant]") {
+    Sora::Concurrency::HazardDomain domain;
+    std::atomic<std::size_t> reclaimed = 0;
+    std::array pointers{new int{1}, new int{2}};
+    domain.Retire(std::span<int* const, pointers.size()>{pointers}, [&](int* pointer) noexcept {
+        delete pointer;
+        reclaimed.fetch_add(1, std::memory_order_relaxed);
+        domain.Retire(new int{3});
+    });
+    REQUIRE(domain.Collect() == 2);
+    REQUIRE(reclaimed.load(std::memory_order_relaxed) == 2);
+    REQUIRE(domain.RetiredCount() == 2);
+    REQUIRE(domain.Collect() == 2);
 }
 
 TEST_CASE("Domain destruction drains objects retired by a reentrant deleter",
