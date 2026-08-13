@@ -368,3 +368,15 @@ if(TARGET Sora.Compute.Backend.Vulkan)
     vk_tp_deploy_runtime(Benchmark.Sora.Compute.VulkanBackend)
     vk_tp_deploy_slang(Benchmark.Sora.Compute.VulkanBackend)
 endif()
+
+add_executable(Benchmark.Sora.Core.Reclamation EXCLUDE_FROM_ALL Core/ReclamationBenchmark.cpp)
+target_include_directories(Benchmark.Sora.Core.Reclamation PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+)
+target_link_libraries(Benchmark.Sora.Core.Reclamation PRIVATE Sora)
+set_target_properties(Benchmark.Sora.Core.Reclamation PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    FOLDER "Sora/Benchmarks/Core"
+)
