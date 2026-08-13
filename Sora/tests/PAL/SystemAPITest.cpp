@@ -121,6 +121,18 @@ TEST_CASE("ModuleLoader preserves UTF-8 spellings and native Unicode search root
 #endif
 }
 
+TEST_CASE("ModuleLoader rejects invalid UTF-8 before native path construction", "[Sora.PAL.SystemAPI]") {
+    constexpr PAL::ModuleLoadOptions options{
+        .nameKind = PAL::ModuleNameKind::ExactPath,
+        .candidatePolicy = PAL::ModuleCandidatePolicy::ExactOnly,
+        .cachePolicy = PAL::ModuleCachePolicy::Private,
+    };
+    const std::string invalidName{static_cast<char>(0xC0)};
+    const Sora::Result<PAL::ModulePtr> loaded = PAL::LoadModule({invalidName}, options);
+    REQUIRE_FALSE(loaded.has_value());
+    REQUIRE(loaded.error() == Sora::ErrorCode::OverlongUtf8Sequence);
+}
+
 TEST_CASE("ModuleLoader publishes one shared module during concurrent first load", "[Sora.PAL.SystemAPI]") {
 #if defined(PLATFORM_WINDOWS)
     constexpr size_t kWorkerCount = 8;
@@ -229,14 +241,14 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(thread.getCurrentThreadId() != 0);
 
     const PAL::SchedulerTraceSystemAPI& tracing = PAL::LoadSchedulerTraceSystemAPI();
-#if defined(PLATFORM_WINDOWS)
+#    if defined(PLATFORM_WINDOWS)
     REQUIRE(tracing.startTrace != nullptr);
     REQUIRE(tracing.controlTrace != nullptr);
     REQUIRE(tracing.openTrace != nullptr);
     REQUIRE(tracing.processTrace != nullptr);
     REQUIRE(tracing.closeTrace != nullptr);
     REQUIRE(tracing.queryPerformanceFrequency != nullptr);
-#endif
+#    endif
     REQUIRE(tracing.start != nullptr);
     REQUIRE(tracing.process != nullptr);
     REQUIRE(tracing.stop != nullptr);

@@ -51,6 +51,34 @@ TEST_CASE("Wire scalar helpers read and write endian-stable integers", "[Sora][C
     REQUIRE(truncated.error() == ErrorCode::DataTruncated);
 }
 
+TEST_CASE("Wire scalar helpers overwrite nonzero offsets in place", "[Sora][Core][Wire]") {
+    std::array<std::byte, 12> bytes{};
+    size_t littleOffset = 3;
+    Wire::WriteLittleEndianUnchecked(std::span{bytes}, littleOffset, uint32_t{0xA1B2C3D4});
+    REQUIRE(littleOffset == 7);
+    REQUIRE(bytes[2] == std::byte{0});
+    REQUIRE(bytes[3] == std::byte{0xD4});
+    REQUIRE(bytes[4] == std::byte{0xC3});
+    REQUIRE(bytes[5] == std::byte{0xB2});
+    REQUIRE(bytes[6] == std::byte{0xA1});
+    REQUIRE(bytes[7] == std::byte{0});
+
+    size_t bigOffset = 7;
+    Wire::WriteBigEndianUnchecked(std::span{bytes}, bigOffset, uint32_t{0x10203040});
+    REQUIRE(bigOffset == 11);
+    REQUIRE(bytes[7] == std::byte{0x10});
+    REQUIRE(bytes[8] == std::byte{0x20});
+    REQUIRE(bytes[9] == std::byte{0x30});
+    REQUIRE(bytes[10] == std::byte{0x40});
+    REQUIRE(bytes[11] == std::byte{0});
+
+    size_t truncatedOffset = 10;
+    const auto truncated = Wire::WriteLittleEndian(std::span{bytes}, truncatedOffset, uint32_t{1});
+    REQUIRE_FALSE(truncated.has_value());
+    REQUIRE(truncated.error() == ErrorCode::DataTruncated);
+    REQUIRE(truncatedOffset == 10);
+}
+
 TEST_CASE("Wire reflected schemas serialize without object-padding dependence", "[Sora][Core][Wire]") {
     const WireRecord record{.kind = 0x0102, .count = 0xA0B0C0D0, .tag = WireKind::Beta, .hash = 0x0102030405060708};
     std::vector<std::byte> bytes;
