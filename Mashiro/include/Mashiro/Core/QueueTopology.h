@@ -23,6 +23,18 @@ namespace Mashiro::Concurrency {
         Concurrent,
     };
 
+    /** @brief Linearized value-removal order exposed by queue-compatible storage. */
+    enum class QueueOrder : std::uint8_t {
+        Fifo,
+        Lifo,
+    };
+
+    /** @brief Selection discipline for suspended asynchronous operations on one endpoint. */
+    enum class WaiterOrder : std::uint8_t {
+        Fifo,
+        Lifo,
+    };
+
     /** @brief Structural compile-time description of a queue's producer and consumer topology. */
     struct QueueTopology {
         QueueCardinality producers;

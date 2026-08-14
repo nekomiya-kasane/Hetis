@@ -279,6 +279,7 @@ namespace Mashiro {
             using value_type = T;
             static constexpr std::size_t kCapacity = Capacity;
             static constexpr QueueTopology topology = Topology;
+            static constexpr Concurrency::QueueOrder order = Concurrency::QueueOrder::Fifo;
             static constexpr bool transactionalPushBatch = !kSequenceCell;
             static constexpr bool isolatesCells = kSequenceCell && IsolateCells;
 
@@ -662,6 +663,8 @@ namespace Mashiro {
             typename Storage::value_type;
             { Storage::kCapacity } -> std::convertible_to<std::size_t>;
             { Storage::topology } -> std::same_as<const QueueTopology&>;
+            { Storage::order } -> std::same_as<const Concurrency::QueueOrder&>;
+            requires Storage::order == Concurrency::QueueOrder::Fifo;
             { Storage::transactionalPushBatch } -> std::same_as<const bool&>;
         };
 

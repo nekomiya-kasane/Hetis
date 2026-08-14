@@ -4,6 +4,7 @@
  * @ingroup Core
  */
 
+#include <Mashiro/Core/BoundedStack.h>
 #include <Mashiro/Core/RingBuffer.h>
 #include <Mashiro/Core/SpscChannel.h>
 
@@ -68,6 +69,7 @@ namespace Mashiro::Benchmark {
         bool layouts = false;
         bool references = false;
         bool spscAudit = false;
+        bool stacks = false;
     };
 
     /** @brief Fixed-size trivially copyable payload carrying a correctness identity. */
@@ -371,6 +373,75 @@ namespace Mashiro::Benchmark {
     private:
         Storage queue_{};
     };
+
+    /** @brief Mashiro bounded LIFO adapter for one compile-time endpoint topology. */
+    template<typename T, std::size_t Capacity, Concurrency::QueueTopology Topology>
+    class MashiroBoundedStack {
+    public:
+        static constexpr std::string_view name = "Mashiro BoundedStack";
+        using Storage = BoundedStack<T, Capacity, Topology>;
+        static constexpr std::size_t storageBytes = sizeof(Storage);
+
+        [[nodiscard]] bool Push(const T& value) noexcept { return stack_.TryPush(value); }
+        [[nodiscard]] bool Pop(T& value) noexcept { return stack_.TryPop(value); }
+
+    private:
+        Storage stack_{};
+    };
+
+#if defined(_WIN32)
+    /** @brief Bounded two-list adapter over Windows' production lock-free stamped-pointer SLIST primitive. */
+    template<typename T, std::size_t Capacity>
+    class WindowsSListStack {
+        struct alignas(MEMORY_ALLOCATION_ALIGNMENT) Node {
+            SLIST_ENTRY entry{};
+            T value{};
+        };
+
+        static_assert(offsetof(Node, entry) == 0);
+
+    public:
+        static constexpr std::string_view name = "Windows SLIST bounded";
+        static constexpr std::size_t storageBytes =
+            (2 * Platform::kCacheLineSize + Capacity * sizeof(Node) + Platform::kCacheLineSize - 1) /
+            Platform::kCacheLineSize * Platform::kCacheLineSize;
+
+        WindowsSListStack() noexcept {
+            InitializeSListHead(&ready_);
+            InitializeSListHead(&free_);
+            for (Node& node : nodes_) {
+                InterlockedPushEntrySList(&free_, &node.entry);
+            }
+        }
+
+        [[nodiscard]] bool Push(const T& value) noexcept {
+            SLIST_ENTRY* entry = InterlockedPopEntrySList(&free_);
+            if (entry == nullptr) {
+                return false;
+            }
+            auto& node = *reinterpret_cast<Node*>(entry);
+            node.value = value;
+            InterlockedPushEntrySList(&ready_, entry);
+            return true;
+        }
+
+        [[nodiscard]] bool Pop(T& value) noexcept {
+            SLIST_ENTRY* entry = InterlockedPopEntrySList(&ready_);
+            if (entry == nullptr) {
+                return false;
+            }
+            auto& node = *reinterpret_cast<Node*>(entry);
+            value = node.value;
+            InterlockedPushEntrySList(&free_, entry);
+            return true;
+        }
+
+    private:
+        alignas(Platform::kCacheLineSize) SLIST_HEADER ready_{};
+        alignas(Platform::kCacheLineSize) SLIST_HEADER free_{};
+        alignas(Platform::kCacheLineSize) std::array<Node, Capacity> nodes_{};
+    };
+#endif
 
     /** @brief MPMC adapter retaining the value-returning optional pop path for paired measurements. */
     template<typename T, std::size_t Capacity>
@@ -913,6 +984,31 @@ namespace Mashiro::Benchmark {
     }
 
     /** @brief Append controls that expose benchmark-template and implementation-order bias in SPSC comparisons. */
+    /** @brief Append paired bounded-LIFO comparisons against the native stamped-pointer implementation. */
+    template<std::size_t Capacity, typename T>
+    void AppendStackCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+#if defined(_WIN32)
+        auto add = [&cases]<Concurrency::QueueTopology Topology>(const Config& cfg, CsvWriter& out,
+                                                                 std::string_view scenario, std::size_t producers,
+                                                                 std::size_t consumers) {
+            using MashiroStack = MashiroBoundedStack<T, Capacity, Topology>;
+            using NativeStack = WindowsSListStack<T, Capacity>;
+            cases.push_back({[&cfg, &out, scenario, producers, consumers] {
+                RunPairedCase<MashiroStack, NativeStack, T>(cfg, out, scenario, Capacity, producers, consumers);
+            }});
+        };
+
+        add.template operator()<Concurrency::QueueTopologies::Spsc>(config, writer, "LIFO-SPSC", 1, 1);
+        add.template operator()<Concurrency::QueueTopologies::Mpsc>(config, writer, "LIFO-MPSC", 4, 1);
+        add.template operator()<Concurrency::QueueTopologies::Spmc>(config, writer, "LIFO-SPMC", 1, 4);
+        add.template operator()<Concurrency::QueueTopologies::Mpmc>(config, writer, "LIFO-MPMC", 4, 4);
+#else
+        static_cast<void>(config);
+        static_cast<void>(writer);
+        static_cast<void>(cases);
+#endif
+    }
+
     template<std::size_t Capacity, typename T>
     void AppendSpscAuditCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
         using MashiroA = NamedQueue<MashiroSpsc<T, Capacity>, MashiroSpscA>;
@@ -968,6 +1064,8 @@ namespace Mashiro::Benchmark {
             } else if (argument == "--spsc-audit") {
                 config.spscAudit = true;
             } else {
+            } else if (argument == "--stacks") {
+                config.stacks = true;
                 throw std::invalid_argument("unknown command-line option: " + std::string{argument});
             }
         }
@@ -977,10 +1075,11 @@ namespace Mashiro::Benchmark {
                 "samples and items must be non-zero and minimum-ms must be finite and non-negative");
         }
         if (static_cast<unsigned>(config.paired) + static_cast<unsigned>(config.layouts) +
-                static_cast<unsigned>(config.references) + static_cast<unsigned>(config.spscAudit) >
+                static_cast<unsigned>(config.references) + static_cast<unsigned>(config.spscAudit) +
+                static_cast<unsigned>(config.stacks) >
             1) {
             throw std::invalid_argument(
-                "paired algorithm, layout, reference, and SPSC audit modes are mutually exclusive");
+                "paired algorithm, layout, reference, stack, and SPSC audit modes are mutually exclusive");
         }
         return config;
     }
@@ -997,7 +1096,12 @@ int main(int argc, char** argv) {
         Mashiro::Benchmark::CsvWriter writer{config};
         std::vector<Mashiro::Benchmark::Case> cases;
 
-        if (config.spscAudit) {
+        if (config.quick && config.stacks) {
+            Mashiro::Benchmark::AppendStackCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.stacks) {
+            Mashiro::Benchmark::AppendStackCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendStackCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+        } else if (config.spscAudit) {
             Mashiro::Benchmark::AppendSpscAuditCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
         } else if (config.quick && config.references) {
             Mashiro::Benchmark::AppendReferenceCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);

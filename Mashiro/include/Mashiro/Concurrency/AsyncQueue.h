@@ -27,7 +27,7 @@
 
 namespace Mashiro::Concurrency {
 
-    template<class Storage, class Adapter = QueueAdapter<Storage>>
+    template<class Storage, class Adapter = QueueAdapter<Storage>, WaiterOrder Waiters = WaiterOrder::Fifo>
         requires AsyncQueueAdapterFor<Adapter, Storage>
     class AsyncQueue;
 
@@ -334,7 +334,7 @@ namespace Mashiro::Concurrency {
      * most once for the queue lifetime; moving a port transfers that capability. Concurrent operations through one
      * single-cardinality port violate the underlying storage contract.
      */
-    template<class Storage, class Adapter>
+    template<class Storage, class Adapter, WaiterOrder Waiters>
         requires AsyncQueueAdapterFor<Adapter, Storage>
     class AsyncQueue {
     public:
@@ -342,6 +342,8 @@ namespace Mashiro::Concurrency {
         using adapter_type = Adapter;
         using value_type = typename Adapter::value_type;
 
+        static constexpr QueueOrder valueOrder = Adapter::order;
+        static constexpr WaiterOrder waiterOrder = Waiters;
         static constexpr QueueCardinality producerCardinality = Adapter::producerCardinality;
         static constexpr QueueCardinality consumerCardinality = Adapter::consumerCardinality;
 
@@ -542,7 +544,7 @@ namespace Mashiro::Concurrency {
                     completions.PushError(op, op.readyError);
                 } else if (!op.maySuspend) {
                     const bool resolved =
-                        HasOlderSameSideWaiterLocked(op.kind) ? op.resolveBackpressure(op) : op.tryTransfer(op);
+                        HasPendingSameSideWaiterLocked(op.kind) ? op.resolveBackpressure(op) : op.tryTransfer(op);
                     if (!resolved && !op.readyError) [[unlikely]] {
                         std::terminate();
                     }
@@ -554,7 +556,7 @@ namespace Mashiro::Concurrency {
                     }
                 } else {
                     ReserveWaiterLocked(op.kind);
-                    if (!HasOlderSameSideWaiterLocked(op.kind) && op.tryTransfer(op)) {
+                    if (!HasPendingSameSideWaiterLocked(op.kind) && op.tryTransfer(op)) {
                         ReleaseWaiterLocked(op.kind);
                         MarkCompleting(op);
                         completions.PushValue(op);
@@ -604,7 +606,7 @@ namespace Mashiro::Concurrency {
             return CurrentAdapter::TryPopBatch(storage_, batch);
         }
 
-        [[nodiscard]] bool HasOlderSameSideWaiterLocked(Detail::OperationKind kind) const noexcept {
+        [[nodiscard]] bool HasPendingSameSideWaiterLocked(Detail::OperationKind kind) const noexcept {
             return Detail::IsProducer(kind) ? !pendingProducers_.Empty() : !pendingConsumers_.Empty();
         }
 
@@ -625,7 +627,7 @@ namespace Mashiro::Concurrency {
 
         void EnqueueReservedLocked(Detail::OperationBase& op) noexcept {
             op.phase.store(Detail::OperationPhase::Pending, std::memory_order_release);
-            QueueFor(op.kind).PushBack(op);
+            QueueFor(op.kind).Push(op);
         }
 
         [[nodiscard]] std::atomic_uint32_t& WaitingFor(Detail::OperationKind kind) noexcept {
@@ -649,7 +651,9 @@ namespace Mashiro::Concurrency {
             ReleaseWaiterLocked(op.kind);
         }
 
-        [[nodiscard]] Detail::IntrusiveWaitQueue& QueueFor(Detail::OperationKind kind) noexcept {
+        using WaitList = Detail::IntrusiveWaitList<Waiters>;
+
+        [[nodiscard]] WaitList& QueueFor(Detail::OperationKind kind) noexcept {
             return Detail::IsProducer(kind) ? pendingProducers_ : pendingConsumers_;
         }
 
@@ -657,14 +661,13 @@ namespace Mashiro::Concurrency {
             bool madeProgress = true;
             while (madeProgress) {
                 madeProgress = false;
-                madeProgress = TryCompleteFrontLocked(pendingProducers_, completions) || madeProgress;
-                madeProgress = TryCompleteFrontLocked(pendingConsumers_, completions) || madeProgress;
+                madeProgress = TryCompleteNextLocked(pendingProducers_, completions) || madeProgress;
+                madeProgress = TryCompleteNextLocked(pendingConsumers_, completions) || madeProgress;
             }
         }
 
-        [[nodiscard]] bool TryCompleteFrontLocked(Detail::IntrusiveWaitQueue& queue,
-                                                  Detail::CompletionList& completions) noexcept {
-            Detail::WaitNode* node = queue.Front();
+        [[nodiscard]] bool TryCompleteNextLocked(WaitList& queue, Detail::CompletionList& completions) noexcept {
+            Detail::WaitNode* node = queue.Next();
             if (node == nullptr) {
                 return false;
             }
@@ -712,17 +715,16 @@ namespace Mashiro::Concurrency {
                 return;
             }
             while (!pendingConsumers_.Empty()) {
-                auto& op = *static_cast<Detail::OperationBase*>(pendingConsumers_.Front());
+                auto& op = *static_cast<Detail::OperationBase*>(pendingConsumers_.Next());
                 RemoveWaiterLocked(op);
                 MarkCompleting(op);
                 completions.PushStopped(op);
             }
         }
 
-        void DrainAllLocked(Detail::IntrusiveWaitQueue& queue, Detail::CompletionList& completions,
-                            QueueError error) noexcept {
+        void DrainAllLocked(WaitList& queue, Detail::CompletionList& completions, QueueError error) noexcept {
             while (!queue.Empty()) {
-                auto& op = *static_cast<Detail::OperationBase*>(queue.Front());
+                auto& op = *static_cast<Detail::OperationBase*>(queue.Next());
                 RemoveWaiterLocked(op);
                 MarkCompleting(op);
                 completions.PushError(op, error);
@@ -758,8 +760,8 @@ namespace Mashiro::Concurrency {
         [[= Detail::QueueLifecycleDomain{}]] alignas(
             Platform::kCacheLineSize) std::atomic<Detail::QueueLifecycle> lifecycle_{Detail::QueueLifecycle::Open};
         [[= Detail::QueueLifecycleDomain{}]] QueueError abortError_{kQueueAborted};
-        [[= Detail::QueueControlDomain{}]] Detail::IntrusiveWaitQueue pendingProducers_{};
-        [[= Detail::QueueControlDomain{}]] Detail::IntrusiveWaitQueue pendingConsumers_{};
+        [[= Detail::QueueControlDomain{}]] WaitList pendingProducers_{};
+        [[= Detail::QueueControlDomain{}]] WaitList pendingConsumers_{};
         [[= Detail::QueueControlDomain{}]] std::atomic_uint32_t waitingProducers_{0};
         [[= Detail::QueueControlDomain{}]] std::atomic_uint32_t waitingConsumers_{0};
         [[= Detail::QueueLifecycleDomain{}]] std::atomic_uint32_t activeProducers_{0};

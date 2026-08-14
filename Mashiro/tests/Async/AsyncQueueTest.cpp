@@ -35,10 +35,19 @@ namespace {
     using SpscStorage = RingBuffer<int, 4, QueueTopologies::Spsc>;
     using MpscStorage = RingBuffer<int, 1024, QueueTopologies::Mpsc>;
     using MpmcStorage = RingBuffer<int, 1024, QueueTopologies::Mpmc>;
+    using SpscLifoStorage = BoundedStack<int, 8, QueueTopologies::Spsc>;
+    using LifoStorage = BoundedStack<int, 8, QueueTopologies::Mpmc>;
+    using LifoWaitStorage = BoundedStack<int, 1, QueueTopologies::Mpsc>;
+    using LifoConsumerWaitStorage = BoundedStack<int, 1, QueueTopologies::Spmc>;
     using SpscAsyncQueue = AsyncQueue<SpscStorage>;
     using MpscAsyncQueue = AsyncQueue<MpscStorage>;
     using MpmcAsyncQueue = AsyncQueue<MpmcStorage>;
+    using LifoAsyncQueue = AsyncQueue<LifoStorage>;
+    using LifoWaitQueue = AsyncQueue<LifoWaitStorage, QueueAdapter<LifoWaitStorage>, WaiterOrder::Lifo>;
+    using LifoConsumerWaitQueue =
+        AsyncQueue<LifoConsumerWaitStorage, QueueAdapter<LifoConsumerWaitStorage>, WaiterOrder::Lifo>;
     using Batch = QueueBatch<int, QueueAdapter<SpscStorage>::capacity>;
+    using LifoBatch = QueueBatch<int, QueueAdapter<LifoStorage>::capacity>;
     using SpscRecordStorage = RecordRingBuffer<256, QueueTopologies::Spsc>;
     using MpscRecordStorage = RecordRingBuffer<8192, QueueTopologies::Mpsc>;
     using MpmcRecordStorage = RecordRingBuffer<8192, QueueTopologies::Mpmc>;
@@ -184,6 +193,16 @@ namespace {
     static_assert(std::is_copy_constructible_v<MpmcProducer>);
     static_assert(std::is_copy_constructible_v<MpmcConsumer>);
 
+    static_assert(LifoAsyncQueue::valueOrder == QueueOrder::Lifo);
+    static_assert(LifoAsyncQueue::waiterOrder == WaiterOrder::Fifo);
+    static_assert(LifoWaitQueue::waiterOrder == WaiterOrder::Lifo);
+    static_assert(QueueAdapter<LifoStorage>::pushProgress == QueueProgress::LockFree);
+    static_assert(QueueAdapter<LifoStorage>::popProgress == QueueProgress::LockFree);
+    static_assert(QueueAdapter<LifoStorage>::transactionalPushBatch);
+    static_assert(HasPushBatch<ProducerPort<LifoAsyncQueue>, LifoBatch>);
+    static_assert(QueueAdapter<SpscLifoStorage>::pushProgress == QueueProgress::WaitFree);
+    static_assert(QueueAdapter<SpscLifoStorage>::popProgress == QueueProgress::WaitFree);
+
     static_assert(AsyncQueueAdapter<QueueAdapter<SpscRecordStorage>>);
     static_assert(AsyncQueueAdapter<QueueAdapter<MpscRecordStorage>>);
     static_assert(AsyncQueueAdapter<QueueAdapter<MpmcRecordStorage>>);
@@ -216,6 +235,91 @@ TEST_CASE("AsyncQueue SPSC immediate sender operations preserve FIFO order", AUT
     REQUIRE(std::get<0>(*first) == 41);
     REQUIRE(std::get<0>(*second) == 42);
     REQUIRE(queue.EmptyApprox());
+}
+
+TEST_CASE("BoundedStack AsyncQueue immediate sender operations preserve LIFO order", AUTO_TAG) {
+    LifoAsyncQueue queue;
+    auto producer = queue.Producer();
+    auto consumer = queue.Consumer();
+
+    REQUIRE(std::get<0>(*stdexec::sync_wait(producer.Push(41))).Enqueued());
+    REQUIRE(std::get<0>(*stdexec::sync_wait(producer.Push(42))).Enqueued());
+
+    auto first = stdexec::sync_wait(consumer.Pop());
+    auto second = stdexec::sync_wait(consumer.Pop());
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(std::get<0>(*first) == 42);
+    REQUIRE(std::get<0>(*second) == 41);
+    REQUIRE(queue.EmptyApprox());
+}
+
+TEST_CASE("BoundedStack AsyncQueue batch publication is transactional and LIFO", AUTO_TAG) {
+    LifoAsyncQueue queue;
+    auto producer = queue.Producer();
+    auto consumer = queue.Consumer();
+
+    auto pushed = stdexec::sync_wait(producer.PushBatch(LifoBatch{1, 2, 3}));
+    REQUIRE(pushed.has_value());
+    REQUIRE(std::get<0>(*pushed).Enqueued());
+
+    auto popped = stdexec::sync_wait(consumer.PopBatch());
+    REQUIRE(popped.has_value());
+    const auto& batch = std::get<0>(*popped);
+    REQUIRE(batch.size() == 3);
+    REQUIRE(batch[0] == 3);
+    REQUIRE(batch[1] == 2);
+    REQUIRE(batch[2] == 1);
+}
+
+TEST_CASE("AsyncQueue LIFO waiter discipline selects the newest blocked producer", AUTO_TAG) {
+    LifoWaitQueue queue;
+    auto producer = queue.Producer();
+    auto consumer = queue.Consumer();
+    REQUIRE(stdexec::sync_wait(producer.Push(1)).has_value());
+
+    CompletionProbe second;
+    CompletionProbe third;
+    auto secondSender = producer.Push(2);
+    auto thirdSender = producer.Push(3);
+    auto secondOperation = stdexec::connect(std::move(secondSender), VoidReceiver{.probe = &second});
+    auto thirdOperation = stdexec::connect(std::move(thirdSender), VoidReceiver{.probe = &third});
+    stdexec::start(secondOperation);
+    stdexec::start(thirdOperation);
+    REQUIRE(second.completion.load(std::memory_order_acquire) == Completion::None);
+    REQUIRE(third.completion.load(std::memory_order_acquire) == Completion::None);
+
+    REQUIRE(consumer.TryPop() == 1);
+    REQUIRE(third.completion.load(std::memory_order_acquire) == Completion::Value);
+    REQUIRE(second.completion.load(std::memory_order_acquire) == Completion::None);
+    REQUIRE(consumer.TryPop() == 3);
+    REQUIRE(second.completion.load(std::memory_order_acquire) == Completion::Value);
+    REQUIRE(consumer.TryPop() == 2);
+}
+
+TEST_CASE("AsyncQueue LIFO waiter discipline selects the newest blocked consumer", AUTO_TAG) {
+    LifoConsumerWaitQueue queue;
+    auto producer = queue.Producer();
+    auto consumer = queue.Consumer();
+    CompletionProbe second;
+    CompletionProbe third;
+    auto secondSender = consumer.Pop();
+    auto thirdSender = consumer.Pop();
+    auto secondOperation = stdexec::connect(std::move(secondSender), IntReceiver{.probe = &second});
+    auto thirdOperation = stdexec::connect(std::move(thirdSender), IntReceiver{.probe = &third});
+    stdexec::start(secondOperation);
+    stdexec::start(thirdOperation);
+    REQUIRE(second.completion.load(std::memory_order_acquire) == Completion::None);
+    REQUIRE(third.completion.load(std::memory_order_acquire) == Completion::None);
+
+    REQUIRE(stdexec::sync_wait(producer.Push(7)).has_value());
+    REQUIRE(third.completion.load(std::memory_order_acquire) == Completion::Value);
+    REQUIRE(third.value.load(std::memory_order_relaxed) == 7);
+    REQUIRE(second.completion.load(std::memory_order_acquire) == Completion::None);
+
+    REQUIRE(stdexec::sync_wait(producer.Push(8)).has_value());
+    REQUIRE(second.completion.load(std::memory_order_acquire) == Completion::Value);
+    REQUIRE(second.value.load(std::memory_order_relaxed) == 8);
 }
 
 TEST_CASE("Record AsyncQueue owns sender inputs and preserves variable-length FIFO values", AUTO_TAG) {

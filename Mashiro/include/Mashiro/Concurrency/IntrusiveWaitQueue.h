@@ -1,9 +1,11 @@
 /**
  * @file IntrusiveWaitQueue.h
- * @brief Allocation-free FIFO wait queues for asynchronous queue operation states.
+ * @brief Allocation-free compile-time-ordered wait lists for asynchronous operation states.
  * @ingroup Concurrency
  */
 #pragma once
+
+#include "Mashiro/Core/QueueTopology.h"
 
 #include <utility>
 
@@ -17,17 +19,24 @@ namespace Mashiro::Concurrency::Detail {
     };
 
     /**
-     * @brief Minimal FIFO intrusive list.
+     * @brief Minimal intrusive list selecting its next operation at compile time.
      *
      * @details The container owns no nodes and performs no allocation. Synchronisation belongs to the enclosing
      * queue state; every member function expects the caller to hold the control-plane lock.
      */
-    class IntrusiveWaitQueue {
+    template<WaiterOrder Order>
+    class IntrusiveWaitList {
     public:
         [[nodiscard]] bool Empty() const noexcept { return head_ == nullptr; }
-        [[nodiscard]] WaitNode* Front() const noexcept { return head_; }
+        [[nodiscard]] WaitNode* Next() const noexcept {
+            if constexpr (Order == WaiterOrder::Fifo) {
+                return head_;
+            } else {
+                return tail_;
+            }
+        }
 
-        void PushBack(WaitNode& node) noexcept {
+        void Push(WaitNode& node) noexcept {
             node.prev = tail_;
             node.next = nullptr;
             node.queued = true;
@@ -39,8 +48,8 @@ namespace Mashiro::Concurrency::Detail {
             tail_ = &node;
         }
 
-        [[nodiscard]] WaitNode* PopFront() noexcept {
-            WaitNode* node = head_;
+        [[nodiscard]] WaitNode* PopNext() noexcept {
+            WaitNode* node = Next();
             if (node != nullptr) {
                 Erase(*node);
             }

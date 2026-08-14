@@ -190,6 +190,7 @@ namespace Mashiro {
             // A record occupying at most half the arena can always follow wrap padding from any aligned position.
             static constexpr std::size_t kMaxRecordBytes = ByteCapacity / 2 - kRecordHeaderBytes;
             static constexpr Concurrency::QueueTopology topology = Topology;
+            static constexpr Concurrency::QueueOrder order = Concurrency::QueueOrder::Fifo;
 
             RecordRingBufferImplementation() = default;
             RecordRingBufferImplementation(const RecordRingBufferImplementation&) = delete;
@@ -559,6 +560,7 @@ namespace Mashiro {
             { Storage::kByteCapacity } -> std::convertible_to<std::size_t>;
             { Storage::kMaxRecordBytes } -> std::convertible_to<std::size_t>;
             { Storage::topology } -> std::same_as<const Concurrency::QueueTopology&>;
+            { Storage::order } -> std::same_as<const Concurrency::QueueOrder&>;
         };
 
     } // namespace Detail

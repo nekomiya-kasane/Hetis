@@ -13,6 +13,21 @@ set_target_properties(Benchmark.Mashiro.Queues PROPERTIES
 )
 vk_tp_deploy_runtime(Benchmark.Mashiro.Queues)
 
+add_library(Benchmark.Mashiro.BoundedStackMigrationAssembly OBJECT EXCLUDE_FROM_ALL
+    BoundedStackMigrationAssembly.cpp
+)
+target_include_directories(Benchmark.Mashiro.BoundedStackMigrationAssembly PRIVATE
+    "${CMAKE_SOURCE_DIR}/Mashiro/include"
+)
+set_target_properties(Benchmark.Mashiro.BoundedStackMigrationAssembly PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    FOLDER "Mashiro/Benchmarks"
+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(Benchmark.Mashiro.BoundedStackMigrationAssembly PRIVATE -O3)
+endif()
+
 add_executable(Benchmark.Mashiro.AsyncQueue EXCLUDE_FROM_ALL AsyncQueueBenchmark.cpp)
 target_link_libraries(Benchmark.Mashiro.AsyncQueue PRIVATE Mashiro TBB::tbb)
 target_include_directories(Benchmark.Mashiro.AsyncQueue PRIVATE "${CMAKE_SOURCE_DIR}/thirdparty/concurrentqueue")

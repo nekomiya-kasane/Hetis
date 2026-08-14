@@ -7,6 +7,7 @@
 
 #include "Mashiro/Concurrency/BoundedByteRecord.h"
 #include "Mashiro/Concurrency/QueueBatch.h"
+#include "Mashiro/Core/BoundedStack.h"
 #include "Mashiro/Core/RecordRingBuffer.h"
 #include "Mashiro/Core/RingBuffer.h"
 
@@ -52,6 +53,7 @@ namespace Mashiro::Concurrency {
                  typename Adapter::value_type& value) {
             typename Adapter::storage_type;
             typename Adapter::value_type;
+            { Adapter::order } -> std::same_as<const QueueOrder&>;
             { Adapter::producerCardinality } -> std::same_as<const QueueCardinality&>;
             { Adapter::consumerCardinality } -> std::same_as<const QueueCardinality&>;
             { Adapter::pushProgress } -> std::same_as<const QueueProgress&>;
@@ -106,6 +108,13 @@ namespace Mashiro::Concurrency {
             return QueueProgress::Unspecified;
         }
 
+        /** @brief Local and dual-ring SPSC stacks are wait-free; shared tagged heads are lock-free. */
+        [[nodiscard]] consteval QueueProgress StackProgress(QueueTopology topology) noexcept {
+            return topology.sharing == QueueSharing::SingleThread || topology == QueueTopologies::Spsc
+                       ? QueueProgress::WaitFree
+                       : QueueProgress::LockFree;
+        }
+
         template<class Adapter>
             requires BatchQueueAdapter<Adapter>
         [[nodiscard]] bool PopAvailable(typename Adapter::storage_type& storage,
@@ -144,6 +153,52 @@ namespace Mashiro::Concurrency {
 
     } // namespace Detail
 
+    /** @brief Adapter for every compile-time-specialized bounded LIFO topology. */
+    template<Mashiro::Detail::BoundedStackStorage Storage>
+    struct QueueAdapter<Storage> {
+        using storage_type = Storage;
+        using value_type = typename Storage::value_type;
+        using batch_type = QueueBatch<value_type, Storage::kCapacity>;
+
+        static constexpr QueueOrder order = Storage::order;
+        static constexpr QueueCardinality producerCardinality = Storage::topology.producers;
+        static constexpr QueueCardinality consumerCardinality = Storage::topology.consumers;
+        static constexpr QueueProgress pushProgress = Detail::StackProgress(Storage::topology);
+        static constexpr QueueProgress popProgress = Detail::StackProgress(Storage::topology);
+        static constexpr std::size_t capacity = Storage::kCapacity;
+        static constexpr bool pushFailurePreservesInput = true;
+        static constexpr bool transactionalPushBatch = true;
+
+        [[nodiscard]] static QueueTransferStatus TryPush(storage_type& storage, value_type& value) noexcept {
+            return storage.TryPush(std::move(value)) ? QueueTransferStatus::Committed
+                                                     : QueueTransferStatus::BackPressure;
+        }
+
+        [[nodiscard]] static std::optional<value_type> TryPop(storage_type& storage) noexcept {
+            return storage.TryPop();
+        }
+
+        [[nodiscard]] static QueueTransferStatus TryPushBatch(storage_type& storage, batch_type& batch) noexcept {
+            if (batch.oversized() || batch.size() > capacity) {
+                return QueueTransferStatus::BatchTooLarge;
+            }
+            if (!storage.TryPushBatch(batch)) {
+                return QueueTransferStatus::BackPressure;
+            }
+            batch.Clear();
+            return QueueTransferStatus::Committed;
+        }
+
+        [[nodiscard]] static bool TryPopBatch(storage_type& storage, batch_type& batch) noexcept {
+            return Detail::PopAvailable<QueueAdapter>(storage, batch);
+        }
+
+        [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }
+        [[nodiscard]] static std::size_t SizeApprox(const storage_type& storage) noexcept {
+            return storage.SizeApprox();
+        }
+    };
+
     /** @brief Uniform adapter for every compile-time-specialized ring-buffer topology. */
     template<Mashiro::Detail::RingBufferStorage Storage>
     struct QueueAdapter<Storage> {
@@ -151,6 +206,7 @@ namespace Mashiro::Concurrency {
         using value_type = typename Storage::value_type;
         using batch_type = QueueBatch<value_type, Storage::kCapacity>;
 
+        static constexpr QueueOrder order = Storage::order;
         static constexpr QueueCardinality producerCardinality = Storage::topology.producers;
         static constexpr QueueCardinality consumerCardinality = Storage::topology.consumers;
         static constexpr QueueProgress pushProgress = Detail::RingProgress(Storage::topology);
@@ -190,6 +246,7 @@ namespace Mashiro::Concurrency {
         using storage_type = Storage;
         using value_type = BoundedByteRecord<Storage::kMaxRecordBytes>;
 
+        static constexpr QueueOrder order = Storage::order;
         static constexpr QueueCardinality producerCardinality = Storage::topology.producers;
         static constexpr QueueCardinality consumerCardinality = Storage::topology.consumers;
         static constexpr QueueProgress pushProgress = Detail::RingProgress(Storage::topology);
