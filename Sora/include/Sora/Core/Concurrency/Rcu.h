@@ -221,7 +221,7 @@ namespace Sora::Concurrency {
                 throw;
             }
             std::size_t count = 0;
-            count = reclaimable.size();
+            count = reclaimable.Size();
             retired_.Destroy(std::move(reclaimable));
             return count;
         }
@@ -231,7 +231,7 @@ namespace Sora::Concurrency {
     private:
         std::atomic<unsigned> phase_{0};
         Detail::StableRecordRegistry<Record> records_;
-        Detail::RetiredList retired_;
+        Detail::RetirementQueue retired_;
         std::mutex synchronizeMutex_;
     };
 

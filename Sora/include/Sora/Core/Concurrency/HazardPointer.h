@@ -166,7 +166,7 @@ namespace Sora::Concurrency {
         /** @brief Reclaim the batch retired before this call when no scanned record protects its address. */
         [[nodiscard]] std::size_t Collect() {
             auto candidates = retired_.DetachAll();
-            if (candidates.empty()) {
+            if (candidates.Empty()) {
                 return 0;
             }
 
@@ -194,7 +194,7 @@ namespace Sora::Concurrency {
 
     private:
         Detail::StableRecordRegistry<Record> records_;
-        Detail::RetiredList retired_;
+        Detail::RetirementQueue retired_;
     };
 
 } // namespace Sora::Concurrency

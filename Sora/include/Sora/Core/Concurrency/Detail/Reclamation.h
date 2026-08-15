@@ -5,15 +5,16 @@
  */
 #pragma once
 
+#include <Sora/Core/Concurrency/ConcurrentBatchQueue.h>
 #include <Sora/Core/InlineFunction.h>
 
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -27,66 +28,25 @@ namespace Sora::Concurrency::Detail {
         std::uint64_t generation = 0;
     };
 
-    struct RetiredNode {
-        RetiredObject object;
-        RetiredNode* next = nullptr;
-    };
-
     inline constexpr std::uint64_t kGenerationHalfRange = std::uint64_t{1} << 63;
 
     [[nodiscard]] constexpr bool GenerationReached(std::uint64_t observed, std::uint64_t target) noexcept {
         return observed == target || observed - target < kGenerationHalfRange;
     }
 
-    /** @brief Thread-safe ownership queue with pooled nodes and allocation-free batch transfer. */
-    class RetiredList {
+    /** @brief Retirement-specific safety facade over a generic concurrent batch queue. */
+    class RetirementQueue {
     public:
-        class Batch {
-        public:
-            Batch() noexcept = default;
-            Batch(const Batch&) = delete;
-            Batch& operator=(const Batch&) = delete;
-            Batch(Batch&& other) noexcept
-                : head_(std::exchange(other.head_, nullptr)),
-                  tail_(std::exchange(other.tail_, nullptr)),
-                  size_(std::exchange(other.size_, 0)) {}
-            Batch& operator=(Batch&&) = delete;
+        using Queue = ConcurrentBatchQueue<RetiredObject>;
+        using Batch = Queue::Batch;
 
-            [[nodiscard]] bool empty() const noexcept { return head_ == nullptr; }
-            [[nodiscard]] std::size_t size() const noexcept { return size_; }
+        RetirementQueue() noexcept = default;
+        RetirementQueue(const RetirementQueue&) = delete;
+        RetirementQueue& operator=(const RetirementQueue&) = delete;
+        RetirementQueue(RetirementQueue&&) = delete;
+        RetirementQueue& operator=(RetirementQueue&&) = delete;
 
-            void PushBack(RetiredNode* node) noexcept {
-                node->next = nullptr;
-                if (tail_ == nullptr) {
-                    head_ = node;
-                } else {
-                    tail_->next = node;
-                }
-                tail_ = node;
-                ++size_;
-            }
-
-            [[nodiscard]] RetiredNode* PopFront() noexcept {
-                RetiredNode* node = head_;
-                if (node == nullptr) {
-                    return nullptr;
-                }
-                head_ = node->next;
-                if (head_ == nullptr) {
-                    tail_ = nullptr;
-                }
-                node->next = nullptr;
-                --size_;
-                return node;
-            }
-
-        private:
-            friend class RetiredList;
-
-            RetiredNode* head_ = nullptr;
-            RetiredNode* tail_ = nullptr;
-            std::size_t size_ = 0;
-        };
+        ~RetirementQueue() { Drain(); }
 
         template<typename T, typename Deleter>
             requires std::is_nothrow_constructible_v<std::remove_cvref_t<Deleter>, Deleter&&> &&
@@ -102,10 +62,7 @@ namespace Sora::Concurrency::Detail {
             };
             RetiredObject object{pointer, std::move(reclaim), generation};
             try {
-                std::scoped_lock lock(mutex_);
-                RetiredNode* node = AcquireNode();
-                node->object = std::move(object);
-                objects_.PushBack(node);
+                queue_.Emplace(std::move(object));
             } catch (...) {
                 object.reclaim();
                 throw;
@@ -124,24 +81,17 @@ namespace Sora::Concurrency::Detail {
                      std::is_nothrow_invocable_v<Deleter&, std::remove_cv_t<Pointer>>
         void Retire(std::span<Pointer, Extent> pointers, Deleter deleter, std::uint64_t generation = 0) {
             using RawPointer = std::remove_cv_t<Pointer>;
-            Batch staged;
             std::size_t next = 0;
             try {
-                std::scoped_lock lock(mutex_);
-                for (; next < pointers.size(); ++next) {
-                    RawPointer pointer = pointers[next];
+                queue_.EmplaceBatch(pointers, [&](RawPointer pointer) noexcept -> std::optional<RetiredObject> {
+                    ++next;
                     if (pointer == nullptr) {
-                        continue;
+                        return std::nullopt;
                     }
-                    RetiredNode* node = AcquireNode();
                     auto reclaim = [pointer, deleter]() mutable noexcept { deleter(pointer); };
-                    node->object = RetiredObject{pointer, std::move(reclaim), generation};
-                    staged.PushBack(node);
-                }
-                Append(objects_, std::move(staged));
-                return;
+                    return RetiredObject{pointer, std::move(reclaim), generation};
+                });
             } catch (...) {
-                Destroy(std::move(staged));
                 for (; next < pointers.size(); ++next) {
                     RawPointer pointer = pointers[next];
                     if (pointer != nullptr) {
@@ -161,27 +111,19 @@ namespace Sora::Concurrency::Detail {
         }
 
         [[nodiscard]] Batch DetachAll() noexcept {
-            std::scoped_lock lock(mutex_);
-            return Batch(std::move(objects_));
+            return queue_.TakeAll();
         }
 
         void Requeue(Batch objects) noexcept {
-            if (objects.empty()) {
-                return;
-            }
-            std::scoped_lock lock(mutex_);
-            Append(objects_, std::move(objects));
+            queue_.Requeue(std::move(objects));
         }
 
-        [[nodiscard]] std::size_t Size() const noexcept {
-            std::scoped_lock lock(mutex_);
-            return objects_.size();
-        }
+        [[nodiscard]] std::size_t Size() const noexcept { return queue_.Size(); }
 
         void Drain() noexcept {
             for (;;) {
                 Batch objects = DetachAll();
-                if (objects.empty()) {
+                if (objects.Empty()) {
                     return;
                 }
                 Destroy(std::move(objects));
@@ -190,85 +132,32 @@ namespace Sora::Concurrency::Detail {
 
         void Destroy(Batch objects) noexcept {
             Batch reusable;
-            while (RetiredNode* node = objects.PopFront()) {
-                node->object.reclaim();
-                node->object = {};
-                reusable.PushBack(node);
+            while (auto* entry = objects.PopFront()) {
+                Batch::Value(*entry).reclaim();
+                reusable.PushBack(entry);
             }
-            std::scoped_lock lock(mutex_);
-            ReleaseNodes(std::move(reusable));
+            queue_.Release(std::move(reusable));
         }
 
     private:
-        static constexpr std::size_t kNodesPerBlock = 64;
-
-        struct Block {
-            std::array<RetiredNode, kNodesPerBlock> nodes;
-            std::unique_ptr<Block> next;
-        };
-
-        [[nodiscard]] RetiredNode* AcquireNode() {
-            if (free_ == nullptr) {
-                auto block = std::make_unique<Block>();
-                for (RetiredNode& node : block->nodes) {
-                    node.next = free_;
-                    free_ = std::addressof(node);
-                }
-                block->next = std::move(blocks_);
-                blocks_ = std::move(block);
-            }
-            RetiredNode* node = free_;
-            free_ = node->next;
-            node->next = nullptr;
-            return node;
-        }
-
-        static void Append(Batch& destination, Batch source) noexcept {
-            if (source.empty()) {
-                return;
-            }
-            if (destination.tail_ == nullptr) {
-                destination.head_ = std::exchange(source.head_, nullptr);
-                destination.tail_ = std::exchange(source.tail_, nullptr);
-                destination.size_ = std::exchange(source.size_, 0);
-                return;
-            }
-            destination.tail_->next = source.head_;
-            destination.tail_ = source.tail_;
-            destination.size_ += source.size_;
-            source.head_ = nullptr;
-            source.tail_ = nullptr;
-            source.size_ = 0;
-        }
-
-        void ReleaseNodes(Batch nodes) noexcept {
-            if (nodes.empty()) {
-                return;
-            }
-            nodes.tail_->next = free_;
-            free_ = nodes.head_;
-        }
-
-        mutable std::mutex mutex_;
-        Batch objects_;
-        RetiredNode* free_ = nullptr;
-        std::unique_ptr<Block> blocks_;
+        Queue queue_;
     };
 
     template<typename Safe>
-    [[nodiscard]] std::size_t ReclaimDetached(RetiredList& retired, RetiredList::Batch candidates, Safe&& safe) {
+    [[nodiscard]] std::size_t ReclaimDetached(RetirementQueue& retired, RetirementQueue::Batch candidates,
+                                               Safe&& safe) {
         static_assert(std::is_nothrow_invocable_r_v<bool, Safe&, const RetiredObject&>);
-        RetiredList::Batch deferred;
-        RetiredList::Batch reclaimable;
-        while (RetiredNode* node = candidates.PopFront()) {
-            if (safe(node->object)) {
-                reclaimable.PushBack(node);
+        RetirementQueue::Batch deferred;
+        RetirementQueue::Batch reclaimable;
+        while (auto* entry = candidates.PopFront()) {
+            if (safe(RetirementQueue::Batch::Value(*entry))) {
+                reclaimable.PushBack(entry);
             } else {
-                deferred.PushBack(node);
+                deferred.PushBack(entry);
             }
         }
         retired.Requeue(std::move(deferred));
-        const std::size_t count = reclaimable.size();
+        const std::size_t count = reclaimable.Size();
         retired.Destroy(std::move(reclaimable));
         return count;
     }

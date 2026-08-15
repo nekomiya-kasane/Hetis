@@ -242,7 +242,7 @@ namespace Sora::Concurrency {
 
         std::atomic<std::uint64_t> epoch_{1};
         Detail::StableRecordRegistry<Record> records_;
-        Detail::RetiredList retired_;
+        Detail::RetirementQueue retired_;
     };
 
 } // namespace Sora::Concurrency

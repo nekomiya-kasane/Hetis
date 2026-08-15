@@ -61,8 +61,8 @@ namespace Sora::Wire {
             }
         }
 
-        template<Concept::MutableByte Byte>
-        constexpr void StoreByte(std::span<Byte> out, size_t& offset, uint8_t value) noexcept {
+        template<Concept::MutableByte Byte, size_t Extent>
+        constexpr void StoreByte(std::span<Byte, Extent> out, size_t& offset, uint8_t value) noexcept {
             if constexpr (std::same_as<std::remove_cv_t<Byte>, std::byte>) {
                 out[offset++] = static_cast<std::byte>(value);
             } else {
@@ -192,8 +192,8 @@ namespace Sora::Wire {
     }
 
     /** @brief Write @p value as a little-endian scalar without bounds checks. */
-    template<Concept::Scalar T, Concept::MutableByte Byte>
-    constexpr void WriteLittleEndianUnchecked(std::span<Byte> out, size_t& offset, T value) noexcept {
+    template<Concept::Scalar T, Concept::MutableByte Byte, size_t Extent>
+    constexpr void WriteLittleEndianUnchecked(std::span<Byte, Extent> out, size_t& offset, T value) noexcept {
         auto u = static_cast<Detail::UnsignedScalar<T>>(Sora::CastToUnsigned(value));
         for (size_t i = 0; i < sizeof(u); ++i) {
             Detail::StoreByte(out, offset, static_cast<uint8_t>((u >> (i * 8u)) & 0xFFu));
@@ -201,8 +201,8 @@ namespace Sora::Wire {
     }
 
     /** @brief Write @p value as a big-endian scalar without bounds checks. */
-    template<Concept::Scalar T, Concept::MutableByte Byte>
-    constexpr void WriteBigEndianUnchecked(std::span<Byte> out, size_t& offset, T value) noexcept {
+    template<Concept::Scalar T, Concept::MutableByte Byte, size_t Extent>
+    constexpr void WriteBigEndianUnchecked(std::span<Byte, Extent> out, size_t& offset, T value) noexcept {
         auto u = static_cast<Detail::UnsignedScalar<T>>(Sora::CastToUnsigned(value));
         for (size_t i = 0; i < sizeof(u); ++i) {
             const size_t shift = (sizeof(u) - 1u - i) * 8u;
@@ -211,8 +211,8 @@ namespace Sora::Wire {
     }
 
     /** @brief Write @p value as a little-endian scalar and advance @p offset. */
-    template<Concept::Scalar T, Concept::MutableByte Byte>
-    constexpr auto WriteLittleEndian(std::span<Byte> out, size_t& offset, T value) -> VoidResult {
+    template<Concept::Scalar T, Concept::MutableByte Byte, size_t Extent>
+    constexpr auto WriteLittleEndian(std::span<Byte, Extent> out, size_t& offset, T value) -> VoidResult {
         using U = Detail::UnsignedScalar<T>;
         if (offset > out.size() || sizeof(U) > out.size() - offset) {
             return std::unexpected(ErrorCode::DataTruncated);
@@ -222,8 +222,8 @@ namespace Sora::Wire {
     }
 
     /** @brief Write @p value as a big-endian scalar and advance @p offset. */
-    template<Concept::Scalar T, Concept::MutableByte Byte>
-    constexpr auto WriteBigEndian(std::span<Byte> out, size_t& offset, T value) -> VoidResult {
+    template<Concept::Scalar T, Concept::MutableByte Byte, size_t Extent>
+    constexpr auto WriteBigEndian(std::span<Byte, Extent> out, size_t& offset, T value) -> VoidResult {
         using U = Detail::UnsignedScalar<T>;
         if (offset > out.size() || sizeof(U) > out.size() - offset) {
             return std::unexpected(ErrorCode::DataTruncated);
@@ -327,8 +327,8 @@ namespace Sora::Wire {
     }
 
     /** @brief Write a reflected schema value into a caller-proven byte buffer at @p offset. */
-    template<typename T, Concept::MutableByte Byte>
-    constexpr void WriteUnchecked(std::span<Byte> out, size_t offset, const T& value) noexcept {
+    template<typename T, Concept::MutableByte Byte, size_t Extent>
+    constexpr void WriteUnchecked(std::span<Byte, Extent> out, size_t offset, const T& value) noexcept {
         Detail::ValidateSchema<T>();
         template for (constexpr auto member : Sora::Traits::DataMembers<T>) {
             WriteLittleEndianUnchecked(out, offset, value.[:member:]);
