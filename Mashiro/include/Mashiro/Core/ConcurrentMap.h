@@ -544,6 +544,39 @@ namespace Mashiro {
             [[nodiscard]] bool Empty() const noexcept { return SizeApprox() == 0; }
 
             /**
+             * @brief Copy one writer-quiescent table into an empty table without an intermediate snapshot allocation.
+             */
+            [[nodiscard]] bool CopyPublishedTo(FlatConcurrentAssociativeStorage& destination) const noexcept {
+                for (std::size_t index = 0; index != CapacityLimit(); ++index) {
+                    for (;;) {
+                        const StateWord before = WaitUntilStable(index);
+                        if (Status(before) != MapSlotStatus::Full) {
+                            break;
+                        }
+                        const Key key = LoadKey(index);
+                        if constexpr (kSet) {
+                            if (LoadState(index, std::memory_order_acquire) != before) {
+                                continue;
+                            }
+                            if (destination.TryInsert(key) != MapInsertResult::Inserted) {
+                                return false;
+                            }
+                        } else {
+                            const Mapped value = LoadValue(index);
+                            if (LoadState(index, std::memory_order_acquire) != before) {
+                                continue;
+                            }
+                            if (destination.TryInsert(key, value) != MapInsertResult::Inserted) {
+                                return false;
+                            }
+                        }
+                        break;
+                    }
+                }
+                return true;
+            }
+
+            /**
              * @brief Copy currently published map entries in physical slot order.
              * @details Snapshot allocation is intentionally outside the hot path.
              */
@@ -1351,10 +1384,313 @@ namespace Mashiro {
         };
 
         /**
-         * @brief Hash-sharded dynamic storage that bounds directory search to one shard.
+         * @brief Read-optimized dynamic shard using release-published copy-on-grow table versions.
          *
-         * @details Each shard retains the validated append-only segment protocol. The compile-time shard count is a
-         * data-layout parameter: it avoids a global segment walk while preserving stable published slot addresses.
+         * @details The shard serializes its writers, so its flat table is compiled as a single-writer data plane even
+         * when the public topology permits multiple writers. Growth copies the current table into a table with twice
+         * the capacity and publishes it with one release store. Readers acquire one version and probe only that table.
+         * Retired versions remain alive until quiescent clear or destruction. Retained table storage stays below twice
+         * the current capacity without reader registration or reclamation traffic on the lookup path.
+         */
+        template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
+                 class KeyEqual>
+        class VersionedConcurrentAssociativeStorage {
+            static constexpr bool kSet = std::same_as<Mapped, SetMarker>;
+            static constexpr bool kMultipleWriters = Topology.writers == Concurrency::MapCardinality::Multiple;
+            static constexpr std::size_t kWriterStripeCount = kMultipleWriters ? 1 : 0;
+            static constexpr Concurrency::MapTopology kFlatTopology{
+                Concurrency::MapCardinality::Single,
+                Topology.readers,
+                Concurrency::MapSharing::Concurrent,
+            };
+            using TableStorage = FlatConcurrentAssociativeStorage<Key, Mapped, std::dynamic_extent, kFlatTopology,
+                                                                  HashAlgorithm, KeyEqual>;
+
+            struct Version {
+                explicit Version(std::size_t capacity, Version* retiredOlder) noexcept
+                    : storage{capacity}, older{retiredOlder} {}
+
+                TableStorage storage;
+                Version* older;
+            };
+
+            using WriterStripes = std::conditional_t<
+                kMultipleWriters, std::array<MapWriterStripe, kWriterStripeCount>,
+                EmptyConcurrentMapField<ConcurrentMapField::WriterStripes>>;
+
+        public:
+            explicit VersionedConcurrentAssociativeStorage(std::size_t initialCapacity = 64) noexcept
+                : initialCapacity_{NormalizeCapacity(initialCapacity)},
+                  current_{CreateVersion(initialCapacity_, nullptr)} {}
+
+            VersionedConcurrentAssociativeStorage(const VersionedConcurrentAssociativeStorage&) = delete;
+            VersionedConcurrentAssociativeStorage& operator=(const VersionedConcurrentAssociativeStorage&) = delete;
+            VersionedConcurrentAssociativeStorage(VersionedConcurrentAssociativeStorage&&) = delete;
+            VersionedConcurrentAssociativeStorage& operator=(VersionedConcurrentAssociativeStorage&&) = delete;
+
+            ~VersionedConcurrentAssociativeStorage() noexcept {
+                DestroyVersions(current_.load(std::memory_order_relaxed));
+            }
+
+            [[nodiscard]] bool Valid() const noexcept {
+                return current_.load(std::memory_order_relaxed) != nullptr;
+            }
+
+            [[nodiscard]] std::uint64_t HashForKey(const Key& key) const noexcept { return HashKey(key); }
+
+            [[nodiscard]] MapInsertResult TryInsert(const Key& key) noexcept
+                requires kSet
+            {
+                MapWriterGuard writer{SelectWriterStripe()};
+                for (;;) {
+                    Version* current = LoadCurrent();
+                    if (!current) {
+                        return MapInsertResult::AllocationFailed;
+                    }
+                    if (ShouldGrow(current)) {
+                        if (current->storage.Contains(key)) {
+                            return MapInsertResult::Exists;
+                        }
+                        if (!Grow(current)) {
+                            return MapInsertResult::AllocationFailed;
+                        }
+                        continue;
+                    }
+                    const MapInsertResult result = current->storage.TryInsert(key);
+                    if (result != MapInsertResult::Full) {
+                        return result;
+                    }
+                    if (!Grow(current)) {
+                        return MapInsertResult::AllocationFailed;
+                    }
+                }
+            }
+
+            [[nodiscard]] MapInsertResult TryInsert(const Key& key, const Mapped& value) noexcept
+                requires (!kSet)
+            {
+                MapWriterGuard writer{SelectWriterStripe()};
+                for (;;) {
+                    Version* current = LoadCurrent();
+                    if (!current) {
+                        return MapInsertResult::AllocationFailed;
+                    }
+                    if (ShouldGrow(current)) {
+                        if (current->storage.Contains(key)) {
+                            return MapInsertResult::Exists;
+                        }
+                        if (!Grow(current)) {
+                            return MapInsertResult::AllocationFailed;
+                        }
+                        continue;
+                    }
+                    const MapInsertResult result = current->storage.TryInsert(key, value);
+                    if (result != MapInsertResult::Full) {
+                        return result;
+                    }
+                    if (!Grow(current)) {
+                        return MapInsertResult::AllocationFailed;
+                    }
+                }
+            }
+
+            [[nodiscard]] MapAssignResult InsertOrAssign(const Key& key, const Mapped& value) noexcept
+                requires (!kSet)
+            {
+                MapWriterGuard writer{SelectWriterStripe()};
+                for (;;) {
+                    Version* current = LoadCurrent();
+                    if (!current) {
+                        return MapAssignResult::AllocationFailed;
+                    }
+                    if (ShouldGrow(current)) {
+                        if (current->storage.Contains(key)) {
+                            return current->storage.InsertOrAssign(key, value);
+                        }
+                        if (!Grow(current)) {
+                            return MapAssignResult::AllocationFailed;
+                        }
+                        continue;
+                    }
+                    const MapAssignResult result = current->storage.InsertOrAssign(key, value);
+                    if (result != MapAssignResult::Full) {
+                        return result;
+                    }
+                    if (!Grow(current)) {
+                        return MapAssignResult::AllocationFailed;
+                    }
+                }
+            }
+
+            [[nodiscard]] std::optional<Mapped> Find(const Key& key) const noexcept
+                requires (!kSet)
+            {
+                Version* current = LoadCurrent();
+                return current ? current->storage.Find(key) : std::nullopt;
+            }
+
+            [[nodiscard]] bool TryGet(const Key& key, Mapped& output) const noexcept
+                requires (!kSet)
+            {
+                Version* current = LoadCurrent();
+                return current && current->storage.TryGet(key, output);
+            }
+
+            [[nodiscard]] bool Contains(const Key& key) const noexcept {
+                Version* current = LoadCurrent();
+                return current && current->storage.Contains(key);
+            }
+
+            [[nodiscard]] bool Erase(const Key& key) noexcept {
+                MapWriterGuard writer{SelectWriterStripe()};
+                Version* current = LoadCurrent();
+                return current && current->storage.Erase(key);
+            }
+
+            [[nodiscard]] std::size_t SizeApprox() const noexcept {
+                Version* current = LoadCurrent();
+                return current ? current->storage.SizeApprox() : 0;
+            }
+
+            [[nodiscard]] bool Empty() const noexcept { return SizeApprox() == 0; }
+
+            [[nodiscard]] std::vector<std::pair<Key, Mapped>> Snapshot() const
+                requires (!kSet)
+            {
+                Version* current = LoadCurrent();
+                return current ? current->storage.Snapshot() : std::vector<std::pair<Key, Mapped>>{};
+            }
+
+            [[nodiscard]] std::vector<Key> Snapshot() const
+                requires kSet
+            {
+                Version* current = LoadCurrent();
+                return current ? current->storage.Snapshot() : std::vector<Key>{};
+            }
+
+            /** @brief Remove every retained version and restore initial capacity. Requires quiescence. */
+            void Clear() noexcept {
+                Version* retired = current_.load(std::memory_order_relaxed);
+                Version* fresh = CreateVersion(initialCapacity_, nullptr);
+                if (fresh) {
+                    current_.store(fresh, std::memory_order_relaxed);
+                    DestroyVersions(retired);
+                    return;
+                }
+                if (!retired) {
+                    return;
+                }
+                retired->storage.Clear();
+                DestroyVersions(std::exchange(retired->older, nullptr));
+            }
+
+        private:
+            static_assert(Topology.sharing == Concurrency::MapSharing::Concurrent);
+
+            [[nodiscard]] static std::size_t NormalizeCapacity(std::size_t capacity) noexcept {
+                constexpr std::size_t kMinimum = 2;
+                if (capacity > std::numeric_limits<std::size_t>::max() / 2) {
+                    return std::bit_floor(std::numeric_limits<std::size_t>::max());
+                }
+                return std::bit_ceil(std::max(capacity, kMinimum));
+            }
+
+            [[nodiscard]] static Version* CreateVersion(std::size_t capacity, Version* older) noexcept {
+                void* memory = ::operator new(sizeof(Version), std::align_val_t{alignof(Version)}, std::nothrow);
+                if (!memory) {
+                    return nullptr;
+                }
+                Version* version = std::construct_at(static_cast<Version*>(memory), capacity, older);
+                if (!version->storage.Valid()) {
+                    std::destroy_at(version);
+                    ::operator delete(memory, std::align_val_t{alignof(Version)});
+                    return nullptr;
+                }
+                return version;
+            }
+
+            static void DestroyVersion(Version* version) noexcept {
+                std::destroy_at(version);
+                ::operator delete(version, std::align_val_t{alignof(Version)});
+            }
+
+            static void DestroyVersions(Version* version) noexcept {
+                while (version) {
+                    Version* older = version->older;
+                    DestroyVersion(version);
+                    version = older;
+                }
+            }
+
+            [[nodiscard]] Version* LoadCurrent() const noexcept {
+                return current_.load(std::memory_order_acquire);
+            }
+
+            [[nodiscard]] MapWriterStripe* SelectWriterStripe() noexcept {
+                if constexpr (kMultipleWriters) {
+                    return std::addressof(writerStripes_[0]);
+                } else {
+                    return nullptr;
+                }
+            }
+
+            [[nodiscard]] bool Grow(Version* current) noexcept {
+                const std::size_t capacity = current->storage.CapacityLimit();
+                if (capacity > std::numeric_limits<std::size_t>::max() / 2) {
+                    return false;
+                }
+                Version* next = CreateVersion(capacity * 2, current);
+                if (!next) {
+                    return false;
+                }
+                if (!current->storage.CopyPublishedTo(next->storage)) {
+                    DestroyVersion(next);
+                    return false;
+                }
+                current_.store(next, std::memory_order_release);
+                return true;
+            }
+
+            [[nodiscard]] static bool ShouldGrow(const Version* current) noexcept {
+                const std::size_t capacity = current->storage.CapacityLimit();
+                return current->storage.SizeApprox() >= capacity - capacity / 4;
+            }
+
+            [[nodiscard]] static constexpr std::uint64_t MixHash(std::uint64_t value) noexcept {
+                value ^= value >> 30;
+                value *= 0xbf58476d1ce4e5b9ULL;
+                value ^= value >> 27;
+                value *= 0x94d049bb133111ebULL;
+                value ^= value >> 31;
+                return value;
+            }
+
+            [[nodiscard]] std::uint64_t HashKey(const Key& key) const noexcept {
+                if constexpr (std::same_as<HashAlgorithm, Hashing::DefaultAlgo> &&
+                              (std::is_integral_v<Key> || std::is_enum_v<Key>) &&
+                              (sizeof(Key) <= sizeof(std::uint64_t))) {
+                    return static_cast<std::uint64_t>(key);
+                }
+                const auto raw = Hashing::Hash(key, hashAlgorithm_);
+                if constexpr (sizeof(raw) <= sizeof(std::uint64_t)) {
+                    return MixHash(static_cast<std::uint64_t>(raw));
+                } else {
+                    return MixHash(static_cast<std::uint64_t>(raw) ^ static_cast<std::uint64_t>(raw >> 64));
+                }
+            }
+
+            const std::size_t initialCapacity_;
+            alignas(Platform::kCacheLineSize) std::atomic<Version*> current_{};
+            MASHIRO_NO_UNIQUE_ADDRESS WriterStripes writerStripes_{};
+            MASHIRO_NO_UNIQUE_ADDRESS HashAlgorithm hashAlgorithm_{};
+        };
+
+        /**
+         * @brief Hash-sharded dynamic storage with one release-published flat table per shard.
+         *
+         * @details The compile-time shard count restores writer parallelism while each shard compiles to a
+         * single-writer copy-on-grow data plane. Lookups select one shard, acquire one version, and probe one flat
+         * table.
          */
         template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
                  class KeyEqual>
@@ -1362,7 +1698,7 @@ namespace Mashiro {
             static constexpr bool kSet = std::same_as<Mapped, SetMarker>;
             static constexpr bool kLocal = Topology.sharing == Concurrency::MapSharing::SingleThread;
             static constexpr std::size_t kShardCount = 16;
-            using ShardStorage = DynamicConcurrentAssociativeStorage<Key, Mapped, Topology, HashAlgorithm, KeyEqual>;
+            using ShardStorage = VersionedConcurrentAssociativeStorage<Key, Mapped, Topology, HashAlgorithm, KeyEqual>;
 
         public:
             explicit ShardedDynamicConcurrentAssociativeStorage(std::size_t initialCapacity = 64) noexcept {
@@ -1496,18 +1832,11 @@ namespace Mashiro {
                     totalCapacity / kShardCount + static_cast<std::size_t>(totalCapacity % kShardCount != 0), 2);
             }
 
-            [[nodiscard]] static constexpr std::uint64_t MixHash(std::uint64_t value) noexcept {
-                value ^= value >> 30;
-                value *= 0xbf58476d1ce4e5b9ULL;
-                value ^= value >> 27;
-                value *= 0x94d049bb133111ebULL;
-                value ^= value >> 31;
-                return value;
-            }
-
             [[nodiscard]] std::size_t SelectShardIndex(const Key& key) const noexcept {
                 constexpr unsigned kShardBits = std::countr_zero(kShardCount);
-                return static_cast<std::size_t>(MixHash(shards_[0]->HashForKey(key)) >> (64U - kShardBits));
+                constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
+                return static_cast<std::size_t>((shards_[0]->HashForKey(key) * kGoldenRatio) >>
+                                                (64U - kShardBits));
             }
 
             [[nodiscard]] ShardStorage* SelectShard(const Key& key) noexcept {

@@ -31,6 +31,27 @@ namespace {
         [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte>) const noexcept { return 0; }
     };
 
+    struct BlockingKeyEqual {
+        inline static thread_local bool blockReader = false;
+        inline static std::atomic<bool> entered{};
+        inline static std::atomic<bool> release{};
+
+        [[nodiscard]] bool operator()(std::uint64_t left, std::uint64_t right) const noexcept {
+            if (blockReader && right == 0) {
+                entered.store(true, std::memory_order_release);
+                while (!release.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+            }
+            return left == right;
+        }
+
+        static void Reset() noexcept {
+            entered.store(false, std::memory_order_relaxed);
+            release.store(false, std::memory_order_relaxed);
+        }
+    };
+
     template<MapTopology Topology>
     void RequireSequentialMapSemantics() {
         ConcurrentMap<std::uint64_t, std::uint64_t, 8, Topology> map;
@@ -164,6 +185,58 @@ namespace {
         REQUIRE(map.TryInsert(0, 7) == MapInsertResult::Exists);
         REQUIRE(map.InsertOrAssign(0, 7) == MapAssignResult::Assigned);
         REQUIRE(map.Find(0) == 7);
+    }
+
+    template<MapTopology Topology>
+    void RequireDynamicMapMutationSemantics() {
+        constexpr std::uint64_t kKeyCount = 2'048;
+        ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, Topology> map{8};
+        for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+            REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
+            REQUIRE(map.InsertOrAssign(key, ~key) == MapAssignResult::Assigned);
+        }
+        for (std::uint64_t key = 0; key < kKeyCount; key += 3) {
+            CAPTURE(key);
+            REQUIRE(map.Erase(key));
+            REQUIRE(map.TryInsert(key, key ^ 0xd6e8feb86659fd93ULL) == MapInsertResult::Inserted);
+        }
+        REQUIRE(map.SizeApprox() == kKeyCount);
+        for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+            const std::uint64_t expected = key % 3 == 0 ? key ^ 0xd6e8feb86659fd93ULL
+                                                        : (key % 2 == 0 ? ~key : key + 1);
+            REQUIRE(map.Find(key) == expected);
+        }
+        map.Clear();
+        REQUIRE(map.Empty());
+        REQUIRE(map.TryInsert(7, 11) == MapInsertResult::Inserted);
+        REQUIRE(map.Find(7) == 11);
+    }
+
+    template<MapTopology Topology>
+    void RequireDynamicSetMutationSemantics() {
+        constexpr std::uint64_t kKeyCount = 2'048;
+        ConcurrentSet<std::uint64_t, std::dynamic_extent, Topology> set{8};
+        for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+            REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 0; key < kKeyCount; key += 3) {
+            CAPTURE(key);
+            REQUIRE(set.Erase(key));
+            REQUIRE(set.TryInsert(key + kKeyCount) == MapInsertResult::Inserted);
+        }
+        REQUIRE(set.SizeApprox() == kKeyCount);
+        for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+            REQUIRE(set.Contains(key) == (key % 3 != 0));
+            if (key % 3 == 0) {
+                REQUIRE(set.Contains(key + kKeyCount));
+            }
+        }
+        set.Clear();
+        REQUIRE(set.Empty());
+        REQUIRE(set.TryInsert(7) == MapInsertResult::Inserted);
+        REQUIRE(set.Contains(7));
     }
 
 } // namespace
@@ -403,6 +476,61 @@ TEST_CASE("Dynamic ConcurrentMap SPSC MPSC and SPMC publish unique values", AUTO
     RequireDynamicConcurrentUniqueInsertion<MapTopologies::Mpsc, 4, 1>();
     INFO("SPMC");
     RequireDynamicConcurrentUniqueInsertion<MapTopologies::Spmc, 1, 4>();
+}
+
+TEST_CASE("Dynamic ConcurrentMap and ConcurrentSet preserve mutation semantics in every concurrent topology",
+          AUTO_TAG_WITH("Stress")) {
+    INFO("SPSC map and set");
+    RequireDynamicMapMutationSemantics<MapTopologies::Spsc>();
+    RequireDynamicSetMutationSemantics<MapTopologies::Spsc>();
+    INFO("MPSC map and set");
+    RequireDynamicMapMutationSemantics<MapTopologies::Mpsc>();
+    RequireDynamicSetMutationSemantics<MapTopologies::Mpsc>();
+    INFO("SPMC map and set");
+    RequireDynamicMapMutationSemantics<MapTopologies::Spmc>();
+    RequireDynamicSetMutationSemantics<MapTopologies::Spmc>();
+    INFO("MPMC map and set");
+    RequireDynamicMapMutationSemantics<MapTopologies::Mpmc>();
+    RequireDynamicSetMutationSemantics<MapTopologies::Mpmc>();
+}
+
+TEST_CASE("Dynamic ConcurrentMap keeps a reader-held retired version alive across repeated growth",
+          AUTO_TAG_WITH("Stress")) {
+    using Map = ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc,
+                              MapOrder::Unordered, Hashing::DefaultAlgo, BlockingKeyEqual>;
+    constexpr std::uint64_t kGrowthKeyCount = 16'384;
+    BlockingKeyEqual::Reset();
+    Map map{8};
+    REQUIRE(map.TryInsert(0, 1) == MapInsertResult::Inserted);
+
+    std::optional<std::uint64_t> retiredObservation;
+    std::jthread reader{[&] {
+        BlockingKeyEqual::blockReader = true;
+        retiredObservation = map.Find(0);
+        BlockingKeyEqual::blockReader = false;
+    }};
+    while (!BlockingKeyEqual::entered.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    bool growthFailed = false;
+    for (std::uint64_t key = 1; key != kGrowthKeyCount; ++key) {
+        if (map.TryInsert(key, key + 1) != MapInsertResult::Inserted) {
+            growthFailed = true;
+            break;
+        }
+    }
+    const MapAssignResult assignResult = map.InsertOrAssign(0, 2);
+    BlockingKeyEqual::release.store(true, std::memory_order_release);
+    reader.join();
+
+    REQUIRE_FALSE(growthFailed);
+    REQUIRE(assignResult == MapAssignResult::Assigned);
+    REQUIRE(retiredObservation == 1);
+    REQUIRE(map.Find(0) == 2);
+    REQUIRE(map.SizeApprox() == kGrowthKeyCount);
+    map.Clear();
+    REQUIRE(map.Empty());
 }
 
 TEST_CASE("Ordered ConcurrentMap and ConcurrentSet expose key-sorted snapshots", AUTO_TAG) {
