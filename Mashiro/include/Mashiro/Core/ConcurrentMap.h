@@ -53,6 +53,9 @@ namespace Mashiro {
 
         enum class ConcurrentMapField : std::uint8_t {
             Capacity,
+            LocalEntries,
+            States,
+            Keys,
             Values,
             WriterStripes,
         };
@@ -97,20 +100,11 @@ namespace Mashiro {
         template<class T, std::size_t Extent>
         using AssociativeArray = typename AssociativeArrayType<T, Extent>::type;
 
-        template<class Mapped, std::size_t Extent, bool IsSet>
-        struct AssociativeValueArrayType {
-            using type = AssociativeArray<RawMapSlot<Mapped>, Extent>;
-        };
-
-        template<class Mapped, std::size_t Extent>
-        struct AssociativeValueArrayType<Mapped, Extent, true> {
-            using type = EmptyConcurrentMapField<ConcurrentMapField::Values>;
-        };
-
         template<class Key, class Mapped, bool IsSet>
         struct LocalMapEntry {
             std::uint64_t state{};
             RawMapSlot<Key> key;
+            MASHIRO_NO_UNIQUE_ADDRESS
             std::conditional_t<IsSet, EmptyConcurrentMapField<ConcurrentMapField::Values>, RawMapSlot<Mapped>> value;
         };
 
@@ -205,12 +199,17 @@ namespace Mashiro {
                           "concurrent map topologies require a trivially-copyable lock-free atomic value");
 
             using StateWord = std::uint64_t;
-            using State = std::conditional_t<kLocal, StateWord, std::atomic<StateWord>>;
             using Size = std::conditional_t<kLocal, std::size_t, std::atomic<std::size_t>>;
-            using LocalEntries = AssociativeArray<LocalMapEntry<Key, Mapped, kSet>, Capacity>;
-            using States = AssociativeArray<State, Capacity>;
-            using KeySlots = AssociativeArray<RawMapSlot<Key>, Capacity>;
-            using ValueSlots = typename AssociativeValueArrayType<Mapped, Capacity, kSet>::type;
+            using LocalEntries = std::conditional_t<
+                kLocal, AssociativeArray<LocalMapEntry<Key, Mapped, kSet>, Capacity>,
+                EmptyConcurrentMapField<ConcurrentMapField::LocalEntries>>;
+            using States = std::conditional_t<kLocal, EmptyConcurrentMapField<ConcurrentMapField::States>,
+                                              AssociativeArray<std::atomic<StateWord>, Capacity>>;
+            using KeySlots = std::conditional_t<kLocal, EmptyConcurrentMapField<ConcurrentMapField::Keys>,
+                                                AssociativeArray<RawMapSlot<Key>, Capacity>>;
+            using ValueSlots = std::conditional_t<
+                kLocal || kSet, EmptyConcurrentMapField<ConcurrentMapField::Values>,
+                AssociativeArray<RawMapSlot<Mapped>, Capacity>>;
             using DynamicCapacity = std::conditional_t<kDynamic, std::size_t,
                                                        EmptyConcurrentMapField<ConcurrentMapField::Capacity>>;
             using WriterStripes = std::conditional_t<
@@ -238,9 +237,9 @@ namespace Mashiro {
                 requires kDynamic
                 : dynamicCapacity_{std::bit_ceil(std::max<std::size_t>(requestedCapacity, 2))} {
                 if constexpr (kLocal) {
-                    localEntries_.reset(new (std::nothrow) LocalMapEntry<Key, Mapped, kSet>[dynamicCapacity_]{});
+                    localEntries_.reset(new (std::nothrow) LocalMapEntry<Key, Mapped, kSet>[dynamicCapacity_]);
                 } else {
-                    states_.reset(new (std::nothrow) State[dynamicCapacity_]{});
+                    states_.reset(new (std::nothrow) std::atomic<StateWord>[dynamicCapacity_]{});
                     keys_.reset(new (std::nothrow) RawMapSlot<Key>[dynamicCapacity_]);
                     if constexpr (!kSet) {
                         values_.reset(new (std::nothrow) RawMapSlot<Mapped>[dynamicCapacity_]);
@@ -252,7 +251,7 @@ namespace Mashiro {
             FlatConcurrentAssociativeStorage(FlatConcurrentAssociativeStorage&&) = delete;
             FlatConcurrentAssociativeStorage& operator=(FlatConcurrentAssociativeStorage&&) = delete;
 
-            ~FlatConcurrentAssociativeStorage() noexcept { Clear(); }
+            ~FlatConcurrentAssociativeStorage() noexcept { DestroyRetainedObjects(); }
 
             [[nodiscard]] bool Valid() const noexcept {
                 if constexpr (!kDynamic) {
@@ -311,7 +310,12 @@ namespace Mashiro {
             [[nodiscard]] std::optional<Mapped> Find(const Key& key) const noexcept
                 requires (!kSet)
             {
-                const std::uint64_t hash = HashKey(key);
+                return FindWithHash(key, HashKey(key));
+            }
+
+            [[nodiscard]] std::optional<Mapped> FindWithHash(const Key& key, std::uint64_t hash) const noexcept
+                requires (!kSet)
+            {
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
                 const std::size_t home = static_cast<std::size_t>(hash) & indexMask;
@@ -355,7 +359,12 @@ namespace Mashiro {
             [[nodiscard]] bool TryGet(const Key& key, Mapped& output) const noexcept
                 requires (!kSet)
             {
-                const std::uint64_t hash = HashKey(key);
+                return TryGetWithHash(key, output, HashKey(key));
+            }
+
+            [[nodiscard]] bool TryGetWithHash(const Key& key, Mapped& output, std::uint64_t hash) const noexcept
+                requires (!kSet)
+            {
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
                 const std::size_t home = static_cast<std::size_t>(hash) & indexMask;
@@ -410,8 +419,9 @@ namespace Mashiro {
                 return nullptr;
             }
 
-            [[nodiscard]] bool Contains(const Key& key) const noexcept {
-                const std::uint64_t hash = HashKey(key);
+            [[nodiscard]] bool Contains(const Key& key) const noexcept { return ContainsWithHash(key, HashKey(key)); }
+
+            [[nodiscard]] bool ContainsWithHash(const Key& key, std::uint64_t hash) const noexcept {
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
                 const std::size_t home = static_cast<std::size_t>(hash) & indexMask;
@@ -577,10 +587,7 @@ namespace Mashiro {
                 for (std::size_t index = 0; index != CapacityLimit(); ++index) {
                     const StateWord state = LoadState(index, std::memory_order_relaxed);
                     if (Status(state) == MapSlotStatus::Full || Status(state) == MapSlotStatus::Tombstone) {
-                        std::destroy_at(KeyPointer(index));
-                        if constexpr (!kSet) {
-                            std::destroy_at(ValuePointer(index));
-                        }
+                        DestroyEntry(index);
                     }
                     StoreState(index, 0, std::memory_order_relaxed);
                 }
@@ -592,6 +599,35 @@ namespace Mashiro {
             }
 
         private:
+            static constexpr bool kRequiresEntryDestruction =
+                !std::is_trivially_destructible_v<Key> || (!kSet && !std::is_trivially_destructible_v<Mapped>);
+
+            void DestroyEntry(std::size_t index) noexcept {
+                if constexpr (!std::is_trivially_destructible_v<Key>) {
+                    std::destroy_at(KeyPointer(index));
+                }
+                if constexpr (!kSet && !std::is_trivially_destructible_v<Mapped>) {
+                    std::destroy_at(ValuePointer(index));
+                }
+            }
+
+            void DestroyRetainedObjects() noexcept {
+                if constexpr (!kRequiresEntryDestruction) {
+                    return;
+                }
+                if constexpr (kDynamic) {
+                    if (!Valid()) {
+                        return;
+                    }
+                }
+                for (std::size_t index = 0; index != CapacityLimit(); ++index) {
+                    const MapSlotStatus status = Status(LoadState(index, std::memory_order_relaxed));
+                    if (status == MapSlotStatus::Full || status == MapSlotStatus::Tombstone) {
+                        DestroyEntry(index);
+                    }
+                }
+            }
+
             [[nodiscard]] static constexpr MapSlotStatus Status(StateWord state) noexcept {
                 return static_cast<MapSlotStatus>(state & kStatusMask);
             }
@@ -667,12 +703,15 @@ namespace Mashiro {
             }
 
             [[nodiscard]] bool Claim(std::size_t index, StateWord expected, StateWord fingerprint) noexcept {
-                const StateWord busy = Encode(Generation(expected), MapSlotStatus::Busy, fingerprint);
                 if constexpr (kMultipleWriters) {
+                    const StateWord busy = Encode(Generation(expected), MapSlotStatus::Busy, fingerprint);
                     return states_[index].compare_exchange_strong(expected, busy, std::memory_order_acq_rel,
                                                                   std::memory_order_acquire);
                 } else {
-                    StoreState(index, busy, std::memory_order_release);
+                    // Empty/tombstone slots remain unreadable until Publish; full-slot readers validate state twice.
+                    static_cast<void>(index);
+                    static_cast<void>(expected);
+                    static_cast<void>(fingerprint);
                     return true;
                 }
             }
@@ -720,7 +759,15 @@ namespace Mashiro {
 
             [[nodiscard]] MapWriterStripe* SelectWriterStripe(std::uint64_t hash) noexcept {
                 if constexpr (kMultipleWriters) {
-                    return std::addressof(writerStripes_[static_cast<std::size_t>(hash >> 32) & (kStripeCount - 1)]);
+                    if constexpr (kStripeCount == 1) {
+                        return std::addressof(writerStripes_[0]);
+                    } else {
+                        constexpr unsigned kStripeBits = std::countr_zero(kStripeCount);
+                        constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
+                        const std::size_t stripe =
+                            static_cast<std::size_t>((hash * kGoldenRatio) >> (64U - kStripeBits));
+                        return std::addressof(writerStripes_[stripe]);
+                    }
                 } else {
                     static_cast<void>(hash);
                     return nullptr;
@@ -869,21 +916,21 @@ namespace Mashiro {
 
             MASHIRO_NO_UNIQUE_ADDRESS DynamicCapacity dynamicCapacity_{};
             MASHIRO_NO_UNIQUE_ADDRESS LocalEntries localEntries_{};
-            alignas(Platform::kCacheLineSize) States states_{};
-            alignas(Platform::kCacheLineSize) KeySlots keys_{};
+            alignas(kLocal ? 1 : Platform::kCacheLineSize) MASHIRO_NO_UNIQUE_ADDRESS States states_{};
+            alignas(kLocal ? 1 : Platform::kCacheLineSize) MASHIRO_NO_UNIQUE_ADDRESS KeySlots keys_{};
             MASHIRO_NO_UNIQUE_ADDRESS ValueSlots values_{};
-            alignas(Platform::kCacheLineSize) Size size_{};
+            alignas(kLocal ? alignof(Size) : Platform::kCacheLineSize) Size size_{};
             MASHIRO_NO_UNIQUE_ADDRESS WriterStripes writerStripes_{};
             MASHIRO_NO_UNIQUE_ADDRESS HashAlgorithm hashAlgorithm_{};
             MASHIRO_NO_UNIQUE_ADDRESS KeyEqual keyEqual_{};
         };
 
         /**
-         * @brief Append-only local storage with a replaceable flat locator index.
+         * @brief Local flat index over geometrically segmented stable value slots.
          *
-         * @details Keys and values remain in their original geometric segment, so references returned by FindRef stay
-         * stable across growth. The replaceable index owns only duplicated keys and segment/value locators; rebuilding
-         * it therefore never moves user values and reduces lookup from a historical-segment scan to one flat probe.
+         * @details Map values occupy stable slots and the replaceable index owns each key plus one slot pointer, so
+         * growth never moves values returned by FindRef. Erased slots form an intrusive free list. Sets need no stable
+         * value arena and therefore compile to only the replaceable flat index.
          */
         template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
                  class KeyEqual>
@@ -891,30 +938,74 @@ namespace Mashiro {
             static constexpr bool kSet = std::same_as<Mapped, SetMarker>;
             static_assert(Topology.sharing == Concurrency::MapSharing::SingleThread);
 
-            using SegmentStorage = FlatConcurrentAssociativeStorage<Key, Mapped, std::dynamic_extent, Topology,
-                                                                    HashAlgorithm, KeyEqual>;
+            struct StableValueSlot {
+                union Storage {
+                    Storage() noexcept {}
+                    ~Storage() noexcept {}
 
-            struct Segment;
+                    RawMapSlot<Mapped> value;
+                    StableValueSlot* nextFree;
+                };
 
-            struct MapLocation {
-                Segment* segment;
-                Mapped* value;
+                [[nodiscard]] Mapped* Value() noexcept { return storage.value.Get(); }
+                [[nodiscard]] const Mapped* Value() const noexcept { return storage.value.Get(); }
+
+                void ConstructValue(const Mapped& source) noexcept {
+                    std::construct_at(std::addressof(storage.value));
+                    std::construct_at(Value(), source);
+                    live = true;
+                }
+
+                void DestroyValue() noexcept {
+                    std::destroy_at(Value());
+                    std::destroy_at(std::addressof(storage.value));
+                    live = false;
+                }
+
+                void LinkFree(StableValueSlot* next) noexcept {
+                    std::construct_at(std::addressof(storage.nextFree), next);
+                }
+
+                [[nodiscard]] StableValueSlot* UnlinkFree() noexcept {
+                    StableValueSlot* next = storage.nextFree;
+                    std::destroy_at(std::addressof(storage.nextFree));
+                    return next;
+                }
+
+                Storage storage;
+                bool live;
             };
 
-            using IndexValue = std::conditional_t<kSet, Segment*, MapLocation>;
+            using IndexValue = std::conditional_t<kSet, SetMarker, StableValueSlot*>;
             using IndexStorage = FlatConcurrentAssociativeStorage<Key, IndexValue, std::dynamic_extent, Topology,
                                                                   HashAlgorithm, KeyEqual>;
 
             struct Segment {
-                explicit Segment(std::size_t capacity, Segment* older) noexcept : storage{capacity}, next{older} {}
+                explicit Segment(std::size_t slotCapacity, Segment* older) noexcept
+                    : slots{new (std::nothrow) StableValueSlot[slotCapacity]}, capacity{slotCapacity}, next{older} {}
 
-                SegmentStorage storage;
+                ~Segment() noexcept { Clear(); }
+
+                [[nodiscard]] bool Valid() const noexcept { return slots != nullptr; }
+
+                void Clear() noexcept {
+                    for (std::size_t index = 0; index != used; ++index) {
+                        if (slots[index].live) {
+                            slots[index].DestroyValue();
+                        }
+                    }
+                    used = 0;
+                }
+
+                std::unique_ptr<StableValueSlot[]> slots;
+                std::size_t capacity;
+                std::size_t used{};
                 Segment* next;
             };
 
         public:
             explicit IndexedDynamicLocalAssociativeStorage(std::size_t initialCapacity = 64) noexcept
-                : initialCapacity_{NormalizeCapacity(initialCapacity)}, head_{CreateSegment(initialCapacity_, nullptr)},
+                : initialCapacity_{NormalizeCapacity(initialCapacity)}, head_{CreateInitialSegment(initialCapacity_)},
                   index_{CreateIndex(initialCapacity_)} {}
 
             IndexedDynamicLocalAssociativeStorage(const IndexedDynamicLocalAssociativeStorage&) = delete;
@@ -924,7 +1015,9 @@ namespace Mashiro {
 
             ~IndexedDynamicLocalAssociativeStorage() noexcept { DestroySegments(head_); }
 
-            [[nodiscard]] bool Valid() const noexcept { return head_ && index_ && index_->Valid(); }
+            [[nodiscard]] bool Valid() const noexcept {
+                return index_ && index_->Valid() && (kSet || head_ != nullptr);
+            }
 
             [[nodiscard]] MapInsertResult TryInsert(const Key& key) noexcept
                 requires kSet
@@ -944,11 +1037,14 @@ namespace Mashiro {
                 if (!index_) {
                     return MapAssignResult::AllocationFailed;
                 }
-                if (MapLocation* location = index_->FindRef(key)) {
-                    *location->value = value;
+                if (StableValueSlot** location = index_->FindRef(key)) {
+                    *(*location)->Value() = value;
                     return MapAssignResult::Assigned;
                 }
-                const MapInsertResult result = InsertMap(key, value);
+                if (!EnsureIndexCapacity()) {
+                    return MapAssignResult::AllocationFailed;
+                }
+                const MapInsertResult result = InsertMapAbsent(key, value);
                 if (result == MapInsertResult::Inserted) {
                     return MapAssignResult::Inserted;
                 }
@@ -963,7 +1059,7 @@ namespace Mashiro {
                     return std::nullopt;
                 }
                 const auto location = index_->Find(key);
-                return location ? std::optional<Mapped>{*location->value} : std::nullopt;
+                return location ? std::optional<Mapped>{*(*location)->Value()} : std::nullopt;
             }
 
             [[nodiscard]] bool TryGet(const Key& key, Mapped& output) const noexcept
@@ -976,7 +1072,7 @@ namespace Mashiro {
                 if (!location) {
                     return false;
                 }
-                output = *location->value;
+                output = *(*location)->Value();
                 return true;
             }
 
@@ -986,8 +1082,8 @@ namespace Mashiro {
                 if (!index_) {
                     return nullptr;
                 }
-                MapLocation* location = index_->FindRef(key);
-                return location ? location->value : nullptr;
+                StableValueSlot** location = index_->FindRef(key);
+                return location ? (*location)->Value() : nullptr;
             }
 
             [[nodiscard]] bool Contains(const Key& key) const noexcept { return index_ && index_->Contains(key); }
@@ -996,21 +1092,16 @@ namespace Mashiro {
                 if (!index_) {
                     return false;
                 }
-                const auto location = index_->Find(key);
-                if (!location) {
-                    return false;
-                }
-                Segment* segment;
                 if constexpr (kSet) {
-                    segment = *location;
+                    if (!index_->Erase(key)) {
+                        return false;
+                    }
                 } else {
-                    segment = location->segment;
-                }
-                if (!segment->storage.Erase(key)) {
-                    return false;
-                }
-                if (!index_->Erase(key)) {
-                    return false;
+                    const auto location = index_->Find(key);
+                    if (!location || !index_->Erase(key)) {
+                        return false;
+                    }
+                    ReleaseValue(*location);
                 }
                 --size_;
                 return true;
@@ -1024,10 +1115,11 @@ namespace Mashiro {
             {
                 std::vector<std::pair<Key, Mapped>> result;
                 result.reserve(size_);
-                for (Segment* segment = head_; segment; segment = segment->next) {
-                    auto entries = segment->storage.Snapshot();
-                    result.insert(result.end(), std::make_move_iterator(entries.begin()),
-                                  std::make_move_iterator(entries.end()));
+                if (!index_) {
+                    return result;
+                }
+                for (auto& [key, slot] : index_->Snapshot()) {
+                    result.emplace_back(std::move(key), *slot->Value());
                 }
                 return result;
             }
@@ -1035,39 +1127,18 @@ namespace Mashiro {
             [[nodiscard]] std::vector<Key> Snapshot() const
                 requires kSet
             {
-                std::vector<Key> result;
-                result.reserve(size_);
-                for (Segment* segment = head_; segment; segment = segment->next) {
-                    auto keys = segment->storage.Snapshot();
-                    result.insert(result.end(), std::make_move_iterator(keys.begin()),
-                                  std::make_move_iterator(keys.end()));
-                }
-                return result;
+                return index_ ? index_->Snapshot() : std::vector<Key>{};
             }
 
-            /** @brief Remove all entries while retaining the oldest segment and current index allocations. */
+            /** @brief Remove all entries while retaining the oldest value segment and current index allocation. */
             void Clear() noexcept {
-                if (!head_) {
-                    head_ = CreateSegment(initialCapacity_, nullptr);
-                } else {
-                    Segment* oldest = head_;
-                    while (oldest->next) {
-                        oldest = oldest->next;
-                    }
-                    oldest->storage.Clear();
-                    Segment* current = head_;
-                    while (current != oldest) {
-                        Segment* next = current->next;
-                        DestroySegment(current);
-                        current = next;
-                    }
-                    oldest->next = nullptr;
-                    head_ = oldest;
-                }
                 if (index_) {
                     index_->Clear();
                 } else {
                     index_ = CreateIndex(initialCapacity_);
+                }
+                if constexpr (!kSet) {
+                    ClearValueSegments();
                 }
                 size_ = 0;
             }
@@ -1087,12 +1158,21 @@ namespace Mashiro {
                     return nullptr;
                 }
                 Segment* segment = std::construct_at(static_cast<Segment*>(memory), capacity, next);
-                if (!segment->storage.Valid()) {
+                if (!segment->Valid()) {
                     std::destroy_at(segment);
                     ::operator delete(memory, std::align_val_t{alignof(Segment)});
                     return nullptr;
                 }
                 return segment;
+            }
+
+            [[nodiscard]] static Segment* CreateInitialSegment(std::size_t capacity) noexcept {
+                if constexpr (kSet) {
+                    static_cast<void>(capacity);
+                    return nullptr;
+                } else {
+                    return CreateSegment(capacity, nullptr);
+                }
             }
 
             [[nodiscard]] static std::unique_ptr<IndexStorage> CreateIndex(std::size_t capacity) noexcept {
@@ -1113,6 +1193,29 @@ namespace Mashiro {
                 }
             }
 
+            void ClearValueSegments() noexcept
+                requires (!kSet)
+            {
+                freeValues_ = nullptr;
+                if (!head_) {
+                    head_ = CreateSegment(initialCapacity_, nullptr);
+                    return;
+                }
+                Segment* oldest = head_;
+                while (oldest->next) {
+                    oldest = oldest->next;
+                }
+                Segment* current = head_;
+                while (current != oldest) {
+                    Segment* next = current->next;
+                    DestroySegment(current);
+                    current = next;
+                }
+                oldest->Clear();
+                oldest->next = nullptr;
+                head_ = oldest;
+            }
+
             [[nodiscard]] bool RebuildIndex(std::size_t capacity) noexcept {
                 auto replacement = CreateIndex(capacity);
                 if (!replacement || !index_->CopyPublishedTo(*replacement)) {
@@ -1122,48 +1225,88 @@ namespace Mashiro {
                 return true;
             }
 
+            [[nodiscard]] static std::size_t GrownIndexCapacity(std::size_t capacity) noexcept {
+                if (capacity <= std::numeric_limits<std::size_t>::max() / 4) {
+                    return capacity * 4;
+                }
+                return capacity <= std::numeric_limits<std::size_t>::max() / 2 ? capacity * 2 : 0;
+            }
+
             [[nodiscard]] bool EnsureIndexCapacity() noexcept {
                 if (!index_) {
                     index_ = CreateIndex(initialCapacity_);
                     return index_ != nullptr;
                 }
-                const std::size_t capacity = index_->CapacityLimit();
-                if (size_ < capacity - capacity / 4) {
+                if (!IndexNeedsGrowth()) {
                     return true;
                 }
-                return capacity <= std::numeric_limits<std::size_t>::max() / 2 && RebuildIndex(capacity * 2);
+                return GrowIndex();
             }
 
-            [[nodiscard]] bool EnsureSegmentCapacity() noexcept {
-                if (!head_) {
-                    head_ = CreateSegment(initialCapacity_, nullptr);
-                    return head_ != nullptr;
-                }
-                const std::size_t capacity = head_->storage.CapacityLimit();
-                if (head_->storage.SizeApprox() < capacity - capacity / 4) {
-                    return true;
-                }
-                if (capacity > std::numeric_limits<std::size_t>::max() / 2) {
-                    return false;
-                }
-                Segment* segment = CreateSegment(capacity * 2, head_);
-                if (!segment) {
-                    return false;
-                }
-                head_ = segment;
-                return true;
+            [[nodiscard]] bool GrowIndex() noexcept {
+                const std::size_t capacity = index_->CapacityLimit();
+                const std::size_t grownCapacity = GrownIndexCapacity(capacity);
+                return grownCapacity != 0 && RebuildIndex(grownCapacity);
+            }
+
+            [[nodiscard]] bool IndexNeedsGrowth() const noexcept {
+                const std::size_t capacity = index_->CapacityLimit();
+                return size_ >= capacity - capacity / 4;
             }
 
             [[nodiscard]] MapInsertResult InsertIndex(const Key& key, const IndexValue& location) noexcept {
-                MapInsertResult result = index_->TryInsert(key, location);
+                MapInsertResult result;
+                if constexpr (kSet) {
+                    static_cast<void>(location);
+                    result = index_->TryInsert(key);
+                } else {
+                    result = index_->TryInsert(key, location);
+                }
                 if (result != MapInsertResult::Full) {
                     return result;
                 }
                 const std::size_t capacity = index_->CapacityLimit();
-                if (capacity > std::numeric_limits<std::size_t>::max() / 2 || !RebuildIndex(capacity * 2)) {
+                const std::size_t grownCapacity = GrownIndexCapacity(capacity);
+                if (grownCapacity == 0 || !RebuildIndex(grownCapacity)) {
                     return MapInsertResult::AllocationFailed;
                 }
-                return index_->TryInsert(key, location);
+                if constexpr (kSet) {
+                    return index_->TryInsert(key);
+                } else {
+                    return index_->TryInsert(key, location);
+                }
+            }
+
+            [[nodiscard]] StableValueSlot* AllocateValue(const Mapped& value) noexcept
+                requires (!kSet)
+            {
+                StableValueSlot* slot = freeValues_;
+                if (slot) {
+                    freeValues_ = slot->UnlinkFree();
+                } else {
+                    if (!head_ || head_->used == head_->capacity) {
+                        const std::size_t capacity = head_ ? head_->capacity : initialCapacity_;
+                        if (capacity > std::numeric_limits<std::size_t>::max() / 2) {
+                            return nullptr;
+                        }
+                        Segment* segment = CreateSegment(head_ ? capacity * 2 : capacity, head_);
+                        if (!segment) {
+                            return nullptr;
+                        }
+                        head_ = segment;
+                    }
+                    slot = std::addressof(head_->slots[head_->used++]);
+                }
+                slot->ConstructValue(value);
+                return slot;
+            }
+
+            void ReleaseValue(StableValueSlot* slot) noexcept
+                requires (!kSet)
+            {
+                slot->DestroyValue();
+                slot->LinkFree(freeValues_);
+                freeValues_ = slot;
             }
 
             [[nodiscard]] MapInsertResult InsertSet(const Key& key) noexcept
@@ -1172,20 +1315,19 @@ namespace Mashiro {
                 if (!index_) {
                     return MapInsertResult::AllocationFailed;
                 }
-                if (!EnsureIndexCapacity() || !EnsureSegmentCapacity()) {
-                    return MapInsertResult::AllocationFailed;
+                if (IndexNeedsGrowth()) {
+                    if (index_->Contains(key)) {
+                        return MapInsertResult::Exists;
+                    }
+                    if (!GrowIndex()) {
+                        return MapInsertResult::AllocationFailed;
+                    }
                 }
-                const MapInsertResult result = head_->storage.TryInsert(key);
-                if (result != MapInsertResult::Inserted) {
-                    return result;
+                const MapInsertResult result = InsertIndex(key, {});
+                if (result == MapInsertResult::Inserted) {
+                    ++size_;
                 }
-                const MapInsertResult indexResult = InsertIndex(key, head_);
-                if (indexResult != MapInsertResult::Inserted) {
-                    static_cast<void>(head_->storage.Erase(key));
-                    return indexResult;
-                }
-                ++size_;
-                return MapInsertResult::Inserted;
+                return result;
             }
 
             [[nodiscard]] MapInsertResult InsertMap(const Key& key, const Mapped& value) noexcept
@@ -1194,20 +1336,27 @@ namespace Mashiro {
                 if (!index_) {
                     return MapInsertResult::AllocationFailed;
                 }
-                if (!EnsureIndexCapacity() || !EnsureSegmentCapacity()) {
+                if (IndexNeedsGrowth()) {
+                    if (index_->Contains(key)) {
+                        return MapInsertResult::Exists;
+                    }
+                    if (!GrowIndex()) {
+                        return MapInsertResult::AllocationFailed;
+                    }
+                }
+                return InsertMapAbsent(key, value);
+            }
+
+            [[nodiscard]] MapInsertResult InsertMapAbsent(const Key& key, const Mapped& value) noexcept
+                requires (!kSet)
+            {
+                StableValueSlot* slot = AllocateValue(value);
+                if (!slot) {
                     return MapInsertResult::AllocationFailed;
                 }
-                const auto [result, storedValue] = head_->storage.TryInsertAndGet(key, value);
-                if (result != MapInsertResult::Inserted) {
-                    return result;
-                }
-                if (!storedValue) {
-                    static_cast<void>(head_->storage.Erase(key));
-                    return MapInsertResult::AllocationFailed;
-                }
-                const MapInsertResult indexResult = InsertIndex(key, MapLocation{head_, storedValue});
+                const MapInsertResult indexResult = InsertIndex(key, slot);
                 if (indexResult != MapInsertResult::Inserted) {
-                    static_cast<void>(head_->storage.Erase(key));
+                    ReleaseValue(slot);
                     return indexResult;
                 }
                 ++size_;
@@ -1216,6 +1365,7 @@ namespace Mashiro {
 
             const std::size_t initialCapacity_;
             Segment* head_{};
+            StableValueSlot* freeValues_{};
             std::unique_ptr<IndexStorage> index_;
             std::size_t size_{};
         };
@@ -1224,10 +1374,10 @@ namespace Mashiro {
          * @brief Read-optimized dynamic shard using release-published copy-on-grow table versions.
          *
          * @details The shard serializes its writers, so its flat table is compiled as a single-writer data plane even
-         * when the public topology permits multiple writers. Growth copies the current table into a table with twice
-         * the capacity and publishes it with one release store. Readers acquire one version and probe only that table.
-         * Retired versions remain alive until quiescent clear or destruction. Retained table storage stays below twice
-         * the current capacity without reader registration or reclamation traffic on the lookup path.
+         * when the public topology permits multiple writers. Single-writer shards grow fourfold to minimize cumulative
+         * copying; multiple-writer shards double to control aggregate over-reservation. Readers acquire one version and
+         * probe only that table. Retired versions remain alive until quiescent clear or destruction, without reader
+         * registration or reclamation traffic on the lookup path.
          */
         template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
                  class KeyEqual>
@@ -1362,20 +1512,36 @@ namespace Mashiro {
             [[nodiscard]] std::optional<Mapped> Find(const Key& key) const noexcept
                 requires (!kSet)
             {
+                return FindWithHash(key, HashForKey(key));
+            }
+
+            [[nodiscard]] std::optional<Mapped> FindWithHash(const Key& key, std::uint64_t hash) const noexcept
+                requires (!kSet)
+            {
                 Version* current = LoadCurrent();
-                return current ? current->storage.Find(key) : std::nullopt;
+                return current ? current->storage.FindWithHash(key, hash) : std::nullopt;
             }
 
             [[nodiscard]] bool TryGet(const Key& key, Mapped& output) const noexcept
                 requires (!kSet)
             {
+                return TryGetWithHash(key, output, HashForKey(key));
+            }
+
+            [[nodiscard]] bool TryGetWithHash(const Key& key, Mapped& output, std::uint64_t hash) const noexcept
+                requires (!kSet)
+            {
                 Version* current = LoadCurrent();
-                return current && current->storage.TryGet(key, output);
+                return current && current->storage.TryGetWithHash(key, output, hash);
             }
 
             [[nodiscard]] bool Contains(const Key& key) const noexcept {
+                return ContainsWithHash(key, HashForKey(key));
+            }
+
+            [[nodiscard]] bool ContainsWithHash(const Key& key, std::uint64_t hash) const noexcept {
                 Version* current = LoadCurrent();
-                return current && current->storage.Contains(key);
+                return current && current->storage.ContainsWithHash(key, hash);
             }
 
             [[nodiscard]] bool Erase(const Key& key) noexcept {
@@ -1472,11 +1638,12 @@ namespace Mashiro {
             }
 
             [[nodiscard]] bool Grow(Version* current) noexcept {
+                constexpr std::size_t kGrowthFactor = kMultipleWriters ? 2 : 4;
                 const std::size_t capacity = current->storage.CapacityLimit();
-                if (capacity > std::numeric_limits<std::size_t>::max() / 2) {
+                if (capacity > std::numeric_limits<std::size_t>::max() / kGrowthFactor) {
                     return false;
                 }
-                Version* next = CreateVersion(capacity * 2, current);
+                Version* next = CreateVersion(capacity * kGrowthFactor, current);
                 if (!next) {
                     return false;
                 }
@@ -1525,24 +1692,25 @@ namespace Mashiro {
         /**
          * @brief Hash-sharded dynamic storage with one release-published flat table per shard.
          *
-         * @details The compile-time shard count restores writer parallelism while each shard compiles to a
-         * single-writer copy-on-grow data plane. Lookups select one shard, acquire one version, and probe one flat
-         * table.
+         * @details Multiple-writer topologies use a compile-time shard count to restore writer parallelism while each
+         * shard compiles to a single-writer copy-on-grow data plane. Single-writer topologies compile to one shard and
+         * therefore pay no unnecessary partitioning cost. Lookups acquire one version and probe one flat table.
          */
         template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
                  class KeyEqual>
         class ShardedDynamicConcurrentAssociativeStorage {
             static constexpr bool kSet = std::same_as<Mapped, SetMarker>;
             static constexpr bool kLocal = Topology.sharing == Concurrency::MapSharing::SingleThread;
-            static constexpr std::size_t kShardCount = 16;
+            static constexpr bool kMultipleWriters = Topology.writers == Concurrency::MapCardinality::Multiple;
+            static constexpr std::size_t kShardCount = kMultipleWriters ? 16 : 1;
             using ShardStorage = VersionedConcurrentAssociativeStorage<Key, Mapped, Topology, HashAlgorithm, KeyEqual>;
 
         public:
             explicit ShardedDynamicConcurrentAssociativeStorage(std::size_t initialCapacity = 64) noexcept {
                 const std::size_t shardCapacity = ShardInitialCapacity(initialCapacity);
                 for (auto& shard : shards_) {
-                    shard.reset(new (std::nothrow) ShardStorage(shardCapacity));
-                    if (!shard || !shard->Valid()) {
+                    ShardStorage* storage = std::construct_at(shard.Get(), shardCapacity);
+                    if (!storage->Valid()) {
                         valid_ = false;
                     }
                 }
@@ -1554,6 +1722,12 @@ namespace Mashiro {
             ShardedDynamicConcurrentAssociativeStorage(ShardedDynamicConcurrentAssociativeStorage&&) = delete;
             ShardedDynamicConcurrentAssociativeStorage& operator=(
                 ShardedDynamicConcurrentAssociativeStorage&&) = delete;
+
+            ~ShardedDynamicConcurrentAssociativeStorage() noexcept {
+                for (auto& shard : shards_) {
+                    std::destroy_at(shard.Get());
+                }
+            }
 
             [[nodiscard]] bool Valid() const noexcept { return valid_; }
 
@@ -1581,15 +1755,21 @@ namespace Mashiro {
             [[nodiscard]] std::optional<Mapped> Find(const Key& key) const noexcept
                 requires (!kSet)
             {
-                const ShardStorage* shard = SelectShard(key);
-                return shard ? shard->Find(key) : std::nullopt;
+                if (!valid_) {
+                    return std::nullopt;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->FindWithHash(key, hash);
             }
 
             [[nodiscard]] bool TryGet(const Key& key, Mapped& output) const noexcept
                 requires (!kSet)
             {
-                const ShardStorage* shard = SelectShard(key);
-                return shard && shard->TryGet(key, output);
+                if (!valid_) {
+                    return false;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->TryGetWithHash(key, output, hash);
             }
 
             [[nodiscard]] Mapped* FindRef(const Key& key) noexcept
@@ -1600,8 +1780,11 @@ namespace Mashiro {
             }
 
             [[nodiscard]] bool Contains(const Key& key) const noexcept {
-                const ShardStorage* shard = SelectShard(key);
-                return shard && shard->Contains(key);
+                if (!valid_) {
+                    return false;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->ContainsWithHash(key, hash);
             }
 
             [[nodiscard]] bool Erase(const Key& key) noexcept {
@@ -1612,9 +1795,7 @@ namespace Mashiro {
             [[nodiscard]] std::size_t SizeApprox() const noexcept {
                 std::size_t size = 0;
                 for (const auto& shard : shards_) {
-                    if (shard) {
-                        size += shard->SizeApprox();
-                    }
+                    size += shard.Get()->SizeApprox();
                 }
                 return size;
             }
@@ -1627,10 +1808,7 @@ namespace Mashiro {
                 std::vector<std::pair<Key, Mapped>> result;
                 result.reserve(SizeApprox());
                 for (const auto& shard : shards_) {
-                    if (!shard) {
-                        continue;
-                    }
-                    auto entries = shard->Snapshot();
+                    auto entries = shard.Get()->Snapshot();
                     result.insert(result.end(), std::make_move_iterator(entries.begin()),
                                   std::make_move_iterator(entries.end()));
                 }
@@ -1643,10 +1821,7 @@ namespace Mashiro {
                 std::vector<Key> result;
                 result.reserve(SizeApprox());
                 for (const auto& shard : shards_) {
-                    if (!shard) {
-                        continue;
-                    }
-                    auto keys = shard->Snapshot();
+                    auto keys = shard.Get()->Snapshot();
                     result.insert(result.end(), std::make_move_iterator(keys.begin()),
                                   std::make_move_iterator(keys.end()));
                 }
@@ -1655,9 +1830,7 @@ namespace Mashiro {
 
             void Clear() noexcept {
                 for (auto& shard : shards_) {
-                    if (shard) {
-                        shard->Clear();
-                    }
+                    shard.Get()->Clear();
                 }
             }
 
@@ -1669,28 +1842,36 @@ namespace Mashiro {
                     totalCapacity / kShardCount + static_cast<std::size_t>(totalCapacity % kShardCount != 0), 2);
             }
 
-            [[nodiscard]] std::size_t SelectShardIndex(const Key& key) const noexcept {
-                constexpr unsigned kShardBits = std::countr_zero(kShardCount);
-                constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
-                return static_cast<std::size_t>((shards_[0]->HashForKey(key) * kGoldenRatio) >>
-                                                (64U - kShardBits));
+            [[nodiscard]] std::uint64_t HashKey(const Key& key) const noexcept {
+                return shards_[0].Get()->HashForKey(key);
+            }
+
+            [[nodiscard]] static constexpr std::size_t SelectShardIndex(std::uint64_t hash) noexcept {
+                if constexpr (kShardCount == 1) {
+                    static_cast<void>(hash);
+                    return 0;
+                } else {
+                    constexpr unsigned kShardBits = std::countr_zero(kShardCount);
+                    constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
+                    return static_cast<std::size_t>((hash * kGoldenRatio) >> (64U - kShardBits));
+                }
             }
 
             [[nodiscard]] ShardStorage* SelectShard(const Key& key) noexcept {
                 if (!valid_) {
                     return nullptr;
                 }
-                return shards_[SelectShardIndex(key)].get();
+                return shards_[SelectShardIndex(HashKey(key))].Get();
             }
 
             [[nodiscard]] const ShardStorage* SelectShard(const Key& key) const noexcept {
                 if (!valid_) {
                     return nullptr;
                 }
-                return shards_[SelectShardIndex(key)].get();
+                return shards_[SelectShardIndex(HashKey(key))].Get();
             }
 
-            std::array<std::unique_ptr<ShardStorage>, kShardCount> shards_{};
+            std::array<RawMapSlot<ShardStorage>, kShardCount> shards_{};
             bool valid_ = true;
         };
 

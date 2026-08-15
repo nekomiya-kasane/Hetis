@@ -52,6 +52,29 @@ namespace {
         }
     };
 
+    struct LifetimeTrackedValue {
+        inline static std::atomic<std::size_t> liveInstances{};
+
+        explicit LifetimeTrackedValue(std::uint64_t payload = 0) noexcept : payload{payload} {
+            liveInstances.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        LifetimeTrackedValue(const LifetimeTrackedValue& other) noexcept : payload{other.payload} {
+            liveInstances.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        LifetimeTrackedValue(LifetimeTrackedValue&& other) noexcept : payload{other.payload} {
+            liveInstances.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        LifetimeTrackedValue& operator=(const LifetimeTrackedValue&) noexcept = default;
+        LifetimeTrackedValue& operator=(LifetimeTrackedValue&&) noexcept = default;
+
+        ~LifetimeTrackedValue() noexcept { liveInstances.fetch_sub(1, std::memory_order_relaxed); }
+
+        std::uint64_t payload;
+    };
+
     template<MapTopology Topology>
     void RequireSequentialMapSemantics() {
         ConcurrentMap<std::uint64_t, std::uint64_t, 8, Topology> map;
@@ -239,6 +262,311 @@ namespace {
         REQUIRE(set.Contains(7));
     }
 
+    [[nodiscard]] constexpr std::uint64_t EncodeRevision(std::uint64_t key, std::uint64_t revision) noexcept {
+        return (key << 32) | revision;
+    }
+
+    template<std::size_t Capacity, MapTopology Topology, std::size_t WriterCount, std::size_t ReaderCount>
+    void RequireConcurrentMapMutationHistory() {
+        static_assert(WriterCount == (Topology.writers == MapCardinality::Single ? 1 : 4));
+        static_assert(ReaderCount == (Topology.readers == MapCardinality::Single ? 1 : 4));
+        constexpr std::size_t kKeysPerWriter = 8;
+        constexpr std::size_t kKeyCount = WriterCount * kKeysPerWriter;
+        constexpr std::uint64_t kIterations = 4'096;
+        using Map = ConcurrentMap<std::uint64_t, std::uint64_t, Capacity, Topology>;
+
+        auto exercise = []<class MapType>(MapType& map) {
+            for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+                REQUIRE(map.TryInsert(key, EncodeRevision(key, 0)) == MapInsertResult::Inserted);
+            }
+
+            std::barrier start{static_cast<std::ptrdiff_t>(WriterCount + ReaderCount)};
+            std::atomic<std::size_t> writersDone{};
+            std::atomic<int> failure{};
+            std::vector<std::jthread> workers;
+            workers.reserve(WriterCount + ReaderCount);
+
+            for (std::size_t writer = 0; writer != WriterCount; ++writer) {
+                workers.emplace_back([&, writer] {
+                    start.arrive_and_wait();
+                    for (std::uint64_t revision = 1; revision <= kIterations; ++revision) {
+                        const std::uint64_t key = writer * kKeysPerWriter + ((revision * 5U) & (kKeysPerWriter - 1));
+                        const std::uint64_t value = EncodeRevision(key, revision);
+                        if (map.InsertOrAssign(key, value) != MapAssignResult::Assigned) {
+                            failure.store(1, std::memory_order_relaxed);
+                            break;
+                        }
+                        if ((revision & 7U) == 0 &&
+                            (!map.Erase(key) || map.TryInsert(key, value) != MapInsertResult::Inserted)) {
+                            failure.store(2, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                    for (std::uint64_t offset = 0; offset != kKeysPerWriter; ++offset) {
+                        const std::uint64_t key = writer * kKeysPerWriter + offset;
+                        if (map.InsertOrAssign(key, EncodeRevision(key, kIterations + 1)) !=
+                            MapAssignResult::Assigned) {
+                            failure.store(3, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                    writersDone.fetch_add(1, std::memory_order_release);
+                });
+            }
+
+            for (std::size_t reader = 0; reader != ReaderCount; ++reader) {
+                workers.emplace_back([&, reader] {
+                    std::array<std::uint32_t, kKeyCount> lastSeen{};
+                    std::uint64_t cursor = reader * 977U;
+                    start.arrive_and_wait();
+                    while (writersDone.load(std::memory_order_acquire) != WriterCount) {
+                        const std::uint64_t key = (cursor++ * 1'001U) % kKeyCount;
+                        std::uint64_t value = 0;
+                        if (!map.TryGet(key, value)) {
+                            continue;
+                        }
+                        const std::uint32_t revision = static_cast<std::uint32_t>(value);
+                        if ((value >> 32) != key || revision < lastSeen[key]) {
+                            failure.store(4, std::memory_order_relaxed);
+                            return;
+                        }
+                        lastSeen[key] = revision;
+                    }
+                });
+            }
+
+            workers.clear();
+            INFO("failure code: " << failure.load(std::memory_order_relaxed));
+            REQUIRE(failure.load(std::memory_order_relaxed) == 0);
+            REQUIRE(map.SizeApprox() == kKeyCount);
+            for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+                REQUIRE(map.Find(key) == EncodeRevision(key, kIterations + 1));
+            }
+        };
+
+        if constexpr (Capacity == std::dynamic_extent) {
+            Map map{8};
+            exercise(map);
+        } else {
+            Map map;
+            exercise(map);
+        }
+    }
+
+    template<std::size_t Capacity, MapTopology Topology, std::size_t WriterCount, std::size_t ReaderCount>
+    void RequireConcurrentSetMutationHistory() {
+        static_assert(WriterCount == (Topology.writers == MapCardinality::Single ? 1 : 4));
+        static_assert(ReaderCount == (Topology.readers == MapCardinality::Single ? 1 : 4));
+        constexpr std::size_t kKeysPerWriter = 16;
+        constexpr std::size_t kKeyCount = WriterCount * kKeysPerWriter;
+        constexpr std::uint64_t kIterations = 4'096;
+        using Set = ConcurrentSet<std::uint64_t, Capacity, Topology>;
+
+        auto exercise = []<class SetType>(SetType& set) {
+            for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+                REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+            }
+
+            std::barrier start{static_cast<std::ptrdiff_t>(WriterCount + ReaderCount)};
+            std::atomic<std::size_t> writersDone{};
+            std::atomic<int> failure{};
+            std::vector<std::jthread> workers;
+            workers.reserve(WriterCount + ReaderCount);
+
+            for (std::size_t writer = 0; writer != WriterCount; ++writer) {
+                workers.emplace_back([&, writer] {
+                    start.arrive_and_wait();
+                    for (std::uint64_t iteration = 0; iteration != kIterations; ++iteration) {
+                        const std::uint64_t key = writer * kKeysPerWriter + ((iteration * 13U) &
+                                                                            (kKeysPerWriter - 1));
+                        if (!set.Erase(key) || set.TryInsert(key) != MapInsertResult::Inserted) {
+                            failure.store(1, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                    writersDone.fetch_add(1, std::memory_order_release);
+                });
+            }
+
+            for (std::size_t reader = 0; reader != ReaderCount; ++reader) {
+                workers.emplace_back([&, reader] {
+                    std::uint64_t cursor = reader * 977U;
+                    start.arrive_and_wait();
+                    while (writersDone.load(std::memory_order_acquire) != WriterCount) {
+                        const std::uint64_t key = (cursor++ * 1'001U) % kKeyCount;
+                        static_cast<void>(set.Contains(key));
+                        if (set.Contains(kKeyCount + key)) {
+                            failure.store(2, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
+                });
+            }
+
+            workers.clear();
+            INFO("failure code: " << failure.load(std::memory_order_relaxed));
+            REQUIRE(failure.load(std::memory_order_relaxed) == 0);
+            REQUIRE(set.SizeApprox() == kKeyCount);
+            for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+                REQUIRE(set.Contains(key));
+            }
+        };
+
+        if constexpr (Capacity == std::dynamic_extent) {
+            Set set{8};
+            exercise(set);
+        } else {
+            Set set;
+            exercise(set);
+        }
+    }
+
+    template<std::size_t Capacity, MapTopology Topology, MapOrder Order, std::size_t WriterCount,
+             std::size_t ReaderCount>
+    void RequireConcurrentSnapshotProperties() {
+        static_assert(WriterCount == (Topology.writers == MapCardinality::Single ? 1 : 4));
+        static_assert(ReaderCount == (Topology.readers == MapCardinality::Single ? 1 : 4));
+        constexpr std::size_t kStableKeysPerWriter = 4;
+        constexpr std::size_t kGrowthKeysPerWriter = 64;
+        constexpr std::size_t kStableKeyCount = WriterCount * kStableKeysPerWriter;
+        constexpr std::size_t kKeyCount = WriterCount * (kStableKeysPerWriter + kGrowthKeysPerWriter);
+        constexpr std::uint64_t kIterations = 4'096;
+        using Map = ConcurrentMap<std::uint64_t, std::uint64_t, Capacity, Topology, Order>;
+        using Set = ConcurrentSet<std::uint64_t, Capacity, Topology, Order>;
+
+        auto exercise = []<class MapType, class SetType>(MapType& map, SetType& set) {
+            for (std::uint64_t key = 0; key != kStableKeyCount; ++key) {
+                REQUIRE(map.TryInsert(key, EncodeRevision(key, 0)) == MapInsertResult::Inserted);
+                REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+            }
+
+            std::barrier start{static_cast<std::ptrdiff_t>(WriterCount + ReaderCount)};
+            std::atomic<std::size_t> readersReady{};
+            std::atomic<std::size_t> writersStarted{};
+            std::atomic<std::size_t> writersDone{};
+            std::atomic<std::size_t> readersWithSnapshot{};
+            std::atomic<std::size_t> overlappingSnapshots{};
+            std::atomic<int> failure{};
+            std::vector<std::jthread> workers;
+            workers.reserve(WriterCount + ReaderCount);
+
+            for (std::size_t writer = 0; writer != WriterCount; ++writer) {
+                workers.emplace_back([&, writer] {
+                    start.arrive_and_wait();
+                    while (readersReady.load(std::memory_order_acquire) != ReaderCount) {
+                        std::this_thread::yield();
+                    }
+                    writersStarted.fetch_add(1, std::memory_order_release);
+                    for (std::uint64_t iteration = 0; iteration != kIterations; ++iteration) {
+                        const std::uint64_t stableKey = writer * kStableKeysPerWriter +
+                                                        (iteration & (kStableKeysPerWriter - 1));
+                        const std::uint64_t value = EncodeRevision(stableKey, iteration + 1);
+                        if (map.InsertOrAssign(stableKey, value) != MapAssignResult::Assigned) {
+                            failure.store(1, std::memory_order_relaxed);
+                            break;
+                        }
+                        if ((iteration & 15U) == 0) {
+                            if (!map.Erase(stableKey) ||
+                                map.TryInsert(stableKey, value) != MapInsertResult::Inserted ||
+                                !set.Erase(stableKey) || set.TryInsert(stableKey) != MapInsertResult::Inserted) {
+                                failure.store(2, std::memory_order_relaxed);
+                                break;
+                            }
+                        }
+                        if (iteration < kGrowthKeysPerWriter) {
+                            const std::uint64_t key = kStableKeyCount + writer * kGrowthKeysPerWriter + iteration;
+                            if (map.TryInsert(key, EncodeRevision(key, iteration + 1)) != MapInsertResult::Inserted ||
+                                set.TryInsert(key) != MapInsertResult::Inserted) {
+                                failure.store(3, std::memory_order_relaxed);
+                                break;
+                            }
+                        }
+                        if (writer == 0 && iteration == kGrowthKeysPerWriter / 2) {
+                            while (readersWithSnapshot.load(std::memory_order_acquire) != ReaderCount &&
+                                   failure.load(std::memory_order_relaxed) == 0) {
+                                std::this_thread::yield();
+                            }
+                        }
+                        if ((iteration & 63U) == 0) {
+                            std::this_thread::yield();
+                        }
+                    }
+                    writersDone.fetch_add(1, std::memory_order_release);
+                });
+            }
+
+            for (std::size_t reader = 0; reader != ReaderCount; ++reader) {
+                workers.emplace_back([&] {
+                    bool completedSnapshot = false;
+                    start.arrive_and_wait();
+                    readersReady.fetch_add(1, std::memory_order_release);
+                    while (writersStarted.load(std::memory_order_acquire) != WriterCount) {
+                        std::this_thread::yield();
+                    }
+                    while (writersDone.load(std::memory_order_acquire) != WriterCount) {
+                        const auto mapEntries = map.Snapshot();
+                        const auto setKeys = set.Snapshot();
+                        std::array<bool, kKeyCount> mapSeen{};
+                        std::array<bool, kKeyCount> setSeen{};
+                        std::uint64_t previousMapKey = 0;
+                        std::uint64_t previousSetKey = 0;
+                        bool firstMap = true;
+                        bool firstSet = true;
+                        for (const auto& [key, value] : mapEntries) {
+                            if (key >= kKeyCount || (value >> 32) != key || mapSeen[key] ||
+                                (Order == MapOrder::Ordered && !firstMap && previousMapKey > key)) {
+                                failure.store(4, std::memory_order_relaxed);
+                                return;
+                            }
+                            mapSeen[key] = true;
+                            previousMapKey = key;
+                            firstMap = false;
+                        }
+                        for (const std::uint64_t key : setKeys) {
+                            if (key >= kKeyCount || setSeen[key] ||
+                                (Order == MapOrder::Ordered && !firstSet && previousSetKey > key)) {
+                                failure.store(5, std::memory_order_relaxed);
+                                return;
+                            }
+                            setSeen[key] = true;
+                            previousSetKey = key;
+                            firstSet = false;
+                        }
+                        overlappingSnapshots.fetch_add(1, std::memory_order_relaxed);
+                        if (!completedSnapshot) {
+                            readersWithSnapshot.fetch_add(1, std::memory_order_release);
+                            completedSnapshot = true;
+                        }
+                    }
+                });
+            }
+
+            workers.clear();
+            INFO("failure code: " << failure.load(std::memory_order_relaxed));
+            REQUIRE(failure.load(std::memory_order_relaxed) == 0);
+            REQUIRE(readersWithSnapshot.load(std::memory_order_relaxed) == ReaderCount);
+            REQUIRE(overlappingSnapshots.load(std::memory_order_relaxed) != 0);
+            REQUIRE(map.SizeApprox() == kKeyCount);
+            REQUIRE(set.SizeApprox() == kKeyCount);
+            for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+                std::uint64_t value = 0;
+                REQUIRE(map.TryGet(key, value));
+                REQUIRE((value >> 32) == key);
+                REQUIRE(set.Contains(key));
+            }
+        };
+
+        if constexpr (Capacity == std::dynamic_extent) {
+            Map map{4};
+            Set set{4};
+            exercise(map, set);
+        } else {
+            Map map;
+            Set set;
+            exercise(map, set);
+        }
+    }
+
     template<MapTopology Topology, std::size_t Capacity>
     void RequireOrderedSnapshotSemantics() {
         using Map = ConcurrentOrderedMap<std::uint64_t, std::uint64_t, Capacity, Topology>;
@@ -358,19 +686,24 @@ TEST_CASE("ConcurrentMap MPSC serializes duplicate insertion by key", AUTO_TAG) 
     constexpr std::size_t kKeyCount = 1'000;
     ConcurrentMap<std::uint64_t, std::uint64_t, 2'048, MapTopologies::Mpsc> map;
     std::barrier start{static_cast<std::ptrdiff_t>(kWriterCount)};
+    std::atomic<bool> failed{};
     std::array<std::jthread, kWriterCount> writers;
     for (std::size_t writer = 0; writer != kWriterCount; ++writer) {
         writers[writer] = std::jthread{[&] {
             start.arrive_and_wait();
             for (std::uint64_t key = 0; key != kKeyCount; ++key) {
                 const auto result = map.TryInsert(key, key);
-                REQUIRE((result == MapInsertResult::Inserted || result == MapInsertResult::Exists));
+                if (result != MapInsertResult::Inserted && result != MapInsertResult::Exists) {
+                    failed.store(true, std::memory_order_relaxed);
+                    break;
+                }
             }
         }};
     }
     for (auto& writer : writers) {
         writer.join();
     }
+    REQUIRE_FALSE(failed.load(std::memory_order_relaxed));
     REQUIRE(map.SizeApprox() == kKeyCount);
 }
 
@@ -423,6 +756,81 @@ TEST_CASE("Dynamic Local ConcurrentMap preserves value addresses while rebuildin
     REQUIRE(map.InsertOrAssign(0, 23) == MapAssignResult::Assigned);
     REQUIRE(map.FindRef(0) == stableValue);
     REQUIRE(*stableValue == 23);
+}
+
+TEST_CASE("Dynamic Local ConcurrentMap reuses erased stable slots with exact nontrivial lifetimes",
+          AUTO_TAG_WITH("Stress")) {
+    REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 0);
+    {
+        ConcurrentMap<std::uint64_t, LifetimeTrackedValue, std::dynamic_extent, MapTopologies::Local> map{8};
+        const LifetimeTrackedValue seed{17};
+        REQUIRE(map.TryInsert(0, seed) == MapInsertResult::Inserted);
+        LifetimeTrackedValue* const erasedValue = map.FindRef(0);
+        REQUIRE(erasedValue != nullptr);
+        const std::uintptr_t erasedAddress = reinterpret_cast<std::uintptr_t>(erasedValue);
+        REQUIRE(map.Erase(0));
+
+        REQUIRE(map.TryInsert(1, seed) == MapInsertResult::Inserted);
+        LifetimeTrackedValue* const stableValue = map.FindRef(1);
+        REQUIRE(stableValue != nullptr);
+        REQUIRE(reinterpret_cast<std::uintptr_t>(stableValue) == erasedAddress);
+
+        for (std::uint64_t key = 2; key != 4'096; ++key) {
+            REQUIRE(map.TryInsert(key, LifetimeTrackedValue{key * 3}) == MapInsertResult::Inserted);
+        }
+        REQUIRE(map.FindRef(1) == stableValue);
+        REQUIRE(stableValue->payload == 17);
+
+        for (std::uint64_t key = 2; key != 4'096; key += 2) {
+            REQUIRE(map.Erase(key));
+            REQUIRE(map.TryInsert(key + 4'096, LifetimeTrackedValue{key * 5}) == MapInsertResult::Inserted);
+        }
+        REQUIRE(map.FindRef(1) == stableValue);
+        const auto snapshot = map.Snapshot();
+        REQUIRE(snapshot.size() == map.SizeApprox());
+
+        map.Clear();
+        REQUIRE(map.Empty());
+        REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 1 + snapshot.size());
+    }
+    REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 0);
+
+    {
+        ConcurrentMap<std::uint64_t, LifetimeTrackedValue, std::dynamic_extent, MapTopologies::Local> map{8};
+        for (std::uint64_t key = 0; key != 256; ++key) {
+            REQUIRE(map.TryInsert(key, LifetimeTrackedValue{key}) == MapInsertResult::Inserted);
+        }
+    }
+    REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("Fixed Local ConcurrentMap destroys nontrivial full and tombstone values exactly once", AUTO_TAG) {
+    REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 0);
+    {
+        ConcurrentMap<std::uint64_t, LifetimeTrackedValue, 32, MapTopologies::Local> map;
+        const LifetimeTrackedValue seed{17};
+        for (std::uint64_t key = 0; key != 16; ++key) {
+            REQUIRE(map.TryInsert(key, seed) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 0; key != 16; key += 2) {
+            REQUIRE(map.Erase(key));
+        }
+        REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 17);
+        map.Clear();
+        REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 1);
+    }
+    REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 0);
+
+    {
+        ConcurrentMap<std::uint64_t, LifetimeTrackedValue, 32, MapTopologies::Local> map;
+        for (std::uint64_t key = 0; key != 16; ++key) {
+            REQUIRE(map.TryInsert(key, LifetimeTrackedValue{key}) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 0; key != 16; key += 2) {
+            REQUIRE(map.Erase(key));
+        }
+    }
+    REQUIRE(LifetimeTrackedValue::liveInstances.load(std::memory_order_relaxed) == 0);
 }
 
 TEST_CASE("Dynamic Local map and set survive disjoint-key tombstone churn", AUTO_TAG_WITH("Stress")) {
@@ -584,6 +992,39 @@ TEST_CASE("Dynamic ConcurrentMap and ConcurrentSet preserve mutation semantics i
     INFO("MPMC map and set");
     RequireDynamicMapMutationSemantics<MapTopologies::Mpmc>();
     RequireDynamicSetMutationSemantics<MapTopologies::Mpmc>();
+}
+
+TEST_CASE("ConcurrentMap every concurrent topology preserves per-key mutation histories", AUTO_TAG_WITH("Stress")) {
+    RequireConcurrentMapMutationHistory<256, MapTopologies::Spsc, 1, 1>();
+    RequireConcurrentMapMutationHistory<256, MapTopologies::Mpsc, 4, 1>();
+    RequireConcurrentMapMutationHistory<256, MapTopologies::Spmc, 1, 4>();
+    RequireConcurrentMapMutationHistory<256, MapTopologies::Mpmc, 4, 4>();
+    RequireConcurrentMapMutationHistory<std::dynamic_extent, MapTopologies::Spsc, 1, 1>();
+    RequireConcurrentMapMutationHistory<std::dynamic_extent, MapTopologies::Mpsc, 4, 1>();
+    RequireConcurrentMapMutationHistory<std::dynamic_extent, MapTopologies::Spmc, 1, 4>();
+    RequireConcurrentMapMutationHistory<std::dynamic_extent, MapTopologies::Mpmc, 4, 4>();
+}
+
+TEST_CASE("ConcurrentSet every concurrent topology survives erase and reuse", AUTO_TAG_WITH("Stress")) {
+    RequireConcurrentSetMutationHistory<256, MapTopologies::Spsc, 1, 1>();
+    RequireConcurrentSetMutationHistory<256, MapTopologies::Mpsc, 4, 1>();
+    RequireConcurrentSetMutationHistory<256, MapTopologies::Spmc, 1, 4>();
+    RequireConcurrentSetMutationHistory<256, MapTopologies::Mpmc, 4, 4>();
+    RequireConcurrentSetMutationHistory<std::dynamic_extent, MapTopologies::Spsc, 1, 1>();
+    RequireConcurrentSetMutationHistory<std::dynamic_extent, MapTopologies::Mpsc, 4, 1>();
+    RequireConcurrentSetMutationHistory<std::dynamic_extent, MapTopologies::Spmc, 1, 4>();
+    RequireConcurrentSetMutationHistory<std::dynamic_extent, MapTopologies::Mpmc, 4, 4>();
+}
+
+TEST_CASE("Ordered and unordered snapshots remain valid during concurrent mutation", AUTO_TAG_WITH("Stress")) {
+    RequireConcurrentSnapshotProperties<512, MapTopologies::Spsc, MapOrder::Unordered, 1, 1>();
+    RequireConcurrentSnapshotProperties<512, MapTopologies::Mpsc, MapOrder::Unordered, 4, 1>();
+    RequireConcurrentSnapshotProperties<512, MapTopologies::Spmc, MapOrder::Unordered, 1, 4>();
+    RequireConcurrentSnapshotProperties<512, MapTopologies::Mpmc, MapOrder::Unordered, 4, 4>();
+    RequireConcurrentSnapshotProperties<std::dynamic_extent, MapTopologies::Spsc, MapOrder::Ordered, 1, 1>();
+    RequireConcurrentSnapshotProperties<std::dynamic_extent, MapTopologies::Mpsc, MapOrder::Ordered, 4, 1>();
+    RequireConcurrentSnapshotProperties<std::dynamic_extent, MapTopologies::Spmc, MapOrder::Ordered, 1, 4>();
+    RequireConcurrentSnapshotProperties<std::dynamic_extent, MapTopologies::Mpmc, MapOrder::Ordered, 4, 4>();
 }
 
 TEST_CASE("Dynamic ConcurrentMap keeps a reader-held retired version alive across repeated growth",
