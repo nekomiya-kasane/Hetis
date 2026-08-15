@@ -1425,10 +1425,11 @@ namespace Mashiro {
          * @brief Read-optimized dynamic shard using release-published copy-on-grow table versions.
          *
          * @details The shard serializes its writers, so its flat table is compiled as a single-writer data plane even
-         * when the public topology permits multiple writers. Single-writer shards grow fourfold to minimize cumulative
-         * copying; multiple-writer shards double to control aggregate over-reservation. Readers acquire one version and
-         * probe only that table. Retired versions remain alive until quiescent clear or destruction, without reader
-         * registration or reclamation traffic on the lookup path.
+         * when the public topology permits multiple writers. Single-writer shards use a capacity-tiered growth schedule
+         * that minimizes cumulative copying while avoiding excessive final capacity; multiple-writer shards double to
+         * control aggregate over-reservation. Readers acquire one version and probe only that table. Retired versions
+         * remain alive until quiescent clear or destruction, without reader registration or reclamation traffic on the
+         * lookup path.
          */
         template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
                  class KeyEqual>
@@ -1706,13 +1707,29 @@ namespace Mashiro {
                 }
             }
 
+            [[nodiscard]] static constexpr std::size_t GrowthFactor(std::size_t capacity) noexcept {
+                if constexpr (kMultipleWriters) {
+                    return 2;
+                }
+                constexpr std::size_t kSmallCapacityLimit = 4U * 1024U;
+                constexpr std::size_t kCompactCapacityLimit = 16U * 1024U;
+                constexpr std::size_t kMediumCapacityLimit = 32U * 1024U;
+                if (capacity < kSmallCapacityLimit) {
+                    return 8;
+                }
+                if (capacity < kCompactCapacityLimit) {
+                    return 4;
+                }
+                return capacity < kMediumCapacityLimit ? 2 : 4;
+            }
+
             [[nodiscard]] bool Grow(Version* current) noexcept {
-                constexpr std::size_t kGrowthFactor = kMultipleWriters ? 2 : 4;
                 const std::size_t capacity = current->storage.CapacityLimit();
-                if (capacity > std::numeric_limits<std::size_t>::max() / kGrowthFactor) {
+                const std::size_t growthFactor = GrowthFactor(capacity);
+                if (capacity > std::numeric_limits<std::size_t>::max() / growthFactor) {
                     return false;
                 }
-                Version* next = CreateVersion(capacity * kGrowthFactor, current);
+                Version* next = CreateVersion(capacity * growthFactor, current);
                 if (!next) {
                     return false;
                 }
