@@ -273,16 +273,31 @@ namespace Mashiro {
                 }
             }
 
+            [[nodiscard]] std::uint64_t HashForKey(const Key& key) const noexcept { return HashKey(key); }
+
             [[nodiscard]] MapInsertResult TryInsert(const Key& key) noexcept
                 requires kSet
             {
-                return InsertImpl(key, nullptr, false).first;
+                return TryInsertWithHash(key, HashKey(key));
+            }
+
+            [[nodiscard]] MapInsertResult TryInsertWithHash(const Key& key, std::uint64_t hash) noexcept
+                requires kSet
+            {
+                return InsertImplWithHash(key, nullptr, false, nullptr, hash).first;
             }
 
             [[nodiscard]] MapInsertResult TryInsert(const Key& key, const Mapped& value) noexcept
                 requires (!kSet)
             {
-                return InsertImpl(key, std::addressof(value), false).first;
+                return TryInsertWithHash(key, value, HashKey(key));
+            }
+
+            [[nodiscard]] MapInsertResult TryInsertWithHash(const Key& key, const Mapped& value,
+                                                            std::uint64_t hash) noexcept
+                requires (!kSet)
+            {
+                return InsertImplWithHash(key, std::addressof(value), false, nullptr, hash).first;
             }
 
             [[nodiscard]] std::pair<MapInsertResult, Mapped*> TryInsertAndGet(const Key& key,
@@ -290,14 +305,23 @@ namespace Mashiro {
                 requires (kLocal && !kSet)
             {
                 Mapped* storedValue = nullptr;
-                const MapInsertResult result = InsertImpl(key, std::addressof(value), false, &storedValue).first;
+                const MapInsertResult result = InsertImplWithHash(key, std::addressof(value), false, &storedValue,
+                                                                   HashKey(key))
+                                                   .first;
                 return {result, storedValue};
             }
 
             [[nodiscard]] MapAssignResult InsertOrAssign(const Key& key, const Mapped& value) noexcept
                 requires (!kSet)
             {
-                const auto [insert, assigned] = InsertImpl(key, std::addressof(value), true);
+                return InsertOrAssignWithHash(key, value, HashKey(key));
+            }
+
+            [[nodiscard]] MapAssignResult InsertOrAssignWithHash(const Key& key, const Mapped& value,
+                                                                 std::uint64_t hash) noexcept
+                requires (!kSet)
+            {
+                const auto [insert, assigned] = InsertImplWithHash(key, std::addressof(value), true, nullptr, hash);
                 if (assigned) {
                     return MapAssignResult::Assigned;
                 }
@@ -313,7 +337,8 @@ namespace Mashiro {
                 return FindWithHash(key, HashKey(key));
             }
 
-            [[nodiscard]] std::optional<Mapped> FindWithHash(const Key& key, std::uint64_t hash) const noexcept
+            [[nodiscard, clang::always_inline]] std::optional<Mapped> FindWithHash(const Key& key,
+                                                                                  std::uint64_t hash) const noexcept
                 requires (!kSet)
             {
                 const StateWord fingerprint = Fingerprint(hash);
@@ -362,7 +387,8 @@ namespace Mashiro {
                 return TryGetWithHash(key, output, HashKey(key));
             }
 
-            [[nodiscard]] bool TryGetWithHash(const Key& key, Mapped& output, std::uint64_t hash) const noexcept
+            [[nodiscard, clang::always_inline]] bool TryGetWithHash(const Key& key, Mapped& output,
+                                                                   std::uint64_t hash) const noexcept
                 requires (!kSet)
             {
                 const StateWord fingerprint = Fingerprint(hash);
@@ -398,10 +424,15 @@ namespace Mashiro {
                 }
             }
 
-            [[nodiscard]] Mapped* FindRef(const Key& key) noexcept
+            [[nodiscard, clang::always_inline]] Mapped* FindRef(const Key& key) noexcept
                 requires (kLocal && !kSet)
             {
-                const std::uint64_t hash = HashKey(key);
+                return FindRefWithHash(key, HashKey(key));
+            }
+
+            [[nodiscard, clang::always_inline]] Mapped* FindRefWithHash(const Key& key, std::uint64_t hash) noexcept
+                requires (kLocal && !kSet)
+            {
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
                 const std::size_t home = static_cast<std::size_t>(hash) & indexMask;
@@ -421,7 +452,8 @@ namespace Mashiro {
 
             [[nodiscard]] bool Contains(const Key& key) const noexcept { return ContainsWithHash(key, HashKey(key)); }
 
-            [[nodiscard]] bool ContainsWithHash(const Key& key, std::uint64_t hash) const noexcept {
+            [[nodiscard, clang::always_inline]] bool ContainsWithHash(const Key& key,
+                                                                     std::uint64_t hash) const noexcept {
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
                 const std::size_t home = static_cast<std::size_t>(hash) & indexMask;
@@ -453,7 +485,22 @@ namespace Mashiro {
             }
 
             [[nodiscard]] bool Erase(const Key& key) noexcept {
-                const std::uint64_t hash = HashKey(key);
+                return EraseWithHash(key, HashKey(key));
+            }
+
+            [[nodiscard]] bool EraseWithHash(const Key& key, std::uint64_t hash) noexcept {
+                return EraseImplWithHash<false>(key, hash, nullptr);
+            }
+
+            [[nodiscard]] bool EraseAndGet(const Key& key, Mapped& erasedValue) noexcept
+                requires (kLocal && !kSet)
+            {
+                return EraseImplWithHash<true>(key, HashKey(key), std::addressof(erasedValue));
+            }
+
+        private:
+            template<bool ReturnErasedValue>
+            [[nodiscard]] bool EraseImplWithHash(const Key& key, std::uint64_t hash, Mapped* erasedValue) noexcept {
                 MapWriterGuard writer{SelectWriterStripe(hash)};
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
@@ -475,6 +522,10 @@ namespace Mashiro {
                             retry = true;
                             break;
                         }
+                        if constexpr (ReturnErasedValue) {
+                            static_assert(!kSet);
+                            *erasedValue = LoadValue(index);
+                        }
                         Publish(index, state, MapSlotStatus::Tombstone, 0);
                         DecrementSize();
                         return true;
@@ -484,6 +535,8 @@ namespace Mashiro {
                     }
                 }
             }
+
+        public:
 
             /** @brief Approximate concurrent size; exact when no mutation overlaps the call. */
             [[nodiscard]] std::size_t SizeApprox() const noexcept {
@@ -777,22 +830,26 @@ namespace Mashiro {
             void IncrementSize() noexcept {
                 if constexpr (kLocal) {
                     ++size_;
-                } else {
+                } else if constexpr (kMultipleWriters) {
                     size_.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    size_.store(size_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
                 }
             }
 
             void DecrementSize() noexcept {
                 if constexpr (kLocal) {
                     --size_;
-                } else {
+                } else if constexpr (kMultipleWriters) {
                     size_.fetch_sub(1, std::memory_order_relaxed);
+                } else {
+                    size_.store(size_.load(std::memory_order_relaxed) - 1, std::memory_order_relaxed);
                 }
             }
 
-            [[nodiscard]] std::pair<MapInsertResult, bool> InsertImpl(const Key& key, const Mapped* value, bool assign,
-                                                                      Mapped** storedValue = nullptr) noexcept {
-                const std::uint64_t hash = HashKey(key);
+            [[nodiscard]] std::pair<MapInsertResult, bool> InsertImplWithHash(const Key& key, const Mapped* value,
+                                                                               bool assign, Mapped** storedValue,
+                                                                               std::uint64_t hash) noexcept {
                 MapWriterGuard writer{SelectWriterStripe(hash)};
                 const StateWord fingerprint = Fingerprint(hash);
                 const std::size_t indexMask = CapacityLimit() - 1;
@@ -1037,14 +1094,15 @@ namespace Mashiro {
                 if (!index_) {
                     return MapAssignResult::AllocationFailed;
                 }
-                if (StableValueSlot** location = index_->FindRef(key)) {
+                const std::uint64_t hash = index_->HashForKey(key);
+                if (StableValueSlot** location = index_->FindRefWithHash(key, hash)) {
                     *(*location)->Value() = value;
                     return MapAssignResult::Assigned;
                 }
-                if (!EnsureIndexCapacity()) {
+                if (IndexNeedsGrowth() && !GrowIndex()) {
                     return MapAssignResult::AllocationFailed;
                 }
-                const MapInsertResult result = InsertMapAbsent(key, value);
+                const MapInsertResult result = InsertMapAbsentWithHash(key, value, hash);
                 if (result == MapInsertResult::Inserted) {
                     return MapAssignResult::Inserted;
                 }
@@ -1076,7 +1134,7 @@ namespace Mashiro {
                 return true;
             }
 
-            [[nodiscard]] Mapped* FindRef(const Key& key) noexcept
+            [[nodiscard, clang::always_inline]] Mapped* FindRef(const Key& key) noexcept
                 requires (!kSet)
             {
                 if (!index_) {
@@ -1097,11 +1155,11 @@ namespace Mashiro {
                         return false;
                     }
                 } else {
-                    const auto location = index_->Find(key);
-                    if (!location || !index_->Erase(key)) {
+                    StableValueSlot* location = nullptr;
+                    if (!index_->EraseAndGet(key, location)) {
                         return false;
                     }
-                    ReleaseValue(*location);
+                    ReleaseValue(location);
                 }
                 --size_;
                 return true;
@@ -1232,17 +1290,6 @@ namespace Mashiro {
                 return capacity <= std::numeric_limits<std::size_t>::max() / 2 ? capacity * 2 : 0;
             }
 
-            [[nodiscard]] bool EnsureIndexCapacity() noexcept {
-                if (!index_) {
-                    index_ = CreateIndex(initialCapacity_);
-                    return index_ != nullptr;
-                }
-                if (!IndexNeedsGrowth()) {
-                    return true;
-                }
-                return GrowIndex();
-            }
-
             [[nodiscard]] bool GrowIndex() noexcept {
                 const std::size_t capacity = index_->CapacityLimit();
                 const std::size_t grownCapacity = GrownIndexCapacity(capacity);
@@ -1254,13 +1301,14 @@ namespace Mashiro {
                 return size_ >= capacity - capacity / 4;
             }
 
-            [[nodiscard]] MapInsertResult InsertIndex(const Key& key, const IndexValue& location) noexcept {
+            [[nodiscard]] MapInsertResult InsertIndexWithHash(const Key& key, const IndexValue& location,
+                                                              std::uint64_t hash) noexcept {
                 MapInsertResult result;
                 if constexpr (kSet) {
                     static_cast<void>(location);
-                    result = index_->TryInsert(key);
+                    result = index_->TryInsertWithHash(key, hash);
                 } else {
-                    result = index_->TryInsert(key, location);
+                    result = index_->TryInsertWithHash(key, location, hash);
                 }
                 if (result != MapInsertResult::Full) {
                     return result;
@@ -1271,9 +1319,9 @@ namespace Mashiro {
                     return MapInsertResult::AllocationFailed;
                 }
                 if constexpr (kSet) {
-                    return index_->TryInsert(key);
+                    return index_->TryInsertWithHash(key, hash);
                 } else {
-                    return index_->TryInsert(key, location);
+                    return index_->TryInsertWithHash(key, location, hash);
                 }
             }
 
@@ -1315,15 +1363,16 @@ namespace Mashiro {
                 if (!index_) {
                     return MapInsertResult::AllocationFailed;
                 }
+                const std::uint64_t hash = index_->HashForKey(key);
                 if (IndexNeedsGrowth()) {
-                    if (index_->Contains(key)) {
+                    if (index_->ContainsWithHash(key, hash)) {
                         return MapInsertResult::Exists;
                     }
                     if (!GrowIndex()) {
                         return MapInsertResult::AllocationFailed;
                     }
                 }
-                const MapInsertResult result = InsertIndex(key, {});
+                const MapInsertResult result = InsertIndexWithHash(key, {}, hash);
                 if (result == MapInsertResult::Inserted) {
                     ++size_;
                 }
@@ -1336,25 +1385,27 @@ namespace Mashiro {
                 if (!index_) {
                     return MapInsertResult::AllocationFailed;
                 }
+                const std::uint64_t hash = index_->HashForKey(key);
                 if (IndexNeedsGrowth()) {
-                    if (index_->Contains(key)) {
+                    if (index_->ContainsWithHash(key, hash)) {
                         return MapInsertResult::Exists;
                     }
                     if (!GrowIndex()) {
                         return MapInsertResult::AllocationFailed;
                     }
                 }
-                return InsertMapAbsent(key, value);
+                return InsertMapAbsentWithHash(key, value, hash);
             }
 
-            [[nodiscard]] MapInsertResult InsertMapAbsent(const Key& key, const Mapped& value) noexcept
+            [[nodiscard]] MapInsertResult InsertMapAbsentWithHash(const Key& key, const Mapped& value,
+                                                                  std::uint64_t hash) noexcept
                 requires (!kSet)
             {
                 StableValueSlot* slot = AllocateValue(value);
                 if (!slot) {
                     return MapInsertResult::AllocationFailed;
                 }
-                const MapInsertResult indexResult = InsertIndex(key, slot);
+                const MapInsertResult indexResult = InsertIndexWithHash(key, slot, hash);
                 if (indexResult != MapInsertResult::Inserted) {
                     ReleaseValue(slot);
                     return indexResult;
@@ -1428,22 +1479,25 @@ namespace Mashiro {
             [[nodiscard]] MapInsertResult TryInsert(const Key& key) noexcept
                 requires kSet
             {
+                return TryInsertWithHash(key, HashKey(key));
+            }
+
+            [[nodiscard]] MapInsertResult TryInsertWithHash(const Key& key, std::uint64_t hash) noexcept
+                requires kSet
+            {
                 MapWriterGuard writer{SelectWriterStripe()};
                 for (;;) {
                     Version* current = LoadCurrent();
                     if (!current) {
                         return MapInsertResult::AllocationFailed;
                     }
-                    if (ShouldGrow(current)) {
-                        if (current->storage.Contains(key)) {
-                            return MapInsertResult::Exists;
+                    const MapInsertResult result = current->storage.TryInsertWithHash(key, hash);
+                    if (result == MapInsertResult::Inserted) {
+                        if (ShouldGrow(current)) {
+                            static_cast<void>(Grow(current));
                         }
-                        if (!Grow(current)) {
-                            return MapInsertResult::AllocationFailed;
-                        }
-                        continue;
+                        return result;
                     }
-                    const MapInsertResult result = current->storage.TryInsert(key);
                     if (result != MapInsertResult::Full) {
                         return result;
                     }
@@ -1456,22 +1510,26 @@ namespace Mashiro {
             [[nodiscard]] MapInsertResult TryInsert(const Key& key, const Mapped& value) noexcept
                 requires (!kSet)
             {
+                return TryInsertWithHash(key, value, HashKey(key));
+            }
+
+            [[nodiscard]] MapInsertResult TryInsertWithHash(const Key& key, const Mapped& value,
+                                                            std::uint64_t hash) noexcept
+                requires (!kSet)
+            {
                 MapWriterGuard writer{SelectWriterStripe()};
                 for (;;) {
                     Version* current = LoadCurrent();
                     if (!current) {
                         return MapInsertResult::AllocationFailed;
                     }
-                    if (ShouldGrow(current)) {
-                        if (current->storage.Contains(key)) {
-                            return MapInsertResult::Exists;
+                    const MapInsertResult result = current->storage.TryInsertWithHash(key, value, hash);
+                    if (result == MapInsertResult::Inserted) {
+                        if (ShouldGrow(current)) {
+                            static_cast<void>(Grow(current));
                         }
-                        if (!Grow(current)) {
-                            return MapInsertResult::AllocationFailed;
-                        }
-                        continue;
+                        return result;
                     }
-                    const MapInsertResult result = current->storage.TryInsert(key, value);
                     if (result != MapInsertResult::Full) {
                         return result;
                     }
@@ -1484,22 +1542,26 @@ namespace Mashiro {
             [[nodiscard]] MapAssignResult InsertOrAssign(const Key& key, const Mapped& value) noexcept
                 requires (!kSet)
             {
+                return InsertOrAssignWithHash(key, value, HashKey(key));
+            }
+
+            [[nodiscard]] MapAssignResult InsertOrAssignWithHash(const Key& key, const Mapped& value,
+                                                                 std::uint64_t hash) noexcept
+                requires (!kSet)
+            {
                 MapWriterGuard writer{SelectWriterStripe()};
                 for (;;) {
                     Version* current = LoadCurrent();
                     if (!current) {
                         return MapAssignResult::AllocationFailed;
                     }
-                    if (ShouldGrow(current)) {
-                        if (current->storage.Contains(key)) {
-                            return current->storage.InsertOrAssign(key, value);
+                    const MapAssignResult result = current->storage.InsertOrAssignWithHash(key, value, hash);
+                    if (result == MapAssignResult::Inserted) {
+                        if (ShouldGrow(current)) {
+                            static_cast<void>(Grow(current));
                         }
-                        if (!Grow(current)) {
-                            return MapAssignResult::AllocationFailed;
-                        }
-                        continue;
+                        return result;
                     }
-                    const MapAssignResult result = current->storage.InsertOrAssign(key, value);
                     if (result != MapAssignResult::Full) {
                         return result;
                     }
@@ -1515,7 +1577,8 @@ namespace Mashiro {
                 return FindWithHash(key, HashForKey(key));
             }
 
-            [[nodiscard]] std::optional<Mapped> FindWithHash(const Key& key, std::uint64_t hash) const noexcept
+            [[nodiscard, clang::always_inline]] std::optional<Mapped> FindWithHash(const Key& key,
+                                                                                  std::uint64_t hash) const noexcept
                 requires (!kSet)
             {
                 Version* current = LoadCurrent();
@@ -1528,7 +1591,8 @@ namespace Mashiro {
                 return TryGetWithHash(key, output, HashForKey(key));
             }
 
-            [[nodiscard]] bool TryGetWithHash(const Key& key, Mapped& output, std::uint64_t hash) const noexcept
+            [[nodiscard, clang::always_inline]] bool TryGetWithHash(const Key& key, Mapped& output,
+                                                                   std::uint64_t hash) const noexcept
                 requires (!kSet)
             {
                 Version* current = LoadCurrent();
@@ -1539,15 +1603,20 @@ namespace Mashiro {
                 return ContainsWithHash(key, HashForKey(key));
             }
 
-            [[nodiscard]] bool ContainsWithHash(const Key& key, std::uint64_t hash) const noexcept {
+            [[nodiscard, clang::always_inline]] bool ContainsWithHash(const Key& key,
+                                                                     std::uint64_t hash) const noexcept {
                 Version* current = LoadCurrent();
                 return current && current->storage.ContainsWithHash(key, hash);
             }
 
             [[nodiscard]] bool Erase(const Key& key) noexcept {
+                return EraseWithHash(key, HashForKey(key));
+            }
+
+            [[nodiscard]] bool EraseWithHash(const Key& key, std::uint64_t hash) noexcept {
                 MapWriterGuard writer{SelectWriterStripe()};
                 Version* current = LoadCurrent();
-                return current && current->storage.Erase(key);
+                return current && current->storage.EraseWithHash(key, hash);
             }
 
             [[nodiscard]] std::size_t SizeApprox() const noexcept {
@@ -1692,15 +1761,14 @@ namespace Mashiro {
         /**
          * @brief Hash-sharded dynamic storage with one release-published flat table per shard.
          *
-         * @details Multiple-writer topologies use a compile-time shard count to restore writer parallelism while each
-         * shard compiles to a single-writer copy-on-grow data plane. Single-writer topologies compile to one shard and
-         * therefore pay no unnecessary partitioning cost. Lookups acquire one version and probe one flat table.
+         * @details Multiple-writer topologies use a compile-time shard count to partition contention while each shard
+         * retains the topology-required writer arbitration. Single-writer topologies compile to one shard and pay no
+         * unnecessary partitioning cost. Lookups acquire one version and probe one flat table.
          */
         template<class Key, class Mapped, Concurrency::MapTopology Topology, Hashing::AnyAlgo HashAlgorithm,
                  class KeyEqual>
         class ShardedDynamicConcurrentAssociativeStorage {
             static constexpr bool kSet = std::same_as<Mapped, SetMarker>;
-            static constexpr bool kLocal = Topology.sharing == Concurrency::MapSharing::SingleThread;
             static constexpr bool kMultipleWriters = Topology.writers == Concurrency::MapCardinality::Multiple;
             static constexpr std::size_t kShardCount = kMultipleWriters ? 16 : 1;
             using ShardStorage = VersionedConcurrentAssociativeStorage<Key, Mapped, Topology, HashAlgorithm, KeyEqual>;
@@ -1734,22 +1802,31 @@ namespace Mashiro {
             [[nodiscard]] MapInsertResult TryInsert(const Key& key) noexcept
                 requires kSet
             {
-                ShardStorage* shard = SelectShard(key);
-                return shard ? shard->TryInsert(key) : MapInsertResult::AllocationFailed;
+                if (!valid_) {
+                    return MapInsertResult::AllocationFailed;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->TryInsertWithHash(key, hash);
             }
 
             [[nodiscard]] MapInsertResult TryInsert(const Key& key, const Mapped& value) noexcept
                 requires (!kSet)
             {
-                ShardStorage* shard = SelectShard(key);
-                return shard ? shard->TryInsert(key, value) : MapInsertResult::AllocationFailed;
+                if (!valid_) {
+                    return MapInsertResult::AllocationFailed;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->TryInsertWithHash(key, value, hash);
             }
 
             [[nodiscard]] MapAssignResult InsertOrAssign(const Key& key, const Mapped& value) noexcept
                 requires (!kSet)
             {
-                ShardStorage* shard = SelectShard(key);
-                return shard ? shard->InsertOrAssign(key, value) : MapAssignResult::AllocationFailed;
+                if (!valid_) {
+                    return MapAssignResult::AllocationFailed;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->InsertOrAssignWithHash(key, value, hash);
             }
 
             [[nodiscard]] std::optional<Mapped> Find(const Key& key) const noexcept
@@ -1762,7 +1839,7 @@ namespace Mashiro {
                 return shards_[SelectShardIndex(hash)].Get()->FindWithHash(key, hash);
             }
 
-            [[nodiscard]] bool TryGet(const Key& key, Mapped& output) const noexcept
+            [[nodiscard, clang::always_inline]] bool TryGet(const Key& key, Mapped& output) const noexcept
                 requires (!kSet)
             {
                 if (!valid_) {
@@ -1770,13 +1847,6 @@ namespace Mashiro {
                 }
                 const std::uint64_t hash = HashKey(key);
                 return shards_[SelectShardIndex(hash)].Get()->TryGetWithHash(key, output, hash);
-            }
-
-            [[nodiscard]] Mapped* FindRef(const Key& key) noexcept
-                requires (kLocal && !kSet)
-            {
-                ShardStorage* shard = SelectShard(key);
-                return shard ? shard->FindRef(key) : nullptr;
             }
 
             [[nodiscard]] bool Contains(const Key& key) const noexcept {
@@ -1788,8 +1858,11 @@ namespace Mashiro {
             }
 
             [[nodiscard]] bool Erase(const Key& key) noexcept {
-                ShardStorage* shard = SelectShard(key);
-                return shard && shard->Erase(key);
+                if (!valid_) {
+                    return false;
+                }
+                const std::uint64_t hash = HashKey(key);
+                return shards_[SelectShardIndex(hash)].Get()->EraseWithHash(key, hash);
             }
 
             [[nodiscard]] std::size_t SizeApprox() const noexcept {
@@ -1835,6 +1908,7 @@ namespace Mashiro {
             }
 
         private:
+            static_assert(Topology.sharing == Concurrency::MapSharing::Concurrent);
             static_assert(std::has_single_bit(kShardCount));
 
             [[nodiscard]] static constexpr std::size_t ShardInitialCapacity(std::size_t totalCapacity) noexcept {
@@ -1855,20 +1929,6 @@ namespace Mashiro {
                     constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
                     return static_cast<std::size_t>((hash * kGoldenRatio) >> (64U - kShardBits));
                 }
-            }
-
-            [[nodiscard]] ShardStorage* SelectShard(const Key& key) noexcept {
-                if (!valid_) {
-                    return nullptr;
-                }
-                return shards_[SelectShardIndex(HashKey(key))].Get();
-            }
-
-            [[nodiscard]] const ShardStorage* SelectShard(const Key& key) const noexcept {
-                if (!valid_) {
-                    return nullptr;
-                }
-                return shards_[SelectShardIndex(HashKey(key))].Get();
             }
 
             std::array<RawMapSlot<ShardStorage>, kShardCount> shards_{};
@@ -1936,8 +1996,10 @@ namespace Mashiro {
             return storage_.InsertOrAssign(key, value);
         }
         [[nodiscard]] std::optional<T> Find(const Key& key) const noexcept { return storage_.Find(key); }
-        [[nodiscard]] bool TryGet(const Key& key, T& output) const noexcept { return storage_.TryGet(key, output); }
-        [[nodiscard]] T* FindRef(const Key& key) noexcept
+        [[nodiscard, clang::always_inline]] bool TryGet(const Key& key, T& output) const noexcept {
+            return storage_.TryGet(key, output);
+        }
+        [[nodiscard, clang::always_inline]] T* FindRef(const Key& key) noexcept
             requires (Topology.sharing == Concurrency::MapSharing::SingleThread)
         {
             return storage_.FindRef(key);

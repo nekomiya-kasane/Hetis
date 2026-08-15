@@ -31,6 +31,22 @@ namespace {
         [[nodiscard]] constexpr ResultType operator()(std::span<const std::byte>) const noexcept { return 0; }
     };
 
+    struct CountingHash {
+        inline static std::atomic<std::size_t> calls{};
+
+        [[nodiscard]] std::uint64_t operator()(std::span<const std::byte> bytes) const noexcept {
+            calls.fetch_add(1, std::memory_order_relaxed);
+            std::uint64_t hash = 0xcbf29ce484222325ULL;
+            for (std::byte byte : bytes) {
+                hash = (hash ^ std::to_integer<std::uint8_t>(byte)) * 0x100000001b3ULL;
+            }
+            return hash;
+        }
+
+        static void Reset() noexcept { calls.store(0, std::memory_order_relaxed); }
+        [[nodiscard]] static std::size_t Calls() noexcept { return calls.load(std::memory_order_relaxed); }
+    };
+
     struct BlockingKeyEqual {
         inline static thread_local bool blockReader = false;
         inline static std::atomic<bool> entered{};
@@ -640,20 +656,68 @@ TEST_CASE("ConcurrentSet every topology retains sequential set semantics", AUTO_
     RequireSequentialSetSemantics<MapTopologies::Mpmc>();
 }
 
-TEST_CASE("ConcurrentMap collision chains survive tombstone reuse", AUTO_TAG) {
-    ConcurrentMap<std::uint64_t, std::uint64_t, 16, MapTopologies::Mpmc, MapOrder::Unordered, ConstantHash> map;
-    for (std::uint64_t key = 0; key != 12; ++key) {
-        REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
-    }
-    for (std::uint64_t key = 0; key != 12; key += 2) {
-        REQUIRE(map.Erase(key));
-    }
-    for (std::uint64_t key = 100; key != 106; ++key) {
-        REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
-    }
-    for (std::uint64_t key = 1; key < 12; key += 2) {
-        REQUIRE(map.Find(key) == key + 1);
-    }
+TEST_CASE("Dynamic map and set hash each mutation once without growth in every topology", AUTO_TAG) {
+    auto requireOnce = []<MapTopology Topology> {
+        using Map = ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, Topology,
+                                  MapOrder::Unordered, CountingHash>;
+        using Set = ConcurrentSet<std::uint64_t, std::dynamic_extent, Topology, MapOrder::Unordered, CountingHash>;
+        Map map{2'048};
+        Set set{2'048};
+
+        CountingHash::Reset();
+        for (std::uint64_t key = 0; key != 64; ++key) {
+            REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
+        }
+        REQUIRE(CountingHash::Calls() == 64);
+
+        CountingHash::Reset();
+        for (std::uint64_t key = 0; key != 64; ++key) {
+            REQUIRE(map.InsertOrAssign(key, key + 2) == MapAssignResult::Assigned);
+        }
+        REQUIRE(CountingHash::Calls() == 64);
+
+        CountingHash::Reset();
+        for (std::uint64_t key = 0; key != 64; ++key) {
+            REQUIRE(map.Erase(key));
+        }
+        REQUIRE(CountingHash::Calls() == 64);
+
+        CountingHash::Reset();
+        for (std::uint64_t key = 0; key != 64; ++key) {
+            REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+        }
+        REQUIRE(CountingHash::Calls() == 64);
+    };
+
+    requireOnce.template operator()<MapTopologies::Local>();
+    requireOnce.template operator()<MapTopologies::Spsc>();
+    requireOnce.template operator()<MapTopologies::Mpsc>();
+    requireOnce.template operator()<MapTopologies::Spmc>();
+    requireOnce.template operator()<MapTopologies::Mpmc>();
+}
+
+TEST_CASE("ConcurrentMap every topology preserves collision chains across tombstone reuse", AUTO_TAG) {
+    auto requireTopology = []<MapTopology Topology> {
+        ConcurrentMap<std::uint64_t, std::uint64_t, 16, Topology, MapOrder::Unordered, ConstantHash> map;
+        for (std::uint64_t key = 0; key != 12; ++key) {
+            REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 0; key != 12; key += 2) {
+            REQUIRE(map.Erase(key));
+        }
+        for (std::uint64_t key = 100; key != 106; ++key) {
+            REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 1; key < 12; key += 2) {
+            REQUIRE(map.Find(key) == key + 1);
+        }
+    };
+
+    requireTopology.template operator()<MapTopologies::Local>();
+    requireTopology.template operator()<MapTopologies::Spsc>();
+    requireTopology.template operator()<MapTopologies::Mpsc>();
+    requireTopology.template operator()<MapTopologies::Spmc>();
+    requireTopology.template operator()<MapTopologies::Mpmc>();
 }
 
 TEST_CASE("ConcurrentMap SPSC publishes complete key-value snapshots", AUTO_TAG) {
@@ -912,27 +976,35 @@ TEST_CASE("Dynamic ConcurrentMap MPMC grows while readers observe complete value
     }
 }
 
-TEST_CASE("Dynamic ConcurrentMap preserves membership under saturated collision chains", AUTO_TAG_WITH("Stress")) {
-    constexpr std::uint64_t kKeyCount = 512;
-    ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc, MapOrder::Unordered,
-                  ConstantHash>
-        map{8};
-    for (std::uint64_t key = 0; key != kKeyCount; ++key) {
-        REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
-    }
-    for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
-        REQUIRE(map.Erase(key));
-        REQUIRE(map.TryInsert(key + kKeyCount, key + 2) == MapInsertResult::Inserted);
-    }
-    REQUIRE(map.SizeApprox() == kKeyCount);
-    for (std::uint64_t key = 1; key < kKeyCount; key += 2) {
-        REQUIRE(map.Find(key) == key + 1);
-        REQUIRE(map.TryInsert(key, 0) == MapInsertResult::Exists);
-    }
-    for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
-        REQUIRE_FALSE(map.Contains(key));
-        REQUIRE(map.Find(key + kKeyCount) == key + 2);
-    }
+TEST_CASE("Dynamic ConcurrentMap every topology preserves membership under saturated collision chains",
+          AUTO_TAG_WITH("Stress")) {
+    auto requireTopology = []<MapTopology Topology> {
+        constexpr std::uint64_t kKeyCount = 512;
+        ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, Topology, MapOrder::Unordered, ConstantHash>
+            map{8};
+        for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+            REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
+        }
+        for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
+            REQUIRE(map.Erase(key));
+            REQUIRE(map.TryInsert(key + kKeyCount, key + 2) == MapInsertResult::Inserted);
+        }
+        REQUIRE(map.SizeApprox() == kKeyCount);
+        for (std::uint64_t key = 1; key < kKeyCount; key += 2) {
+            REQUIRE(map.Find(key) == key + 1);
+            REQUIRE(map.TryInsert(key, 0) == MapInsertResult::Exists);
+        }
+        for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
+            REQUIRE_FALSE(map.Contains(key));
+            REQUIRE(map.Find(key + kKeyCount) == key + 2);
+        }
+    };
+
+    requireTopology.template operator()<MapTopologies::Local>();
+    requireTopology.template operator()<MapTopologies::Spsc>();
+    requireTopology.template operator()<MapTopologies::Mpsc>();
+    requireTopology.template operator()<MapTopologies::Spmc>();
+    requireTopology.template operator()<MapTopologies::Mpmc>();
 }
 
 TEST_CASE("Dynamic ConcurrentMap MPMC admits exactly one duplicate-key insertion across growth",
