@@ -239,6 +239,45 @@ namespace {
         REQUIRE(set.Contains(7));
     }
 
+    template<MapTopology Topology, std::size_t Capacity>
+    void RequireOrderedSnapshotSemantics() {
+        using Map = ConcurrentOrderedMap<std::uint64_t, std::uint64_t, Capacity, Topology>;
+        using Set = ConcurrentOrderedSet<std::uint64_t, Capacity, Topology>;
+        auto verify = []<class MapType, class SetType>(MapType& map, SetType& set) {
+            constexpr std::uint64_t kKeyCount = 256;
+            for (std::uint64_t index = 0; index != kKeyCount; ++index) {
+                const std::uint64_t key = index * 73U & (kKeyCount - 1);
+                REQUIRE(map.TryInsert(key, key * 10) == MapInsertResult::Inserted);
+                REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+            }
+            for (std::uint64_t key = 0; key < kKeyCount; key += 5) {
+                REQUIRE(map.Erase(key));
+                REQUIRE(set.Erase(key));
+                REQUIRE(map.TryInsert(key, key * 10) == MapInsertResult::Inserted);
+                REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+            }
+            const auto mapEntries = map.Snapshot();
+            const auto setKeys = set.Snapshot();
+            REQUIRE(mapEntries.size() == kKeyCount);
+            REQUIRE(setKeys.size() == kKeyCount);
+            for (std::size_t index = 0; index != kKeyCount; ++index) {
+                REQUIRE(mapEntries[index].first == index);
+                REQUIRE(mapEntries[index].second == index * 10);
+                REQUIRE(setKeys[index] == index);
+            }
+        };
+
+        if constexpr (Capacity == std::dynamic_extent) {
+            Map map{8};
+            Set set{8};
+            verify(map, set);
+        } else {
+            Map map;
+            Set set;
+            verify(map, set);
+        }
+    }
+
 } // namespace
 
 TEST_CASE("Map topology vocabulary reduces exact participant counts at compile time", AUTO_TAG) {
@@ -249,8 +288,12 @@ TEST_CASE("Map topology vocabulary reduces exact participant counts at compile t
     STATIC_REQUIRE(StaticMapTopology<4, 4, 2>() == MapTopologies::Mpmc);
     using HashMapAlias = ConcurrentHashMap<std::uint64_t, std::uint64_t, 8, MapTopologies::Local>;
     using HashSetAlias = ConcurrentHashSet<std::uint64_t, 8, MapTopologies::Local>;
+    using OrderedMapAlias = ConcurrentOrderedMap<std::uint64_t, std::uint64_t, 8, MapTopologies::Local>;
+    using OrderedSetAlias = ConcurrentOrderedSet<std::uint64_t, 8, MapTopologies::Local>;
     STATIC_REQUIRE(HashMapAlias::order == MapOrder::Unordered);
     STATIC_REQUIRE(HashSetAlias::order == MapOrder::Unordered);
+    STATIC_REQUIRE(OrderedMapAlias::order == MapOrder::Ordered);
+    STATIC_REQUIRE(OrderedSetAlias::order == MapOrder::Ordered);
 }
 
 TEST_CASE("ConcurrentMap every topology retains sequential map semantics", AUTO_TAG) {
@@ -365,6 +408,55 @@ TEST_CASE("Dynamic ConcurrentMap and ConcurrentSet grow without rehashing publis
     REQUIRE(set.Empty());
     REQUIRE(map.TryInsert(42, 84) == MapInsertResult::Inserted);
     REQUIRE(set.TryInsert(42) == MapInsertResult::Inserted);
+}
+
+TEST_CASE("Dynamic Local ConcurrentMap preserves value addresses while rebuilding its locator index", AUTO_TAG) {
+    ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Local> map{8};
+    REQUIRE(map.TryInsert(0, 17) == MapInsertResult::Inserted);
+    std::uint64_t* const stableValue = map.FindRef(0);
+    REQUIRE(stableValue != nullptr);
+
+    for (std::uint64_t key = 1; key != 10'000; ++key) {
+        REQUIRE(map.TryInsert(key, key * 3) == MapInsertResult::Inserted);
+    }
+    REQUIRE(map.FindRef(0) == stableValue);
+    REQUIRE(map.InsertOrAssign(0, 23) == MapAssignResult::Assigned);
+    REQUIRE(map.FindRef(0) == stableValue);
+    REQUIRE(*stableValue == 23);
+}
+
+TEST_CASE("Dynamic Local map and set survive disjoint-key tombstone churn", AUTO_TAG_WITH("Stress")) {
+    constexpr std::uint64_t kKeyCount = 1'024;
+    constexpr std::uint64_t kRounds = 16;
+    ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Local> map{8};
+    ConcurrentSet<std::uint64_t, std::dynamic_extent, MapTopologies::Local> set{8};
+
+    for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+        REQUIRE(map.TryInsert(key, key) == MapInsertResult::Inserted);
+        REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+    }
+    for (std::uint64_t round = 1; round != kRounds; ++round) {
+        const std::uint64_t oldBase = (round - 1) * kKeyCount;
+        const std::uint64_t newBase = round * kKeyCount;
+        for (std::uint64_t offset = 0; offset != kKeyCount; ++offset) {
+            REQUIRE(map.Erase(oldBase + offset));
+            REQUIRE(set.Erase(oldBase + offset));
+        }
+        for (std::uint64_t offset = 0; offset != kKeyCount; ++offset) {
+            const std::uint64_t key = newBase + offset;
+            REQUIRE(map.TryInsert(key, ~key) == MapInsertResult::Inserted);
+            REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
+        }
+        REQUIRE(map.SizeApprox() == kKeyCount);
+        REQUIRE(set.SizeApprox() == kKeyCount);
+    }
+
+    const std::uint64_t finalBase = (kRounds - 1) * kKeyCount;
+    for (std::uint64_t offset = 0; offset != kKeyCount; ++offset) {
+        const std::uint64_t key = finalBase + offset;
+        REQUIRE(map.Find(key) == ~key);
+        REQUIRE(set.Contains(key));
+    }
 }
 
 TEST_CASE("Dynamic ConcurrentMap MPMC grows while readers observe complete values", AUTO_TAG) {
@@ -533,21 +625,35 @@ TEST_CASE("Dynamic ConcurrentMap keeps a reader-held retired version alive acros
     REQUIRE(map.Empty());
 }
 
-TEST_CASE("Ordered ConcurrentMap and ConcurrentSet expose key-sorted snapshots", AUTO_TAG) {
-    ConcurrentMap<std::uint64_t, std::uint64_t, 32, MapTopologies::Mpmc, MapOrder::Ordered> map;
-    ConcurrentSet<std::uint64_t, 32, MapTopologies::Mpmc, MapOrder::Ordered> set;
+TEST_CASE("Ordered ConcurrentMap and ConcurrentSet cover every topology and capacity policy", AUTO_TAG) {
+    RequireOrderedSnapshotSemantics<MapTopologies::Local, 512>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Spsc, 512>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Mpsc, 512>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Spmc, 512>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Mpmc, 512>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Local, std::dynamic_extent>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Spsc, std::dynamic_extent>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Mpsc, std::dynamic_extent>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Spmc, std::dynamic_extent>();
+    RequireOrderedSnapshotSemantics<MapTopologies::Mpmc, std::dynamic_extent>();
+}
+
+TEST_CASE("Ordered ConcurrentMap and ConcurrentSet honor their compile-time comparator", AUTO_TAG) {
+    using Map = ConcurrentOrderedMap<std::uint64_t, std::uint64_t, 32, MapTopologies::Local,
+                                     Hashing::DefaultAlgo, std::equal_to<std::uint64_t>, std::greater<std::uint64_t>>;
+    using Set = ConcurrentOrderedSet<std::uint64_t, 32, MapTopologies::Local, Hashing::DefaultAlgo,
+                                     std::equal_to<std::uint64_t>, std::greater<std::uint64_t>>;
+    Map map;
+    Set set;
     for (const std::uint64_t key : {7, 1, 15, 3, 9, 2}) {
         REQUIRE(map.TryInsert(key, key * 10) == MapInsertResult::Inserted);
         REQUIRE(set.TryInsert(key) == MapInsertResult::Inserted);
     }
     const auto mapEntries = map.Snapshot();
     const auto setKeys = set.Snapshot();
-    REQUIRE(mapEntries.size() == 6);
-    REQUIRE(setKeys.size() == 6);
     for (std::size_t index = 1; index != mapEntries.size(); ++index) {
-        REQUIRE(mapEntries[index - 1].first < mapEntries[index].first);
-        REQUIRE(mapEntries[index].second == mapEntries[index].first * 10);
-        REQUIRE(setKeys[index - 1] < setKeys[index]);
+        REQUIRE(mapEntries[index - 1].first > mapEntries[index].first);
+        REQUIRE(setKeys[index - 1] > setKeys[index]);
     }
 }
 
