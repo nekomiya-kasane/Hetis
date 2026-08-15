@@ -807,6 +807,31 @@ TEST_CASE("Dynamic ConcurrentMap and ConcurrentSet grow without rehashing publis
     REQUIRE(set.TryInsert(42) == MapInsertResult::Inserted);
 }
 
+TEST_CASE("Dynamic SPSC ConcurrentMap and ConcurrentSet cross every growth tier", AUTO_TAG_WITH("Stress")) {
+    using Map = ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Spsc>;
+    using Set = ConcurrentSet<std::uint64_t, std::dynamic_extent, MapTopologies::Spsc>;
+    constexpr std::uint64_t kKeyCount = 75'000;
+    Map map{8};
+    Set set{8};
+    std::size_t failures = 0;
+    for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+        failures += map.TryInsert(key, key ^ 0xd6e8feb86659fd93ULL) != MapInsertResult::Inserted;
+        failures += set.TryInsert(key) != MapInsertResult::Inserted;
+    }
+    REQUIRE(failures == 0);
+    REQUIRE(map.SizeApprox() == kKeyCount);
+    REQUIRE(set.SizeApprox() == kKeyCount);
+    for (std::uint64_t key = 0; key < kKeyCount; key += 257) {
+        CAPTURE(key);
+        REQUIRE(map.Find(key) == (key ^ 0xd6e8feb86659fd93ULL));
+        REQUIRE(set.Contains(key));
+    }
+    map.Clear();
+    set.Clear();
+    REQUIRE(map.Empty());
+    REQUIRE(set.Empty());
+}
+
 TEST_CASE("Dynamic Local ConcurrentMap preserves value addresses while rebuilding its locator index", AUTO_TAG) {
     ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Local> map{8};
     REQUIRE(map.TryInsert(0, 17) == MapInsertResult::Inserted);
