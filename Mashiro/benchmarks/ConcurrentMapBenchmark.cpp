@@ -5,9 +5,13 @@
  */
 #include <Mashiro/Core/ConcurrentMap.h>
 
+#include <oneapi/tbb/concurrent_unordered_map.h>
+
+#include <barrier>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -94,26 +98,159 @@ namespace {
                   << elapsed.count() << "\n";
     }
 
-    void RunMpmcInsert() {
-        constexpr std::size_t kWriters = 4;
-        constexpr std::size_t kKeysPerWriter = 4'000;
-        ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc> map{64};
+    void RunTbbConcurrentLookup() {
+        constexpr std::size_t kKeys = 1U << 15;
+        constexpr std::size_t kThreads = 4;
+        constexpr std::size_t kIterationsPerThread = 2'000'000;
+        oneapi::tbb::concurrent_unordered_map<std::uint64_t, std::uint64_t> map;
+        map.reserve(kKeys);
+        for (std::uint64_t key = 0; key != kKeys; ++key) {
+            map.emplace(key, key + 1);
+        }
+
         std::vector<std::jthread> workers;
-        workers.reserve(kWriters);
+        workers.reserve(kThreads);
         const auto begin = Clock::now();
-        for (std::size_t writer = 0; writer != kWriters; ++writer) {
-            workers.emplace_back([&, writer] {
-                for (std::size_t offset = 0; offset != kKeysPerWriter; ++offset) {
-                    const std::uint64_t key = writer * kKeysPerWriter + offset;
-                    while (map.TryInsert(key, key + 1) != MapInsertResult::Inserted) {
-                        std::this_thread::yield();
-                    }
+        for (std::size_t thread = 0; thread != kThreads; ++thread) {
+            workers.emplace_back([&, thread] {
+                std::uint64_t sink = 0;
+                for (std::size_t iteration = 0; iteration != kIterationsPerThread; ++iteration) {
+                    const auto iterator = map.find((iteration + thread) & (kKeys - 1));
+                    sink ^= iterator->second;
+                }
+                std::atomic_signal_fence(std::memory_order_seq_cst);
+                if (sink == 0) {
+                    std::cerr << "unexpected zero sink\n";
                 }
             });
         }
         workers.clear();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin);
+        std::cout << "tbb_concurrent_unordered_find," << MillionOpsPerSecond(kThreads * kIterationsPerThread, elapsed)
+                  << ',' << elapsed.count() << "\n";
+    }
+
+    void RunDynamicConcurrentLookup() {
+        constexpr std::size_t kKeys = 1U << 18;
+        constexpr std::size_t kThreads = 4;
+        constexpr std::size_t kIterationsPerThread = 2'000'000;
+        ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc> map{64};
+        for (std::uint64_t key = 0; key != kKeys; ++key) {
+            if (map.TryInsert(key, key + 1) != MapInsertResult::Inserted) {
+                std::terminate();
+            }
+        }
+
+        std::barrier start{static_cast<std::ptrdiff_t>(kThreads + 1)};
+        std::vector<std::jthread> workers;
+        workers.reserve(kThreads);
+        for (std::size_t thread = 0; thread != kThreads; ++thread) {
+            workers.emplace_back([&, thread] {
+                start.arrive_and_wait();
+                std::uint64_t sink = 0;
+                std::uint64_t value = 0;
+                for (std::size_t iteration = 0; iteration != kIterationsPerThread; ++iteration) {
+                    const bool found = map.TryGet((iteration + thread) & (kKeys - 1), value);
+                    (void)found;
+                    sink ^= value;
+                }
+                std::atomic_signal_fence(std::memory_order_seq_cst);
+                if (sink == 0) {
+                    std::cerr << "unexpected zero sink\n";
+                }
+            });
+        }
+        const auto begin = Clock::now();
+        start.arrive_and_wait();
+        workers.clear();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin);
+        std::cout << "mashiro_mpmc_dynamic_find," << MillionOpsPerSecond(kThreads * kIterationsPerThread, elapsed)
+                  << ',' << elapsed.count() << "\n";
+    }
+
+    void RunTbbDynamicConcurrentLookup() {
+        constexpr std::size_t kKeys = 1U << 18;
+        constexpr std::size_t kThreads = 4;
+        constexpr std::size_t kIterationsPerThread = 2'000'000;
+        oneapi::tbb::concurrent_unordered_map<std::uint64_t, std::uint64_t> map;
+        for (std::uint64_t key = 0; key != kKeys; ++key) {
+            map.emplace(key, key + 1);
+        }
+
+        std::barrier start{static_cast<std::ptrdiff_t>(kThreads + 1)};
+        std::vector<std::jthread> workers;
+        workers.reserve(kThreads);
+        for (std::size_t thread = 0; thread != kThreads; ++thread) {
+            workers.emplace_back([&, thread] {
+                start.arrive_and_wait();
+                std::uint64_t sink = 0;
+                for (std::size_t iteration = 0; iteration != kIterationsPerThread; ++iteration) {
+                    const auto iterator = map.find((iteration + thread) & (kKeys - 1));
+                    sink ^= iterator->second;
+                }
+                std::atomic_signal_fence(std::memory_order_seq_cst);
+                if (sink == 0) {
+                    std::cerr << "unexpected zero sink\n";
+                }
+            });
+        }
+        const auto begin = Clock::now();
+        start.arrive_and_wait();
+        workers.clear();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin);
+        std::cout << "tbb_dynamic_find," << MillionOpsPerSecond(kThreads * kIterationsPerThread, elapsed) << ','
+                  << elapsed.count() << "\n";
+    }
+
+    void RunMpmcInsert() {
+        constexpr std::size_t kWriters = 4;
+        constexpr std::size_t kKeysPerWriter = 100'000;
+        ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc> map{64};
+        std::barrier start{static_cast<std::ptrdiff_t>(kWriters + 1)};
+        std::vector<std::jthread> workers;
+        workers.reserve(kWriters);
+        for (std::size_t writer = 0; writer != kWriters; ++writer) {
+            workers.emplace_back([&, writer] {
+                start.arrive_and_wait();
+                for (std::size_t offset = 0; offset != kKeysPerWriter; ++offset) {
+                    const std::uint64_t key = writer * kKeysPerWriter + offset;
+                    if (map.TryInsert(key, key + 1) != MapInsertResult::Inserted) {
+                        std::terminate();
+                    }
+                }
+            });
+        }
+        const auto begin = Clock::now();
+        start.arrive_and_wait();
+        workers.clear();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin);
         std::cout << "mashiro_mpmc_dynamic_insert," << MillionOpsPerSecond(kWriters * kKeysPerWriter, elapsed) << ','
+                  << elapsed.count() << "\n";
+    }
+
+    void RunTbbMpmcInsert() {
+        constexpr std::size_t kWriters = 4;
+        constexpr std::size_t kKeysPerWriter = 100'000;
+        oneapi::tbb::concurrent_unordered_map<std::uint64_t, std::uint64_t> map;
+        std::barrier start{static_cast<std::ptrdiff_t>(kWriters + 1)};
+        std::vector<std::jthread> workers;
+        workers.reserve(kWriters);
+        for (std::size_t writer = 0; writer != kWriters; ++writer) {
+            workers.emplace_back([&, writer] {
+                start.arrive_and_wait();
+                for (std::size_t offset = 0; offset != kKeysPerWriter; ++offset) {
+                    const std::uint64_t key = writer * kKeysPerWriter + offset;
+                    if (!map.emplace(key, key + 1).second) {
+                        std::terminate();
+                    }
+                }
+            });
+        }
+        const auto begin = Clock::now();
+        start.arrive_and_wait();
+        workers.clear();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin);
+        std::cout << "tbb_mpmc_dynamic_insert," << MillionOpsPerSecond(kWriters * kKeysPerWriter, elapsed) << ','
                   << elapsed.count() << "\n";
     }
 
@@ -125,5 +262,9 @@ int main() {
     RunConcurrentLookup<MapTopologies::Spsc>("mashiro_spsc_find");
     RunConcurrentLookup<MapTopologies::Spmc>("mashiro_spmc_find");
     RunConcurrentLookup<MapTopologies::Mpmc>("mashiro_mpmc_find");
+    RunTbbConcurrentLookup();
+    RunDynamicConcurrentLookup();
+    RunTbbDynamicConcurrentLookup();
     RunMpmcInsert();
+    RunTbbMpmcInsert();
 }

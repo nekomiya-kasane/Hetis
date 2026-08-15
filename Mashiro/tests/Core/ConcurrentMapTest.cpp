@@ -339,6 +339,63 @@ TEST_CASE("Dynamic ConcurrentMap MPMC grows while readers observe complete value
     }
 }
 
+TEST_CASE("Dynamic ConcurrentMap preserves membership under saturated collision chains", AUTO_TAG_WITH("Stress")) {
+    constexpr std::uint64_t kKeyCount = 512;
+    ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc, MapOrder::Unordered,
+                  ConstantHash>
+        map{8};
+    for (std::uint64_t key = 0; key != kKeyCount; ++key) {
+        REQUIRE(map.TryInsert(key, key + 1) == MapInsertResult::Inserted);
+    }
+    for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
+        REQUIRE(map.Erase(key));
+        REQUIRE(map.TryInsert(key + kKeyCount, key + 2) == MapInsertResult::Inserted);
+    }
+    REQUIRE(map.SizeApprox() == kKeyCount);
+    for (std::uint64_t key = 1; key < kKeyCount; key += 2) {
+        REQUIRE(map.Find(key) == key + 1);
+        REQUIRE(map.TryInsert(key, 0) == MapInsertResult::Exists);
+    }
+    for (std::uint64_t key = 0; key != kKeyCount; key += 2) {
+        REQUIRE_FALSE(map.Contains(key));
+        REQUIRE(map.Find(key + kKeyCount) == key + 2);
+    }
+}
+
+TEST_CASE("Dynamic ConcurrentMap MPMC admits exactly one duplicate-key insertion across growth",
+          AUTO_TAG_WITH("Stress")) {
+    constexpr std::size_t kWriterCount = 8;
+    constexpr std::size_t kKeyCount = 2'000;
+    ConcurrentMap<std::uint64_t, std::uint64_t, std::dynamic_extent, MapTopologies::Mpmc> map{8};
+    std::array<std::atomic<std::uint8_t>, kKeyCount> insertionCounts{};
+    std::barrier start{static_cast<std::ptrdiff_t>(kWriterCount)};
+    std::atomic<bool> failed{};
+    std::array<std::jthread, kWriterCount> writers;
+    for (std::size_t writer = 0; writer != kWriterCount; ++writer) {
+        writers[writer] = std::jthread{[&, writer] {
+            start.arrive_and_wait();
+            for (std::size_t offset = 0; offset != kKeyCount; ++offset) {
+                const std::size_t key = (offset * 1'001 + writer * 977) % kKeyCount;
+                const MapInsertResult result = map.TryInsert(key, key + 1);
+                if (result == MapInsertResult::Inserted) {
+                    insertionCounts[key].fetch_add(1, std::memory_order_relaxed);
+                } else if (result != MapInsertResult::Exists) {
+                    failed.store(true, std::memory_order_relaxed);
+                }
+            }
+        }};
+    }
+    for (auto& writer : writers) {
+        writer.join();
+    }
+    REQUIRE_FALSE(failed.load(std::memory_order_relaxed));
+    REQUIRE(map.SizeApprox() == kKeyCount);
+    for (std::size_t key = 0; key != kKeyCount; ++key) {
+        REQUIRE(insertionCounts[key].load(std::memory_order_relaxed) == 1);
+        REQUIRE(map.Find(key) == key + 1);
+    }
+}
+
 TEST_CASE("Dynamic ConcurrentMap SPSC MPSC and SPMC publish unique values", AUTO_TAG_WITH("Stress")) {
     INFO("SPSC");
     RequireDynamicConcurrentUniqueInsertion<MapTopologies::Spsc, 1, 1>();

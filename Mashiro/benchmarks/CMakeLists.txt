@@ -40,7 +40,7 @@ set_target_properties(Benchmark.Mashiro.AsyncQueue PROPERTIES
 vk_tp_deploy_runtime(Benchmark.Mashiro.AsyncQueue)
 
 add_executable(Benchmark.Mashiro.ConcurrentMaps EXCLUDE_FROM_ALL ConcurrentMapBenchmark.cpp)
-target_link_libraries(Benchmark.Mashiro.ConcurrentMaps PRIVATE Mashiro)
+target_link_libraries(Benchmark.Mashiro.ConcurrentMaps PRIVATE Mashiro TBB::tbb)
 set_target_properties(Benchmark.Mashiro.ConcurrentMaps PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
