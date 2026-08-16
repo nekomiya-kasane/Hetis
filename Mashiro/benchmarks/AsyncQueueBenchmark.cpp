@@ -4,8 +4,15 @@
  * @ingroup Core
  */
 
-#include <Mashiro/Concurrency/AsyncQueue.h>
-#include <Mashiro/Core/RingBuffer.h>
+#if defined(SORA_MIGRATION_TARGET)
+#    include <Sora/Core/Concurrency/AsyncQueue.h>
+#    include <Sora/Core/Concurrency/RecordRingBuffer.h>
+#    include <Sora/Core/Concurrency/RingBuffer.h>
+#else
+#    include <Mashiro/Concurrency/AsyncQueue.h>
+#    include <Mashiro/Core/RecordRingBuffer.h>
+#    include <Mashiro/Core/RingBuffer.h>
+#endif
 
 #include <blockingconcurrentqueue.h>
 #include <oneapi/tbb/concurrent_queue.h>
@@ -20,6 +27,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -39,11 +47,25 @@
 #include <vector>
 
 #if defined(_M_X64) || defined(__x86_64__)
-#include <immintrin.h>
+#    include <immintrin.h>
 #endif
 
 #if defined(_WIN32)
-#include <windows.h>
+#    include <windows.h>
+#endif
+
+#if defined(SORA_MIGRATION_TARGET)
+#    define Mashiro Sora
+
+namespace Sora {
+
+    template<typename T, std::size_t Capacity, Concurrency::QueueTopology Topology>
+    using RingBuffer = Concurrency::RingBuffer<T, Capacity, Topology>;
+
+    template<std::size_t ByteCapacity, Concurrency::QueueTopology Topology = Concurrency::QueueTopologies::Spsc>
+    using RecordRingBuffer = Concurrency::RecordRingBuffer<ByteCapacity, Topology>;
+
+} // namespace Sora
 #endif
 
 namespace Mashiro::Benchmark {
@@ -219,7 +241,7 @@ namespace Mashiro::Benchmark {
     template<typename T>
     inline void DoNotOptimize(const T& value) noexcept {
 #if defined(__clang__) || defined(__GNUC__)
-        asm volatile("" : : "g"(std::addressof(value)) : "memory");
+        asm volatile("" ::"g"(std::addressof(value)) : "memory");
 #else
         static_cast<void>(value);
         std::atomic_signal_fence(std::memory_order_seq_cst);
@@ -335,6 +357,38 @@ namespace Mashiro::Benchmark {
         }
     };
 
+    /** @brief Inline receiver without cancellation or cross-thread terminal synchronization. */
+    template<typename T>
+    struct UnstoppableInlineReceiver {
+        using receiver_concept = stdexec::receiver_t;
+
+        T* value{};
+        bool* completed{};
+
+        [[nodiscard]] stdexec::env<> get_env() const noexcept { return {}; }
+
+        void set_value(T result) && noexcept {
+            *value = std::move(result);
+            *completed = true;
+        }
+
+        void set_stopped() && noexcept { *completed = true; }
+        void set_error(Concurrency::QueueError) && noexcept { *completed = true; }
+    };
+
+    /** @brief Push receiver without cancellation or cross-thread terminal synchronization. */
+    struct UnstoppablePushReceiver {
+        using receiver_concept = stdexec::receiver_t;
+
+        bool* completed{};
+
+        [[nodiscard]] stdexec::env<> get_env() const noexcept { return {}; }
+
+        void set_value(Concurrency::PushOutcome) && noexcept { *completed = true; }
+        void set_stopped() && noexcept { *completed = true; }
+        void set_error(Concurrency::QueueError) && noexcept { *completed = true; }
+    };
+
     /** @brief Minimal atomic terminal state with release/acquire publication of completion data. */
     struct AtomicTerminalState {
         std::atomic<TerminalCompletion> completion{TerminalCompletion::Pending};
@@ -397,10 +451,9 @@ namespace Mashiro::Benchmark {
 
     /** @brief Map one terminal selection to its benchmark synchronization state. */
     template<TerminalKind Terminal>
-    using TerminalState =
-        std::conditional_t<Terminal == TerminalKind::ConditionVariable, ConditionTerminalState,
-                           std::conditional_t<Terminal == TerminalKind::SpinWait, SpinTerminalState,
-                                              AtomicTerminalState>>;
+    using TerminalState = std::conditional_t<
+        Terminal == TerminalKind::ConditionVariable, ConditionTerminalState,
+        std::conditional_t<Terminal == TerminalKind::SpinWait, SpinTerminalState, AtomicTerminalState>>;
 
     /** @brief Receiver adapting one push sender to a benchmark terminal state. */
     template<typename State>
@@ -504,8 +557,8 @@ namespace Mashiro::Benchmark {
                 throw std::runtime_error("latency sample is empty");
             }
             for (std::size_t index = 0; index < sample.nanoseconds.size(); ++index) {
-                rawLatencyStream_ << config.label << ',' << category << ',' << scenario << ',' << implementation
-                                  << ',' << sampleIndex << ',' << index << ',' << sample.nanoseconds[index] << '\n';
+                rawLatencyStream_ << config.label << ',' << category << ',' << scenario << ',' << implementation << ','
+                                  << sampleIndex << ',' << index << ',' << sample.nanoseconds[index] << '\n';
             }
             rawLatencyStream_.flush();
             std::ranges::sort(sample.nanoseconds);
@@ -513,8 +566,8 @@ namespace Mashiro::Benchmark {
                 const double position = quantile * static_cast<double>(sample.nanoseconds.size() - 1);
                 return sample.nanoseconds[static_cast<std::size_t>(std::llround(position))];
             };
-            WritePrefix(config, category, scenario, implementation, 0, 0, 1, 1, sampleIndex,
-                        sample.nanoseconds.size(), 0.0, 0.0);
+            WritePrefix(config, category, scenario, implementation, 0, 0, 1, 1, sampleIndex, sample.nanoseconds.size(),
+                        0.0, 0.0);
             stream_ << ',' << percentile(0.50) << ',' << percentile(0.90) << ',' << percentile(0.99) << ','
                     << percentile(0.999) << ',' << sample.nanoseconds.back() << ",0," << Placement(config) << ','
                     << config.parkDelay.count() << '\n';
@@ -660,7 +713,7 @@ namespace Mashiro::Benchmark {
     /** @brief Run one Mashiro AsyncQueue throughput sample through the public sender API. */
     template<TerminalKind Terminal, typename Storage, typename T>
     [[nodiscard]] ThroughputSample RunMashiroThroughput(std::size_t producers, std::size_t consumers,
-                                                         std::size_t itemsPerProducer, bool pinWorkers) {
+                                                        std::size_t itemsPerProducer, bool pinWorkers) {
         using Queue = Concurrency::AsyncQueue<Storage>;
         Queue queue;
         const std::size_t workerCount = producers + consumers;
@@ -723,6 +776,100 @@ namespace Mashiro::Benchmark {
         if (placementFailed.load(std::memory_order_relaxed) || consumed.load(std::memory_order_relaxed) != expected ||
             checksum.load(std::memory_order_relaxed) != expectedChecksum) {
             throw std::runtime_error("Mashiro AsyncQueue throughput integrity check failed");
+        }
+        return {.seconds = std::chrono::duration<double>(end - begin).count(), .transfers = expected};
+    }
+
+    /** @brief Construct one deterministic owning record with an identity in its first eight bytes. */
+    template<std::size_t PayloadBytes, class Record>
+    [[nodiscard]] Record MakeBenchmarkRecord(std::uint64_t id) {
+        static_assert(PayloadBytes >= sizeof(id));
+        std::array<std::byte, PayloadBytes> bytes{};
+        std::memcpy(bytes.data(), &id, sizeof(id));
+        for (std::size_t index = sizeof(id); index != PayloadBytes; ++index) {
+            bytes[index] = static_cast<std::byte>((id + index) & 0xffu);
+        }
+        return Record{std::span<const std::byte>{bytes}};
+    }
+
+    /** @brief Read the benchmark identity encoded by @ref MakeBenchmarkRecord. */
+    template<class Record>
+    [[nodiscard]] std::uint64_t BenchmarkRecordId(const Record& record) noexcept {
+        if (record.size() < sizeof(std::uint64_t)) {
+            std::terminate();
+        }
+        std::uint64_t id = 0;
+        std::memcpy(&id, record.data(), sizeof(id));
+        return id;
+    }
+
+    /** @brief Run one RecordRingBuffer-backed AsyncQueue sample through the public sender API. */
+    template<TerminalKind Terminal, typename Storage, std::size_t PayloadBytes>
+    [[nodiscard]] ThroughputSample RunRecordAsyncThroughput(std::size_t producers, std::size_t consumers,
+                                                            std::size_t itemsPerProducer, bool pinWorkers) {
+        using Queue = Concurrency::AsyncQueue<Storage>;
+        using Record = typename Queue::value_type;
+        Queue queue;
+        const std::size_t workerCount = producers + consumers;
+        const auto cpuSets = SelectWorkerCpuSets(workerCount, pinWorkers);
+        std::barrier start{static_cast<std::ptrdiff_t>(workerCount + 1)};
+        std::latch done{static_cast<std::ptrdiff_t>(workerCount)};
+        std::atomic<std::size_t> remainingProducers{producers};
+        std::atomic<std::uint64_t> consumed{};
+        std::atomic<std::uint64_t> checksum{};
+        std::atomic<bool> placementFailed{};
+        std::vector<std::thread> workers;
+        workers.reserve(workerCount);
+
+        for (std::size_t producerIndex = 0; producerIndex != producers; ++producerIndex) {
+            workers.emplace_back([&, producerIndex] {
+                auto port = queue.Producer();
+                if (!BindWorker(cpuSets, consumers + producerIndex)) {
+                    placementFailed.store(true, std::memory_order_relaxed);
+                }
+                start.arrive_and_wait();
+                const std::uint64_t first = producerIndex * itemsPerProducer + 1;
+                for (std::size_t index = 0; index != itemsPerProducer; ++index) {
+                    PushAndWait<Terminal>(port, MakeBenchmarkRecord<PayloadBytes, Record>(first + index));
+                }
+                if (remainingProducers.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    queue.Close();
+                }
+                done.count_down();
+            });
+        }
+        for (std::size_t consumerIndex = 0; consumerIndex != consumers; ++consumerIndex) {
+            workers.emplace_back([&, consumerIndex] {
+                auto port = queue.Consumer();
+                if (!BindWorker(cpuSets, consumerIndex)) {
+                    placementFailed.store(true, std::memory_order_relaxed);
+                }
+                start.arrive_and_wait();
+                std::uint64_t localCount = 0;
+                std::uint64_t localChecksum = 0;
+                Record value;
+                while (PopAndWait<Terminal>(port, value)) {
+                    ++localCount;
+                    localChecksum += BenchmarkRecordId(value);
+                }
+                consumed.fetch_add(localCount, std::memory_order_relaxed);
+                checksum.fetch_add(localChecksum, std::memory_order_relaxed);
+                done.count_down();
+            });
+        }
+
+        const auto begin = Clock::now();
+        start.arrive_and_wait();
+        done.wait();
+        const auto end = Clock::now();
+        for (auto& worker : workers) {
+            worker.join();
+        }
+        const std::uint64_t expected = producers * itemsPerProducer;
+        const std::uint64_t expectedChecksum = expected * (expected + 1) / 2;
+        if (placementFailed.load(std::memory_order_relaxed) || consumed.load(std::memory_order_relaxed) != expected ||
+            checksum.load(std::memory_order_relaxed) != expectedChecksum) {
+            throw std::runtime_error("Record AsyncQueue throughput integrity check failed");
         }
         return {.seconds = std::chrono::duration<double>(end - begin).count(), .transfers = expected};
     }
@@ -847,8 +994,7 @@ namespace Mashiro::Benchmark {
                 if (attempt == 7) {
                     throw std::runtime_error("throughput sample did not reach the minimum duration after adaptation");
                 }
-                const double scale =
-                    std::max(2.0, config.minimumSampleSeconds * 1.25 / std::max(result.seconds, 1e-9));
+                const double scale = std::max(2.0, config.minimumSampleSeconds * 1.25 / std::max(result.seconds, 1e-9));
                 const double requested = static_cast<double>(items) * scale;
                 if (!std::isfinite(requested) || requested > 1'000'000'000.0) {
                     throw std::overflow_error("adaptive throughput sample exceeded the practical item limit");
@@ -884,23 +1030,19 @@ namespace Mashiro::Benchmark {
                     body(iterations);
                     const double seconds = std::chrono::duration<double>(Clock::now() - begin).count();
                     if (config.minimumSampleSeconds == 0.0 || seconds >= config.minimumSampleSeconds) {
-                        writer.WriteRate(config, "ready", "push-pop", implementation, sample, iterations * 2,
-                                         seconds);
+                        writer.WriteRate(config, "ready", "push-pop", implementation, sample, iterations * 2, seconds);
                         if (config.minimumSampleSeconds != 0.0) {
-                            const double scale =
-                                std::clamp(config.minimumSampleSeconds * 1.25 / seconds, 0.1, 10.0);
-                            iterations = std::max<std::uint64_t>(
-                                1, static_cast<std::uint64_t>(std::ceil(iterations * scale)));
+                            const double scale = std::clamp(config.minimumSampleSeconds * 1.25 / seconds, 0.1, 10.0);
+                            iterations =
+                                std::max<std::uint64_t>(1, static_cast<std::uint64_t>(std::ceil(iterations * scale)));
                         }
                         break;
                     }
                     if (attempt == 7) {
                         throw std::runtime_error("ready-path sample did not reach the minimum duration");
                     }
-                    const double scale =
-                        std::max(2.0, config.minimumSampleSeconds * 1.25 / std::max(seconds, 1e-9));
-                    iterations =
-                        static_cast<std::uint64_t>(std::ceil(static_cast<double>(iterations) * scale));
+                    const double scale = std::max(2.0, config.minimumSampleSeconds * 1.25 / std::max(seconds, 1e-9));
+                    iterations = static_cast<std::uint64_t>(std::ceil(static_cast<double>(iterations) * scale));
                 }
             }
         };
@@ -969,6 +1111,166 @@ namespace Mashiro::Benchmark {
                     std::terminate();
                 }
                 checksum += value.id;
+            }
+            if (checksum != iterations * (iterations + 1) / 2) {
+                std::terminate();
+            }
+        });
+    }
+
+    /** @brief Measure allocation-free RecordRingBuffer storage, facade, and sender ready paths. */
+    template<std::size_t PayloadBytes, std::size_t ByteCapacity = 4096>
+    void RunRecordReadyPath(const Config& config, CsvWriter& writer) {
+        using Storage = RecordRingBuffer<ByteCapacity, Concurrency::QueueTopologies::Spsc>;
+        using Queue = Concurrency::AsyncQueue<Storage>;
+        using Record = typename Queue::value_type;
+#if defined(SORA_MIGRATION_TARGET)
+        static_assert(PayloadBytes <= Storage::kMaxPayloadBytes);
+#else
+        static_assert(PayloadBytes <= Storage::kMaxRecordBytes);
+#endif
+        const std::string scenario = "push-pop-" + std::to_string(PayloadBytes) + "B";
+        const auto runRate = [&](std::string_view implementation, auto&& body) {
+            std::uint64_t iterations = 100'000;
+            while (config.minimumSampleSeconds != 0.0) {
+                const auto begin = Clock::now();
+                body(iterations);
+                const double seconds = std::chrono::duration<double>(Clock::now() - begin).count();
+                if (seconds >= config.minimumSampleSeconds) {
+                    break;
+                }
+                const double scale = std::max(2.0, config.minimumSampleSeconds * 1.2 / seconds);
+                iterations = static_cast<std::uint64_t>(std::ceil(static_cast<double>(iterations) * scale));
+            }
+            for (std::size_t warmup = 0; warmup != config.warmups; ++warmup) {
+                body(std::max<std::uint64_t>(1, iterations / 2));
+            }
+            for (std::size_t sample = 0; sample != config.samples; ++sample) {
+                const auto begin = Clock::now();
+                body(iterations);
+                const double seconds = std::chrono::duration<double>(Clock::now() - begin).count();
+                writer.WriteRate(config, "record-ready", scenario, implementation, sample, iterations * 2, seconds);
+            }
+        };
+
+        runRate("Record storage try", [](std::uint64_t iterations) {
+            Storage storage;
+            std::uint64_t checksum = 0;
+            for (std::uint64_t index = 1; index <= iterations; ++index) {
+                auto record = MakeBenchmarkRecord<PayloadBytes, Record>(index);
+                if (!storage.TryWrite(record.Bytes())) {
+                    std::terminate();
+                }
+                DoNotOptimize(storage);
+                if (!storage.TryConsume([&checksum](std::span<const std::byte> bytes) noexcept {
+                        std::uint64_t id = 0;
+                        std::memcpy(&id, bytes.data(), sizeof(id));
+                        checksum += id;
+                    })) {
+                    std::terminate();
+                }
+                DoNotOptimize(storage);
+            }
+            if (checksum != iterations * (iterations + 1) / 2) {
+                std::terminate();
+            }
+        });
+        runRate("Record storage owning", [](std::uint64_t iterations) {
+            Storage storage;
+            Record value;
+            std::uint64_t checksum = 0;
+            for (std::uint64_t index = 1; index <= iterations; ++index) {
+                auto record = MakeBenchmarkRecord<PayloadBytes, Record>(index);
+                if (!storage.TryWrite(record.Bytes())) {
+                    std::terminate();
+                }
+                DoNotOptimize(storage);
+                if (!storage.TryConsume([&value, &checksum](std::span<const std::byte> bytes) noexcept {
+                        if (!value.TryAssign(bytes)) {
+                            std::terminate();
+                        }
+                        checksum += BenchmarkRecordId(value);
+                    })) {
+                    std::terminate();
+                }
+                DoNotOptimize(storage);
+            }
+            if (checksum != iterations * (iterations + 1) / 2) {
+                std::terminate();
+            }
+        });
+        runRate("Record AsyncQueue try", [](std::uint64_t iterations) {
+            Queue queue;
+            std::uint64_t checksum = 0;
+            for (std::uint64_t index = 1; index <= iterations; ++index) {
+                auto record = MakeBenchmarkRecord<PayloadBytes, Record>(index);
+                if (!queue.TryPush(record)) {
+                    std::terminate();
+                }
+                DoNotOptimize(queue);
+                auto result = queue.TryPop();
+                if (!result.has_value()) {
+                    std::terminate();
+                }
+                DoNotOptimize(queue);
+                checksum += BenchmarkRecordId(*result);
+            }
+            if (checksum != iterations * (iterations + 1) / 2) {
+                std::terminate();
+            }
+        });
+        runRate("Record sender start", [](std::uint64_t iterations) {
+            Queue queue;
+            auto producer = queue.Producer();
+            auto consumer = queue.Consumer();
+            std::uint64_t checksum = 0;
+            for (std::uint64_t index = 1; index <= iterations; ++index) {
+                std::atomic<bool> pushed{};
+                auto pushSender = producer.Push(MakeBenchmarkRecord<PayloadBytes, Record>(index));
+                auto pushOperation = stdexec::connect(std::move(pushSender), PushReceiver{.completed = &pushed});
+                stdexec::start(pushOperation);
+                if (!pushed.load(std::memory_order_acquire)) {
+                    std::terminate();
+                }
+
+                std::atomic<bool> popped{};
+                Record value;
+                auto popOperation =
+                    stdexec::connect(consumer.Pop(), InlineReceiver<Record>{.value = &value, .completed = &popped});
+                stdexec::start(popOperation);
+                if (!popped.load(std::memory_order_acquire)) {
+                    std::terminate();
+                }
+                checksum += BenchmarkRecordId(value);
+            }
+            if (checksum != iterations * (iterations + 1) / 2) {
+                std::terminate();
+            }
+        });
+        runRate("Record sender unstoppable", [](std::uint64_t iterations) {
+            Queue queue;
+            auto producer = queue.Producer();
+            auto consumer = queue.Consumer();
+            std::uint64_t checksum = 0;
+            for (std::uint64_t index = 1; index <= iterations; ++index) {
+                bool pushed = false;
+                auto pushSender = producer.Push(MakeBenchmarkRecord<PayloadBytes, Record>(index));
+                auto pushOperation =
+                    stdexec::connect(std::move(pushSender), UnstoppablePushReceiver{.completed = &pushed});
+                stdexec::start(pushOperation);
+                if (!pushed) {
+                    std::terminate();
+                }
+
+                bool popped = false;
+                Record value;
+                auto popOperation = stdexec::connect(
+                    consumer.Pop(), UnstoppableInlineReceiver<Record>{.value = &value, .completed = &popped});
+                stdexec::start(popOperation);
+                if (!popped) {
+                    std::terminate();
+                }
+                checksum += BenchmarkRecordId(value);
             }
             if (checksum != iterations * (iterations + 1) / 2) {
                 std::terminate();
@@ -1101,7 +1403,7 @@ namespace Mashiro::Benchmark {
         Queue queue;
         auto producer = queue.Producer();
         auto consumer = queue.Consumer();
-        for (std::size_t index = 0; index < Queue::capacity; ++index) {
+        for (std::size_t index = 0; index < Queue::adapter_type::capacity; ++index) {
             auto result = stdexec::sync_wait(producer.Push(T{.id = index + 1}));
             if (!result || !std::get<0>(*result).Enqueued()) {
                 std::terminate();
@@ -1117,7 +1419,7 @@ namespace Mashiro::Benchmark {
             }
             for (std::size_t index = 0; index < config.latencyIterations; ++index) {
                 std::atomic<bool> completed{};
-                auto sender = producer.Push(T{.id = Queue::capacity + index + 1});
+                auto sender = producer.Push(T{.id = Queue::adapter_type::capacity + index + 1});
                 auto operation = stdexec::connect(std::move(sender), PushReceiver{.completed = &completed});
                 stdexec::start(operation);
                 ready.store(index + 1, std::memory_order_release);
@@ -1247,8 +1549,8 @@ namespace Mashiro::Benchmark {
             T value{};
             auto sender = consumer.Pop();
             auto operation = stdexec::connect(
-                std::move(sender), InlineReceiver<T>{.value = &value, .completed = &completed,
-                                                     .token = stopSource.get_token()});
+                std::move(sender),
+                InlineReceiver<T>{.value = &value, .completed = &completed, .token = stopSource.get_token()});
             stdexec::start(operation);
             const auto begin = Clock::now();
             stopSource.request_stop();
@@ -1364,10 +1666,10 @@ namespace Mashiro::Benchmark {
         for (auto& waiter : waiters) {
             waiter.join();
         }
-        return LatencySample{.nanoseconds = {
-                                 static_cast<std::uint64_t>(
-                                     std::chrono::duration_cast<Nanoseconds>(end - begin).count()),
-                             }};
+        return LatencySample{
+            .nanoseconds = {
+                static_cast<std::uint64_t>(std::chrono::duration_cast<Nanoseconds>(end - begin).count()),
+            }};
     }
 
     /** @brief Measure AsyncQueue abort-to-receiver delivery without introducing a thread terminal. */
@@ -1378,8 +1680,7 @@ namespace Mashiro::Benchmark {
         auto consumer = queue.Consumer();
         std::atomic<std::size_t> completions{};
         using Sender = decltype(consumer.Pop());
-        using Operation =
-            decltype(stdexec::connect(std::declval<Sender>(), std::declval<FanoutReceiver<T>>()));
+        using Operation = decltype(stdexec::connect(std::declval<Sender>(), std::declval<FanoutReceiver<T>>()));
         std::vector<std::unique_ptr<Operation>> operations;
         operations.reserve(waiterCount);
         for (std::size_t index = 0; index < waiterCount; ++index) {
@@ -1394,10 +1695,10 @@ namespace Mashiro::Benchmark {
         if (completions.load(std::memory_order_acquire) != waiterCount) {
             std::terminate();
         }
-        return LatencySample{.nanoseconds = {
-                                 static_cast<std::uint64_t>(
-                                     std::chrono::duration_cast<Nanoseconds>(end - begin).count()),
-                             }};
+        return LatencySample{
+            .nanoseconds = {
+                static_cast<std::uint64_t>(std::chrono::duration_cast<Nanoseconds>(end - begin).count()),
+            }};
     }
 
     /** @brief Measure pending-pop to inline receiver callback delivery without an OS thread wake. */
@@ -1445,8 +1746,7 @@ namespace Mashiro::Benchmark {
         writer.WriteSize(config, "pop-sender", "Mashiro AsyncQueue", sizeof(PopSender));
         writer.WriteSize(config, "push-operation", "Mashiro AsyncQueue", sizeof(PushOperation));
         writer.WriteSize(config, "pop-operation", "Mashiro AsyncQueue", sizeof(PopOperation));
-        writer.WriteSize(config, "queue", "oneTBB bounded",
-                         sizeof(oneapi::tbb::concurrent_bounded_queue<Payload<8>>));
+        writer.WriteSize(config, "queue", "oneTBB bounded", sizeof(oneapi::tbb::concurrent_bounded_queue<Payload<8>>));
         writer.WriteSize(config, "queue", "moodycamel blocking",
                          sizeof(moodycamel::BlockingConcurrentQueue<Payload<8>>));
         writer.WriteSize(config, "queue", "condition variable", sizeof(ConditionQueue<Payload<8>, 1024>));
@@ -1512,9 +1812,9 @@ namespace Mashiro::Benchmark {
         if (config.samples == 0 || config.latencyIterations == 0 || config.itemsPerProducer == 0) {
             throw std::invalid_argument("sample and iteration counts must be non-zero");
         }
-        constexpr std::array sections{"all", "ready", "throughput", "latency", "fanout"};
+        constexpr std::array sections{"all", "ready", "throughput", "record", "latency", "fanout"};
         if (std::ranges::find(sections, config.section) == sections.end()) {
-            throw std::invalid_argument("--section requires all, ready, throughput, latency, or fanout");
+            throw std::invalid_argument("--section requires all, ready, throughput, record, latency, or fanout");
         }
         return config;
     }
@@ -1538,8 +1838,8 @@ namespace Mashiro::Benchmark {
                 const auto run = [&]<TerminalKind Terminal>(std::string_view implementation) {
                     RunThroughputCase(config, writer, scenario, implementation, sizeof(T), Capacity, producers,
                                       consumers, [&](std::size_t items) {
-                                          return RunMashiroThroughput<Terminal, Storage, T>(
-                                              producers, consumers, items, config.pinWorkers);
+                                          return RunMashiroThroughput<Terminal, Storage, T>(producers, consumers, items,
+                                                                                            config.pinWorkers);
                                       });
                 };
                 run.template operator()<TerminalKind::SyncWait>("Mashiro sync_wait");
@@ -1564,8 +1864,8 @@ namespace Mashiro::Benchmark {
                                   return RunExternalThroughput<MoodycamelBlockingQueue<T, Capacity>, T>(
                                       producers, consumers, items, config.pinWorkers);
                               });
-            RunThroughputCase(config, writer, scenario, "condition variable", sizeof(T), Capacity, producers,
-                              consumers, [&](std::size_t items) {
+            RunThroughputCase(config, writer, scenario, "condition variable", sizeof(T), Capacity, producers, consumers,
+                              [&](std::size_t items) {
                                   return RunExternalThroughput<ConditionBlockingQueue<T, Capacity>, T>(
                                       producers, consumers, items, config.pinWorkers);
                               });
@@ -1578,6 +1878,47 @@ namespace Mashiro::Benchmark {
             throughput.template operator()<Payload<64>, 1024>(1, 1, "SPSC");
             throughput.template operator()<Payload<64>, 1024>(4, 1, "MPSC");
             throughput.template operator()<Payload<64>, 1024>(4, 4, "MPMC");
+        }
+
+        if (selected("record")) {
+            constexpr std::size_t kByteCapacity = 4096;
+            RunRecordReadyPath<8, kByteCapacity>(config, writer);
+            RunRecordReadyPath<64, kByteCapacity>(config, writer);
+            RunRecordReadyPath<1024, kByteCapacity>(config, writer);
+
+            const auto recordThroughput = [&]<std::size_t PayloadBytes>(std::size_t producers, std::size_t consumers,
+                                                                        std::string_view scenario) {
+                const auto run = [&]<typename Storage, TerminalKind Terminal>(std::string_view implementation) {
+                    RunThroughputCase(config, writer, scenario, implementation, PayloadBytes, kByteCapacity, producers,
+                                      consumers, [&](std::size_t items) {
+                                          return RunRecordAsyncThroughput<Terminal, Storage, PayloadBytes>(
+                                              producers, consumers, items, config.pinWorkers);
+                                      });
+                };
+                if (producers == 1 && consumers == 1) {
+                    using Storage = RecordRingBuffer<kByteCapacity, Concurrency::QueueTopologies::Spsc>;
+                    run.template operator()<Storage, TerminalKind::SyncWait>("Record AsyncQueue sync_wait");
+                    run.template operator()<Storage, TerminalKind::SpinWait>("Record AsyncQueue spin terminal");
+                } else if (consumers == 1) {
+                    using Storage = RecordRingBuffer<kByteCapacity, Concurrency::QueueTopologies::Mpsc>;
+                    run.template operator()<Storage, TerminalKind::SyncWait>("Record AsyncQueue sync_wait");
+                    run.template operator()<Storage, TerminalKind::SpinWait>("Record AsyncQueue spin terminal");
+                } else {
+                    using Storage = RecordRingBuffer<kByteCapacity, Concurrency::QueueTopologies::Mpmc>;
+                    run.template operator()<Storage, TerminalKind::SyncWait>("Record AsyncQueue sync_wait");
+                    run.template operator()<Storage, TerminalKind::SpinWait>("Record AsyncQueue spin terminal");
+                }
+            };
+
+            recordThroughput.template operator()<8>(1, 1, "Record SPSC");
+            recordThroughput.template operator()<8>(4, 1, "Record MPSC");
+            recordThroughput.template operator()<8>(4, 4, "Record MPMC");
+            recordThroughput.template operator()<64>(1, 1, "Record SPSC");
+            recordThroughput.template operator()<64>(4, 1, "Record MPSC");
+            recordThroughput.template operator()<64>(4, 4, "Record MPMC");
+            recordThroughput.template operator()<1024>(1, 1, "Record SPSC");
+            recordThroughput.template operator()<1024>(4, 1, "Record MPSC");
+            recordThroughput.template operator()<1024>(4, 4, "Record MPMC");
         }
 
         using T = Payload<8>;
@@ -1611,21 +1952,16 @@ namespace Mashiro::Benchmark {
                 }
                 const std::string scenario = "waiters-" + std::to_string(waiters);
                 RunLatencyCase(config, writer, "abort-callback-fanout", scenario, "Mashiro AsyncQueue",
-                               [&](const Config& current) {
-                                   return RunAbortCallbackFanout<T>(current, waiters);
-                               });
-                RunLatencyCase(config, writer, "abort-thread-fanout", scenario, "Mashiro + atomic wait",
-                               [&](const Config& current) {
-                                   return RunAbortFanout<MashiroAbortQueue<T>>(current, waiters);
-                               });
-                RunLatencyCase(config, writer, "abort-thread-fanout", scenario, "oneTBB bounded",
-                               [&](const Config& current) {
-                                   return RunAbortFanout<TbbAbortQueue<T>>(current, waiters);
-                               });
-                RunLatencyCase(config, writer, "abort-thread-fanout", scenario, "condition variable",
-                               [&](const Config& current) {
-                                   return RunAbortFanout<ConditionAbortQueue<T>>(current, waiters);
-                               });
+                               [&](const Config& current) { return RunAbortCallbackFanout<T>(current, waiters); });
+                RunLatencyCase(
+                    config, writer, "abort-thread-fanout", scenario, "Mashiro + atomic wait",
+                    [&](const Config& current) { return RunAbortFanout<MashiroAbortQueue<T>>(current, waiters); });
+                RunLatencyCase(
+                    config, writer, "abort-thread-fanout", scenario, "oneTBB bounded",
+                    [&](const Config& current) { return RunAbortFanout<TbbAbortQueue<T>>(current, waiters); });
+                RunLatencyCase(
+                    config, writer, "abort-thread-fanout", scenario, "condition variable",
+                    [&](const Config& current) { return RunAbortFanout<ConditionAbortQueue<T>>(current, waiters); });
             }
         }
     }

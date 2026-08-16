@@ -6,7 +6,7 @@
 
 #include <Mashiro/Core/BoundedStack.h>
 #include <Mashiro/Core/RingBuffer.h>
-#include <Mashiro/Core/SpscChannel.h>
+#include <Sora/Core/Concurrency/RingBuffer.h>
 
 #include <concurrentqueue.h>
 #include <oneapi/tbb/concurrent_queue.h>
@@ -43,11 +43,11 @@
 #include <vector>
 
 #if defined(_M_X64) || defined(__x86_64__)
-#include <immintrin.h>
+#    include <immintrin.h>
 #endif
 
 #if defined(_WIN32)
-#include <windows.h>
+#    include <windows.h>
 #endif
 
 namespace Mashiro::Benchmark {
@@ -63,12 +63,19 @@ namespace Mashiro::Benchmark {
         std::size_t itemsPerProducer = 200'000;
         double minimumSampleSeconds = 0.2;
         std::uint64_t seed = 0x534F52414D415348ULL;
+        std::optional<std::size_t> payloadBytes;
+        std::optional<std::size_t> capacity;
+        std::optional<std::string> topology;
+        std::optional<std::size_t> endpoints;
         bool quick = false;
         bool pinWorkers = true;
         bool paired = false;
         bool layouts = false;
         bool references = false;
+        bool soraReferences = false;
         bool spscAudit = false;
+        bool locks = false;
+        bool migration = false;
         bool stacks = false;
     };
 
@@ -244,54 +251,6 @@ namespace Mashiro::Benchmark {
         Storage queue_{};
     };
 
-    /** @brief Mashiro SPSC channel adapter, including its atomic notification-plane cost. */
-    template<typename T, std::size_t Capacity>
-    class MashiroSpscChannel {
-    public:
-        static constexpr std::string_view name = "Mashiro SPSC channel";
-        static constexpr std::size_t storageBytes = sizeof(SpscChannel<T, Capacity>);
-
-        [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
-        [[nodiscard]] bool Pop(T& value) noexcept { return queue_.TryPop(value); }
-
-    private:
-        SpscChannel<T, Capacity> queue_{};
-    };
-
-    /** @brief Pre-optimization SPSC channel with one bidirectionally contended wake sequence. */
-    template<typename T, std::size_t Capacity>
-    class SharedEpochSpscChannel {
-    public:
-        static constexpr std::string_view name = "shared-epoch SPSC channel";
-        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Spsc>;
-        static constexpr std::size_t storageBytes = sizeof(Storage) + Platform::kCacheLineSize;
-
-        [[nodiscard]] bool Push(const T& value) noexcept {
-            if (!queue_.TryPush(value)) {
-                return false;
-            }
-            Signal();
-            return true;
-        }
-
-        [[nodiscard]] bool Pop(T& value) noexcept {
-            if (!queue_.TryPop(value)) {
-                return false;
-            }
-            Signal();
-            return true;
-        }
-
-    private:
-        void Signal() noexcept {
-            epoch_.fetch_add(1, std::memory_order_release);
-            epoch_.notify_one();
-        }
-
-        Storage queue_{};
-        alignas(Platform::kCacheLineSize) std::atomic<std::uint64_t> epoch_{0};
-    };
-
     /** @brief Mashiro MPSC storage adapter. */
     template<typename T, std::size_t Capacity>
     class MashiroMpsc {
@@ -465,6 +424,50 @@ namespace Mashiro::Benchmark {
         Storage queue_{};
     };
 
+    /** @brief Sora topology-specialized storage adapter used to audit the Mashiro-to-Sora migration. */
+    template<typename T, std::size_t Capacity, Sora::Concurrency::QueueTopology Topology>
+    class SoraRing {
+        static constexpr bool kSpsc = Topology == Sora::Concurrency::QueueTopologies::Spsc;
+
+    public:
+        static constexpr std::string_view name = "Sora RingBuffer";
+        using Storage = Sora::Concurrency::RingBuffer<T, Capacity, Topology>;
+        static constexpr std::size_t padding = (Sora::kCacheLineSize - 1) / sizeof(T) + 1;
+        static constexpr std::size_t storageBytes =
+            sizeof(Storage) + (kSpsc ? (Capacity + 1 + 2 * padding) * sizeof(T) : 0);
+
+        [[nodiscard]] bool Push(const T& value) noexcept { return queue_.TryPush(value); }
+
+        [[nodiscard]] bool Pop(T& value) noexcept {
+            if constexpr (kSpsc) {
+                T* front = queue_.Front();
+                if (front == nullptr) {
+                    return false;
+                }
+                value = std::move(*front);
+                queue_.PopFront();
+                return true;
+            } else {
+                return queue_.TryPop(value);
+            }
+        }
+
+    private:
+        Storage queue_{};
+    };
+
+    template<typename T, std::size_t Capacity>
+    using SoraSpsc = SoraRing<T, Capacity, Sora::Concurrency::QueueTopologies::Spsc>;
+
+    template<typename T, std::size_t Capacity>
+    using SoraMpsc = SoraRing<T, Capacity, Sora::Concurrency::QueueTopologies::Mpsc>;
+
+    template<typename T, std::size_t Capacity>
+    using SoraSpmc = SoraRing<T, Capacity, Sora::Concurrency::QueueTopologies::Spmc>;
+
+    template<typename T, std::size_t Capacity>
+    using SoraMpmc = SoraRing<T, Capacity, Sora::Concurrency::QueueTopologies::Mpmc>;
+
     /** @brief Rigtorp's specialized bounded SPSC queue adapter. */
     template<typename T, std::size_t Capacity>
     class RigtorpSpsc {
@@ -515,6 +518,31 @@ namespace Mashiro::Benchmark {
     };
     struct RigtorpSpscB {
         static constexpr std::string_view name = "Rigtorp SPSC B";
+    };
+
+    struct MigrationMashiroSelfA {
+        static constexpr std::string_view name = "Mashiro self A";
+    };
+    struct MigrationMashiroSelfB {
+        static constexpr std::string_view name = "Mashiro self B";
+    };
+    struct MigrationSoraSelfA {
+        static constexpr std::string_view name = "Sora self A";
+    };
+    struct MigrationSoraSelfB {
+        static constexpr std::string_view name = "Sora self B";
+    };
+    struct MigrationMashiroForward {
+        static constexpr std::string_view name = "Mashiro forward";
+    };
+    struct MigrationSoraForward {
+        static constexpr std::string_view name = "Sora forward";
+    };
+    struct MigrationSoraReverse {
+        static constexpr std::string_view name = "Sora reverse";
+    };
+    struct MigrationMashiroReverse {
+        static constexpr std::string_view name = "Mashiro reverse";
     };
 
     /** @brief Rigtorp's bounded strict-FIFO MPMC queue adapter. */
@@ -595,6 +623,29 @@ namespace Mashiro::Benchmark {
     private:
         std::mutex mutex_{};
         std::deque<T> queue_{};
+    };
+
+    /** @brief Bounded strict-FIFO reference using the local RingBuffer state machine under one mutex. */
+    template<typename T, std::size_t Capacity>
+    class LockedRingBuffer {
+    public:
+        static constexpr std::string_view name = "mutex RingBuffer";
+        using Storage = RingBuffer<T, Capacity, Concurrency::QueueTopologies::Local>;
+        static constexpr std::size_t storageBytes = sizeof(Storage) + sizeof(std::mutex);
+
+        [[nodiscard]] bool Push(const T& value) {
+            std::scoped_lock lock{mutex_};
+            return queue_.TryPush(value);
+        }
+
+        [[nodiscard]] bool Pop(T& value) {
+            std::scoped_lock lock{mutex_};
+            return queue_.TryPop(value);
+        }
+
+    private:
+        std::mutex mutex_{};
+        Storage queue_{};
     };
 
     /** @brief Run one producer/consumer topology and validate every transferred identity. */
@@ -678,14 +729,12 @@ namespace Mashiro::Benchmark {
 
         const std::uint64_t expectedCount = producers * itemsPerProducer;
         const std::uint64_t expectedChecksum = expectedCount * (expectedCount + 1) / 2;
-        const std::uint64_t consumed = std::ranges::fold_left(
-            consumerResults, std::uint64_t{}, [](std::uint64_t sum, const WorkerResult& item) {
-                return sum + item.transferred;
-            });
-        const std::uint64_t checksum = std::ranges::fold_left(
-            consumerResults, std::uint64_t{}, [](std::uint64_t sum, const WorkerResult& item) {
-                return sum + item.checksum;
-            });
+        const std::uint64_t consumed =
+            std::ranges::fold_left(consumerResults, std::uint64_t{},
+                                   [](std::uint64_t sum, const WorkerResult& item) { return sum + item.transferred; });
+        const std::uint64_t checksum =
+            std::ranges::fold_left(consumerResults, std::uint64_t{},
+                                   [](std::uint64_t sum, const WorkerResult& item) { return sum + item.checksum; });
         if (consumed != expectedCount || checksum != expectedChecksum) {
             throw std::runtime_error("queue benchmark integrity check failed");
         }
@@ -693,12 +742,12 @@ namespace Mashiro::Benchmark {
         return {
             .seconds = std::chrono::duration<double>(end - begin).count(),
             .transferred = consumed,
-            .pushFailures = std::ranges::fold_left(
-                producerResults, std::uint64_t{},
-                [](std::uint64_t sum, const WorkerResult& item) { return sum + item.failures; }),
-            .popFailures = std::ranges::fold_left(
-                consumerResults, std::uint64_t{},
-                [](std::uint64_t sum, const WorkerResult& item) { return sum + item.failures; }),
+            .pushFailures =
+                std::ranges::fold_left(producerResults, std::uint64_t{},
+                                       [](std::uint64_t sum, const WorkerResult& item) { return sum + item.failures; }),
+            .popFailures =
+                std::ranges::fold_left(consumerResults, std::uint64_t{},
+                                       [](std::uint64_t sum, const WorkerResult& item) { return sum + item.failures; }),
         };
     }
 
@@ -721,9 +770,8 @@ namespace Mashiro::Benchmark {
             stream_ << config.label << ',' << scenario << ',' << Queue::name << ',' << payloadBytes << ',' << capacity
                     << ',' << producers << ',' << consumers << ',' << sampleIndex << ',' << sample.transferred << ','
                     << sample.seconds << ',' << throughput << ',' << sample.pushFailures << ',' << sample.popFailures
-                    << ',' << Queue::storageBytes << ','
-                    << (config.pinWorkers ? "cpu-set-high-priority" : "scheduler") << ','
-                    << config.minimumSampleSeconds * 1'000.0 << '\n';
+                    << ',' << Queue::storageBytes << ',' << (config.pinWorkers ? "cpu-set-high-priority" : "scheduler")
+                    << ',' << config.minimumSampleSeconds * 1'000.0 << '\n';
         }
 
     private:
@@ -816,21 +864,20 @@ namespace Mashiro::Benchmark {
     template<std::size_t Capacity, typename T>
     void AppendCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
         auto add = [&cases]<typename Queue>(const Config& cfg, CsvWriter& out, std::string_view scenario,
-                                           std::size_t producers, std::size_t consumers) {
+                                            std::size_t producers, std::size_t consumers) {
             cases.push_back({[&cfg, &out, scenario, producers, consumers] {
                 RunCase<Queue, T>(cfg, out, scenario, Capacity, producers, consumers);
             }});
         };
 
         add.template operator()<MashiroSpsc<T, Capacity>>(config, writer, "SPSC", 1, 1);
-        add.template operator()<MashiroSpscChannel<T, Capacity>>(config, writer, "SPSC", 1, 1);
         add.template operator()<RigtorpSpsc<T, Capacity>>(config, writer, "SPSC", 1, 1);
         add.template operator()<MoodycamelQueue<T, Capacity>>(config, writer, "SPSC", 1, 1);
         add.template operator()<TbbQueue<T, Capacity>>(config, writer, "SPSC", 1, 1);
         add.template operator()<MutexQueue<T, Capacity>>(config, writer, "SPSC", 1, 1);
 
-        const std::array<std::size_t, 3> producerCounts = config.quick ? std::array{2uz, 2uz, 2uz}
-                                                                      : std::array{2uz, 4uz, 8uz};
+        const std::array<std::size_t, 3> producerCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
         for (const std::size_t producers : producerCounts) {
             add.template operator()<MashiroMpsc<T, Capacity>>(config, writer, "MPSC", producers, 1);
             add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "MPSC", producers, 1);
@@ -857,8 +904,7 @@ namespace Mashiro::Benchmark {
             }
         }
 
-        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz}
-                                                                       : std::array{2uz, 4uz};
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
         for (const std::size_t count : symmetricCounts) {
             add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "MPMC", count, count);
             add.template operator()<RigtorpMpmc<T, Capacity>>(config, writer, "MPMC", count, count);
@@ -882,24 +928,21 @@ namespace Mashiro::Benchmark {
             }});
         };
 
-        add.template operator()<MashiroSpscChannel<T, Capacity>, SharedEpochSpscChannel<T, Capacity>>(
-            config, writer, "SPSC", 1, 1);
-        const std::array<std::size_t, 3> producerCounts = config.quick ? std::array{2uz, 2uz, 2uz}
-                                                                      : std::array{2uz, 4uz, 8uz};
+        const std::array<std::size_t, 3> producerCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
         for (const std::size_t producers : producerCounts) {
-            add.template operator()<MashiroMpsc<T, Capacity>, MashiroMpscOptional<T, Capacity>>(
-                config, writer, "MPSC", producers, 1);
-            add.template operator()<MashiroMpmc<T, Capacity>, MashiroMpmcOptional<T, Capacity>>(
-                config, writer, "MPSC", producers, 1);
+            add.template operator()<MashiroMpsc<T, Capacity>, MashiroMpscOptional<T, Capacity>>(config, writer, "MPSC",
+                                                                                                producers, 1);
+            add.template operator()<MashiroMpmc<T, Capacity>, MashiroMpmcOptional<T, Capacity>>(config, writer, "MPSC",
+                                                                                                producers, 1);
             if (config.quick) {
                 break;
             }
         }
-        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz}
-                                                                       : std::array{2uz, 4uz};
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
         for (const std::size_t count : symmetricCounts) {
-            add.template operator()<MashiroMpmc<T, Capacity>, MashiroMpmcOptional<T, Capacity>>(
-                config, writer, "MPMC", count, count);
+            add.template operator()<MashiroMpmc<T, Capacity>, MashiroMpmcOptional<T, Capacity>>(config, writer, "MPMC",
+                                                                                                count, count);
             if (config.quick) {
                 break;
             }
@@ -983,7 +1026,78 @@ namespace Mashiro::Benchmark {
         }
     }
 
-    /** @brief Append controls that expose benchmark-template and implementation-order bias in SPSC comparisons. */
+    /** @brief Append direct Sora versus Rigtorp reference comparisons for every topology. */
+    template<std::size_t Capacity, typename T>
+    void AppendSoraReferenceCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+        auto add = [&cases]<typename First, typename Second>(const Config& cfg, CsvWriter& out,
+                                                             std::string_view scenario, std::size_t producers,
+                                                             std::size_t consumers) {
+            cases.push_back({[&cfg, &out, scenario, producers, consumers] {
+                RunPairedCase<First, Second, T>(cfg, out, scenario, Capacity, producers, consumers);
+            }});
+        };
+
+        add.template operator()<SoraSpsc<T, Capacity>, RigtorpSpsc<T, Capacity>>(config, writer, "SPSC", 1, 1);
+        const std::array<std::size_t, 3> endpointCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
+        for (const std::size_t producers : endpointCounts) {
+            add.template operator()<SoraMpsc<T, Capacity>, RigtorpMpmc<T, Capacity>>(config, writer, "MPSC",
+                                                                                       producers, 1);
+            if (config.quick) {
+                break;
+            }
+        }
+        for (const std::size_t consumers : endpointCounts) {
+            add.template operator()<SoraSpmc<T, Capacity>, RigtorpMpmc<T, Capacity>>(config, writer, "SPMC", 1,
+                                                                                       consumers);
+            if (config.quick) {
+                break;
+            }
+        }
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
+        for (const std::size_t count : symmetricCounts) {
+            add.template operator()<SoraMpmc<T, Capacity>, RigtorpMpmc<T, Capacity>>(config, writer, "MPMC", count,
+                                                                                       count);
+            if (config.quick) {
+                break;
+            }
+        }
+    }
+
+    /** @brief Append paired lock-free versus single-mutex comparisons for all concurrent topologies. */
+    template<std::size_t Capacity, typename T>
+    void AppendLockCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+        auto add = [&cases]<typename Queue>(const Config& cfg, CsvWriter& out, std::string_view scenario,
+                                            std::size_t producers, std::size_t consumers) {
+            cases.push_back({[&cfg, &out, scenario, producers, consumers] {
+                RunPairedCase<Queue, LockedRingBuffer<T, Capacity>, T>(cfg, out, scenario, Capacity, producers,
+                                                                       consumers);
+            }});
+        };
+
+        const std::array<std::size_t, 3> endpointCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
+        for (const std::size_t producers : endpointCounts) {
+            add.template operator()<MashiroMpsc<T, Capacity>>(config, writer, "MPSC", producers, 1);
+            if (config.quick) {
+                break;
+            }
+        }
+        for (const std::size_t consumers : endpointCounts) {
+            add.template operator()<MashiroSpmc<T, Capacity>>(config, writer, "SPMC", 1, consumers);
+            if (config.quick) {
+                break;
+            }
+        }
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
+        for (const std::size_t count : symmetricCounts) {
+            add.template operator()<MashiroMpmc<T, Capacity>>(config, writer, "MPMC", count, count);
+            if (config.quick) {
+                break;
+            }
+        }
+    }
+
     /** @brief Append paired bounded-LIFO comparisons against the native stamped-pointer implementation. */
     template<std::size_t Capacity, typename T>
     void AppendStackCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
@@ -1009,6 +1123,7 @@ namespace Mashiro::Benchmark {
 #endif
     }
 
+    /** @brief Append controls that expose benchmark-template and implementation-order bias in SPSC comparisons. */
     template<std::size_t Capacity, typename T>
     void AppendSpscAuditCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
         using MashiroA = NamedQueue<MashiroSpsc<T, Capacity>, MashiroSpscA>;
@@ -1024,6 +1139,79 @@ namespace Mashiro::Benchmark {
         add.template operator()<RigtorpA, RigtorpB>(config, writer);
         add.template operator()<MashiroA, RigtorpA>(config, writer);
         add.template operator()<RigtorpB, MashiroB>(config, writer);
+    }
+
+    /** @brief Append self-controls and bidirectional Mashiro/Sora pairs for one topology specialization. */
+    template<typename MashiroQueue, typename SoraQueue, typename T>
+    void AppendMigrationTopologyCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases,
+                                       std::string_view scenario, std::size_t capacity, std::size_t producers,
+                                       std::size_t consumers) {
+        if ((config.topology && *config.topology != scenario) ||
+            (config.endpoints && *config.endpoints != std::max(producers, consumers))) {
+            return;
+        }
+        static_assert(sizeof(typename MashiroQueue::Storage) == sizeof(typename SoraQueue::Storage));
+        static_assert(alignof(typename MashiroQueue::Storage) == alignof(typename SoraQueue::Storage));
+        static_assert(MashiroQueue::storageBytes == SoraQueue::storageBytes);
+
+        using MashiroSelfA = NamedQueue<MashiroQueue, MigrationMashiroSelfA>;
+        using MashiroSelfB = NamedQueue<MashiroQueue, MigrationMashiroSelfB>;
+        using SoraSelfA = NamedQueue<SoraQueue, MigrationSoraSelfA>;
+        using SoraSelfB = NamedQueue<SoraQueue, MigrationSoraSelfB>;
+        using MashiroForward = NamedQueue<MashiroQueue, MigrationMashiroForward>;
+        using SoraForward = NamedQueue<SoraQueue, MigrationSoraForward>;
+        using SoraReverse = NamedQueue<SoraQueue, MigrationSoraReverse>;
+        using MashiroReverse = NamedQueue<MashiroQueue, MigrationMashiroReverse>;
+
+        auto add = [&cases]<typename First, typename Second>(const Config& cfg, CsvWriter& out,
+                                                             std::string_view topology, std::size_t ringCapacity,
+                                                             std::size_t producerCount, std::size_t consumerCount) {
+            cases.push_back({[&cfg, &out, topology, ringCapacity, producerCount, consumerCount] {
+                RunPairedCase<First, Second, T>(cfg, out, topology, ringCapacity, producerCount, consumerCount);
+            }});
+        };
+
+        add.template operator()<MashiroSelfA, MashiroSelfB>(config, writer, scenario, capacity, producers, consumers);
+        add.template operator()<SoraSelfA, SoraSelfB>(config, writer, scenario, capacity, producers, consumers);
+        add.template operator()<MashiroForward, SoraForward>(config, writer, scenario, capacity, producers, consumers);
+        add.template operator()<SoraReverse, MashiroReverse>(config, writer, scenario, capacity, producers, consumers);
+    }
+
+    /** @brief Append the complete topology matrix used to audit the Mashiro-to-Sora migration. */
+    template<std::size_t Capacity, typename T>
+    void AppendMigrationCases(const Config& config, CsvWriter& writer, std::vector<Case>& cases) {
+        if ((config.payloadBytes && *config.payloadBytes != sizeof(T)) ||
+            (config.capacity && *config.capacity != Capacity)) {
+            return;
+        }
+        AppendMigrationTopologyCases<MashiroSpsc<T, Capacity>, SoraSpsc<T, Capacity>, T>(config, writer, cases, "SPSC",
+                                                                                         Capacity, 1, 1);
+
+        const std::array<std::size_t, 3> endpointCounts =
+            config.quick ? std::array{2uz, 2uz, 2uz} : std::array{2uz, 4uz, 8uz};
+        for (const std::size_t producers : endpointCounts) {
+            AppendMigrationTopologyCases<MashiroMpsc<T, Capacity>, SoraMpsc<T, Capacity>, T>(
+                config, writer, cases, "MPSC", Capacity, producers, 1);
+            if (config.quick) {
+                break;
+            }
+        }
+        for (const std::size_t consumers : endpointCounts) {
+            AppendMigrationTopologyCases<MashiroSpmc<T, Capacity>, SoraSpmc<T, Capacity>, T>(
+                config, writer, cases, "SPMC", Capacity, 1, consumers);
+            if (config.quick) {
+                break;
+            }
+        }
+
+        const std::array<std::size_t, 2> symmetricCounts = config.quick ? std::array{2uz, 2uz} : std::array{2uz, 4uz};
+        for (const std::size_t count : symmetricCounts) {
+            AppendMigrationTopologyCases<MashiroMpmc<T, Capacity>, SoraMpmc<T, Capacity>, T>(
+                config, writer, cases, "MPMC", Capacity, count, count);
+            if (config.quick) {
+                break;
+            }
+        }
     }
 
     /** @brief Parse benchmark command-line options. */
@@ -1051,6 +1239,14 @@ namespace Mashiro::Benchmark {
                 config.minimumSampleSeconds = std::stod(std::string{requireValue(index)}) / 1'000.0;
             } else if (argument == "--seed") {
                 config.seed = std::stoull(std::string{requireValue(index)});
+            } else if (argument == "--payload-bytes") {
+                config.payloadBytes = std::stoull(std::string{requireValue(index)});
+            } else if (argument == "--capacity") {
+                config.capacity = std::stoull(std::string{requireValue(index)});
+            } else if (argument == "--topology") {
+                config.topology = requireValue(index);
+            } else if (argument == "--endpoints") {
+                config.endpoints = std::stoull(std::string{requireValue(index)});
             } else if (argument == "--quick") {
                 config.quick = true;
             } else if (argument == "--no-pin") {
@@ -1061,11 +1257,17 @@ namespace Mashiro::Benchmark {
                 config.layouts = true;
             } else if (argument == "--references") {
                 config.references = true;
+            } else if (argument == "--sora-references") {
+                config.soraReferences = true;
             } else if (argument == "--spsc-audit") {
                 config.spscAudit = true;
-            } else {
+            } else if (argument == "--locks") {
+                config.locks = true;
+            } else if (argument == "--migration") {
+                config.migration = true;
             } else if (argument == "--stacks") {
                 config.stacks = true;
+            } else {
                 throw std::invalid_argument("unknown command-line option: " + std::string{argument});
             }
         }
@@ -1076,10 +1278,15 @@ namespace Mashiro::Benchmark {
         }
         if (static_cast<unsigned>(config.paired) + static_cast<unsigned>(config.layouts) +
                 static_cast<unsigned>(config.references) + static_cast<unsigned>(config.spscAudit) +
-                static_cast<unsigned>(config.stacks) >
+                static_cast<unsigned>(config.locks) + static_cast<unsigned>(config.migration) +
+                static_cast<unsigned>(config.soraReferences) + static_cast<unsigned>(config.stacks) >
             1) {
             throw std::invalid_argument(
-                "paired algorithm, layout, reference, stack, and SPSC audit modes are mutually exclusive");
+                "paired algorithm, layout, reference, lock, migration, stack, and SPSC audit modes are mutually "
+                "exclusive");
+        }
+        if ((config.payloadBytes || config.capacity || config.topology || config.endpoints) && !config.migration) {
+            throw std::invalid_argument("case filters require --migration");
         }
         return config;
     }
@@ -1101,8 +1308,35 @@ int main(int argc, char** argv) {
         } else if (config.stacks) {
             Mashiro::Benchmark::AppendStackCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
             Mashiro::Benchmark::AppendStackCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+        } else if (config.quick && config.soraReferences) {
+            Mashiro::Benchmark::AppendSoraReferenceCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.soraReferences) {
+            Mashiro::Benchmark::AppendSoraReferenceCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendSoraReferenceCases<16'384, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendSoraReferenceCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendSoraReferenceCases<16'384, Mashiro::Benchmark::Payload<64>>(
+                config, writer, cases);
+        } else if (config.quick && config.migration) {
+            Mashiro::Benchmark::AppendMigrationCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.migration) {
+            Mashiro::Benchmark::AppendMigrationCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendMigrationCases<16'384, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendMigrationCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendMigrationCases<16'384, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
         } else if (config.spscAudit) {
             Mashiro::Benchmark::AppendSpscAuditCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.quick && config.locks) {
+            Mashiro::Benchmark::AppendLockCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+        } else if (config.locks) {
+            Mashiro::Benchmark::AppendLockCases<64, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<1024, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<16'384, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<64, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<16'384, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<64, Mashiro::Benchmark::Payload<256>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<1024, Mashiro::Benchmark::Payload<256>>(config, writer, cases);
+            Mashiro::Benchmark::AppendLockCases<16'384, Mashiro::Benchmark::Payload<256>>(config, writer, cases);
         } else if (config.quick && config.references) {
             Mashiro::Benchmark::AppendReferenceCases<4096, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
         } else if (config.references) {
@@ -1133,6 +1367,10 @@ int main(int argc, char** argv) {
             Mashiro::Benchmark::AppendCases<16'384, Mashiro::Benchmark::Payload<8>>(config, writer, cases);
             Mashiro::Benchmark::AppendCases<1024, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
             Mashiro::Benchmark::AppendCases<16'384, Mashiro::Benchmark::Payload<64>>(config, writer, cases);
+        }
+
+        if (cases.empty()) {
+            throw std::invalid_argument("benchmark filters selected no cases");
         }
 
         std::mt19937_64 random{config.seed};

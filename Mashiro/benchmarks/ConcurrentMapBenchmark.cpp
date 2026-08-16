@@ -3,7 +3,11 @@
  * @brief Topology-valid throughput matrix for ConcurrentMap and ConcurrentSet.
  * @ingroup Testing
  */
-#include <Mashiro/Core/ConcurrentMap.h>
+#if defined(SORA_MIGRATION_TARGET)
+#    include <Sora/Core/Concurrency/ConcurrentMap.h>
+#else
+#    include <Mashiro/Core/ConcurrentMap.h>
+#endif
 
 #include <oneapi/tbb/concurrent_unordered_map.h>
 #include <oneapi/tbb/concurrent_unordered_set.h>
@@ -28,6 +32,10 @@
 
 #if defined(_WIN32)
 #    include <windows.h>
+#endif
+
+#if defined(SORA_MIGRATION_TARGET)
+#    define Mashiro Sora
 #endif
 
 using namespace Mashiro;

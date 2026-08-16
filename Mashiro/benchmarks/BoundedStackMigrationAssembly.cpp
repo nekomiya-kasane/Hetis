@@ -4,9 +4,17 @@
  * @ingroup Core
  */
 
-#include <Mashiro/Core/BoundedStack.h>
+#if defined(SORA_MIGRATION_TARGET)
+#    include <Sora/Core/Concurrency/BoundedStack.h>
+#else
+#    include <Mashiro/Core/BoundedStack.h>
+#endif
 
 #include <cstdint>
+
+#if defined(SORA_MIGRATION_TARGET)
+#    define Mashiro Sora
+#endif
 
 namespace {
 

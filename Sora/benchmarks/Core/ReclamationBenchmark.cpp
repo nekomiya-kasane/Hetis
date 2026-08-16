@@ -17,6 +17,7 @@
 #include <memory>
 #include <print>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -193,6 +194,35 @@ namespace {
                      collect / static_cast<double>(rounds * batchSize));
     }
 
+    template<typename Factory>
+    void MeasureReaderScaling(std::string_view name, Factory&& factory) {
+        for (std::size_t readerCount : {std::size_t{1}, std::size_t{2}, std::size_t{4}, std::size_t{8}}) {
+            std::barrier start{static_cast<std::ptrdiff_t>(readerCount + 1)};
+            std::atomic<std::uint64_t> total = 0;
+            std::vector<std::jthread> readers;
+            readers.reserve(readerCount);
+            for (std::size_t reader = 0; reader < readerCount; ++reader) {
+                readers.emplace_back([&] {
+                    auto operation = factory();
+                    start.arrive_and_wait();
+                    std::uint64_t local = 0;
+                    for (std::size_t index = 0; index < kOperations; ++index) {
+                        local += operation();
+                    }
+                    total.fetch_add(local, std::memory_order_relaxed);
+                });
+            }
+            const auto begin = std::chrono::steady_clock::now();
+            start.arrive_and_wait();
+            readers.clear();
+            const auto elapsed = std::chrono::steady_clock::now() - begin;
+            const double nsPerOperation = std::chrono::duration<double, std::nano>(elapsed).count() /
+                                          static_cast<double>(readerCount * kOperations);
+            std::println("  {:24} readers {:2}: {:8.2f} ns/op aggregate, checksum {}", name, readerCount,
+                         nsPerOperation, total.load(std::memory_order_relaxed));
+        }
+    }
+
 } // namespace
 
 int main() {
@@ -207,17 +237,26 @@ int main() {
     auto epochParticipant = epochs.Register();
     Sora::Concurrency::RcuDomain rcu;
     auto rcuParticipant = rcu.Register();
+    Sora::Concurrency::QsbrDomain qsbr;
+    auto nestedEpochParticipant = epochs.Register();
+    auto nestedEpochRegion = nestedEpochParticipant.Enter();
+    auto nestedRcuParticipant = rcu.Register();
+    auto nestedRcuRegion = nestedRcuParticipant.Read();
     std::uint64_t sink = 0;
 
     auto rawRead = [&]() noexcept { sink += source.load(std::memory_order_acquire)->value; };
     auto hazardRead = [&]() noexcept { sink += hazard.Protect(source)->value; };
     auto epochRead = [&]() noexcept { sink += epochParticipant.Protect(source)->value; };
     auto rcuRead = [&]() noexcept { sink += rcuParticipant.Protect(source)->value; };
+    auto nestedEpochRead = [&]() noexcept { sink += nestedEpochParticipant.Protect(source)->value; };
+    auto nestedRcuRead = [&]() noexcept { sink += nestedRcuParticipant.Protect(source)->value; };
     const std::array readCases{
         Sora::Benchmark::MakeCase("raw acquire load", rawRead),
         Sora::Benchmark::MakeCase("hazard protect reused", hazardRead),
         Sora::Benchmark::MakeCase("epoch protect", epochRead),
         Sora::Benchmark::MakeCase("RCU protect", rcuRead),
+        Sora::Benchmark::MakeCase("epoch protect nested", nestedEpochRead),
+        Sora::Benchmark::MakeCase("RCU protect nested", nestedRcuRead),
     };
     const auto readResult =
         Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(readCases, 1, std::chrono::milliseconds{30});
@@ -246,31 +285,33 @@ int main() {
         Sora::Benchmark::MeasureInterleavedIndependent<kSamples>(casCases, 1, std::chrono::milliseconds{30});
     PrintGroup("single-thread publication cost", casCases, casResult);
 
-    for (std::size_t readerCount : {std::size_t{1}, std::size_t{2}, std::size_t{4}, std::size_t{8}}) {
-        std::barrier start{static_cast<std::ptrdiff_t>(readerCount + 1)};
-        std::atomic<std::uint64_t> total = 0;
-        std::vector<std::jthread> readers;
-        readers.reserve(readerCount);
-        for (std::size_t reader = 0; reader < readerCount; ++reader) {
-            readers.emplace_back([&] {
-                auto localHazard = hazards.MakeHazardPointer();
-                start.arrive_and_wait();
-                std::uint64_t local = 0;
-                for (std::size_t operation = 0; operation < kOperations; ++operation) {
-                    local += localHazard.Protect(source)->value;
-                }
-                total.fetch_add(local, std::memory_order_relaxed);
-            });
-        }
-        const auto begin = std::chrono::steady_clock::now();
-        start.arrive_and_wait();
-        readers.clear();
-        const auto elapsed = std::chrono::steady_clock::now() - begin;
-        const double nsPerOperation =
-            std::chrono::duration<double, std::nano>(elapsed).count() / static_cast<double>(readerCount * kOperations);
-        std::println("hazard readers {:2}: {:8.2f} ns/op aggregate, checksum {}", readerCount, nsPerOperation,
-                     total.load(std::memory_order_relaxed));
-    }
+    std::println("reader scaling");
+    MeasureReaderScaling("hazard protect", [&] {
+        auto localHazard = hazards.MakeHazardPointer();
+        return [localHazard = std::move(localHazard), &source]() mutable noexcept {
+            return localHazard.Protect(source)->value;
+        };
+    });
+    MeasureReaderScaling("epoch protect", [&] {
+        auto participant = epochs.Register();
+        return [participant = std::move(participant), &source]() mutable noexcept {
+            return participant.Protect(source)->value;
+        };
+    });
+    MeasureReaderScaling("RCU protect", [&] {
+        auto participant = rcu.Register();
+        return [participant = std::move(participant), &source]() mutable noexcept {
+            return participant.Protect(source)->value;
+        };
+    });
+    MeasureReaderScaling("QSBR observe+quiet", [&] {
+        auto participant = qsbr.Register();
+        return [participant = std::move(participant), &source]() mutable noexcept {
+            const std::uint64_t value = source.load(std::memory_order_acquire)->value;
+            participant.Quiescent();
+            return value;
+        };
+    });
 
     MeasureRetirementBoundaries();
     std::println("hazard collection scan");

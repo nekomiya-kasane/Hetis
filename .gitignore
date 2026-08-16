@@ -37,3 +37,4 @@ CMakeFiles/
 # Only thirdparty/CMakeLists.txt (the integration wrapper) is committed.
 /thirdparty/*/
 results
+__pycache__
