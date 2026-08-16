@@ -72,7 +72,7 @@ namespace Sora {
             template<typename T, QueueTopology Topo>
             concept RingBufferElement = std::is_object_v<T> && std::is_nothrow_destructible_v<T> && [] consteval {
                 if constexpr (Meta::GetRingBufferProtocol(Topo) == RingBufferProtocol::SequenceCell) {
-                    return std::move_constructible<T> && std::is_nothrow_move_constructible_v<T>;
+                    return ConcurrentQueueElement<T>;
                 } else {
                     return true;
                 }
@@ -231,6 +231,7 @@ namespace Sora {
 
                 static constexpr size_t kCapacity = Capacity;
                 static constexpr QueueTopology topology = Topo;
+                static constexpr QueueOrder order = QueueOrder::Fifo;
                 static constexpr bool transactionalPushBatch = kProtocol != RingBufferProtocol::SequenceCell;
                 static constexpr bool isolatesCells = kProtocol == RingBufferProtocol::SequenceCell && CacheLineAligned;
 
@@ -657,14 +658,14 @@ namespace Sora {
 
                 [[= CachedReadDomain{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kCacheAlignment) CachedReadPosition cachedReadPosition_{};
-                
+
                 [[= ReadDomain{}]]
                 [[= $::CohesiveContentionRegion{}]]
                 alignas(kPositionAlignment) Position readPosition_{0};
 
                 [[= CachedWriteDomain{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kCacheAlignment) CachedWritePosition cachedWritePosition_{};
-                
+
                 [[= ArenaDomain{}]]
                 [[= ArenaCoverage{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kArenaAlignment) Arena arena_{};
@@ -681,6 +682,21 @@ namespace Sora {
          */
         template<class T, size_t Capacity, QueueTopology Topo>
         using RingBuffer = Detail::RingBufferImpl<T, Capacity, Topo>;
+
+        namespace Concept {
+
+            /** @brief Storage capability implemented by Sora's compile-time-specialized FIFO rings. */
+            template<class Storage>
+            concept RingBufferStorage = requires {
+                typename Storage::ValueType;
+                { Storage::kCapacity } -> std::convertible_to<std::size_t>;
+                { Storage::topology } -> std::same_as<const QueueTopology&>;
+                { Storage::order } -> std::same_as<const QueueOrder&>;
+                requires Storage::order == QueueOrder::Fifo;
+                { Storage::transactionalPushBatch } -> std::same_as<const bool&>;
+            };
+
+        } // namespace Concept
 
     } // namespace Concurrency
 

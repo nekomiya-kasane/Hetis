@@ -8,6 +8,7 @@
 #include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Detail/Reclamation.h>
 #include <Sora/Core/Concurrency/Protection.h>
+#include <Sora/Core/Guard.h>
 
 #include <algorithm>
 #include <atomic>
@@ -20,7 +21,13 @@
 
 namespace Sora::Concurrency {
 
-    /** @brief Explicit hazard-pointer domain with reusable, domain-owned protection records. */
+    /**
+     * @brief Explicit hazard-pointer domain with reusable, domain-owned protection records.
+     *
+     * @details Protect every dereference through a hazard record. Before @ref Retire, remove the pointer from every
+     * source through a sequentially consistent atomic update; the source update, hazard publication, validation, and
+     * collection scan then share one total order. The domain must outlive its hazard pointers and protected results.
+     */
     class HazardDomain {
         struct alignas(Platform::kCacheLineSize) Record {
             std::atomic<void*> protectedAddress{nullptr};
@@ -33,6 +40,8 @@ namespace Sora::Concurrency {
             }
         };
         static_assert(sizeof(Record) % Platform::kCacheLineSize == 0);
+        static_assert(std::atomic<void*>::is_always_lock_free && std::atomic<bool>::is_always_lock_free,
+                      "HazardDomain requires lock-free address and ownership atomics");
 
     public:
         /** @brief Move-only ownership of one hazard record and its successive protection epochs. */
@@ -138,6 +147,7 @@ namespace Sora::Concurrency {
         }
 
         template<typename T>
+            requires std::is_nothrow_destructible_v<T>
         void Retire(T* pointer) {
             retired_.Retire(pointer);
         }
@@ -150,7 +160,8 @@ namespace Sora::Concurrency {
         }
         template<typename Pointer, std::size_t Extent>
             requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
-                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_destructible_v<std::remove_pointer_t<std::remove_cv_t<Pointer>>>
         void Retire(std::span<Pointer, Extent> pointers) {
             retired_.Retire(pointers);
         }
@@ -170,20 +181,18 @@ namespace Sora::Concurrency {
                 return 0;
             }
 
-            // The SC fence is paired with SC protection publication. A source must be unlinked before Retire().
-            std::atomic_thread_fence(std::memory_order_seq_cst);
-            std::vector<void*> protectedAddresses;
-            try {
-                records_.Visit([&](const Record& record) {
-                    if (void* address = record.protectedAddress.load(std::memory_order_seq_cst); address != nullptr) {
-                        protectedAddresses.push_back(address);
-                    }
-                });
-            } catch (...) {
-                retired_.Requeue(std::move(candidates));
-                throw;
-            }
+            // SC unlink, protection publication, validation, and scanning share one total order.
+            static thread_local std::vector<void*> protectedAddresses;
+            protectedAddresses.clear();
+            Sora::ScopeExit restoreCandidates{[&]() noexcept { retired_.Requeue(std::move(candidates)); }};
+            records_.Visit([&](const Record& record) {
+                if (void* address = record.protectedAddress.load(std::memory_order_seq_cst); address != nullptr) {
+                    protectedAddresses.push_back(address);
+                }
+            });
             std::ranges::sort(protectedAddresses);
+            protectedAddresses.erase(std::ranges::unique(protectedAddresses).begin(), protectedAddresses.end());
+            restoreCandidates.Release();
             return Detail::ReclaimDetached(retired_, std::move(candidates),
                                            [&](const Detail::RetiredObject& object) noexcept {
                                                return !std::ranges::binary_search(protectedAddresses, object.pointer);

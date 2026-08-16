@@ -3,13 +3,9 @@
  * @brief Define the open contention-domain vocabulary used to classify concurrently accessed data members.
  * @details
  * A contention domain is an empty tag type that describes both access policy and agent identity. Generic writer
- *
  * domains remain isolated even from the same domain. Only an explicitly cohesive protocol may opt into same-domain
- *
  * sharing. Read-only state may share only with other read-only state. Independent region-coverage tags state whether
- *
  * an aggregate member is cohesive or proves its own internal isolation.
- *
  * @ingroup Core
  */
 #pragma once

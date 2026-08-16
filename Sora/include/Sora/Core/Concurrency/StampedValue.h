@@ -179,7 +179,12 @@ namespace Sora::Concurrency {
         explicit constexpr VersionedValue(Detail::FromRepresentationTag tag, Word word) noexcept : Base(tag, word) {}
     };
 
-    /** @brief Lock-free atomic publication for a canonical single-word tagged or versioned value. */
+    /**
+     * @brief Lock-free atomic publication for a canonical single-word tagged or versioned value.
+     * @details Memory-order arguments follow the corresponding @c std::atomic operations. In particular, load/store
+     * orders must be valid for those operations, and a compare-exchange failure order must be no stronger than the
+     * success order and must not be @c release or @c acq_rel.
+     */
     template<Concept::StampedWord Stamped>
     class AtomicStampedValue {
     public:
@@ -202,11 +207,13 @@ namespace Sora::Concurrency {
         [[nodiscard]] Stamped Exchange(Stamped value, std::memory_order order = std::memory_order_acq_rel) noexcept {
             return Stamped::FromRepresentation(word_.exchange(value.Representation(), order));
         }
+        /** @brief Weak CAS; updates @p expected with the observed complete stamped word on failure. */
         [[nodiscard]] bool CompareExchangeWeak(Stamped& expected, Stamped desired,
                                                std::memory_order success = std::memory_order_acq_rel,
                                                std::memory_order failure = std::memory_order_acquire) noexcept {
             return CompareExchange(expected, desired, true, success, failure);
         }
+        /** @brief Strong CAS; updates @p expected with the observed complete stamped word on failure. */
         [[nodiscard]] bool CompareExchangeStrong(Stamped& expected, Stamped desired,
                                                  std::memory_order success = std::memory_order_acq_rel,
                                                  std::memory_order failure = std::memory_order_acquire) noexcept {

@@ -6,8 +6,10 @@
 #pragma once
 
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace Sora {
 
@@ -24,6 +26,27 @@ namespace Sora {
             SingleThread,
             Concurrent,
         };
+
+        /** @brief Linearized value-removal order exposed by queue-compatible storage. */
+        enum class QueueOrder : std::uint8_t {
+            Fifo,
+            Lifo,
+        };
+
+        /** @brief Selection discipline for suspended asynchronous operations on one endpoint. */
+        enum class WaiterOrder : std::uint8_t {
+            Fifo,
+            Lifo,
+        };
+
+        namespace Concept {
+
+            /** @brief Payload whose move and destruction cannot strand a concurrent queue reservation. */
+            template<typename T>
+            concept ConcurrentQueueElement = std::move_constructible<T> && std::is_nothrow_move_constructible_v<T> &&
+                                             std::is_nothrow_destructible_v<T>;
+
+        } // namespace Concept
 
         /** @brief Structural compile-time description of a queue's producer and consumer topology. */
         struct QueueTopology {
@@ -98,8 +121,10 @@ namespace Sora {
     } // namespace Concurrency
 
     using Concurrency::QueueCardinality;
+    using Concurrency::QueueOrder;
     using Concurrency::QueueSharing;
     using Concurrency::QueueTopology;
+    using Concurrency::WaiterOrder;
 
     using Concurrency::QueueTopologies::Local;
     using Concurrency::QueueTopologies::Mpmc;
@@ -116,5 +141,11 @@ namespace Sora {
         } // namespace Concurrency
 
     } // namespace Traits
+
+    namespace Concept {
+
+        using Sora::Concurrency::Concept::ConcurrentQueueElement;
+
+    } // namespace Concept
 
 } // namespace Sora

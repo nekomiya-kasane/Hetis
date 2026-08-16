@@ -19,7 +19,13 @@
 
 namespace Sora::Concurrency {
 
-    /** @brief QSBR domain for affine participants that periodically report quiescent states. */
+    /**
+     * @brief QSBR domain for affine participants that periodically report quiescent states.
+     *
+     * @details A participant may use protected references only between reports. @ref Participant::Quiescent promises
+     * that no reference acquired before it remains in use afterward; participant destruction makes the same promise.
+     * Remove an object from every source before @ref Retire. Participants are affine, and the domain must outlive them.
+     */
     class QsbrDomain {
         struct alignas(Platform::kCacheLineSize) Record {
             std::atomic<std::uint64_t> acknowledged{0};
@@ -32,6 +38,8 @@ namespace Sora::Concurrency {
             }
         };
         static_assert(sizeof(Record) % Platform::kCacheLineSize == 0);
+        static_assert(std::atomic<std::uint64_t>::is_always_lock_free && std::atomic<bool>::is_always_lock_free,
+                      "QsbrDomain requires lock-free generation and registration atomics");
 
     public:
         /** @brief Affine registration whose calls and protected reference use must not overlap between threads. */
@@ -59,7 +67,7 @@ namespace Sora::Concurrency {
             /** @brief Report that no reference acquired before this call remains in use afterward. */
             void Quiescent() noexcept {
                 assert(record_ != nullptr);
-                record_->acknowledged.store(generation_->load(std::memory_order_acquire), std::memory_order_release);
+                record_->acknowledged.store(generation_->load(std::memory_order_seq_cst), std::memory_order_release);
             }
 
         private:
@@ -90,6 +98,7 @@ namespace Sora::Concurrency {
         [[nodiscard]] Participant Register() { return Participant(*this); }
 
         template<typename T>
+            requires std::is_nothrow_destructible_v<T>
         void Retire(T* pointer) {
             if (pointer != nullptr) {
                 retired_.Retire(pointer, CaptureGeneration());
@@ -106,7 +115,8 @@ namespace Sora::Concurrency {
         }
         template<typename Pointer, std::size_t Extent>
             requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
-                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_destructible_v<std::remove_pointer_t<std::remove_cv_t<Pointer>>>
         void Retire(std::span<Pointer, Extent> pointers) {
             if (!pointers.empty()) {
                 retired_.Retire(pointers, CaptureGeneration());
@@ -127,6 +137,11 @@ namespace Sora::Concurrency {
             return generation_.fetch_add(1, std::memory_order_seq_cst) + 1;
         }
 
+        /**
+         * @brief Advance the generation, wait for every pre-existing participant, then collect eligible objects.
+         * @pre The calling thread must not own a registered participant from this domain; it would wait for its own
+         * next quiescent report.
+         */
         void Synchronize() {
             const std::uint64_t target = Advance();
             records_.Visit([&](const Record& record) {
@@ -140,6 +155,9 @@ namespace Sora::Concurrency {
 
         [[nodiscard]] std::size_t Collect() {
             auto candidates = retired_.DetachAll();
+            if (candidates.Empty()) {
+                return 0;
+            }
             const std::uint64_t current = generation_.load(std::memory_order_acquire);
             std::uint64_t minimum = current;
             std::uint64_t greatestAge = 0;
@@ -160,16 +178,18 @@ namespace Sora::Concurrency {
             });
             return Detail::ReclaimDetached(
                 retired_, std::move(candidates), [&](const Detail::RetiredObject& object) noexcept {
-                    return generationRangeValid && Detail::GenerationReached(minimum, object.generation + 1);
+                    // Validate the object's own age before applying the participant-derived lower bound.
+                    return generationRangeValid && Detail::GenerationReached(current, object.generation) &&
+                           Detail::GenerationReached(minimum, object.generation + 1);
                 });
         }
 
         [[nodiscard]] std::size_t RetiredCount() const noexcept { return retired_.Size(); }
 
     private:
-        /** @brief Read the immediate predecessor in generation modification order before transferring ownership. */
+        /** @brief Publish preceding unlink work and return the immediate generation modification-order predecessor. */
         [[nodiscard]] std::uint64_t CaptureGeneration() noexcept {
-            return generation_.fetch_add(0, std::memory_order_acquire);
+            return generation_.fetch_add(0, std::memory_order_release);
         }
 
         std::atomic<std::uint64_t> generation_{1};

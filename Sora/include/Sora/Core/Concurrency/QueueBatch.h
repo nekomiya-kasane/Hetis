@@ -23,7 +23,9 @@ namespace Sora {
          *
          * @details The container delegates inline lifetime management to C++26 @c std::inplace_vector. A sized range
          * larger than @p Capacity is rejected before any input element is consumed and records @ref oversized, allowing
-         * an async operation to report a permanent size error rather than waiting forever for impossible capacity.
+         * an async operation to report a permanent size error rather than waiting forever for impossible capacity. A
+         * conforming sized range must report its actual distance; violating that range semantic is outside the contract.
+         * This value owns no synchronization and must not be mutated concurrently.
          */
         template<class T, std::size_t Capacity>
             requires(Capacity > 0)
@@ -55,6 +57,7 @@ namespace Sora {
 
             [[nodiscard]] bool empty() const noexcept { return values_.empty(); }
             [[nodiscard]] std::size_t size() const noexcept { return values_.size(); }
+            /** @brief True when range construction rejected an input larger than @ref capacity. */
             [[nodiscard]] bool oversized() const noexcept { return oversized_; }
             [[nodiscard]] static consteval std::size_t capacity() noexcept { return Capacity; }
 
@@ -68,6 +71,7 @@ namespace Sora {
             [[nodiscard]] ConstIterator cbegin() const noexcept { return values_.cbegin(); }
             [[nodiscard]] ConstIterator cend() const noexcept { return values_.cend(); }
 
+            /** @brief Append one value if the batch remains valid and has capacity, preserving @p value on failure. */
             template<class U>
                 requires std::constructible_from<T, U&&>
             [[nodiscard]] bool TryPush(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
@@ -78,6 +82,7 @@ namespace Sora {
                 return true;
             }
 
+            /** @brief Append one value or terminate when the batch is oversized or full. */
             template<class U>
                 requires std::constructible_from<T, U&&>
             void Push(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
@@ -86,6 +91,7 @@ namespace Sora {
                 }
             }
 
+            /** @brief Destroy all values and clear a prior oversized-input state. */
             void Clear() noexcept {
                 values_.clear();
                 oversized_ = false;

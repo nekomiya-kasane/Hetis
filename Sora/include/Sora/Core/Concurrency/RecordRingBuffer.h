@@ -54,6 +54,9 @@ namespace Sora::Concurrency {
         template<RecordRingBufferField Field>
         using EmptyRecordRingBufferField = std::integral_constant<RecordRingBufferField, Field>;
 
+        struct RecordRingSingleProducerDomain : $::CohesiveSingleWriterContentionDomain {};
+        struct RecordRingMultiProducerDomain : $::CohesiveMultiWriterContentionDomain {};
+
         /** @brief Interpret an unsigned position subtraction as its two's-complement signed difference. */
         [[nodiscard]] constexpr int64_t PositionDifference(uint64_t lhs, uint64_t rhs) noexcept {
             return std::bit_cast<int64_t>(lhs - rhs);
@@ -93,9 +96,9 @@ namespace Sora::Concurrency {
                                    EmptyRecordRingBufferField<RecordRingBufferField::ConsumerClaimPosition>>;
             using ConsumerReclaimPosition = std::conditional_t<kLocal, uint64_t, std::atomic<uint64_t>>;
 
-            using ProducerDomain =
-                std::conditional_t<kLocal, $::Inactive,
-                                   std::conditional_t<kMultipleProducers, $::Contended, $::ProducerOwned>>;
+            using ProducerDomain = std::conditional_t<
+                kLocal, $::Inactive,
+                std::conditional_t<kMultipleProducers, RecordRingMultiProducerDomain, RecordRingSingleProducerDomain>>;
             using CachedReclaimDomain = ProducerDomain;
             using ConsumerClaimDomain = std::conditional_t<kMultipleConsumers, $::Contended, $::Inactive>;
             using ConsumerReclaimDomain =
@@ -117,6 +120,7 @@ namespace Sora::Concurrency {
             // A record occupying at most half the arena can always follow wrap padding from any aligned position.
             static constexpr size_t kMaxPayloadBytes = ByteCapacity / 2 - kRecordHeaderBytes;
             static constexpr QueueTopology topology = Topology;
+            static constexpr QueueOrder order = QueueOrder::Fifo;
 
             RecordRingBufferImpl() = default;
             RecordRingBufferImpl(const RecordRingBufferImpl&) = delete;
@@ -541,7 +545,7 @@ namespace Sora::Concurrency {
             [[= ProducerDomain{}]] [[= $::CohesiveContentionRegion{}]]
                 alignas(kPositionAlignment) ProducerPosition producerPosition_{0};
             [[= CachedReclaimDomain{}]] [[= $::CohesiveContentionRegion{}]]
-                SORA_NO_UNIQUE_ADDRESS alignas(kPositionAlignment) CachedReclaimPosition cachedReclaimPosition_{};
+                SORA_NO_UNIQUE_ADDRESS CachedReclaimPosition cachedReclaimPosition_{};
             [[= ConsumerClaimDomain{}]] [[= $::CohesiveContentionRegion{}]]
                 SORA_NO_UNIQUE_ADDRESS alignas(kPositionAlignment)
                 ConsumerClaimPosition consumerClaimPosition_{};
@@ -561,6 +565,20 @@ namespace Sora::Concurrency {
      */
     template<size_t ByteCapacity, QueueTopology Topology = QueueTopologies::Spsc>
     using RecordRingBuffer = Detail::RecordRingBufferImpl<ByteCapacity, Topology>;
+
+    namespace Concept {
+
+        /** @brief Storage capability implemented by Sora's packed variable-length FIFO rings. */
+        template<class Storage>
+        concept RecordRingBufferStorage = requires {
+            { Storage::kByteCapacity } -> std::convertible_to<std::size_t>;
+            { Storage::kMaxPayloadBytes } -> std::convertible_to<std::size_t>;
+            { Storage::topology } -> std::same_as<const QueueTopology&>;
+            { Storage::order } -> std::same_as<const QueueOrder&>;
+            requires Storage::order == QueueOrder::Fifo;
+        };
+
+    } // namespace Concept
 
     /** @cond INTERNAL */
     consteval {

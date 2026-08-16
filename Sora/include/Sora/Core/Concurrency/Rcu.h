@@ -8,8 +8,8 @@
 #include <Sora/Core/Concurrency/Detail/Reclamation.h>
 #include <Sora/Core/Concurrency/StampedValue.h>
 #include <Sora/Core/Concurrency/Protection.h>
+#include <Sora/Core/Guard.h>
 
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
@@ -22,15 +22,21 @@
 
 namespace Sora::Concurrency {
 
-    /** @brief RCU domain that waits only for read-side regions preceding a grace-period flip. */
+    /**
+     * @brief RCU domain that waits only for read-side regions preceding a grace-period flip.
+     *
+     * @details Access protected objects only inside a participant's read-side region. Remove an object from every
+     * source before @ref Retire; queue handoff publishes that unlink before the grace-period phase flip. Participants
+     * and guards are affine, and the domain must outlive all of them.
+     */
     class RcuDomain {
         struct alignas(Platform::kCacheLineSize) Record {
-            std::array<std::atomic<std::size_t>, 2> readers{};
+            std::atomic<unsigned> announcedPhase{0};
+            std::atomic<std::size_t> depth{0};
             std::atomic<bool> registered{false};
 
             [[nodiscard]] bool TryRegister() noexcept {
-                if (readers[0].load(std::memory_order_relaxed) != 0 ||
-                    readers[1].load(std::memory_order_relaxed) != 0) {
+                if (depth.load(std::memory_order_relaxed) != 0) {
                     return false;
                 }
                 bool expected = false;
@@ -38,8 +44,7 @@ namespace Sora::Concurrency {
                                                         std::memory_order_relaxed)) {
                     return false;
                 }
-                if (readers[0].load(std::memory_order_acquire) == 0 &&
-                    readers[1].load(std::memory_order_acquire) == 0) {
+                if (depth.load(std::memory_order_acquire) == 0) {
                     return true;
                 }
                 registered.store(false, std::memory_order_release);
@@ -47,6 +52,9 @@ namespace Sora::Concurrency {
             }
         };
         static_assert(sizeof(Record) % Platform::kCacheLineSize == 0);
+        static_assert(std::atomic<unsigned>::is_always_lock_free && std::atomic<std::size_t>::is_always_lock_free &&
+                          std::atomic<bool>::is_always_lock_free,
+                      "RcuDomain requires lock-free phase, depth, and registration atomics");
 
     public:
         class Participant;
@@ -57,13 +65,11 @@ namespace Sora::Concurrency {
             ReadGuard() noexcept = default;
             ReadGuard(const ReadGuard&) = delete;
             ReadGuard& operator=(const ReadGuard&) = delete;
-            ReadGuard(ReadGuard&& other) noexcept
-                : record_(std::exchange(other.record_, nullptr)), phase_(other.phase_) {}
+            ReadGuard(ReadGuard&& other) noexcept : record_(std::exchange(other.record_, nullptr)) {}
             ReadGuard& operator=(ReadGuard&& other) noexcept {
                 if (this != &other) {
                     Reset();
                     record_ = std::exchange(other.record_, nullptr);
-                    phase_ = other.phase_;
                 }
                 return *this;
             }
@@ -84,18 +90,17 @@ namespace Sora::Concurrency {
                 if (record_ == nullptr) {
                     return;
                 }
-                const std::size_t readers = record_->readers[phase_].load(std::memory_order_relaxed);
-                assert(readers != 0);
-                record_->readers[phase_].store(readers - 1, std::memory_order_release);
+                const std::size_t depth = record_->depth.load(std::memory_order_relaxed);
+                assert(depth != 0);
+                record_->depth.store(depth - 1, std::memory_order_release);
                 record_ = nullptr;
             }
             [[nodiscard]] explicit operator bool() const noexcept { return record_ != nullptr; }
 
         private:
             friend class Participant;
-            ReadGuard(Record* record, unsigned phase) noexcept : record_(record), phase_(phase) {}
+            explicit ReadGuard(Record* record) noexcept : record_(record) {}
             Record* record_ = nullptr;
-            unsigned phase_ = 0;
         };
 
         /** @brief Affine registration; calls through it and its guards must not overlap between threads. */
@@ -119,14 +124,20 @@ namespace Sora::Concurrency {
 
             [[nodiscard]] ReadGuard Read() noexcept {
                 assert(record_ != nullptr);
+                const std::size_t depth = record_->depth.load(std::memory_order_relaxed);
+                if (depth != 0) {
+                    record_->depth.store(depth + 1, std::memory_order_release);
+                    return ReadGuard(record_);
+                }
+
                 for (;;) {
                     const unsigned observed = phase_->load(std::memory_order_acquire);
-                    const std::size_t readers = record_->readers[observed].load(std::memory_order_relaxed);
-                    record_->readers[observed].store(readers + 1, std::memory_order_seq_cst);
+                    record_->announcedPhase.store(observed, std::memory_order_release);
+                    record_->depth.store(1, std::memory_order_seq_cst);
                     if (phase_->load(std::memory_order_seq_cst) == observed) {
-                        return ReadGuard(record_, observed);
+                        return ReadGuard(record_);
                     }
-                    record_->readers[observed].store(readers, std::memory_order_release);
+                    record_->depth.store(0, std::memory_order_release);
                 }
             }
 
@@ -165,8 +176,7 @@ namespace Sora::Concurrency {
         ~RcuDomain() {
             records_.Visit([](const Record& record) {
                 assert(!record.registered.load(std::memory_order_relaxed) &&
-                       record.readers[0].load(std::memory_order_relaxed) == 0 &&
-                       record.readers[1].load(std::memory_order_relaxed) == 0 &&
+                       record.depth.load(std::memory_order_relaxed) == 0 &&
                        "RCU domain must outlive all participants and read guards");
             });
             retired_.Drain();
@@ -175,6 +185,7 @@ namespace Sora::Concurrency {
         [[nodiscard]] Participant Register() { return Participant(*this); }
 
         template<typename T>
+            requires std::is_nothrow_destructible_v<T>
         void Retire(T* pointer) {
             retired_.Retire(pointer);
         }
@@ -187,7 +198,8 @@ namespace Sora::Concurrency {
         }
         template<typename Pointer, std::size_t Extent>
             requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
-                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_destructible_v<std::remove_pointer_t<std::remove_cv_t<Pointer>>>
         void Retire(std::span<Pointer, Extent> pointers) {
             retired_.Retire(pointers);
         }
@@ -200,28 +212,40 @@ namespace Sora::Concurrency {
             retired_.Retire(pointers, std::move(deleter));
         }
 
-        /** @brief Wait for all read-side regions that began before this grace period. */
+        /**
+         * @brief Wait for all read-side regions that began before this grace period.
+         * @pre The calling thread must not hold a read guard from this domain.
+         */
         void Synchronize() {
             std::scoped_lock synchronize(synchronizeMutex_);
             const unsigned oldPhase = phase_.fetch_xor(1, std::memory_order_seq_cst);
             records_.Visit([&](const Record& record) {
-                while (record.readers[oldPhase].load(std::memory_order_acquire) != 0) {
+                // The SC load closes publication -> validation -> flip -> scan. An acquire announcement also orders
+                // an old-reader exit when this record has already entered the new phase.
+                if (record.depth.load(std::memory_order_seq_cst) == 0 ||
+                    record.announcedPhase.load(std::memory_order_acquire) != oldPhase) {
+                    return;
+                }
+                while (record.depth.load(std::memory_order_acquire) != 0 &&
+                       record.announcedPhase.load(std::memory_order_acquire) == oldPhase) {
                     std::this_thread::yield();
                 }
             });
         }
 
-        /** @brief Complete one grace period, then reclaim exactly the callbacks pending before it. */
+        /**
+         * @brief Complete one grace period, then reclaim exactly the callbacks pending before it.
+         * @pre The calling thread must not hold a read guard from this domain.
+         */
         [[nodiscard]] std::size_t Reclaim() {
             auto reclaimable = retired_.DetachAll();
-            try {
-                Synchronize();
-            } catch (...) {
-                retired_.Requeue(std::move(reclaimable));
-                throw;
+            if (reclaimable.Empty()) {
+                return 0;
             }
-            std::size_t count = 0;
-            count = reclaimable.Size();
+            Sora::ScopeExit restoreReclaimable{[&]() noexcept { retired_.Requeue(std::move(reclaimable)); }};
+            Synchronize();
+            restoreReclaimable.Release();
+            const std::size_t count = reclaimable.Size();
             retired_.Destroy(std::move(reclaimable));
             return count;
         }

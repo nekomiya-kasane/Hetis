@@ -1,6 +1,9 @@
 /**
  * @file AsyncQueue.h
  * @brief P2300-native asynchronous facade over specialized bounded queue storage.
+ * @details The queue is a stateful resource whose ports create one-shot push and pop senders. It is neither a sender
+ * nor an awaitable itself. Inside a sender-aware coroutine such as @ref Task, those operation senders can be awaited
+ * directly without introducing a second queue waiting protocol.
  * @ingroup Concurrency
  */
 #pragma once
@@ -330,9 +333,10 @@ namespace Mashiro::Concurrency {
      * @tparam Adapter Compile-time capability description and storage bridge.
      *
      * @details The queue owns no operation state. It must outlive all producer and consumer ports, senders, connected
-     * operation states, and receiver completion execution. Single-cardinality ports are affine capabilities issued at
-     * most once for the queue lifetime; moving a port transfers that capability. Concurrent operations through one
-     * single-cardinality port violate the underlying storage contract.
+     * operation states, coroutine frames awaiting those operations, and receiver completion execution.
+     * Single-cardinality ports are affine capabilities issued at most once for the queue lifetime; moving a port
+     * transfers that capability. Concurrent operations through one single-cardinality port violate the underlying
+     * storage contract.
      */
     template<class Storage, class Adapter, WaiterOrder Waiters>
         requires AsyncQueueAdapterFor<Adapter, Storage>

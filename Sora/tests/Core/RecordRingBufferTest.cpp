@@ -5,6 +5,7 @@
  */
 
 #include <Sora/Core/Concurrency/RecordRingBuffer.h>
+#include <Sora/Platform.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -397,8 +398,14 @@ TEST_CASE("SPMC RecordRingBuffer cannot lose a completed-prefix reclaim handoff"
 }
 
 TEST_CASE("RecordRingBuffer concurrent layouts isolate all contention domains", "[Sora.Core.RecordRingBuffer]") {
-    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditFalseSharing<RecordRingBuffer<4096, Topology::Spsc>>());
-    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditFalseSharing<RecordRingBuffer<4096, Topology::Mpsc>>());
-    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditFalseSharing<RecordRingBuffer<4096, Topology::Spmc>>());
-    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditFalseSharing<RecordRingBuffer<4096, Topology::Mpmc>>());
+    constexpr std::size_t line = Sora::Platform::kCacheLineSize;
+    STATIC_REQUIRE(sizeof(RecordRingBuffer<4096, Topology::Spsc>) == 4096 + 2 * line);
+    STATIC_REQUIRE(sizeof(RecordRingBuffer<4096, Topology::Mpsc>) == 4096 + 2 * line);
+    STATIC_REQUIRE(sizeof(RecordRingBuffer<4096, Topology::Spmc>) == 4096 + 3 * line);
+    STATIC_REQUIRE(sizeof(RecordRingBuffer<4096, Topology::Mpmc>) == 4096 + 3 * line);
+    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, Topology::Spsc>>());
+    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, Topology::Mpsc>>());
+    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, Topology::Spmc>>());
+    STATIC_REQUIRE(Sora::Concurrency::Meta::AuditDirectMemberFalseSharing<RecordRingBuffer<4096, Topology::Mpmc>>());
+    STATIC_REQUIRE_FALSE(RecordRingBuffer<4096, Topology::Mpmc>::Layout().coversAllRegions);
 }

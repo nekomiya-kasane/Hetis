@@ -1,4 +1,4 @@
-#include <Sora/Core/Concurrency/SpscRingBuffer.h>
+#include <Sora/Core/Concurrency/RingBuffer.h>
 #include <Sora/Core/PAL/Thread.h>
 
 #include <charconv>
@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
     }
     NameTraceThread(options.traceThreads, "main");
 
-    SpscRingBuffer<int, 8> buffer{};
+    RingBuffer<int, 8, Spsc> buffer{};
 
     std::thread producer([&buffer, options]() {
         NameTraceThread(options.traceThreads, "producer");

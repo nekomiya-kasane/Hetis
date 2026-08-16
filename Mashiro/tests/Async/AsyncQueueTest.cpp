@@ -39,6 +39,11 @@ namespace {
     using LifoStorage = BoundedStack<int, 8, QueueTopologies::Mpmc>;
     using LifoWaitStorage = BoundedStack<int, 1, QueueTopologies::Mpsc>;
     using LifoConsumerWaitStorage = BoundedStack<int, 1, QueueTopologies::Spmc>;
+    using MichaelScottStorage = MichaelScottQueue<int, MichaelScottQueueConfig{.capacity = 64,
+                                                                                 .maxConcurrentOperations = 16,
+                                                                                 .reclamationThreshold = 16,
+                                                                                 .backing =
+                                                                                     MichaelScottBacking::Inline}>;
     using SpscAsyncQueue = AsyncQueue<SpscStorage>;
     using MpscAsyncQueue = AsyncQueue<MpscStorage>;
     using MpmcAsyncQueue = AsyncQueue<MpmcStorage>;
@@ -46,6 +51,7 @@ namespace {
     using LifoWaitQueue = AsyncQueue<LifoWaitStorage, QueueAdapter<LifoWaitStorage>, WaiterOrder::Lifo>;
     using LifoConsumerWaitQueue =
         AsyncQueue<LifoConsumerWaitStorage, QueueAdapter<LifoConsumerWaitStorage>, WaiterOrder::Lifo>;
+    using MichaelScottAsyncQueue = AsyncQueue<MichaelScottStorage>;
     using Batch = QueueBatch<int, QueueAdapter<SpscStorage>::capacity>;
     using LifoBatch = QueueBatch<int, QueueAdapter<LifoStorage>::capacity>;
     using SpscRecordStorage = RecordRingBuffer<256, QueueTopologies::Spsc>;
@@ -202,6 +208,12 @@ namespace {
     static_assert(HasPushBatch<ProducerPort<LifoAsyncQueue>, LifoBatch>);
     static_assert(QueueAdapter<SpscLifoStorage>::pushProgress == QueueProgress::WaitFree);
     static_assert(QueueAdapter<SpscLifoStorage>::popProgress == QueueProgress::WaitFree);
+
+    static_assert(MichaelScottAsyncQueue::producerCardinality == QueueCardinality::Multiple);
+    static_assert(MichaelScottAsyncQueue::consumerCardinality == QueueCardinality::Multiple);
+    static_assert(QueueAdapter<MichaelScottStorage>::pushProgress == QueueProgress::LockFree);
+    static_assert(QueueAdapter<MichaelScottStorage>::popProgress == QueueProgress::LockFree);
+    static_assert(!QueueAdapter<MichaelScottStorage>::transactionalPushBatch);
 
     static_assert(AsyncQueueAdapter<QueueAdapter<SpscRecordStorage>>);
     static_assert(AsyncQueueAdapter<QueueAdapter<MpscRecordStorage>>);
@@ -830,4 +842,20 @@ TEST_CASE("AsyncQueue MPMC accepts concurrent producers and consumers", AUTO_TAG
     for (const auto& count : seen) {
         REQUIRE(count.load(std::memory_order_relaxed) == 1);
     }
+}
+
+TEST_CASE("AsyncQueue exposes Michael-Scott storage through the unified sender facade", AUTO_TAG) {
+    MichaelScottAsyncQueue queue;
+    auto producer = queue.Producer();
+    auto consumer = queue.Consumer();
+
+    REQUIRE(stdexec::sync_wait(producer.Push(41)).has_value());
+    REQUIRE(stdexec::sync_wait(producer.Push(42)).has_value());
+    auto first = stdexec::sync_wait(consumer.Pop());
+    auto second = stdexec::sync_wait(consumer.Pop());
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(std::get<0>(*first) == 41);
+    REQUIRE(std::get<0>(*second) == 42);
+    REQUIRE(queue.SizeApprox() == 0);
 }

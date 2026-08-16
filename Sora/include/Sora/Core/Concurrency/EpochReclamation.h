@@ -20,7 +20,13 @@
 
 namespace Sora::Concurrency {
 
-    /** @brief Epoch domain whose participants delimit short, nestable read-side regions. */
+    /**
+     * @brief Epoch domain whose participants delimit short, nestable read-side regions.
+     *
+     * @details Access protected objects only inside a participant's read-side region. Remove an object from every
+     * source before @ref Retire; retirement publishes that unlink into the epoch modification order. Participants and
+     * guards are affine, and the domain must outlive all of them.
+     */
     class EpochDomain {
         struct alignas(Platform::kCacheLineSize) Record {
             std::atomic<std::uint64_t> announced{0};
@@ -44,6 +50,9 @@ namespace Sora::Concurrency {
             }
         };
         static_assert(sizeof(Record) % Platform::kCacheLineSize == 0);
+        static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                          std::atomic<std::size_t>::is_always_lock_free && std::atomic<bool>::is_always_lock_free,
+                      "EpochDomain requires lock-free epoch, depth, and registration atomics");
 
     public:
         class Participant;
@@ -121,7 +130,7 @@ namespace Sora::Concurrency {
 
                 for (;;) {
                     const std::uint64_t observed = epoch_->load(std::memory_order_acquire);
-                    record_->announced.store(observed, std::memory_order_relaxed);
+                    record_->announced.store(observed, std::memory_order_release);
                     record_->depth.store(1, std::memory_order_seq_cst);
                     if (epoch_->load(std::memory_order_seq_cst) == observed) {
                         return ReadGuard(record_);
@@ -174,6 +183,7 @@ namespace Sora::Concurrency {
         [[nodiscard]] Participant Register() { return Participant(*this); }
 
         template<typename T>
+            requires std::is_nothrow_destructible_v<T>
         void Retire(T* pointer) {
             if (pointer != nullptr) {
                 retired_.Retire(pointer, CaptureEpoch());
@@ -190,7 +200,8 @@ namespace Sora::Concurrency {
         }
         template<typename Pointer, std::size_t Extent>
             requires std::is_pointer_v<std::remove_cv_t<Pointer>> &&
-                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*>
+                     std::is_convertible_v<std::remove_cv_t<Pointer>, void*> &&
+                     std::is_nothrow_destructible_v<std::remove_pointer_t<std::remove_cv_t<Pointer>>>
         void Retire(std::span<Pointer, Extent> pointers) {
             if (!pointers.empty()) {
                 retired_.Retire(pointers, CaptureEpoch());
@@ -213,7 +224,7 @@ namespace Sora::Concurrency {
             bool mayAdvance = true;
             records_.Visit([&](const Record& record) {
                 if (record.depth.load(std::memory_order_seq_cst) != 0 &&
-                    record.announced.load(std::memory_order_relaxed) != current) {
+                    record.announced.load(std::memory_order_acquire) != current) {
                     mayAdvance = false;
                 }
             });
@@ -227,18 +238,23 @@ namespace Sora::Concurrency {
         /** @brief Reclaim objects at least two completed epoch transitions behind the current generation. */
         [[nodiscard]] std::size_t Collect() {
             auto candidates = retired_.DetachAll();
+            if (candidates.Empty()) {
+                return 0;
+            }
             const std::uint64_t current = epoch_.load(std::memory_order_acquire);
             return Detail::ReclaimDetached(retired_, std::move(candidates),
                                            [&](const Detail::RetiredObject& object) noexcept {
-                                               return Detail::GenerationReached(current, object.generation + 2);
+                                               // A serial number older than half the range is ambiguous; retain it.
+                                               return Detail::GenerationReached(current, object.generation) &&
+                                                      Detail::GenerationReached(current, object.generation + 2);
                                            });
         }
 
         [[nodiscard]] std::size_t RetiredCount() const noexcept { return retired_.Size(); }
 
     private:
-        /** @brief Read the immediate predecessor in epoch modification order, avoiding a stale retirement epoch. */
-        [[nodiscard]] std::uint64_t CaptureEpoch() noexcept { return epoch_.fetch_add(0, std::memory_order_acquire); }
+        /** @brief Publish preceding unlink work and return the immediate epoch modification-order predecessor. */
+        [[nodiscard]] std::uint64_t CaptureEpoch() noexcept { return epoch_.fetch_add(0, std::memory_order_release); }
 
         std::atomic<std::uint64_t> epoch_{1};
         Detail::StableRecordRegistry<Record> records_;

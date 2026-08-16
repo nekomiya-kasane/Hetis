@@ -8,6 +8,7 @@
 #include "Mashiro/Concurrency/BoundedByteRecord.h"
 #include "Mashiro/Concurrency/QueueBatch.h"
 #include "Mashiro/Core/BoundedStack.h"
+#include "Mashiro/Core/MichaelScottQueue.h"
 #include "Mashiro/Core/RecordRingBuffer.h"
 #include "Mashiro/Core/RingBuffer.h"
 
@@ -277,6 +278,36 @@ namespace Mashiro::Concurrency {
         }
 
         [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }
+    };
+
+    /** @brief Adapter exposing bounded Michael-Scott storage through the unified asynchronous queue facade. */
+    template<typename T, Mashiro::MichaelScottQueueConfig Config>
+    struct QueueAdapter<Mashiro::MichaelScottQueue<T, Config>> {
+        using storage_type = Mashiro::MichaelScottQueue<T, Config>;
+        using value_type = T;
+
+        static constexpr QueueOrder order = QueueOrder::Fifo;
+        static constexpr QueueCardinality producerCardinality = QueueCardinality::Multiple;
+        static constexpr QueueCardinality consumerCardinality = QueueCardinality::Multiple;
+        static constexpr QueueProgress pushProgress = QueueProgress::LockFree;
+        static constexpr QueueProgress popProgress = QueueProgress::LockFree;
+        static constexpr std::size_t capacity = storage_type::kCapacity;
+        static constexpr bool pushFailurePreservesInput = true;
+        static constexpr bool transactionalPushBatch = false;
+
+        [[nodiscard]] static QueueTransferStatus TryPush(storage_type& storage, value_type& value) noexcept {
+            return storage.TryPush(std::move(value)) ? QueueTransferStatus::Committed
+                                                     : QueueTransferStatus::BackPressure;
+        }
+
+        [[nodiscard]] static std::optional<value_type> TryPop(storage_type& storage) noexcept {
+            return storage.TryPop();
+        }
+
+        [[nodiscard]] static bool IsDrained(const storage_type& storage) noexcept { return storage.Empty(); }
+        [[nodiscard]] static std::size_t SizeApprox(const storage_type& storage) noexcept {
+            return storage.SizeApprox();
+        }
     };
 
 } // namespace Mashiro::Concurrency
