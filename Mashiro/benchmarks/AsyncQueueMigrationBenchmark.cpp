@@ -75,6 +75,8 @@ namespace {
         double ratio{};
     };
 
+    [[nodiscard]] double GeometricMean(double first, double second) noexcept { return std::sqrt(first * second); }
+
     [[nodiscard]] std::vector<std::uint32_t> AvailableCpuSets() {
 #if defined(_WIN32)
         ULONG byteCount = 0;
@@ -301,29 +303,41 @@ namespace {
             if (warmup % 2 == 0) {
                 static_cast<void>(RunSample<MashiroQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
                 static_cast<void>(RunSample<SoraQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
+                static_cast<void>(RunSample<SoraQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
+                static_cast<void>(RunSample<MashiroQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
             } else {
                 static_cast<void>(RunSample<SoraQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
                 static_cast<void>(RunSample<MashiroQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
+                static_cast<void>(RunSample<MashiroQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
+                static_cast<void>(RunSample<SoraQueue, T>(producers, consumers, warmupItems, config.pinWorkers));
             }
         }
 
         std::vector<double> ratios;
         ratios.reserve(config.samples);
         for (std::size_t sampleIndex = 0; sampleIndex < config.samples; ++sampleIndex) {
-            ThroughputSample mashiro;
-            ThroughputSample sora;
-            const std::string_view order = sampleIndex % 2 == 0 ? "MS" : "SM";
+            std::array<ThroughputSample, 2> mashiro;
+            std::array<ThroughputSample, 2> sora;
+            const std::string_view order = sampleIndex % 2 == 0 ? "MSSM" : "SMMS";
             if (sampleIndex % 2 == 0) {
-                mashiro = RunSample<MashiroQueue, T>(producers, consumers, items, config.pinWorkers);
-                sora = RunSample<SoraQueue, T>(producers, consumers, items, config.pinWorkers);
+                mashiro[0] = RunSample<MashiroQueue, T>(producers, consumers, items, config.pinWorkers);
+                sora[0] = RunSample<SoraQueue, T>(producers, consumers, items, config.pinWorkers);
+                sora[1] = RunSample<SoraQueue, T>(producers, consumers, items, config.pinWorkers);
+                mashiro[1] = RunSample<MashiroQueue, T>(producers, consumers, items, config.pinWorkers);
             } else {
-                sora = RunSample<SoraQueue, T>(producers, consumers, items, config.pinWorkers);
-                mashiro = RunSample<MashiroQueue, T>(producers, consumers, items, config.pinWorkers);
+                sora[0] = RunSample<SoraQueue, T>(producers, consumers, items, config.pinWorkers);
+                mashiro[0] = RunSample<MashiroQueue, T>(producers, consumers, items, config.pinWorkers);
+                mashiro[1] = RunSample<MashiroQueue, T>(producers, consumers, items, config.pinWorkers);
+                sora[1] = RunSample<SoraQueue, T>(producers, consumers, items, config.pinWorkers);
             }
+            const double mashiroOperationsPerSecond =
+                GeometricMean(mashiro[0].OperationsPerSecond(), mashiro[1].OperationsPerSecond());
+            const double soraOperationsPerSecond =
+                GeometricMean(sora[0].OperationsPerSecond(), sora[1].OperationsPerSecond());
             const PairSample pair{
-                .mashiroOperationsPerSecond = mashiro.OperationsPerSecond(),
-                .soraOperationsPerSecond = sora.OperationsPerSecond(),
-                .ratio = sora.OperationsPerSecond() / mashiro.OperationsPerSecond(),
+                .mashiroOperationsPerSecond = mashiroOperationsPerSecond,
+                .soraOperationsPerSecond = soraOperationsPerSecond,
+                .ratio = soraOperationsPerSecond / mashiroOperationsPerSecond,
             };
             ratios.push_back(pair.ratio);
             std::println("sample,{},{},{},{},{},{},{},{:.9g},{:.9g},{:.9f},,,,,", topology, sizeof(T), producers,
