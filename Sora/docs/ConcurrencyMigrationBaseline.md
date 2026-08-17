@@ -6,19 +6,19 @@ that one workstation proves performance on every target.
 
 ## Decision
 
-The paired evidence found no migration regression larger than 10% at the selected 95% bootstrap confidence level:
-every per-case lower confidence bound for `Sora throughput / Mashiro throughput` is greater than `0.90`.
-`ConcurrentMap` has an overall geometric-mean ratio of `1.004459695`; `AsyncQueue` has `1.000307056`.
+The migration gate is a one-sided 3% non-inferiority test: every case must have a 95% bootstrap confidence-interval
+lower bound of at least `0.97` for `Sora throughput / Mashiro throughput`. A control run cannot substitute for a failed
+migration comparison, and failed samples may not be discarded or selectively rerun.
 
-This is a one-sided non-inferiority guard. It is not a two-sided TOST equivalence proof: some upper confidence bounds
-exceed `1.10`, so the result must not be restated as strict ±10% statistical equivalence.
+This is not a two-sided TOST equivalence proof. A point estimate above one is not evidence of a universal speedup, and
+the result applies only to the recorded compiler, machine, placement, build, and workload.
 
 ## Recorded environment
 
 | Property | Value |
 | --- | --- |
-| Date | 2026-08-16 |
-| Source revision | `c0372296296de2f2bd6ff9ae73a2af959a7ec2a5` plus the working-tree migration changes |
+| Date | 2026-08-17 |
+| Source revision | `02018d7` plus the reviewed Concurrency and benchmark changes recorded with this baseline |
 | OS | Windows 11 Pro, build 26200 |
 | CPU | Intel Core i7-12700H, 14 cores / 20 logical processors |
 | Toolchain | COCA clang-p2996, Clang 21.0.0git (`6e677e01...`), libc++ |
@@ -28,38 +28,52 @@ exceed `1.10`, so the result must not be restated as strict ±10% statistical eq
 
 Authoritative sample-level evidence is versioned in:
 
-- `Sora/benchmarks/baselines/ConcurrencyMigration/concurrent-map-paired-25.csv`
-- `Sora/benchmarks/baselines/ConcurrencyMigration/async-queue-paired-25.csv`
+- `Sora/benchmarks/baselines/ConcurrencyMigration/concurrent-map-final-crossover-49-250ms.csv`
+- `Sora/benchmarks/baselines/ConcurrencyMigration/async-queue-final-49-500ms.csv`
 
-Their SHA-256 digests after normalization to UTF-8 with LF line endings are:
+Their SHA-256 digests are byte-level digests of the final artifacts; the benchmark's CRLF output is intentionally
+preserved. Benchmark executables write fresh artifacts under `build/x64-release/migration-evidence/`.
 
-```text
-concurrent-map-paired-25.csv  60A0A36473F27550C7C21957716E8BDC477D5219F33324180E8C566C8EEE1CEB
-async-queue-paired-25.csv     0DD42B5D721445CD52B6283478E7E5799CC444B900C93EC6026BCC64CA309C6F
-```
-
-Benchmark executables write fresh artifacts under `build/x64-release/migration-evidence/`. The recorded map artifact
-used UTF-8/CRLF and the queue artifact used UTF-16LE/CRLF; the versioned files contain identical decoded CSV records,
-normalized for review. In particular, `queue-migration-final.csv` covers only the 8-byte payload and must not be used
-as evidence for the 64-byte cases.
+| Artifact | SHA-256 |
+| --- | --- |
+| `concurrent-map-final-crossover-49-250ms.csv` | `6251D939C8DFD9000B234BAE68F77841DBFBA1EE3C2C44A2BC95CEC87521446D` |
+| `async-queue-final-49-500ms.csv` | `8EDC845729FB3807596B0C386F2B4C8D17F0E662FC39C79650E08A04ABC1F924` |
 
 ## Measurement protocol
 
-Each case uses 25 same-process paired samples, two warm-up pairs, calibrated runs of at least 120 ms, and alternating
-Mashiro/Sora then Sora/Mashiro order. Each worker is pinned and promoted; each sample validates result count and content.
-The reported estimate is the median of paired throughput ratios. The 95% percentile interval uses 20,000 deterministic
-bootstrap resamples of those ratios. The overall value is the geometric mean of case medians.
+Each case uses 49 same-process paired samples and two warm-ups. Map runs are calibrated to at least 250 ms and queue
+runs to at least 500 ms. Every map sample executes all four crossover blocks in a sample-rotated order:
+
+```text
+ABBA, BAAB, CDDC, DCCD
+```
+
+`A/B` are Mashiro/Sora in the forward runner; `C/D` are Sora/Mashiro in the reverse runner. Thus each implementation
+occupies both template positions and both positions inside each paired block. Insert repeats the complete four-block
+crossover four times per sample. Fixed lookup retains capacity `2^20`; fixed insert uses a benchmark-only `2^23`
+capacity so the calibrated run is not truncated by exhaustion. These choices do not change production `ConcurrentMap`.
+
+Each worker is pinned and promoted; each sample validates result count and content. The reported estimate is the median
+of paired throughput ratios. The 95% percentile interval uses 20,000 deterministic bootstrap resamples of those ratios.
+The overall value is the geometric mean of case medians.
 
 Run from `build/x64-release/bin` after activating the COCA environment:
 
 ```powershell
-Benchmark.Sora.Migration.ConcurrentMapPaired.exe --samples=25 --warmups=2 --minimum-ms=120
-Benchmark.Sora.Migration.AsyncQueuePaired.exe --samples=25 --warmups=2 --minimum-ms=120
+Benchmark.Sora.Migration.ConcurrentMapPaired.exe --samples=49 --warmups=2 --minimum-ms=250
+Benchmark.Sora.Migration.AsyncQueuePaired.exe --samples=49 --warmups=2 --minimum-ms=500
 ```
 
 Benchmark timing excludes setup, but includes the complete tested transfer operation. Calibration, warm-up, alternating
 order, fixed placement, integrity checks, and raw samples are part of the baseline and must not be removed in a later
 comparison.
+
+The production `ConcurrentMap` assembly probes for Mashiro and Sora have byte-identical `.text` sections. Both extracted
+images have SHA-256 `9A53A88CA0157F3E53771EF351FE33721C57AA07EA2C061CAE8508D0F8FD5FB3`; `fc /b` reports no
+differences. The dynamic Local lookup `Transfer` instances are likewise byte-identical except for relocations to their
+namespace-specific `Find` symbols. Earlier paired outliers were therefore treated as benchmark-layout and scheduling
+evidence, not attributed to a production algorithm without proof. The complete crossover and noinline 64-byte-aligned
+transfer kernels cancel that code-position drift. Control comparisons diagnose the harness but cannot pass migration.
 
 ## ConcurrentMap results
 
@@ -67,31 +81,30 @@ Ratios greater than one favor Sora.
 
 | Storage | Topology | Operation | Threads | Median | 95% CI |
 | --- | --- | --- | ---: | ---: | ---: |
-| fixed | Local | find hit | 1 | 1.011415888 | [0.985868697, 1.024110286] |
-| fixed | MPMC | find hit | 4 | 1.003805196 | [0.988772949, 1.066866851] |
-| fixed | MPMC | find miss | 4 | 0.998146649 | [0.935293536, 1.056658399] |
-| fixed | MPMC | insert | 4 | 1.017507050 | [0.978445454, 1.585894739] |
-| dynamic | Local | find hit | 1 | 0.996872880 | [0.924335450, 1.007288450] |
-| dynamic | MPMC | find hit | 4 | 1.004179150 | [0.978164273, 1.070044088] |
-| dynamic | Local | insert | 1 | 0.998674091 | [0.980161304, 1.014329721] |
-| dynamic | MPMC | insert | 4 | 1.005250658 | [0.973135647, 1.055224235] |
+| fixed | Local | find hit | 1 | 0.992835912 | [0.986718559, 1.000237788] |
+| fixed | MPMC | find hit | 4 | 0.998385562 | [0.980430917, 1.012949389] |
+| fixed | MPMC | find miss | 4 | 1.000625936 | [0.988672107, 1.008150821] |
+| fixed | MPMC | insert | 4 | 1.000770576 | [0.991926788, 1.008936066] |
+| dynamic | Local | find hit | 1 | 1.004397791 | [0.993706001, 1.010418650] |
+| dynamic | MPMC | find hit | 4 | 1.002064190 | [0.986053008, 1.012890192] |
+| dynamic | Local | insert | 1 | 1.005034589 | [0.996885875, 1.010916240] |
+| dynamic | MPMC | insert | 4 | 0.999842209 | [0.994349218, 1.008108888] |
 
-The wide upper interval for fixed MPMC insert reflects scheduler variance and is not evidence of a 58% speedup. The
-non-inferiority conclusion rests on its lower bound; future optimization claims require a quieter, higher-power run.
+The eight-case geometric mean is `1.000488215`. Every lower bound passes `0.97`; the conclusion is non-inferiority,
+not a universal speedup claim.
 
 ## AsyncQueue results
 
 | Topology | Payload | Producers | Consumers | Median | 95% CI |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| SPSC | 8 B | 1 | 1 | 1.001325819 | [0.958325470, 1.044864852] |
-| MPSC | 8 B | 4 | 1 | 1.001452368 | [0.958306460, 1.100144141] |
-| MPMC | 8 B | 4 | 4 | 1.009625894 | [0.990344216, 1.046657202] |
-| SPSC | 64 B | 1 | 1 | 1.004488031 | [0.938480786, 1.054561493] |
-| MPSC | 64 B | 4 | 1 | 0.989530266 | [0.900948033, 1.047489038] |
-| MPMC | 64 B | 4 | 4 | 0.995542837 | [0.955375328, 1.040879889] |
+| SPSC | 8 B | 1 | 1 | 0.992339428 | [0.982679173, 0.998469080] |
+| MPSC | 8 B | 4 | 1 | 1.014044546 | [0.998780968, 1.027076310] |
+| MPMC | 8 B | 4 | 4 | 1.013351078 | [1.006074440, 1.021013689] |
+| SPSC | 64 B | 1 | 1 | 1.041099381 | [1.024805049, 1.053501599] |
+| MPSC | 64 B | 4 | 1 | 0.999119444 | [0.984772831, 1.029870991] |
+| MPMC | 64 B | 4 | 4 | 1.000813856 | [0.992033940, 1.009296307] |
 
-MPSC with a 64-byte payload is the limiting regression guard. Its lower bound is only `0.000948033` above the threshold,
-so it should be the first case rerun after changes to waiter matching, operation-state size, or queue transfer layout.
+The six-case geometric mean is `1.010004605`. All six lower bounds pass `0.97`.
 
 ## Ownership and linearization
 
@@ -157,15 +170,22 @@ All 31 headers under `Sora/Core/Concurrency`, including the internal reclamation
 not recorded because stress-test assertion counts vary with valid scheduling outcomes; executable and test-case counts
 are stable.
 
-The Windows COCA toolchain currently has no working TSan configuration, so sanitizer success is not a data-race proof.
-In addition, ASan exception unwinding across the current `stdexec::task` coroutine implementation is broken in the
-toolchain; the affected coroutine error-propagation case is conditionally excluded under ASan. This is a toolchain
-limitation, not application-level evidence, and the non-ASan configurations must continue to exercise that case.
-It is the sole reason the ASan matrix contains 214 rather than 215 test cases.
+TSan is intentionally excluded from this project. Race-safety claims require explicit happens-before and lifetime
+arguments plus targeted stress; sanitizer success is never substituted for that proof. Intel's Inspector transition
+notice records Inspector 2024.2 as the final release and states that it is no longer available for download; the
+oneAPI 2026 installation therefore has no `inspxe-cl` replacement. The installed tree does contain VTune Profiler
+2026.2, but VTune is a performance and threading-behavior profiler, not a replacement for Inspector's dynamic race
+and memory correctness analysis. Inspector and VTune, when available, are diagnostic instruments only: instrumented
+results must never be inserted into the final throughput CSV.
+
+ASan exception unwinding across the current `stdexec::task` coroutine implementation is broken in the toolchain; the
+affected coroutine error-propagation case is conditionally excluded under ASan. This is a toolchain limitation, not
+application-level evidence, and the non-ASan configurations must continue to exercise that case. It is the sole reason
+the ASan matrix contains 214 rather than 215 test cases.
 
 ## Baseline policy
 
 Future migration-sensitive changes fail the performance gate when a comparable paired run has a 95% lower bound below
-`0.90`. A point estimate below one is not sufficient to declare a regression, and a point estimate above one is not
+`0.97`. A point estimate below one is not sufficient to declare a regression, and a point estimate above one is not
 sufficient to declare an improvement. Changes to compiler, CPU placement, power policy, topology, payload, sample count,
 or integrity checks create a new baseline rather than silently replacing this one.

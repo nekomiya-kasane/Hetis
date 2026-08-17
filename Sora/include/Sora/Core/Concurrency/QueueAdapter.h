@@ -109,7 +109,8 @@ namespace Sora::Concurrency {
             return QueueProgress::Unspecified;
         }
 
-        /** @brief Local and dual-ring SPSC stacks are wait-free; shared tagged heads are lock-free. */
+        /** @brief Local/SPSC stacks are wait-free; tagged-head variants are lock-free within their finite tag window.
+         */
         [[nodiscard]] consteval QueueProgress StackProgress(QueueTopology topology) noexcept {
             return topology.sharing == QueueSharing::SingleThread || topology == QueueTopologies::Spsc
                        ? QueueProgress::WaitFree

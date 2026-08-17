@@ -13,11 +13,10 @@
  *   stale handle to a recycled slot is rejected until the finite generation field wraps. Because live generations
  *   are odd, the same encoded handle can recur after 2^15 complete recycle cycles of one slot. A handle is an identity
  *   token, not an ownership lease or a reclamation guard.
- * - **ABA-safe free-list** — the free-list head is a single 64-bit atomic packing
- *   `[aba-tag | slot-index]`. The tag is bumped on every push so a popped-then-
- *   repushed head fails the CAS instead of silently succeeding (the classic
- *   tagged-pointer ABA mitigation). The bit split is computed at compile time by
- *   @ref Detail::ComputeAbaLayout from the configured capacity.
+ * - **Finite-tag ABA mitigation** — the free-list head is a single 64-bit atomic packing
+ *   `[aba-tag | slot-index]`. The tag is bumped on every head change so a popped-then-repushed head fails the CAS
+ *   unless the complete tag period elapses while an older observation remains outstanding. The bit split and exact
+ *   period are computed at compile time from the configured capacity.
  * - **SoA storage** — slot payloads, free-list links and generations live in
  *   three parallel arrays so free-list traversal and generation checks never pull
  *   `sizeof(T)`-strided cache lines, and the contended head sits alone on its line.
@@ -128,7 +127,7 @@ namespace Sora {
          * The head is a 64-bit atomic split into a high *ABA tag* and a low *index*
          * field wide enough to encode every valid slot plus a `sentinel` value used
          * for the empty list. The tag occupies the remaining high bits and is bumped
-         * on every push to defeat ABA.
+         * on every head change to distinguish reuse within the finite tag period.
          */
         struct AbaLayout {
             uint32_t indexBits = 0; ///< Width of the index field in bits.
@@ -142,8 +141,8 @@ namespace Sora {
          *
          * `indexBits = bit_width(capacity)` so the field can hold every index in
          * `0 .. capacity-1` *and* the sentinel value `capacity` itself. The tag gets
-         * all remaining bits; we require at least 32 tag bits so wrap-around is
-         * astronomically unlikely on the contended path.
+         * all remaining bits. At least 32 tag bits are retained; correctness assumes that no operation remains
+         * outstanding across a complete tag period.
          */
         consteval AbaLayout ComputeAbaLayout(size_t capacity) {
             AbaLayout l{};
@@ -174,15 +173,9 @@ namespace Sora {
      * caller must retain the association with the producing pool; a foreign-pool
      * handle cannot be detected from these bits alone.
      *
-     * @todo The index/generation split is fixed at 15/16 bits regardless of the
-     *       pool's capacity. Since the capacity is known at compile time, the
-     *       index field only needs `bit_width(capacity-1)` bits and every bit
-     *       saved there could widen the generation field — directly enlarging the
-     *       use-after-free / ABA detection window (a capacity-1024 pool wastes 5
-     *       index bits that could grow the generation window 32×). Making the
-     *       split capacity-adaptive (template the field widths, or demote
-     *       `PoolHandle` to an opaque 32-bit token packed/unpacked by the pool)
-     *       is deferred to keep handles pool-agnostic for now.
+     * The fixed 15/16 split deliberately keeps one pool-independent, four-byte handle ABI. It provides a finite stale
+     * handle detection window of 2^15 complete recycle cycles per slot; applications needing an unbounded lifetime
+     * proof must use an ownership or reclamation guard instead of retaining this identity token indefinitely.
      */
     struct PoolHandle {
         uint32_t bits = 0; ///< Packed `[valid:1][index:15][generation:16]`.
@@ -337,6 +330,9 @@ namespace Sora {
 
         static constexpr size_t kCapacity = C.capacity; ///< Compile-time slot count.
         static constexpr size_t kAlignment = C.alignment ? C.alignment : alignof(T);
+        static constexpr uint32_t kFreeListTagBits = Detail::ComputeAbaLayout(C.capacity).tagBits; ///< Head tag width.
+        static constexpr uint64_t kFreeListTagPeriod = uint64_t{1} << kFreeListTagBits; ///< Head identity period.
+        static constexpr uint64_t kHandleRecyclePeriod = uint64_t{1} << 15; ///< Per-slot encoded handle period.
 
         static_assert(kAlignment >= alignof(T), "pool payload alignment must not weaken alignof(T)");
 
@@ -352,7 +348,7 @@ namespace Sora {
         static_assert(std::atomic<uint64_t>::is_always_lock_free,
                       "ConcurrentObjectPool requires lock-free 64-bit atomics");
         static_assert(C.capacity <= Detail::kMaxPoolCapacity, "capacity exceeds the 15-bit handle index field");
-        static_assert(kAba.tagBits >= 32, "ABA tag must keep >= 32 bits so the free-list head cannot wrap in practice");
+        static_assert(kAba.tagBits >= 32, "the free-list head must retain an ABA tag window of at least 32 bits");
 
         /** @brief Decode the slot index from a packed head word. */
         [[nodiscard]] static constexpr uint32_t IndexOf(uint64_t word) noexcept {
@@ -832,15 +828,10 @@ namespace Sora {
          *          `Link` with `relaxed` ordering. The classic Treiber-stack ABA
          *          hazard (a node popped, recycled, and re-pushed mid-walk, so a stale
          *          `afterBatch` swings the head onto a dangling chain) is contained by
-         *          the head word's ABA tag (@ref Pack): any intervening head change
-         *          fails our CAS and we retry. ASan/TSan stress (see the test file)
-         *          exercises this path.
-         * @todo If a future code path ever writes an in-list node's `Link` from a
-         *       context other than the head-CAS winner (lazy/segmented free lists,
-         *       hazard-pointer reclamation, per-thread caching that passes nodes around
-         *       without touching the head, …), this `relaxed` walk must be revisited:
-         *       promote the `Link` loads to `acquire` and re-audit, or move to a
-         *       tagged-per-node scheme. The invariant is load-bearing, not cosmetic.
+         *          the head word's ABA tag (@ref Pack): an intervening head change within the finite tag period fails
+         *          our CAS and forces a retry. ASan and concurrent stress tests exercise this path.
+         * @note Any extension that writes an in-list node's `Link` without changing the head invalidates this proof;
+         * the relaxed walk must then be re-audited or replaced by a reclamation/tagging protocol that covers links.
          *
          * @param maxCount Maximum slots to detach (must be >= 1).
          * @param[out] outFirst Index of the first slot in the detached chain

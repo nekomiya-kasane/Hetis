@@ -74,10 +74,11 @@ namespace Sora {
         /**
          * @brief Fixed-capacity stack with a direct local protocol or an ABA-resistant indexed Treiber protocol.
          *
-         * @details Multi-endpoint specializations use preallocated tagged index stacks. SPSC publishes node indices
-         * through one ring, folds each acquired snapshot into a consumer-local stack, and returns consumed indices
-         * through a second ring. A stalled operation owns only detached nodes, so no protocol creates a publication or
-         * reclamation hole.
+         * @details Multi-endpoint specializations use preallocated tagged index stacks. The Treiber variants are
+         * lock-free under the explicit assumption that no operation remains outstanding across the complete finite
+         * head-tag period. SPSC publishes node indices through one ring, folds each acquired snapshot into a
+         * consumer-local stack, and returns consumed indices through a second ring. A stalled operation owns only
+         * detached nodes, so no protocol creates a publication or reclamation hole.
          */
         template<class T, std::size_t Capacity, Concurrency::QueueTopology Topology>
             requires ValidBoundedStack<T, Capacity, Topology>
@@ -173,6 +174,8 @@ namespace Sora {
                           "concurrent BoundedStack requires lock-free compact indices");
             static_assert(kTagShift < std::numeric_limits<std::uint64_t>::digits,
                           "bounded stack head must retain version bits for ABA resistance");
+            static_assert(kLocal || kSpsc || std::numeric_limits<std::uint64_t>::digits - kTagShift >= 32,
+                          "a shared bounded-stack head must retain an ABA tag window of at least 32 bits");
 
         public:
             using value_type = T;
@@ -180,6 +183,9 @@ namespace Sora {
             static constexpr Concurrency::QueueTopology topology = Topology;
             static constexpr Concurrency::QueueOrder order = Concurrency::QueueOrder::Lifo;
             static constexpr bool transactionalPushBatch = true;
+            static constexpr unsigned kHeadTagBits = kLocal || kSpsc ? 0 : 64 - kTagShift; ///< Shared-head tag width.
+            static constexpr std::uint64_t kHeadTagPeriod =
+                kLocal || kSpsc ? 0 : std::uint64_t{1} << kHeadTagBits; ///< Shared-head identity period.
 
             BoundedStackImplementation() noexcept {
                 if constexpr (!kLocal) {

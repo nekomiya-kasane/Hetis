@@ -126,9 +126,10 @@ CAS, reader scaling, allocation cost, cold and warmed retirement metadata, and h
 counts. A process pinned to one logical CPU is suitable for fixed-cost and scan measurements but invalidates the
 multi-reader scaling section; scaling evidence needs distinct worker affinities and is not reported below.
 Results apply only to the recorded compiler, CPU, optimization level, workload, and allocator. Competitor comparisons
-require identical memory ordering, ownership protocol, pinning, warm-up, and correctness checks. Debug, Release, ASan,
-and UBSan test runs do not replace a TSan run; the current Windows COCA matrix does not provide a working TSan
-configuration for this target.
+require identical memory ordering, ownership protocol, pinning, warm-up, and correctness checks. TSan is intentionally
+not part of the Sora validation matrix. Race-safety claims instead require an explicit happens-before and lifetime
+argument, targeted concurrent stress, and complementary Debug, Release, ASan, and UBSan execution; sanitizer success
+alone is never treated as a data-race proof.
 
 ## Reusable storage layers
 
