@@ -212,6 +212,11 @@ namespace Sora {
             using WriterStripes = std::conditional_t<kMultipleWriters, std::array<MapWriterStripe, kStripeCount>,
                                                      EmptyConcurrentMapField<ConcurrentMapField::WriterStripes>>;
 
+            static_assert(kLocal || std::atomic<StateWord>::is_always_lock_free,
+                          "concurrent map topologies require a lock-free slot-state atomic");
+            static_assert(kLocal || std::atomic<std::size_t>::is_always_lock_free,
+                          "concurrent map topologies require a lock-free size atomic");
+
             static constexpr unsigned kStatusBits = 2;
             static constexpr unsigned kFingerprintBits = 16;
             static constexpr unsigned kGenerationShift = kStatusBits + kFingerprintBits;
@@ -232,7 +237,7 @@ namespace Sora {
 
             explicit FlatConcurrentAssociativeStorage(std::size_t requestedCapacity) noexcept
                 requires kDynamic
-                : dynamicCapacity_{std::bit_ceil(std::max<std::size_t>(requestedCapacity, 2))} {
+                : dynamicCapacity_{NormalizeDynamicCapacity(requestedCapacity)} {
                 if constexpr (kLocal) {
                     localEntries_.reset(new (std::nothrow) LocalMapEntry<Key, Mapped, kSet>[dynamicCapacity_]);
                 } else {
@@ -645,6 +650,14 @@ namespace Sora {
             }
 
         private:
+            [[nodiscard]] static std::size_t NormalizeDynamicCapacity(std::size_t capacity) noexcept {
+                constexpr std::size_t kMinimum = 2;
+                if (capacity > std::numeric_limits<std::size_t>::max() / 2) {
+                    return std::bit_floor(std::numeric_limits<std::size_t>::max());
+                }
+                return std::bit_ceil(std::max(capacity, kMinimum));
+            }
+
             static constexpr bool kRequiresEntryDestruction =
                 !std::is_trivially_destructible_v<Key> || (!kSet && !std::is_trivially_destructible_v<Mapped>);
 
@@ -1667,6 +1680,8 @@ namespace Sora {
 
         private:
             static_assert(Topology.sharing == Concurrency::MapSharing::Concurrent);
+            static_assert(std::atomic<Version*>::is_always_lock_free,
+                          "dynamic concurrent map versions require a lock-free publication pointer");
 
             [[nodiscard]] static std::size_t NormalizeCapacity(std::size_t capacity) noexcept {
                 constexpr std::size_t kMinimum = 2;
