@@ -17,7 +17,7 @@ namespace Sora::PAL {
 
     namespace {
 
-        [[nodiscard]] size_t MappingGranularity(const FileSystemAPI& api) noexcept {
+        [[nodiscard]] size_t MappingGranularity(const SystemInformationSystemAPI& api) noexcept {
 #if defined(PLATFORM_WINDOWS)
             WindowsSystem::SystemInfo info{};
             if (EnsureSystemAPIs(api.getSystemInfo)) {
@@ -91,26 +91,29 @@ namespace Sora::PAL {
             mapping.active_ = true;
             return mapping;
         }
-        const auto& api = LoadFileSystemAPI();
+        const auto& fileAPI = LoadFileSystemAPI();
+        const auto& mappingAPI = LoadFileMappingSystemAPI();
+        const auto& systemAPI = LoadSystemInformationSystemAPI();
 
         // 2. Duplicate the source file so mapping lifetime is independent of its caller.
 #if defined(PLATFORM_WINDOWS)
         const ProcessSystemAPI& processAPI = LoadProcessSystemAPI();
-        if (!EnsureSystemAPIs(processAPI.getCurrentProcess, api.duplicateHandle)) {
+        const HandleSystemAPI& handles = LoadHandleSystemAPI();
+        if (!EnsureSystemAPIs(processAPI.getCurrentProcess, handles.duplicateHandle)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
         const NativeFileHandle process = processAPI.getCurrentProcess();
         NativeFileHandle duplicate = kInvalidNativeFileHandle;
-        if (api.duplicateHandle(process, file.handle_, process, &duplicate, 0, WindowsSystem::kFalse,
-                                WindowsSystem::kDuplicateSameAccess) == WindowsSystem::kFalse) {
+        if (handles.duplicateHandle(process, file.handle_, process, &duplicate, 0, WindowsSystem::kFalse,
+                                    WindowsSystem::kDuplicateSameAccess) == WindowsSystem::kFalse) {
             return std::unexpected{ErrorCode::IoError};
         }
         mapping.file_ = File{duplicate, false, false, {}};
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (!EnsureSystemAPIs(api.duplicate)) {
+        if (!EnsureSystemAPIs(fileAPI.duplicate)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
-        const NativeFileHandle duplicate = api.duplicate(file.handle_);
+        const NativeFileHandle duplicate = fileAPI.duplicate(file.handle_);
         if (duplicate < 0) {
             return std::unexpected{ErrorCode::IoError};
         }
@@ -118,7 +121,7 @@ namespace Sora::PAL {
 #endif
 
         // 3. Expand the native view downward to allocation granularity while preserving the exact exposed subrange.
-        const size_t granularity = MappingGranularity(api);
+        const size_t granularity = MappingGranularity(systemAPI);
         const std::uint64_t alignedOffset = options.offset - options.offset % granularity;
         const size_t delta = static_cast<size_t>(options.offset - alignedOffset);
         if (requested > std::numeric_limits<size_t>::max() - delta) {
@@ -128,7 +131,8 @@ namespace Sora::PAL {
 
         // 4. Create the platform mapping and expose only the caller-requested bytes.
 #if defined(PLATFORM_WINDOWS)
-        if (!EnsureSystemAPIs(api.createFileMappingWide, api.mapViewOfFile, api.unmapViewOfFile, api.closeHandle)) {
+        if (!EnsureSystemAPIs(mappingAPI.createFileMappingWide, mappingAPI.mapViewOfFile,
+                              mappingAPI.unmapViewOfFile, LoadHandleSystemAPI().closeHandle)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
         const WindowsSystem::DWord protection = options.access == FileMappingAccess::Read ? WindowsSystem::kPageReadOnly
@@ -139,15 +143,16 @@ namespace Sora::PAL {
             options.access == FileMappingAccess::Read        ? WindowsSystem::kFileMapRead
             : options.access == FileMappingAccess::ReadWrite ? WindowsSystem::kFileMapWrite
                                                              : WindowsSystem::kFileMapCopy;
-        mapping.mappingHandle_ = api.createFileMappingWide(mapping.file_.handle_, nullptr, protection, 0, 0, nullptr);
+        mapping.mappingHandle_ =
+            mappingAPI.createFileMappingWide(mapping.file_.handle_, nullptr, protection, 0, 0, nullptr);
         if (mapping.mappingHandle_ == nullptr) {
             return std::unexpected{ErrorCode::IoError};
         }
-        mapping.base_ = api.mapViewOfFile(mapping.mappingHandle_, desiredAccess,
-                                          static_cast<WindowsSystem::DWord>(alignedOffset >> 32),
-                                          static_cast<WindowsSystem::DWord>(alignedOffset), mapping.mappedSize_);
+        mapping.base_ = mappingAPI.mapViewOfFile(mapping.mappingHandle_, desiredAccess,
+                                                 static_cast<WindowsSystem::DWord>(alignedOffset >> 32),
+                                                 static_cast<WindowsSystem::DWord>(alignedOffset), mapping.mappedSize_);
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        if (!EnsureSystemAPIs(api.map, api.unmap) ||
+        if (!EnsureSystemAPIs(mappingAPI.map, mappingAPI.unmap) ||
             alignedOffset > static_cast<std::uint64_t>(std::numeric_limits<PosixSystem::FileOffset>::max())) {
             return std::unexpected{ErrorCode::NotSupported};
         }
@@ -157,8 +162,8 @@ namespace Sora::PAL {
         }
         const int flags =
             options.access == FileMappingAccess::CopyOnWrite ? PosixSystem::kMapPrivate : PosixSystem::kMapShared;
-        mapping.base_ = api.map(nullptr, mapping.mappedSize_, protection, flags, mapping.file_.handle_,
-                                static_cast<PosixSystem::FileOffset>(alignedOffset));
+        mapping.base_ = mappingAPI.map(nullptr, mapping.mappedSize_, protection, flags, mapping.file_.handle_,
+                                       static_cast<PosixSystem::FileOffset>(alignedOffset));
         if (PosixSystem::IsMapFailed(mapping.base_)) {
             mapping.base_ = nullptr;
         }
@@ -182,7 +187,7 @@ namespace Sora::PAL {
         if (length > size_ - offset || length == 0) {
             return length == 0 ? VoidResult{} : VoidResult{std::unexpected{ErrorCode::OutOfRange}};
         }
-        const auto& api = LoadFileSystemAPI();
+        const auto& api = LoadFileMappingSystemAPI();
 #if defined(PLATFORM_WINDOWS)
         if (!EnsureSystemAPIs(api.flushViewOfFile)) {
             return std::unexpected{ErrorCode::NotSupported};
@@ -212,7 +217,7 @@ namespace Sora::PAL {
             return std::unexpected{ErrorCode::InvalidArgument};
         }
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        const auto& api = LoadFileSystemAPI();
+        const auto& api = LoadFileMappingSystemAPI();
         if (!EnsureSystemAPIs(api.adviseMap)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
@@ -230,13 +235,14 @@ namespace Sora::PAL {
 
     void FileMapping::Reset() noexcept {
         if (active_ || base_ != nullptr || mappingHandle_ != nullptr || file_) {
-            const auto& api = LoadFileSystemAPI();
+            const auto& api = LoadFileMappingSystemAPI();
 #if defined(PLATFORM_WINDOWS)
             if (base_ != nullptr && api.unmapViewOfFile != nullptr) {
                 static_cast<void>(api.unmapViewOfFile(base_));
             }
-            if (mappingHandle_ != nullptr && api.closeHandle != nullptr) {
-                static_cast<void>(api.closeHandle(mappingHandle_));
+            const auto& handles = LoadHandleSystemAPI();
+            if (mappingHandle_ != nullptr && handles.closeHandle != nullptr) {
+                static_cast<void>(handles.closeHandle(mappingHandle_));
             }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             if (base_ != nullptr && api.unmap != nullptr) {

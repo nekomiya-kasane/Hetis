@@ -41,12 +41,13 @@ namespace Sora::PAL {
         ~State() {
             const auto& api = LoadFileSystemAPI();
 #if defined(PLATFORM_WINDOWS)
+            const auto& handles = LoadHandleSystemAPI();
             if (directory != nullptr && !WindowsSystem::IsInvalidHandle(directory) &&
-                EnsureSystemAPIs(api.closeHandle)) {
-                static_cast<void>(api.closeHandle(directory));
+                EnsureSystemAPIs(handles.closeHandle)) {
+                static_cast<void>(handles.closeHandle(directory));
             }
-            if (event != nullptr && EnsureSystemAPIs(api.closeHandle)) {
-                static_cast<void>(api.closeHandle(event));
+            if (event != nullptr && EnsureSystemAPIs(handles.closeHandle)) {
+                static_cast<void>(handles.closeHandle(event));
             }
 #elif defined(PLATFORM_LINUX)
             if (notify >= 0 && EnsureSystemAPIs(api.close)) {
@@ -310,7 +311,9 @@ namespace Sora::PAL {
 
             // 2. Create the native monitor and retain only its resource handles in State.
 #if defined(PLATFORM_WINDOWS)
-            if (!EnsureSystemAPIs(api.createFileWide, api.closeHandle, api.createEventWide, api.readDirectoryChanges)) {
+            const auto& synchronization = LoadSynchronizationSystemAPI();
+            if (!EnsureSystemAPIs(api.createFileWide, LoadHandleSystemAPI().closeHandle,
+                                  synchronization.createEventWide, api.readDirectoryChanges)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
             state->directory = api.createFileWide(
@@ -321,7 +324,7 @@ namespace Sora::PAL {
             if (WindowsSystem::IsInvalidHandle(state->directory)) {
                 return std::unexpected{ErrorCode::IoError};
             }
-            state->event = api.createEventWide(nullptr, true, false, nullptr);
+            state->event = synchronization.createEventWide(nullptr, true, false, nullptr);
             if (state->event == nullptr) {
                 return std::unexpected{ErrorCode::IoError};
             }
@@ -380,7 +383,9 @@ namespace Sora::PAL {
             const auto& api = LoadFileSystemAPI();
             std::vector<FileChange> changes;
 #if defined(PLATFORM_WINDOWS)
-            if (!EnsureSystemAPIs(api.resetEvent, api.waitForSingleObject, api.getOverlappedResult, api.cancelIo)) {
+            const auto& synchronization = LoadSynchronizationSystemAPI();
+            if (!EnsureSystemAPIs(synchronization.resetEvent, synchronization.waitForSingleObject,
+                                  api.getOverlappedResult, api.cancelIo)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
 
@@ -388,7 +393,7 @@ namespace Sora::PAL {
             static_assert(State::kBufferSize <= std::numeric_limits<WindowsSystem::DWord>::max());
             WindowsSystem::Overlapped overlapped{};
             overlapped.event = state_->event;
-            if (api.resetEvent(state_->event) == WindowsSystem::kFalse) {
+            if (synchronization.resetEvent(state_->event) == WindowsSystem::kFalse) {
                 return std::unexpected{ErrorCode::IoError};
             }
             WindowsSystem::DWord byteCount = 0;
@@ -405,7 +410,7 @@ namespace Sora::PAL {
                                           ? WindowsSystem::kInfinite
                                           : static_cast<WindowsSystem::DWord>(
                                                 std::min<std::int64_t>(timeout.count(), WindowsSystem::kInfinite - 1));
-            const WindowsSystem::DWord waited = api.waitForSingleObject(state_->event, milliseconds);
+            const WindowsSystem::DWord waited = synchronization.waitForSingleObject(state_->event, milliseconds);
             if (waited == WindowsSystem::kWaitTimeout) {
                 CancelWindowsRead(*state_, api, overlapped);
                 return changes;

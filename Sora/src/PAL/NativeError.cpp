@@ -23,7 +23,7 @@ namespace Sora::PAL {
         struct LocalMemoryDeleter {
             void operator()(wchar_t* memory) const noexcept {
                 if (memory != nullptr) {
-                    const NativeErrorSystemAPI& api = LoadNativeErrorSystemAPI();
+                    const LocalMemorySystemAPI& api = LoadLocalMemorySystemAPI();
                     if (api.localFree != nullptr) {
                         api.localFree(memory);
                     }
@@ -35,7 +35,7 @@ namespace Sora::PAL {
         [[nodiscard]] std::string WindowsMessage(int value) {
             wchar_t* buffer = nullptr;
             const NativeErrorSystemAPI& api = LoadNativeErrorSystemAPI();
-            if (api.formatMessageWide == nullptr || api.localFree == nullptr) {
+            if (api.formatMessageWide == nullptr || LoadLocalMemorySystemAPI().localFree == nullptr) {
                 return {};
             }
             constexpr WindowsSystem::DWord flags = WindowsSystem::kFormatMessageAllocateBuffer |

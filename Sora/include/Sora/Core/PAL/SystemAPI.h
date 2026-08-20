@@ -448,6 +448,17 @@ namespace Sora::PAL {
 
             } // namespace FileWatch
 
+            /** @brief Win32 thread access rights and lookup errors used by thread metadata queries. */
+            inline namespace Thread {
+
+                inline constexpr DWord kThreadSetLimitedInformation = 0x00000400;
+                inline constexpr DWord kThreadQueryLimitedInformation = 0x00000800;
+                inline constexpr DWord kSynchronizeAccess = 0x00100000;
+                inline constexpr DWord kErrorAccessDenied = 5;
+                inline constexpr DWord kErrorInvalidParameter = 87;
+
+            } // namespace Thread
+
             /** @brief File replacement and mapping constants. */
             inline namespace FileMapping {
 
@@ -525,7 +536,6 @@ namespace Sora::PAL {
         using GetLastErrorFunction      = WindowsSystem::DWord(__stdcall*)();
         using SetLastErrorFunction      = void(__stdcall*)(WindowsSystem::DWord);
         using FormatMessageWideFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const void*, WindowsSystem::DWord, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord, std::va_list*);
-        using LocalFreeFunction         = void*(__stdcall*)(void*);
 
         [[= $::Syscall{"GetLastError"}]]
         GetLastErrorFunction      getLastError      = nullptr;
@@ -533,9 +543,70 @@ namespace Sora::PAL {
         SetLastErrorFunction      setLastError      = nullptr;
         [[= $::Syscall{"FormatMessageW"}]]
         FormatMessageWideFunction formatMessageWide = nullptr;
-        [[= $::Syscall{"LocalFree"}]]
-        LocalFreeFunction         localFree         = nullptr;
         // clang-format on
+    };
+
+    /** @brief Dynamically resolved Win32 local-memory operations. */
+    struct LocalMemorySystemAPI {
+        using LocalFreeFunction = void*(__stdcall*)(void*);
+
+        [[= $::Syscall{"LocalFree"}]]
+        LocalFreeFunction localFree = nullptr;
+    };
+
+    /** @brief Dynamically resolved operations common to Win32 kernel handles. */
+    struct HandleSystemAPI {
+        // clang-format off
+        using CloseHandleFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using DuplicateHandleFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
+
+        [[= $::Syscall{"CloseHandle"}]]
+        CloseHandleFunction     closeHandle     = nullptr;
+        [[= $::Syscall{"DuplicateHandle"}]]
+        DuplicateHandleFunction duplicateHandle = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Win32 event synchronization operations. */
+    struct SynchronizationSystemAPI {
+        using CreateEventWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool,
+                                                                           WindowsSystem::Bool, const wchar_t*);
+        using ResetEventFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using WaitForSingleObjectFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
+
+        [[= $::Syscall{"CreateEventW"}]]
+        CreateEventWideFunction createEventWide = nullptr;
+        [[= $::Syscall{"ResetEvent"}]]
+        ResetEventFunction resetEvent = nullptr;
+        [[= $::Syscall{"WaitForSingleObject"}]]
+        WaitForSingleObjectFunction waitForSingleObject = nullptr;
+    };
+
+    /** @brief Dynamically resolved Win32 file-backed virtual-memory mapping operations. */
+    struct FileMappingSystemAPI {
+        // clang-format off
+        using CreateFileMappingWideFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, const wchar_t*);
+        using MapViewOfFileFunction         = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, size_t);
+        using UnmapViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*);
+        using FlushViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*, size_t);
+
+        [[= $::Syscall{"CreateFileMappingW"}]]
+        CreateFileMappingWideFunction createFileMappingWide = nullptr;
+        [[= $::Syscall{"MapViewOfFile"}]]
+        MapViewOfFileFunction         mapViewOfFile         = nullptr;
+        [[= $::Syscall{"UnmapViewOfFile"}]]
+        UnmapViewOfFileFunction       unmapViewOfFile       = nullptr;
+        [[= $::Syscall{"FlushViewOfFile"}]]
+        FlushViewOfFileFunction       flushViewOfFile       = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Win32 system-information queries. */
+    struct SystemInformationSystemAPI {
+        using GetSystemInfoFunction = void(__stdcall*)(void*);
+
+        [[= $::Syscall{"GetSystemInfo"}]]
+        GetSystemInfoFunction getSystemInfo = nullptr;
     };
 
     /** @brief Dynamically resolved Win32 environment entry points. */
@@ -584,11 +655,9 @@ namespace Sora::PAL {
         using CreateProcessSnapshotFunction         = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord);
         using ReadProcessEntryFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::tagPROCESSENTRY32W*);
         using ReadThreadEntryFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::ThreadEntry*);
-        using CloseHandleFunction                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
         using QueryFullProcessImageNameWideFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord*);
         using GetCommandLineWideFunction            = wchar_t*(__stdcall*)();
         using CommandLineToArgvWideFunction         = wchar_t**(__stdcall*)(const wchar_t*, int*);
-        using LocalFreeFunction                     = void*(__stdcall*)(void*);
         using GetProcessTimesFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*);
         using GetProcessMemoryInfoFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_PROCESS_MEMORY_COUNTERS*, WindowsSystem::DWord);
         using QueryParentProcessIdFunction          = bool (*)(WindowsSystem::DWord*) noexcept;
@@ -608,16 +677,12 @@ namespace Sora::PAL {
         ReadThreadEntryFunction               firstThread                   = nullptr;
         [[= $::Syscall{"Thread32Next"}]]
         ReadThreadEntryFunction               nextThread                    = nullptr;
-        [[= $::Syscall{"CloseHandle"}]]
-        CloseHandleFunction                   closeHandle                    = nullptr;
         [[= $::Syscall{"QueryFullProcessImageNameW"}]]
         QueryFullProcessImageNameWideFunction queryFullProcessImageNameWide = nullptr;
         [[= $::Syscall{"GetCommandLineW"}]]
         GetCommandLineWideFunction            getCommandLineWide            = nullptr;
         [[= $::Syscall{"CommandLineToArgvW"}]]
         CommandLineToArgvWideFunction         commandLineToArgvWide         = nullptr;
-        [[= $::Syscall{"LocalFree"}]]
-        LocalFreeFunction                     localFree                     = nullptr;
         [[= $::Syscall{"GetProcessTimes"}]]
         GetProcessTimesFunction               getProcessTimes               = nullptr;
         [[= $::Syscall{"K32GetProcessMemoryInfo"}]]
@@ -632,9 +697,11 @@ namespace Sora::PAL {
         // clang-format off
         using GetCurrentThreadIdFunction          = WindowsSystem::DWord(__stdcall*)();
         using GetCurrentThreadFunction            = WindowsSystem::Handle(__stdcall*)();
+        using OpenThreadFunction                  = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord,
+                                                                                       WindowsSystem::Bool,
+                                                                                       WindowsSystem::DWord);
         using SetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, const wchar_t*);
         using GetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, wchar_t**);
-        using LocalFreeFunction                   = void*(__stdcall*)(void*);
         using GetCurrentProcessorNumberExFunction = void(__stdcall*)(WindowsSystem::ProcessorNumber*);
         using GetCurrentThreadStackLimitsFunction = void(__stdcall*)(uintptr_t*, uintptr_t*);
 
@@ -642,12 +709,12 @@ namespace Sora::PAL {
         GetCurrentThreadIdFunction          getCurrentThreadId          = nullptr;
         [[= $::Syscall{"GetCurrentThread"}]]
         GetCurrentThreadFunction            getCurrentThread            = nullptr;
+        [[= $::Syscall{"OpenThread"}]]
+        OpenThreadFunction                  openThread                  = nullptr;
         [[= $::Syscall{"SetThreadDescription"}]]
         SetThreadDescriptionFunction        setThreadDescription        = nullptr;
         [[= $::Syscall{"GetThreadDescription"}]]
         GetThreadDescriptionFunction        getThreadDescription        = nullptr;
-        [[= $::Syscall{"LocalFree"}]]
-        LocalFreeFunction                   localFree                   = nullptr;
         [[= $::Syscall{"GetCurrentProcessorNumberEx"}]]
         GetCurrentProcessorNumberExFunction getCurrentProcessorNumberEx = nullptr;
         [[= $::Syscall{"GetCurrentThreadStackLimits"}]]
@@ -707,37 +774,25 @@ namespace Sora::PAL {
         // clang-format off
         using GetStandardHandleFunction     = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord);
         using CreateFileWideFunction        = WindowsSystem::Handle(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::Handle);
-        using CloseHandleFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
         using WriteFileFunction             = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*);
         using FlushFileBuffersFunction      = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
         using ReadFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*);
         using GetFileSizeFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_LARGE_INTEGER*);
         using SetFileInformationFunction    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*, WindowsSystem::DWord);
         using GetFileInformationFunction    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*, WindowsSystem::DWord);
-        using CreateFileMappingWideFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, const wchar_t*);
-        using MapViewOfFileFunction         = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, size_t);
-        using UnmapViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*);
-        using FlushViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*, size_t);
         using ReplaceFileWideFunction       = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, const wchar_t*, WindowsSystem::DWord, void*, void*);
         using MoveFileWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, WindowsSystem::DWord);
         using DeleteFileWideFunction        = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
-        using CreateEventWideFunction       = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::Bool, const wchar_t*);
-        using ResetEventFunction            = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using WaitForSingleObjectFunction   = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
         using GetOverlappedResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool);
         using CancelIoFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*);
         using LockFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
         using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
         using ReadDirectoryChangesFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*, DirectoryCompletionFunction);
-        using GetSystemInfoFunction         = void(__stdcall*)(void*);
-        using DuplicateHandleFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Handle*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
 
         [[= $::Syscall{"GetStdHandle"}]]
         GetStandardHandleFunction     getStandardHandle     = nullptr;
         [[= $::Syscall{"CreateFileW"}]]
         CreateFileWideFunction        createFileWide        = nullptr;
-        [[= $::Syscall{"CloseHandle"}]]
-        CloseHandleFunction           closeHandle           = nullptr;
         [[= $::Syscall{"WriteFile"}]]
         WriteFileFunction             writeFile             = nullptr;
         [[= $::Syscall{"FlushFileBuffers"}]]
@@ -750,26 +805,12 @@ namespace Sora::PAL {
         SetFileInformationFunction    setFileInformation    = nullptr;
         [[= $::Syscall{"GetFileInformationByHandleEx"}]]
         GetFileInformationFunction    getFileInformation    = nullptr;
-        [[= $::Syscall{"CreateFileMappingW"}]]
-        CreateFileMappingWideFunction createFileMappingWide = nullptr;
-        [[= $::Syscall{"MapViewOfFile"}]]
-        MapViewOfFileFunction         mapViewOfFile         = nullptr;
-        [[= $::Syscall{"UnmapViewOfFile"}]]
-        UnmapViewOfFileFunction       unmapViewOfFile       = nullptr;
-        [[= $::Syscall{"FlushViewOfFile"}]]
-        FlushViewOfFileFunction       flushViewOfFile       = nullptr;
         [[= $::Syscall{"ReplaceFileW"}]]
         ReplaceFileWideFunction       replaceFileWide       = nullptr;
         [[= $::Syscall{"MoveFileExW"}]]
         MoveFileWideFunction          moveFileWide          = nullptr;
         [[= $::Syscall{"DeleteFileW"}]]
         DeleteFileWideFunction        deleteFileWide        = nullptr;
-        [[= $::Syscall{"CreateEventW"}]]
-        CreateEventWideFunction       createEventWide       = nullptr;
-        [[= $::Syscall{"ResetEvent"}]]
-        ResetEventFunction            resetEvent            = nullptr;
-        [[= $::Syscall{"WaitForSingleObject"}]]
-        WaitForSingleObjectFunction   waitForSingleObject   = nullptr;
         [[= $::Syscall{"GetOverlappedResult"}]]
         GetOverlappedResultFunction   getOverlappedResult   = nullptr;
         [[= $::Syscall{"CancelIoEx"}]]
@@ -778,10 +819,6 @@ namespace Sora::PAL {
         LockFileFunction              lockFile              = nullptr;
         [[= $::Syscall{"ReadDirectoryChangesW"}]]
         ReadDirectoryChangesFunction  readDirectoryChanges  = nullptr;
-        [[= $::Syscall{"GetSystemInfo"}]]
-        GetSystemInfoFunction         getSystemInfo         = nullptr;
-        [[= $::Syscall{"DuplicateHandle"}]]
-        DuplicateHandleFunction       duplicateHandle       = nullptr;
         // clang-format on
     };
 
@@ -1004,6 +1041,32 @@ namespace Sora::PAL {
 
     /** @brief POSIX has no additional native-error entry points beyond thread-local @c errno. */
     struct NativeErrorSystemAPI {};
+    struct LocalMemorySystemAPI {};
+    struct HandleSystemAPI {};
+    struct SynchronizationSystemAPI {};
+    struct FileMappingSystemAPI {
+        // clang-format off
+        using MapFunction       = void* (*)(void*, size_t, int, int, int, PosixSystem::FileOffset);
+        using UnmapFunction     = int (*)(void*, size_t);
+        using SyncMapFunction   = int (*)(void*, size_t, int);
+        using AdviseMapFunction = int (*)(void*, size_t, int);
+
+        [[= $::Syscall{"mmap"}]]
+        MapFunction       map       = nullptr;
+        [[= $::Syscall{"munmap"}]]
+        UnmapFunction     unmap     = nullptr;
+        [[= $::Syscall{"msync"}]]
+        SyncMapFunction   syncMap   = nullptr;
+        [[= $::Syscall{"madvise"}]]
+        AdviseMapFunction adviseMap = nullptr;
+        // clang-format on
+    };
+    struct SystemInformationSystemAPI {
+        using SystemConfigurationFunction = long (*)(int);
+
+        [[= $::Syscall{"sysconf"}]]
+        SystemConfigurationFunction systemConfiguration = nullptr;
+    };
 
     /** @brief Dynamically resolved POSIX process-environment entry points. */
     struct EnvironmentSystemAPI {
@@ -1107,15 +1170,15 @@ namespace Sora::PAL {
         PthreadGetNameFunction pthreadGetName = nullptr;
 
 #    if defined(PLATFORM_LINUX)
-        using SystemCallFunction               = long (*)(long, ...);
+        using GetThreadIdFunction              = int (*)();
         using ScheduleGetCpuFunction           = int (*)();
         using PthreadSetNameFunction           = int (*)(PosixSystem::ThreadId, const char*);
         using PthreadGetAttributesFunction     = int (*)(PosixSystem::ThreadId, PosixSystem::ThreadAttributes*);
         using PthreadDestroyAttributesFunction = int (*)(PosixSystem::ThreadAttributes*);
         using PthreadGetStackFunction          = int (*)(const PosixSystem::ThreadAttributes*, void**, size_t*);
 
-        [[= $::Syscall{"syscall"}]]
-        SystemCallFunction               systemCall               = nullptr;
+        [[= $::Syscall{"gettid"}]]
+        GetThreadIdFunction              getThreadId              = nullptr;
         [[= $::Syscall{"sched_getcpu"}]]
         ScheduleGetCpuFunction           scheduleGetCpu           = nullptr;
         [[= $::Syscall{"pthread_setname_np"}]]
@@ -1162,14 +1225,9 @@ namespace Sora::PAL {
         using SyncFunction                = int (*)(int);
         using ResizeFunction              = int (*)(int, PosixSystem::FileOffset);
         using StatFunction                = int (*)(int, struct stat*);
-        using MapFunction                 = void* (*)(void*, size_t, int, int, int, PosixSystem::FileOffset);
-        using UnmapFunction               = int (*)(void*, size_t);
-        using SyncMapFunction             = int (*)(void*, size_t, int);
-        using AdviseMapFunction           = int (*)(void*, size_t, int);
         using RenameFunction              = int (*)(const char*, const char*);
         using UnlinkFunction              = int (*)(const char*);
         using ControlFunction             = int (*)(int, int, ...);
-        using SystemConfigurationFunction = long (*)(int);
         using QueryFileBlockSizeFunction  = bool (*)(int, size_t*) noexcept;
         using QueryFileSizeFunction       = bool (*)(int, uint64_t*) noexcept;
         using DuplicateFunction           = int (*)(int);
@@ -1194,22 +1252,12 @@ namespace Sora::PAL {
         ResizeFunction              resize              = nullptr;
         [[= $::Syscall{"fstat"}]]
         StatFunction                stat                = nullptr;
-        [[= $::Syscall{"mmap"}]]
-        MapFunction                 map                 = nullptr;
-        [[= $::Syscall{"munmap"}]]
-        UnmapFunction               unmap               = nullptr;
-        [[= $::Syscall{"msync"}]]
-        SyncMapFunction             syncMap             = nullptr;
-        [[= $::Syscall{"madvise"}]]
-        AdviseMapFunction           adviseMap           = nullptr;
         [[= $::Syscall{"rename"}]]
         RenameFunction              rename              = nullptr;
         [[= $::Syscall{"unlink"}]]
         UnlinkFunction              unlink              = nullptr;
         [[= $::Syscall{"fcntl"}]]
         ControlFunction             control             = nullptr;
-        [[= $::Syscall{"sysconf"}]]
-        SystemConfigurationFunction systemConfiguration = nullptr;
         [[= $::Syscall{"fstat"}]]
         QueryFileBlockSizeFunction  queryFileBlockSize  = nullptr;
         [[= $::Syscall{"fstat"}]]
@@ -1263,6 +1311,11 @@ namespace Sora::PAL {
 #else
 
     struct NativeErrorSystemAPI {};
+    struct LocalMemorySystemAPI {};
+    struct HandleSystemAPI {};
+    struct SynchronizationSystemAPI {};
+    struct FileMappingSystemAPI {};
+    struct SystemInformationSystemAPI {};
     struct EnvironmentSystemAPI {};
     struct ModuleSystemAPI {};
     struct ProcessSystemAPI {};
@@ -1345,6 +1398,21 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable native error-reporting function table. */
     [[nodiscard]] const NativeErrorSystemAPI& LoadNativeErrorSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 local-memory function table. */
+    [[nodiscard]] const LocalMemorySystemAPI& LoadLocalMemorySystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 kernel-handle function table. */
+    [[nodiscard]] const HandleSystemAPI& LoadHandleSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 synchronization function table. */
+    [[nodiscard]] const SynchronizationSystemAPI& LoadSynchronizationSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 file-mapping function table. */
+    [[nodiscard]] const FileMappingSystemAPI& LoadFileMappingSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable system-information function table. */
+    [[nodiscard]] const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept;
 
     /** @brief Load and return the immutable process-environment function table. */
     [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;

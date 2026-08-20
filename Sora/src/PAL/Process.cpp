@@ -135,7 +135,8 @@ namespace Sora::PAL {
             return std::unexpected(ErrorCode::InvalidArgument);
         }
         const ProcessSystemAPI& api = LoadProcessSystemAPI();
-        if (!EnsureSystemAPIs(api.createProcessSnapshot, api.firstThread, api.nextThread, api.closeHandle)) {
+        const HandleSystemAPI& handles = LoadHandleSystemAPI();
+        if (!EnsureSystemAPIs(api.createProcessSnapshot, api.firstThread, api.nextThread, handles.closeHandle)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
 
@@ -143,7 +144,7 @@ namespace Sora::PAL {
         if (WindowsSystem::IsInvalidHandle(snapshot)) {
             return std::unexpected(ErrorCode::ProcessNativeFailure);
         }
-        ScopeExit closeSnapshot{[&api, snapshot] noexcept { api.closeHandle(snapshot); }};
+        ScopeExit closeSnapshot{[&handles, snapshot] noexcept { handles.closeHandle(snapshot); }};
 
         std::vector<NativeThreadId> threads;
         WindowsSystem::ThreadEntry entry{};
@@ -247,7 +248,8 @@ namespace Sora::PAL {
     Result<std::vector<std::string>> CurrentProcessArguments() {
 #if defined(PLATFORM_WINDOWS)
         const ProcessSystemAPI& api = LoadProcessSystemAPI();
-        if (!EnsureSystemAPIs(api.getCommandLineWide, api.commandLineToArgvWide, api.localFree)) {
+        const LocalMemorySystemAPI& memoryAPI = LoadLocalMemorySystemAPI();
+        if (!EnsureSystemAPIs(api.getCommandLineWide, api.commandLineToArgvWide, memoryAPI.localFree)) {
             return std::unexpected(ErrorCode::NotSupported);
         }
 
@@ -263,7 +265,7 @@ namespace Sora::PAL {
             return std::unexpected(ErrorCode::ProcessNativeFailure);
         }
 
-        Sora::ScopeExit releaseArguments{[&api, nativeArguments] noexcept { api.localFree(nativeArguments); }};
+        Sora::ScopeExit releaseArguments{[&memoryAPI, nativeArguments] noexcept { memoryAPI.localFree(nativeArguments); }};
 
         // 2. Convert each argument to UTF-8 and reject malformed native text atomically.
         std::vector<std::string> arguments;

@@ -40,6 +40,11 @@ namespace {
 TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PAL.SystemAPI]") {
     REQUIRE(&PAL::CurrentProcessModule() == &PAL::CurrentProcessModule());
     REQUIRE(&PAL::LoadNativeErrorSystemAPI() == &PAL::LoadNativeErrorSystemAPI());
+    REQUIRE(&PAL::LoadLocalMemorySystemAPI() == &PAL::LoadLocalMemorySystemAPI());
+    REQUIRE(&PAL::LoadHandleSystemAPI() == &PAL::LoadHandleSystemAPI());
+    REQUIRE(&PAL::LoadSynchronizationSystemAPI() == &PAL::LoadSynchronizationSystemAPI());
+    REQUIRE(&PAL::LoadFileMappingSystemAPI() == &PAL::LoadFileMappingSystemAPI());
+    REQUIRE(&PAL::LoadSystemInformationSystemAPI() == &PAL::LoadSystemInformationSystemAPI());
     REQUIRE(&PAL::LoadEnvironmentSystemAPI() == &PAL::LoadEnvironmentSystemAPI());
     REQUIRE(&PAL::LoadModuleSystemAPI() == &PAL::LoadModuleSystemAPI());
     REQUIRE(&PAL::LoadProcessSystemAPI() == &PAL::LoadProcessSystemAPI());
@@ -205,7 +210,20 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(error.getLastError != nullptr);
     REQUIRE(error.setLastError != nullptr);
     REQUIRE(error.formatMessageWide != nullptr);
-    REQUIRE(error.localFree != nullptr);
+    REQUIRE(PAL::LoadLocalMemorySystemAPI().localFree != nullptr);
+    const PAL::HandleSystemAPI& handles = PAL::LoadHandleSystemAPI();
+    REQUIRE(handles.closeHandle != nullptr);
+    REQUIRE(handles.duplicateHandle != nullptr);
+    const PAL::SynchronizationSystemAPI& synchronization = PAL::LoadSynchronizationSystemAPI();
+    REQUIRE(synchronization.createEventWide != nullptr);
+    REQUIRE(synchronization.resetEvent != nullptr);
+    REQUIRE(synchronization.waitForSingleObject != nullptr);
+    const PAL::FileMappingSystemAPI& mapping = PAL::LoadFileMappingSystemAPI();
+    REQUIRE(mapping.createFileMappingWide != nullptr);
+    REQUIRE(mapping.mapViewOfFile != nullptr);
+    REQUIRE(mapping.unmapViewOfFile != nullptr);
+    REQUIRE(mapping.flushViewOfFile != nullptr);
+    REQUIRE(PAL::LoadSystemInformationSystemAPI().getSystemInfo != nullptr);
 
     const PAL::EnvironmentSystemAPI& environment = PAL::LoadEnvironmentSystemAPI();
     REQUIRE(environment.getEnvironmentVariableWide != nullptr);
@@ -225,19 +243,17 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(process.createProcessSnapshot != nullptr);
     REQUIRE(process.firstProcess != nullptr);
     REQUIRE(process.nextProcess != nullptr);
-    REQUIRE(process.closeHandle != nullptr);
     REQUIRE(process.queryParentProcessId != nullptr);
     REQUIRE(process.queryFullProcessImageNameWide != nullptr);
     REQUIRE(process.getCommandLineWide != nullptr);
     REQUIRE(process.commandLineToArgvWide != nullptr);
-    REQUIRE(process.localFree != nullptr);
     REQUIRE(process.getProcessTimes != nullptr);
     REQUIRE(process.getProcessMemoryInfo != nullptr);
     REQUIRE(process.captureUsage != nullptr);
     const PAL::ThreadSystemAPI& thread = PAL::LoadThreadSystemAPI();
     REQUIRE(thread.getCurrentThreadId != nullptr);
     REQUIRE(thread.getCurrentThread != nullptr);
-    REQUIRE(thread.localFree != nullptr);
+    REQUIRE(thread.openThread != nullptr);
     REQUIRE(thread.getCurrentThreadId() != 0);
 
     const PAL::SchedulerTraceSystemAPI& tracing = PAL::LoadSchedulerTraceSystemAPI();
@@ -270,7 +286,6 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     const PAL::FileSystemAPI& file = PAL::LoadFileSystemAPI();
     REQUIRE(file.getStandardHandle != nullptr);
     REQUIRE(file.createFileWide != nullptr);
-    REQUIRE(file.closeHandle != nullptr);
     REQUIRE(file.writeFile != nullptr);
     REQUIRE(file.flushFileBuffers != nullptr);
 
@@ -315,12 +330,22 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     const PAL::ThreadSystemAPI& thread = PAL::LoadThreadSystemAPI();
     REQUIRE(thread.pthreadSelf != nullptr);
     REQUIRE(thread.pthreadGetName != nullptr);
+#    if defined(PLATFORM_LINUX)
+    REQUIRE(thread.getThreadId != nullptr);
+    REQUIRE(thread.getThreadId() > 0);
+#    endif
 
     const PAL::FileSystemAPI& file = PAL::LoadFileSystemAPI();
     REQUIRE(file.open != nullptr);
     REQUIRE(file.close != nullptr);
     REQUIRE(file.write != nullptr);
     REQUIRE(file.sync != nullptr);
+    const PAL::FileMappingSystemAPI& mapping = PAL::LoadFileMappingSystemAPI();
+    REQUIRE(mapping.map != nullptr);
+    REQUIRE(mapping.unmap != nullptr);
+    REQUIRE(mapping.syncMap != nullptr);
+    REQUIRE(mapping.adviseMap != nullptr);
+    REQUIRE(PAL::LoadSystemInformationSystemAPI().systemConfiguration != nullptr);
 
     const PAL::StackTraceSystemAPI& stackTrace = PAL::LoadStackTraceSystemAPI();
     REQUIRE(stackTrace.captureStackBackTrace != nullptr);

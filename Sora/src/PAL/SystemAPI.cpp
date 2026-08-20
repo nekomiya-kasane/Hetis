@@ -6,6 +6,8 @@
 
 #include <Sora/Core/PAL/SystemAPI.h>
 #include <Sora/Core/PAL/Module.h>
+#include <Sora/Core/Unicode.h>
+
 
 #include <atomic>
 #include <array>
@@ -333,8 +335,9 @@ namespace Sora::PAL {
                 return false;
             }
             const ProcessSystemAPI& api = LoadProcessSystemAPI();
+            const HandleSystemAPI& handles = LoadHandleSystemAPI();
             if (!EnsureSystemAPIs(api.getCurrentProcessId, api.createProcessSnapshot, api.firstProcess, api.nextProcess,
-                                  api.closeHandle)) {
+                                  handles.closeHandle)) {
                 return false;
             }
 
@@ -354,7 +357,7 @@ namespace Sora::PAL {
                     break;
                 }
             }
-            api.closeHandle(snapshot);
+            handles.closeHandle(snapshot);
             return result;
         }
 
@@ -476,13 +479,22 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<ProcessSystemAPI::CreateProcessSnapshotFunction,           decltype(&::CreateToolhelp32Snapshot)>);
         static_assert(std::is_same_v<ProcessSystemAPI::ReadProcessEntryFunction,                decltype(&::Process32FirstW)>);
         static_assert(std::is_same_v<ProcessSystemAPI::ReadProcessEntryFunction,                decltype(&::Process32NextW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::CloseHandleFunction,                     decltype(&::CloseHandle)>);
+        static_assert(std::is_same_v<HandleSystemAPI::CloseHandleFunction,                      decltype(&::CloseHandle)>);
         static_assert(std::is_same_v<ProcessSystemAPI::QueryFullProcessImageNameWideFunction,   decltype(&::QueryFullProcessImageNameW)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetCommandLineWideFunction,              decltype(&::GetCommandLineW)>);
         static_assert(std::is_same_v<ProcessSystemAPI::CommandLineToArgvWideFunction,           decltype(&::CommandLineToArgvW)>);
-        static_assert(std::is_same_v<ProcessSystemAPI::LocalFreeFunction,                       decltype(&::LocalFree)>);
+        static_assert(std::is_same_v<LocalMemorySystemAPI::LocalFreeFunction,                   decltype(&::LocalFree)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetProcessTimesFunction,                 decltype(&::GetProcessTimes)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetProcessMemoryInfoFunction,            decltype(&::K32GetProcessMemoryInfo)>);
+        static_assert(std::is_same_v<ThreadSystemAPI::OpenThreadFunction,                       decltype(&::OpenThread)>);
+        static_assert(std::is_same_v<HandleSystemAPI::DuplicateHandleFunction,                  decltype(&::DuplicateHandle)>);
+        static_assert(std::is_same_v<SynchronizationSystemAPI::CreateEventWideFunction,         decltype(&::CreateEventW)>);
+        static_assert(std::is_same_v<SynchronizationSystemAPI::ResetEventFunction,              decltype(&::ResetEvent)>);
+        static_assert(std::is_same_v<SynchronizationSystemAPI::WaitForSingleObjectFunction,     decltype(&::WaitForSingleObject)>);
+        static_assert(std::is_same_v<FileMappingSystemAPI::CreateFileMappingWideFunction,       decltype(&::CreateFileMappingW)>);
+        static_assert(std::is_same_v<FileMappingSystemAPI::MapViewOfFileFunction,               decltype(&::MapViewOfFile)>);
+        static_assert(std::is_same_v<FileMappingSystemAPI::UnmapViewOfFileFunction,             decltype(&::UnmapViewOfFile)>);
+        static_assert(std::is_same_v<FileMappingSystemAPI::FlushViewOfFileFunction,             decltype(&::FlushViewOfFile)>);
 
         static_assert(sizeof(WindowsSystem::GlobalMemory)  == sizeof(HGLOBAL));
         static_assert(alignof(WindowsSystem::GlobalMemory) == alignof(HGLOBAL));
@@ -497,7 +509,6 @@ namespace Sora::PAL {
 
         static_assert(std::is_same_v<FileSystemAPI::GetStandardHandleFunction,                  decltype(&::GetStdHandle)>);
         static_assert(std::is_same_v<FileSystemAPI::CreateFileWideFunction,                     decltype(&::CreateFileW)>);
-        static_assert(std::is_same_v<FileSystemAPI::CloseHandleFunction,                        decltype(&::CloseHandle)>);
         static_assert(std::is_same_v<FileSystemAPI::ReadFileFunction,                           decltype(&::ReadFile)>);
         static_assert(std::is_same_v<FileSystemAPI::WriteFileFunction,                          decltype(&::WriteFile)>);
         static_assert(std::is_same_v<FileSystemAPI::FlushFileBuffersFunction,                   decltype(&::FlushFileBuffers)>);
@@ -579,7 +590,8 @@ namespace Sora::PAL {
                 return false;
             }
             const FileSystemAPI& file = LoadFileSystemAPI();
-            if (!EnsureSystemAPIs(file.systemConfiguration, file.open, file.read, file.close)) {
+            const SystemInformationSystemAPI& system = LoadSystemInformationSystemAPI();
+            if (!EnsureSystemAPIs(system.systemConfiguration, file.open, file.read, file.close)) {
                 return false;
             }
 
@@ -610,7 +622,7 @@ namespace Sora::PAL {
             }
             uint64_t residentPages = 0;
             parsed = std::from_chars(current, end, residentPages);
-            const long pageSize = file.systemConfiguration(_SC_PAGESIZE);
+            const long pageSize = system.systemConfiguration(_SC_PAGESIZE);
             if (parsed.ec != std::errc{} || pageSize <= 0 ||
                 residentPages > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(pageSize)) {
                 return false;
@@ -1282,8 +1294,98 @@ namespace Sora::PAL {
             loaded.getLastError      = module->TryFindFunction<API::GetLastErrorFunction>("GetLastError");
             loaded.setLastError      = module->TryFindFunction<API::SetLastErrorFunction>("SetLastError");
             loaded.formatMessageWide = module->TryFindFunction<API::FormatMessageWideFunction>("FormatMessageW");
-            loaded.localFree         = module->TryFindFunction<API::LocalFreeFunction>("LocalFree");
             // clang-format on
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const LocalMemorySystemAPI& LoadLocalMemorySystemAPI() noexcept {
+        static const LocalMemorySystemAPI api = [] {
+            LocalMemorySystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+                loaded.localFree = module->TryFindFunction<LocalMemorySystemAPI::LocalFreeFunction>("LocalFree");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const HandleSystemAPI& LoadHandleSystemAPI() noexcept {
+        static const HandleSystemAPI api = [] {
+            HandleSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+                loaded.closeHandle = module->TryFindFunction<HandleSystemAPI::CloseHandleFunction>("CloseHandle");
+                loaded.duplicateHandle =
+                    module->TryFindFunction<HandleSystemAPI::DuplicateHandleFunction>("DuplicateHandle");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const SynchronizationSystemAPI& LoadSynchronizationSystemAPI() noexcept {
+        static const SynchronizationSystemAPI api = [] {
+            SynchronizationSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+                loaded.createEventWide =
+                    module->TryFindFunction<SynchronizationSystemAPI::CreateEventWideFunction>("CreateEventW");
+                loaded.resetEvent = module->TryFindFunction<SynchronizationSystemAPI::ResetEventFunction>("ResetEvent");
+                loaded.waitForSingleObject = module->TryFindFunction<
+                    SynchronizationSystemAPI::WaitForSingleObjectFunction>("WaitForSingleObject");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const FileMappingSystemAPI& LoadFileMappingSystemAPI() noexcept {
+        static const FileMappingSystemAPI api = [] {
+            FileMappingSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+                loaded.createFileMappingWide = module->TryFindFunction<
+                    FileMappingSystemAPI::CreateFileMappingWideFunction>("CreateFileMappingW");
+                loaded.mapViewOfFile =
+                    module->TryFindFunction<FileMappingSystemAPI::MapViewOfFileFunction>("MapViewOfFile");
+                loaded.unmapViewOfFile =
+                    module->TryFindFunction<FileMappingSystemAPI::UnmapViewOfFileFunction>("UnmapViewOfFile");
+                loaded.flushViewOfFile =
+                    module->TryFindFunction<FileMappingSystemAPI::FlushViewOfFileFunction>("FlushViewOfFile");
+            }
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+            if (const ModulePtr& module = CurrentProcessModule(); module != nullptr) {
+                loaded.map = module->TryFindFunction<FileMappingSystemAPI::MapFunction>("mmap");
+                loaded.unmap = module->TryFindFunction<FileMappingSystemAPI::UnmapFunction>("munmap");
+                loaded.syncMap = module->TryFindFunction<FileMappingSystemAPI::SyncMapFunction>("msync");
+                loaded.adviseMap = module->TryFindFunction<FileMappingSystemAPI::AdviseMapFunction>("madvise");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept {
+        static const SystemInformationSystemAPI api = [] {
+            SystemInformationSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+                loaded.getSystemInfo =
+                    module->TryFindFunction<SystemInformationSystemAPI::GetSystemInfoFunction>("GetSystemInfo");
+            }
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+            if (const ModulePtr& module = CurrentProcessModule(); module != nullptr) {
+                loaded.systemConfiguration = module->TryFindFunction<
+                    SystemInformationSystemAPI::SystemConfigurationFunction>("sysconf");
+            }
 #endif
             return loaded;
         }();
@@ -1363,16 +1465,14 @@ namespace Sora::PAL {
                 loaded.nextProcess                   = module->TryFindFunction<API::ReadProcessEntryFunction>("Process32NextW");
                 loaded.firstThread                   = module->TryFindFunction<API::ReadThreadEntryFunction>("Thread32First");
                 loaded.nextThread                    = module->TryFindFunction<API::ReadThreadEntryFunction>("Thread32Next");
-                loaded.closeHandle                   = module->TryFindFunction<API::CloseHandleFunction>("CloseHandle");
                 loaded.queryFullProcessImageNameWide = module->TryFindFunction<API::QueryFullProcessImageNameWideFunction>("QueryFullProcessImageNameW");
                 loaded.getCommandLineWide            = module->TryFindFunction<API::GetCommandLineWideFunction>("GetCommandLineW");
-                loaded.localFree                     = module->TryFindFunction<API::LocalFreeFunction>("LocalFree");
                 loaded.getProcessTimes               = module->TryFindFunction<API::GetProcessTimesFunction>("GetProcessTimes");
                 loaded.getProcessMemoryInfo          = module->TryFindFunction<API::GetProcessMemoryInfoFunction>("K32GetProcessMemoryInfo");
                 // clang-format on
             }
             if (EnsureSystemAPIs(loaded.getCurrentProcessId, loaded.createProcessSnapshot, loaded.firstProcess,
-                                 loaded.nextProcess, loaded.closeHandle)) {
+                                 loaded.nextProcess, LoadHandleSystemAPI().closeHandle)) {
                 loaded.queryParentProcessId = QueryWindowsParentProcessId;
             }
             if (EnsureSystemAPIs(loaded.getCurrentProcess, loaded.getProcessTimes, loaded.getProcessMemoryInfo)) {
@@ -1400,8 +1500,8 @@ namespace Sora::PAL {
                 // clang-format on
             }
 #    if defined(PLATFORM_LINUX)
-            const auto& fileAPI = LoadFileSystemAPI();
-            if (EnsureSystemAPIs(loaded.getResourceUsage, fileAPI.systemConfiguration)) {
+            const auto& systemAPI = LoadSystemInformationSystemAPI();
+            if (EnsureSystemAPIs(loaded.getResourceUsage, systemAPI.systemConfiguration)) {
                 loaded.captureUsage = CapturePosixProcessUsage;
             }
 #    else
@@ -1433,16 +1533,16 @@ namespace Sora::PAL {
 #if defined(PLATFORM_WINDOWS)
             loaded.getCurrentThreadId          = module->TryFindFunction<API::GetCurrentThreadIdFunction>("GetCurrentThreadId");
             loaded.getCurrentThread            = module->TryFindFunction<API::GetCurrentThreadFunction>("GetCurrentThread");
+            loaded.openThread                  = module->TryFindFunction<API::OpenThreadFunction>("OpenThread");
             loaded.setThreadDescription        = module->TryFindFunction<API::SetThreadDescriptionFunction>("SetThreadDescription");
             loaded.getThreadDescription        = module->TryFindFunction<API::GetThreadDescriptionFunction>("GetThreadDescription");
-            loaded.localFree                   = module->TryFindFunction<API::LocalFreeFunction>("LocalFree");
             loaded.getCurrentProcessorNumberEx = module->TryFindFunction<API::GetCurrentProcessorNumberExFunction>("GetCurrentProcessorNumberEx");
             loaded.getCurrentThreadStackLimits = module->TryFindFunction<API::GetCurrentThreadStackLimitsFunction>("GetCurrentThreadStackLimits");
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             loaded.pthreadSelf                 = module->TryFindFunction<API::PthreadSelfFunction>("pthread_self");
             loaded.pthreadGetName              = module->TryFindFunction<API::PthreadGetNameFunction>("pthread_getname_np");
 #    if defined(PLATFORM_LINUX)
-            loaded.systemCall                  = module->TryFindFunction<API::SystemCallFunction>("syscall");
+            loaded.getThreadId                 = module->TryFindFunction<API::GetThreadIdFunction>("gettid");
             loaded.scheduleGetCpu              = module->TryFindFunction<API::ScheduleGetCpuFunction>("sched_getcpu");
             loaded.pthreadSetName              = module->TryFindFunction<API::PthreadSetNameFunction>("pthread_setname_np");
             loaded.pthreadGetAttributes        = module->TryFindFunction<API::PthreadGetAttributesFunction>("pthread_getattr_np");
@@ -1557,29 +1657,19 @@ namespace Sora::PAL {
             // clang-format off
             loaded.getStandardHandle     = module->TryFindFunction<API::GetStandardHandleFunction>("GetStdHandle");
             loaded.createFileWide        = module->TryFindFunction<API::CreateFileWideFunction>("CreateFileW");
-            loaded.closeHandle           = module->TryFindFunction<API::CloseHandleFunction>("CloseHandle");
             loaded.readFile              = module->TryFindFunction<API::ReadFileFunction>("ReadFile");
             loaded.writeFile             = module->TryFindFunction<API::WriteFileFunction>("WriteFile");
             loaded.flushFileBuffers      = module->TryFindFunction<API::FlushFileBuffersFunction>("FlushFileBuffers");
             loaded.getFileSize           = module->TryFindFunction<API::GetFileSizeFunction>("GetFileSizeEx");
             loaded.setFileInformation    = module->TryFindFunction<API::SetFileInformationFunction>("SetFileInformationByHandle");
             loaded.getFileInformation    = module->TryFindFunction<API::GetFileInformationFunction>("GetFileInformationByHandleEx");
-            loaded.createFileMappingWide = module->TryFindFunction<API::CreateFileMappingWideFunction>("CreateFileMappingW");
-            loaded.mapViewOfFile         = module->TryFindFunction<API::MapViewOfFileFunction>("MapViewOfFile");
-            loaded.unmapViewOfFile       = module->TryFindFunction<API::UnmapViewOfFileFunction>("UnmapViewOfFile");
-            loaded.flushViewOfFile       = module->TryFindFunction<API::FlushViewOfFileFunction>("FlushViewOfFile");
             loaded.replaceFileWide       = module->TryFindFunction<API::ReplaceFileWideFunction>("ReplaceFileW");
             loaded.moveFileWide          = module->TryFindFunction<API::MoveFileWideFunction>("MoveFileExW");
             loaded.deleteFileWide        = module->TryFindFunction<API::DeleteFileWideFunction>("DeleteFileW");
-            loaded.createEventWide       = module->TryFindFunction<API::CreateEventWideFunction>("CreateEventW");
-            loaded.resetEvent            = module->TryFindFunction<API::ResetEventFunction>("ResetEvent");
-            loaded.waitForSingleObject   = module->TryFindFunction<API::WaitForSingleObjectFunction>("WaitForSingleObject");
             loaded.getOverlappedResult   = module->TryFindFunction<API::GetOverlappedResultFunction>("GetOverlappedResult");
             loaded.cancelIo              = module->TryFindFunction<API::CancelIoFunction>("CancelIoEx");
             loaded.lockFile              = module->TryFindFunction<API::LockFileFunction>("LockFileEx");
             loaded.readDirectoryChanges  = module->TryFindFunction<API::ReadDirectoryChangesFunction>("ReadDirectoryChangesW");
-            loaded.getSystemInfo         = module->TryFindFunction<API::GetSystemInfoFunction>("GetSystemInfo");
-            loaded.duplicateHandle       = module->TryFindFunction<API::DuplicateHandleFunction>("DuplicateHandle");
             // clang-format on
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             // clang-format off
@@ -1592,14 +1682,9 @@ namespace Sora::PAL {
             loaded.sync                  = module->TryFindFunction<API::SyncFunction>("fsync");
             loaded.resize                = module->TryFindFunction<API::ResizeFunction>("ftruncate");
             loaded.stat                  = module->TryFindFunction<API::StatFunction>("fstat");
-            loaded.map                   = module->TryFindFunction<API::MapFunction>("mmap");
-            loaded.unmap                 = module->TryFindFunction<API::UnmapFunction>("munmap");
-            loaded.syncMap               = module->TryFindFunction<API::SyncMapFunction>("msync");
-            loaded.adviseMap             = module->TryFindFunction<API::AdviseMapFunction>("madvise");
             loaded.rename                = module->TryFindFunction<API::RenameFunction>("rename");
             loaded.unlink                = module->TryFindFunction<API::UnlinkFunction>("unlink");
             loaded.control               = module->TryFindFunction<API::ControlFunction>("fcntl");
-            loaded.systemConfiguration   = module->TryFindFunction<API::SystemConfigurationFunction>("sysconf");
             loaded.queryFileBlockSize    = loaded.stat != nullptr ? &QueryPosixFileBlockSize : nullptr;
             loaded.queryFileSize         = loaded.stat != nullptr ? &QueryPosixFileSize : nullptr;
             loaded.duplicate             = module->TryFindFunction<API::DuplicateFunction>("dup");

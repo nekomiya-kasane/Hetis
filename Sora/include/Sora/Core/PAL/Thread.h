@@ -11,12 +11,12 @@
  *     HandleThreadMetadataError(named.error());
  * }
  *
- * const auto processor = Sora::PAL::CurrentLogicalProcessor();
+ * const auto processor = Sora::PAL::GetCurrentLogicalProcessor();
  * if (processor) {
  *     RecordProcessorLocation(*processor);
  * }
  * const int frameMarker = 0;
- * const auto stack = Sora::PAL::CurrentThreadStackBounds();
+ * const auto stack = Sora::PAL::GetCurrentThreadStackBounds();
  * if (stack && stack->Contains(&frameMarker)) {
  *     RecordStackResidentDiagnostic();
  * }
@@ -80,7 +80,7 @@ namespace Sora {
          * correlating Sora diagnostics with native debuggers, profilers, and Trace Event consumers.
          * @return A nonzero native identifier on supported platforms, or zero when the platform cannot provide one.
          */
-        [[nodiscard]] Result<NativeThreadId> CurrentNativeThreadId() noexcept;
+        [[nodiscard]] Result<NativeThreadId> GetCurrentNativeThreadId() noexcept;
 
         /**
          * @brief Assign a UTF-8 debugger/profiler name to the calling thread.
@@ -94,7 +94,30 @@ namespace Sora {
          * @brief Read the calling thread's debugger/profiler name as UTF-8.
          * @return The current name, which may be empty, or a thread/native-text error.
          */
-        [[nodiscard]] Result<std::string> CurrentThreadName();
+        [[nodiscard]] Result<std::string> GetCurrentThreadName();
+
+        /**
+         * @brief Assign a UTF-8 debugger/profiler name to the thread currently identified by @p threadId.
+         * @details Native thread identifiers are observations and may be reused after exit. The operation targets the
+         * thread owning the identifier when the operating-system lookup occurs; it does not establish stable identity.
+         * @param[in] threadId Nonzero process-local native thread identifier.
+         * @param[in] name Name without embedded nulls.
+         * @return Success or a validation, permission, lookup, native-operation, or unsupported error.
+         */
+        [[nodiscard]] Result<void> SetThreadName(NativeThreadId threadId, std::string_view name);
+
+        /**
+         * @brief Read the name of the thread currently identified by @p threadId.
+         * @details The identifier is resolved at call time and may have been reused after the originally observed
+         * thread exited. This API does not provide a stable long-lived thread capability.
+         */
+        [[nodiscard]] Result<std::string> GetThreadName(NativeThreadId threadId);
+
+        /**
+         * @brief Test whether @p threadId identifies a live thread at the instant of the native query.
+         * @details A successful result is transient and does not prevent immediate exit or identifier reuse.
+         */
+        [[nodiscard]] Result<bool> IsThreadAlive(NativeThreadId threadId) noexcept;
 
         /**
          * @brief Query the logical processor currently executing the calling thread.
@@ -102,7 +125,7 @@ namespace Sora {
          * afterward.
          * @return Current processor location, @ref ErrorCode::ThreadNativeFailure, or @ref ErrorCode::NotSupported.
          */
-        [[nodiscard]] Result<LogicalProcessorLocation> CurrentLogicalProcessor() noexcept;
+        [[nodiscard]] Result<LogicalProcessorLocation> GetCurrentLogicalProcessor() noexcept;
 
         /**
          * @brief Query the calling thread's current stack allocation as a half-open address interval.
@@ -111,7 +134,7 @@ namespace Sora {
          * @return Valid bounds with @c lower < upper, @ref ErrorCode::ThreadNativeFailure, or
          * @ref ErrorCode::NotSupported.
          */
-        [[nodiscard]] Result<ThreadStackBounds> CurrentThreadStackBounds() noexcept;
+        [[nodiscard]] Result<ThreadStackBounds> GetCurrentThreadStackBounds() noexcept;
 
     } // namespace PAL
 

@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <latch>
 #include <string>
@@ -20,9 +21,9 @@ static_assert(Sora::PAL::ThreadStackBounds{.lower = 2, .upper = 1}.Size() == 0);
 static_assert(std::is_nothrow_invocable_r_v<size_t, std::hash<Sora::PAL::NativeThreadId>, Sora::PAL::NativeThreadId>);
 
 TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[Sora.PAL.Thread]") {
-    const auto callingThread = Sora::PAL::CurrentNativeThreadId();
+    const auto callingThread = Sora::PAL::GetCurrentNativeThreadId();
     REQUIRE(callingThread.has_value());
-    const auto repeated = Sora::PAL::CurrentNativeThreadId();
+    const auto repeated = Sora::PAL::GetCurrentNativeThreadId();
     REQUIRE(repeated.has_value());
     REQUIRE(*repeated == *callingThread);
 
@@ -30,11 +31,11 @@ TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[S
     std::latch captured{2};
     std::array workers{
         std::thread{[&] {
-            workerIds[0] = Sora::PAL::CurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
+            workerIds[0] = Sora::PAL::GetCurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
             captured.arrive_and_wait();
         }},
         std::thread{[&] {
-            workerIds[1] = Sora::PAL::CurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
+            workerIds[1] = Sora::PAL::GetCurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
             captured.arrive_and_wait();
         }},
     };
@@ -50,15 +51,64 @@ TEST_CASE("Native thread ids are stable and distinguish concurrent threads", "[S
 }
 
 TEST_CASE("Current thread names round-trip as UTF-8", "[Sora.PAL.Thread]") {
-    const auto original = Sora::PAL::CurrentThreadName();
+    const auto original = Sora::PAL::GetCurrentThreadName();
     REQUIRE(original.has_value());
 
     constexpr std::string_view kName{"Sora.\xCE\xBC"};
     REQUIRE(Sora::PAL::SetCurrentThreadName(kName).has_value());
-    const auto current = Sora::PAL::CurrentThreadName();
+    const auto current = Sora::PAL::GetCurrentThreadName();
     REQUIRE(current.has_value());
     REQUIRE(*current == kName);
     REQUIRE(Sora::PAL::SetCurrentThreadName(*original).has_value());
+    const auto restored = Sora::PAL::GetCurrentThreadName();
+    REQUIRE(restored.has_value());
+    REQUIRE(*restored == *original);
+}
+
+TEST_CASE("Non-current thread metadata is resolved by native id at call time", "[Sora.PAL.Thread]") {
+    std::atomic<bool> release = false;
+    Sora::PAL::NativeThreadId workerId{};
+    std::latch captured{1};
+    std::jthread worker{[&] {
+        workerId = Sora::PAL::GetCurrentNativeThreadId().value_or(Sora::PAL::NativeThreadId{});
+        captured.count_down();
+        while (!release.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    }};
+    captured.wait();
+    REQUIRE(workerId.Value() != 0);
+
+    constexpr std::string_view kWorkerName{"Sora.Worker"};
+    const auto named = Sora::PAL::SetThreadName(workerId, kWorkerName);
+    const auto observed = Sora::PAL::GetThreadName(workerId);
+    const auto alive = Sora::PAL::IsThreadAlive(workerId);
+    if constexpr (Sora::kIsMacOS) {
+        REQUIRE(named.error() == Sora::ErrorCode::NotSupported);
+        REQUIRE(observed.error() == Sora::ErrorCode::NotSupported);
+        REQUIRE(alive.error() == Sora::ErrorCode::NotSupported);
+    } else {
+        REQUIRE(named.has_value());
+        REQUIRE(observed.has_value());
+        REQUIRE(*observed == kWorkerName);
+        REQUIRE(alive.has_value());
+        REQUIRE(*alive);
+    }
+
+    release.store(true, std::memory_order_release);
+    worker.join();
+    if constexpr (!Sora::kIsMacOS) {
+        const auto stopped = Sora::PAL::IsThreadAlive(workerId);
+        REQUIRE(stopped.has_value());
+        REQUIRE_FALSE(*stopped);
+    }
+}
+
+TEST_CASE("Thread-id operations reject the zero sentinel", "[Sora.PAL.Thread]") {
+    constexpr Sora::PAL::NativeThreadId invalid{};
+    REQUIRE(Sora::PAL::SetThreadName(invalid, "name").error() == Sora::ErrorCode::InvalidArgument);
+    REQUIRE(Sora::PAL::GetThreadName(invalid).error() == Sora::ErrorCode::InvalidArgument);
+    REQUIRE(Sora::PAL::IsThreadAlive(invalid).error() == Sora::ErrorCode::InvalidArgument);
 }
 
 TEST_CASE("Thread names reject malformed UTF-8 and embedded nulls", "[Sora.PAL.Thread]") {
@@ -83,7 +133,7 @@ TEST_CASE("Thread names reject malformed UTF-8 and embedded nulls", "[Sora.PAL.T
 }
 
 TEST_CASE("Current logical processor reports a native scheduler observation", "[Sora.PAL.Thread]") {
-    const auto processor = Sora::PAL::CurrentLogicalProcessor();
+    const auto processor = Sora::PAL::GetCurrentLogicalProcessor();
     if constexpr (Sora::kIsWindows || Sora::kIsLinux) {
         REQUIRE(processor.has_value());
     } else {
@@ -92,7 +142,7 @@ TEST_CASE("Current logical processor reports a native scheduler observation", "[
 }
 
 TEST_CASE("Current stack bounds contain calling-frame storage", "[Sora.PAL.Thread]") {
-    const auto bounds = Sora::PAL::CurrentThreadStackBounds();
+    const auto bounds = Sora::PAL::GetCurrentThreadStackBounds();
     REQUIRE(bounds.has_value());
     REQUIRE(bounds->lower < bounds->upper);
     REQUIRE(bounds->Size() != 0);

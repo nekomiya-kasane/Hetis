@@ -58,14 +58,14 @@ namespace Sora::PAL {
         class ThreadIOEvent {
         public:
             ThreadIOEvent() noexcept {
-                const auto& api = LoadFileSystemAPI();
+                const auto& api = LoadSynchronizationSystemAPI();
                 if (EnsureSystemAPIs(api.createEventWide)) {
                     handle_ = api.createEventWide(nullptr, WindowsSystem::kFalse, WindowsSystem::kFalse, nullptr);
                 }
             }
 
             ~ThreadIOEvent() {
-                const auto& api = LoadFileSystemAPI();
+                const auto& api = LoadHandleSystemAPI();
                 if (IsValidFileHandle(handle_) && EnsureSystemAPIs(api.closeHandle)) {
                     static_cast<void>(api.closeHandle(handle_));
                 }
@@ -75,7 +75,7 @@ namespace Sora::PAL {
             ThreadIOEvent& operator=(const ThreadIOEvent&) = delete;
 
             [[nodiscard]] NativeFileHandle Prepare() noexcept {
-                const auto& api = LoadFileSystemAPI();
+                const auto& api = LoadSynchronizationSystemAPI();
                 if (IsValidFileHandle(handle_) && EnsureSystemAPIs(api.resetEvent) &&
                     api.resetEvent(handle_) != WindowsSystem::kFalse) {
                     return handle_;
@@ -210,7 +210,7 @@ namespace Sora::PAL {
         const FileSystemAPI& api = LoadFileSystemAPI();
         NativeFileHandle handle = kInvalidNativeFileHandle;
 #if defined(PLATFORM_WINDOWS)
-        if (!EnsureSystemAPIs(api.createFileWide, api.closeHandle)) {
+        if (!EnsureSystemAPIs(api.createFileWide, LoadHandleSystemAPI().closeHandle)) {
             return std::unexpected{ErrorCode::NotSupported};
         }
         WindowsSystem::DWord access = 0;
@@ -612,7 +612,8 @@ namespace Sora::PAL {
         const auto& api = LoadFileSystemAPI();
         bool closed = false;
 #if defined(PLATFORM_WINDOWS)
-        closed = EnsureSystemAPIs(api.closeHandle) && api.closeHandle(handle_) != WindowsSystem::kFalse;
+        const auto& handles = LoadHandleSystemAPI();
+        closed = EnsureSystemAPIs(handles.closeHandle) && handles.closeHandle(handle_) != WindowsSystem::kFalse;
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
         if (EnsureSystemAPIs(api.close)) {
             closed = api.close(handle_) == 0;

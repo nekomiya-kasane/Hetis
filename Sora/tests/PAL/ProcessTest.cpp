@@ -36,7 +36,7 @@ TEST_CASE("Current process identity is stable and has a parent", "[Sora.PAL.Proc
 
 TEST_CASE("Current process thread snapshot contains the calling thread", "[Sora.PAL.Process]") {
     const auto process = Sora::PAL::CurrentNativeProcessId();
-    const auto thread = Sora::PAL::CurrentNativeThreadId();
+    const auto thread = Sora::PAL::GetCurrentNativeThreadId();
     REQUIRE(process.has_value());
     REQUIRE(thread.has_value());
 
