@@ -238,6 +238,18 @@ namespace Sora {
                     return Clamp(value, T{0}, T{1});
                 }
 
+                template<typename T>
+                    requires std::same_as<std::remove_cvref_t<T>, bool>
+                [[nodiscard]] static constexpr auto Select(bool condition, T yes, T no) noexcept {
+                    return condition ? yes : no;
+                }
+
+                template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U>
+                [[nodiscard]] static constexpr auto Select(bool condition, T yes, U no) noexcept {
+                    using R = std::common_type_t<T, U>;
+                    return condition ? static_cast<R>(yes) : static_cast<R>(no);
+                }
+
                 template<Sora::Concept::NumericScalar T, Sora::Concept::NumericScalar U, Sora::Concept::NumericScalar V>
                     requires std::floating_point<std::common_type_t<T, U, V>>
                 [[nodiscard]] static constexpr auto Lerp(T a, U b, V t) noexcept {

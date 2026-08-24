@@ -370,6 +370,22 @@ namespace Sora::Math {
             }
         };
 
+        /** @brief CPO implementing backend-dispatched lane selection. */
+        struct SelectFn {
+            template<typename Condition, typename First, typename Second>
+                requires requires(Condition&& condition, First&& first, Second&& second) {
+                    BackendFor<First, Second>::Select(std::forward<Condition>(condition),
+                                                       std::forward<First>(first), std::forward<Second>(second));
+                }
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
+            operator()(Condition&& condition, First&& first, Second&& second) const noexcept(
+                noexcept(BackendFor<First, Second>::Select(std::forward<Condition>(condition),
+                                                           std::forward<First>(first), std::forward<Second>(second)))) {
+                return BackendFor<First, Second>::Select(std::forward<Condition>(condition),
+                                                         std::forward<First>(first), std::forward<Second>(second));
+            }
+        };
+
         /** @brief CPO implementing backend-dispatched unit-interval clamping. */
         struct SaturateFn {
             template<typename First>
@@ -469,6 +485,9 @@ namespace Sora::Math {
 
     /** @brief Clamp a value to the inclusive unit interval. */
     inline constexpr CPO::SaturateFn Saturate{};
+
+    /** @brief Select @p yes where @p condition is true and @p no elsewhere, lane-wise for SIMD carriers. */
+    inline constexpr CPO::SelectFn Select{};
 
     /** @brief Return the signed unit value corresponding to the operand's sign. */
     inline constexpr CPO::SignFn Sign{};
