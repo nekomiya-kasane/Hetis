@@ -364,6 +364,10 @@ namespace Sora {
         inline constexpr bool kIsUnixLike = kIsPosixLike && !kIsWebAssembly;
         inline constexpr bool kIsLittleEndian = kByteOrder == ByteOrder::Little;
         inline constexpr bool kIsBigEndian = kByteOrder == ByteOrder::Big;
+        inline constexpr bool kIsDebug = kBuildMode == BuildMode::Debug;
+        inline constexpr bool kIsRelease = kBuildMode == BuildMode::Release;
+        inline constexpr bool kIsRelWithDebInfo = kBuildMode == BuildMode::RelWithDebInfo;
+        inline constexpr bool kIsMinSizeRel = kBuildMode == BuildMode::MinSizeRel;
         inline constexpr bool kIs64Bit = sizeof(void*) == 8;
         inline constexpr bool kIs32Bit = sizeof(void*) == 4;
 

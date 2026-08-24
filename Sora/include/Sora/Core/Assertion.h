@@ -12,15 +12,22 @@
 #include <string_view>
 #include <utility>
 
+#include <Sora/Platform.h>
+
 namespace Sora {
 
     class StackTrace;
 
     /** @brief Semantic class of a failed runtime condition. */
+    // clang-format off
     enum class AssertionKind : uint8_t {
         Assertion,   /**< Debug-build invariant checked by @ref Assert. */
-        Verification /**< Always-evaluated condition checked by @ref Verify. */
+        Verification, /**< Always-evaluated condition checked by @ref Verify. */
+        ContractPrecondition, /**< C++26-style function precondition. */
+        ContractPostcondition, /**< C++26-style function postcondition. */
+        ContractAssertion /**< C++26-style assertion statement. */
     };
+    // clang-format on
 
     /** @brief Terminal action performed after an assertion failure has been reported. */
     enum class AssertionAction : uint8_t {
@@ -44,7 +51,7 @@ namespace Sora {
         std::string_view condition;                    /**< Stringized source expression. */
         std::string message;                           /**< Optional formatted diagnostic payload. */
         std::source_location source;                   /**< Call site at which the condition was evaluated. */
-        const StackTrace* stackTrace = nullptr;         /**< Captured stack, valid only during the reporter call. */
+        const StackTrace* stackTrace = nullptr;        /**< Captured stack, valid only during the reporter call. */
     };
 
     /** @brief Non-owning synchronous reporter invoked on the failing thread. */
@@ -121,13 +128,12 @@ namespace Sora {
     template<typename... Args>
     inline void Assert(Detail::LocatedCondition condition, std::format_string<Args...> format = "",
                        Args&&... args) noexcept {
-#if !defined(NDEBUG) || defined(SORA_ENABLE_ASSERTIONS)
-        static_cast<void>(::Sora::Detail::EvaluateCondition(condition.value, ::Sora::AssertionKind::Assertion, "",
-                                                            condition.source, format,
-                                                            std::forward<Args>(args)...));
-#else
-        static_cast<void>(condition);
-#endif
+        if constexpr (kIsDebug) {
+            static_cast<void>(::Sora::Detail::EvaluateCondition(condition.value, ::Sora::AssertionKind::Assertion, "",
+                                                                condition.source, format, std::forward<Args>(args)...));
+        } else {
+            static_cast<void>(condition);
+        }
     }
 
     /**
