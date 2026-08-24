@@ -10,7 +10,7 @@
 #include <memory> // std::assume_aligned
 
 namespace Sora::Math::Simd {
-    
+
     // [simd.traits]
     // --- Alignment ---
     template<typename Tp, typename Up = typename Tp::value_type>

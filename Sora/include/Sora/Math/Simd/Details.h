@@ -609,8 +609,7 @@ namespace Sora::Math::Simd {
         if constexpr (!Vectorizable<Tp>) {
             return InvalidAbi();
         } else if constexpr (ComplexLike<Tp>) {
-            constexpr auto underlying =
-                Sora::Math::Simd::PreferredAbi<typename Tp::value_type, MaximumBytes, Traits>();
+            constexpr auto underlying = Sora::Math::Simd::PreferredAbi<typename Tp::value_type, MaximumBytes, Traits>();
             constexpr int complexSize = underlying.kStorageSize / (underlying.kStorageSize == 1 ? 1 : 2);
             return AbiT<complexSize, 1, underlying.kVariant, AbiVariant::kCxIleav>();
         } else {
@@ -619,14 +618,12 @@ namespace Sora::Math::Simd {
             if constexpr (MaximumBytes >= nativeBytes) {
                 return native;
             } else {
-                constexpr int preferredSize = MaximumBytes < size_t(adjustedSize)
-                                                  ? 1
-                                                  : static_cast<int>(MaximumBytes / adjustedSize);
+                constexpr int preferredSize =
+                    MaximumBytes < size_t(adjustedSize) ? 1 : static_cast<int>(MaximumBytes / adjustedSize);
                 if constexpr (preferredSize == 1) {
                     return AbiT<1, 1>();
                 } else if constexpr (Traits.HaveAvx512vl()) {
-                    constexpr AbiVariant maskVariant =
-                        FilterAbiVariant(native.kVariant, AbiVariant::kMaskVariants);
+                    constexpr AbiVariant maskVariant = FilterAbiVariant(native.kVariant, AbiVariant::kMaskVariants);
                     return AbiT<preferredSize, 1, maskVariant>();
                 } else {
                     return AbiT<preferredSize, 1>();

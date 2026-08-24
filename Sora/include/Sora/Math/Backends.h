@@ -111,7 +111,11 @@ namespace Sora {
                         const U bits = static_cast<U>(x);
                         return x < 0 ? U{0} - bits : bits;
                     } else {
-                        return std::abs(x);
+                        if consteval {
+                            return Detail::CtAbs(x);
+                        } else {
+                            return std::abs(x);
+                        }
                     }
                 }
 

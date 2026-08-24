@@ -236,8 +236,7 @@ namespace Sora::Math {
             template<typename First, typename Second>
             [[nodiscard]] static constexpr auto Atan2(First&& y, Second&& x) noexcept {
                 auto primal = Math::Atan2(Primal(y), Primal(x));
-                auto numerator =
-                    Math::Mfs(Primal(x), Tangent(y, primal), Math::Mul(Primal(y), Tangent(x, primal)));
+                auto numerator = Math::Mfs(Primal(x), Tangent(y, primal), Math::Mul(Primal(y), Tangent(x, primal)));
                 auto denominator = Math::Add(Math::Square(Primal(x)), Math::Square(Primal(y)));
                 auto tangent = Math::Div(numerator, denominator);
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
@@ -314,9 +313,9 @@ namespace Sora::Math {
             template<typename First, typename Second, typename Third>
             [[nodiscard]] static constexpr auto Lerp(First&& a, Second&& b, Third&& t) noexcept {
                 auto primal = Math::Lerp(Primal(a), Primal(b), Primal(t));
-                auto tangent = Math::Fma(
-                    Primal(t), Math::Sub(Tangent(b, primal), Tangent(a, primal)),
-                    Math::Fma(Math::Sub(Primal(b), Primal(a)), Tangent(t, primal), Tangent(a, primal)));
+                auto tangent =
+                    Math::Fma(Primal(t), Math::Sub(Tangent(b, primal), Tangent(a, primal)),
+                              Math::Fma(Math::Sub(Primal(b), Primal(a)), Tangent(t, primal), Tangent(a, primal)));
                 return Dual<decltype(primal)>{std::move(primal), std::move(tangent)};
             }
 

@@ -110,6 +110,8 @@ namespace {
     static_assert(std::is_trivially_copyable_v<Sora::Math::Reverse<float, 128>>);
     static_assert(std::same_as<decltype(Sora::Math::Abs(std::numeric_limits<int>::min())), unsigned int>);
     static_assert(Sora::Math::Abs(std::numeric_limits<int>::min()) == 1U + unsigned(std::numeric_limits<int>::max()));
+    static_assert(Sora::Math::Abs(-2.0F) == 2.0F);
+    static_assert(Sora::Math::Abs(-0.0F) == 0.0F);
     static_assert(!std::invocable<decltype(Sora::Math::Inv), int>);
     static_assert(!std::invocable<decltype(Sora::Math::Inv), Int4>);
     static_assert(std::same_as<typename Simd::Vector<float, 8>::AbiType, Simd::AbiT<8, 2>>);
@@ -142,9 +144,8 @@ namespace {
     static_assert(noexcept(kSquaredSum(2, 3)));
     static_assert(!std::invocable<decltype(Sora::Math::Sin), PrimaryFunctionTest::Number>);
 
-    constexpr auto kCompiledSquareAdd = Sora::Math::Compile<1>([](auto x) {
-        return Sora::Math::Add(Sora::Math::Square(x), 1.0F);
-    });
+    constexpr auto kCompiledSquareAdd =
+        Sora::Math::Compile<1>([](auto x) { return Sora::Math::Add(Sora::Math::Square(x), 1.0F); });
     constexpr auto kCompiledSquare = Sora::Math::Compile<1>([](auto x) { return Sora::Math::Square(x); });
     static_assert(std::invocable<decltype(kCompiledSquareAdd), float>);
     static_assert(std::is_trivially_copyable_v<decltype(kCompiledSquareAdd)>);
@@ -189,12 +190,10 @@ namespace {
     static_assert(std::same_as<std::remove_cv_t<decltype(kNormalizedNms)>, StagedNms>);
     static_assert(std::same_as<std::remove_cv_t<decltype(kNormalizedExplicitNegation)>, StagedNegatedFma>);
 
-    constexpr auto kCompiledProductSum = Sora::Math::Compile<4>([](auto a, auto b, auto c, auto d) {
-        return Sora::Math::Add(Sora::Math::Mul(a, b), Sora::Math::Mul(c, d));
-    });
-    constexpr auto kCompiledSquareSum = Sora::Math::Compile<2>([](auto a, auto b) {
-        return Sora::Math::Add(Sora::Math::Square(a), Sora::Math::Square(b));
-    });
+    constexpr auto kCompiledProductSum = Sora::Math::Compile<4>(
+        [](auto a, auto b, auto c, auto d) { return Sora::Math::Add(Sora::Math::Mul(a, b), Sora::Math::Mul(c, d)); });
+    constexpr auto kCompiledSquareSum = Sora::Math::Compile<2>(
+        [](auto a, auto b) { return Sora::Math::Add(Sora::Math::Square(a), Sora::Math::Square(b)); });
     constexpr auto kCompiledNegatedProductSum = Sora::Math::Compile<4>([](auto a, auto b, auto c, auto d) {
         return Sora::Math::Neg(Sora::Math::Add(Sora::Math::Mul(a, b), Sora::Math::Mul(c, d)));
     });
@@ -386,7 +385,7 @@ TEST_CASE("batched JVP combines automatic differentiation with SIMD tail handlin
     }
 
     const auto run = [&]<size_t Unroll>(std::array<float, largeCount>& primalDestination,
-                                             std::array<float, largeCount>& tangentDestination) {
+                                        std::array<float, largeCount>& tangentDestination) {
         Sora::Math::TransformBatchJvp<Float4, Unroll>(
             std::span<float>(primalDestination), std::span<float>(tangentDestination),
             [](auto value) noexcept { return Sora::Math::Add(Sora::Math::Exp(value), Sora::Math::Square(value)); },
@@ -415,8 +414,8 @@ TEST_CASE("compiled kernels fuse expressions across scalar SIMD JVP and VJP", "[
     const Float4 simdInput([](int index) { return 0.25F * static_cast<float>(index + 1); });
     const Float4 simdOutput = kernel(simdInput);
     for (int index = 0; index < 4; ++index) {
-        REQUIRE(std::abs(simdOutput[index] - std::fma(simdInput[index], simdInput[index],
-                                                      std::exp(simdInput[index]))) < 1e-6F);
+        REQUIRE(std::abs(simdOutput[index] - std::fma(simdInput[index], simdInput[index], std::exp(simdInput[index]))) <
+                1e-6F);
     }
 
     const auto jvp = kernel(Dual{xValue, 1.0});
@@ -456,19 +455,19 @@ TEST_CASE("compiled backend stages every public primitive", "[Sora][Math][Compil
     constexpr auto kernel = Compile<1>([](auto x) {
         const auto shifted = Add(x, 2.0);
         const auto half = Div(x, 2.0);
-        return Add(Neg(x), Inv(shifted), Square(x), Abs(x), Sin(x), Cos(x), Tan(half), Asin(half), Acos(half),
-                   Atan(x), Atan2(x, shifted), Exp(half), Log(shifted), Sqrt(shifted), Pow(shifted, x),
-                   Fma(x, x, 1.0), Mfs(x, shifted, 0.5), Nms(x, shifted, 0.5), Nma(x, shifted, 0.5),
-                   Lerp(x, 2.0, 0.3), Clamp(x, -1.0, 1.0), Saturate(x), Sign(x), Sub(shifted, x), Mul(x, half));
+        return Add(Neg(x), Inv(shifted), Square(x), Abs(x), Sin(x), Cos(x), Tan(half), Asin(half), Acos(half), Atan(x),
+                   Atan2(x, shifted), Exp(half), Log(shifted), Sqrt(shifted), Pow(shifted, x), Fma(x, x, 1.0),
+                   Mfs(x, shifted, 0.5), Nms(x, shifted, 0.5), Nma(x, shifted, 0.5), Lerp(x, 2.0, 0.3),
+                   Clamp(x, -1.0, 1.0), Saturate(x), Sign(x), Sub(shifted, x), Mul(x, half));
     });
 
     const auto eager = [](double x) {
         const auto shifted = Add(x, 2.0);
         const auto half = Div(x, 2.0);
-        return Add(Neg(x), Inv(shifted), Square(x), Abs(x), Sin(x), Cos(x), Tan(half), Asin(half), Acos(half),
-                   Atan(x), Atan2(x, shifted), Exp(half), Log(shifted), Sqrt(shifted), Pow(shifted, x),
-                   Fma(x, x, 1.0), Mfs(x, shifted, 0.5), Nms(x, shifted, 0.5), Nma(x, shifted, 0.5),
-                   Lerp(x, 2.0, 0.3), Clamp(x, -1.0, 1.0), Saturate(x), Sign(x), Sub(shifted, x), Mul(x, half));
+        return Add(Neg(x), Inv(shifted), Square(x), Abs(x), Sin(x), Cos(x), Tan(half), Asin(half), Acos(half), Atan(x),
+                   Atan2(x, shifted), Exp(half), Log(shifted), Sqrt(shifted), Pow(shifted, x), Fma(x, x, 1.0),
+                   Mfs(x, shifted, 0.5), Nms(x, shifted, 0.5), Nma(x, shifted, 0.5), Lerp(x, 2.0, 0.3),
+                   Clamp(x, -1.0, 1.0), Saturate(x), Sign(x), Sub(shifted, x), Mul(x, half));
     };
 
     constexpr double value = 0.25;

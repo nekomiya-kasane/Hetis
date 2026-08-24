@@ -23,8 +23,8 @@ namespace Sora::Math {
     namespace Detail {
 
         template<size_t Capacity>
-        using ReverseIndex = std::conditional_t<(Capacity <= std::numeric_limits<std::uint32_t>::max()), std::uint32_t,
-                                                std::uint64_t>;
+        using ReverseIndex =
+            std::conditional_t<(Capacity <= std::numeric_limits<std::uint32_t>::max()), std::uint32_t, std::uint64_t>;
 
         template<DifferentiableValue P, size_t Capacity, bool CompactScalar = (alignof(P) <= alignof(void*))>
         struct ReverseStorage;
@@ -68,8 +68,7 @@ namespace Sora::Math {
         static constexpr bool kIsReverse = true;
         static constexpr size_t kCapacity = Capacity;
 
-        constexpr Reverse(P primal, TapeType* tape, IndexType node) noexcept
-            : Storage(std::move(primal), tape, node) {}
+        constexpr Reverse(P primal, TapeType* tape, IndexType node) noexcept : Storage(std::move(primal), tape, node) {}
     };
 
     template<typename T>

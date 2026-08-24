@@ -48,7 +48,7 @@ namespace Sora::Math {
 
         template<typename Current, typename Next, typename... Rest>
         [[nodiscard]] consteval std::meta::info JoinBackends() {
-            using Joined = [: JoinBackend<Current, Next>() :];
+            using Joined = [:JoinBackend<Current, Next>():];
             if constexpr (sizeof...(Rest) == 0) {
                 return ^^Joined;
             } else {
@@ -57,7 +57,7 @@ namespace Sora::Math {
         }
 
         template<typename... Carriers>
-        using BackendFor = [: JoinBackends<Traits::BackendTypeOf<std::remove_cvref_t<Carriers>>...>() :];
+        using BackendFor = [:JoinBackends<Traits::BackendTypeOf<std::remove_cvref_t<Carriers>>...>():];
         /** @endcond */
 
         /** @brief CPO implementing backend-dispatched addition. */

@@ -718,8 +718,7 @@ namespace Sora::Math::Simd {
 #endif
                 if (n >= size_t(kStorageSize)) [[unlikely]] {
                     return BasicVector(LoadCtorTag(), mem);
-                }
-                else if constexpr (kStorageSize > 4) {
+                } else if constexpr (kStorageSize > 4) {
                     alignas(DataType) std::byte dst[sizeof(DataType)] = {};
                     const std::byte* src = reinterpret_cast<const std::byte*>(mem);
                     MemcpyChunks<sizeof(Up), sizeof(DataType)>(dst, src, n);

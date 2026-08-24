@@ -86,6 +86,7 @@ namespace Sora {
         GlobalMemoryNativeFailure = 0x002B, ///< A native movable-global-memory operation failed.
         PermissionDenied = 0x002C,          ///< The caller lacks permission for the requested operation.
         ResourceBusy = 0x002D,              ///< An exclusive resource is currently owned by another operation.
+        SingularMatrix = 0x002E,            ///< A matrix or affine linear part has no inverse.
         /** @} */
 
         /** @name Core Rendering (0x1000 – 0x1FFF) @{ */

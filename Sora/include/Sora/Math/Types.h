@@ -10,6 +10,8 @@
 #include <Sora/Math/Matrix.h>
 #include <Sora/Math/UnitVector.h>
 
+#include <cstddef>
+
 namespace Sora::Math {
 
     using Vec2f = Vec<Sora::Traits::Float<32>, 2>;
@@ -44,6 +46,19 @@ namespace Sora::Math {
     using Point2d = Point<Sora::Traits::Float<64>, 2>;
     using Point3d = Point<Sora::Traits::Float<64>, 3>;
     using Point4d = Point<Sora::Traits::Float<64>, 4>;
+    using Point2i = Point<Sora::Traits::Signed<32>, 2>;
+    using Point3i = Point<Sora::Traits::Signed<32>, 3>;
+    using Point4i = Point<Sora::Traits::Signed<32>, 4>;
+    using Point2u = Point<Sora::Traits::Unsigned<32>, 2>;
+    using Point3u = Point<Sora::Traits::Unsigned<32>, 3>;
+    using Point4u = Point<Sora::Traits::Unsigned<32>, 4>;
+
+    /** @brief Four-component float vector with explicit 16-byte alignment and no backend-specific semantics. */
+    struct alignas(16) Vec4Padded : Vec4f {
+        using Vec4f::Vec4f;
+        constexpr Vec4Padded() noexcept = default;
+        constexpr explicit Vec4Padded(const Vec4f& components) noexcept : Vec4f(components) {}
+    };
 
     using UnitVector2f = UnitVector<Sora::Traits::Float<32>, 2>;
     using UnitVector3f = UnitVector<Sora::Traits::Float<32>, 3>;
@@ -60,5 +75,6 @@ namespace Sora::Math {
     static_assert(sizeof(Point3d) == 3 * sizeof(double));
     static_assert(sizeof(UnitVector3f) == 3 * sizeof(float));
     static_assert(sizeof(UnitVector3d) == 3 * sizeof(double));
+    static_assert(sizeof(Vec4Padded) == 16 && alignof(Vec4Padded) == 16);
 
 } // namespace Sora::Math
