@@ -1187,36 +1187,36 @@ namespace Sora::PAL {
 
 #    if defined(PLATFORM_LINUX)
             // clang-format off
-            inline constexpr int kOpenReadOnly = 0x00000000;
-            inline constexpr int kOpenWriteOnly = 0x00000001;
-            inline constexpr int kOpenReadWrite = 0x00000002;
-            inline constexpr int kOpenCreate = 0x00000040;
-            inline constexpr int kOpenExclusive = 0x00000080;
-            inline constexpr int kOpenTruncate = 0x00000200;
-            inline constexpr int kOpenDirectory = 0x00010000;
-            inline constexpr int kOpenDirect = 0x00004000;
-            inline constexpr int kOpenSync = 0x00101000;
-            inline constexpr int kPageSizeConfiguration = 30;
-            inline constexpr int kFileAdviceSequential = 2;
-            inline constexpr int kFileAdviceRandom = 1;
-            inline constexpr int kLockExclusive = 2;
-            inline constexpr int kLockNonBlocking = 4;
+            inline constexpr int kOpenReadOnly           = 0x00000000;
+            inline constexpr int kOpenWriteOnly          = 0x00000001;
+            inline constexpr int kOpenReadWrite          = 0x00000002;
+            inline constexpr int kOpenCreate             = 0x00000040;
+            inline constexpr int kOpenExclusive          = 0x00000080;
+            inline constexpr int kOpenTruncate           = 0x00000200;
+            inline constexpr int kOpenDirectory          = 0x00010000;
+            inline constexpr int kOpenDirect             = 0x00004000;
+            inline constexpr int kOpenSync               = 0x00101000;
+            inline constexpr int kPageSizeConfiguration  = 30;
+            inline constexpr int kFileAdviceSequential   = 2;
+            inline constexpr int kFileAdviceRandom       = 1;
+            inline constexpr int kLockExclusive          = 2;
+            inline constexpr int kLockNonBlocking        = 4;
             // clang-format on
 #    elif defined(PLATFORM_MACOS)
             // clang-format off
-            inline constexpr int kOpenReadOnly = 0x00000000;
-            inline constexpr int kOpenWriteOnly = 0x00000001;
-            inline constexpr int kOpenReadWrite = 0x00000002;
-            inline constexpr int kOpenCreate = 0x00000200;
-            inline constexpr int kOpenExclusive = 0x00000800;
-            inline constexpr int kOpenTruncate = 0x00000400;
-            inline constexpr int kOpenDirectory = 0x00100000;
-            inline constexpr int kOpenSync = 0x00000080;
-            inline constexpr int kNoCacheControl = 48;
-            inline constexpr int kFullSyncControl = 51;
-            inline constexpr int kPageSizeConfiguration = 29;
-            inline constexpr int kLockExclusive = 2;
-            inline constexpr int kLockNonBlocking = 4;
+            inline constexpr int kOpenReadOnly           = 0x00000000;
+            inline constexpr int kOpenWriteOnly          = 0x00000001;
+            inline constexpr int kOpenReadWrite          = 0x00000002;
+            inline constexpr int kOpenCreate             = 0x00000200;
+            inline constexpr int kOpenExclusive          = 0x00000800;
+            inline constexpr int kOpenTruncate           = 0x00000400;
+            inline constexpr int kOpenDirectory          = 0x00100000;
+            inline constexpr int kOpenSync               = 0x00000080;
+            inline constexpr int kNoCacheControl         = 48;
+            inline constexpr int kFullSyncControl        = 51;
+            inline constexpr int kPageSizeConfiguration  = 29;
+            inline constexpr int kLockExclusive          = 2;
+            inline constexpr int kLockNonBlocking        = 4;
             // clang-format on
 #    endif
 
@@ -1226,16 +1226,16 @@ namespace Sora::PAL {
         inline namespace Mapping {
 
             // clang-format off
-            inline constexpr int kProtectionRead = 0x1;
-            inline constexpr int kProtectionWrite = 0x2;
-            inline constexpr int kMapShared = 0x1;
-            inline constexpr int kMapPrivate = 0x2;
-            inline constexpr int kSynchronize = 0x4;
-            inline constexpr int kAdviceNormal = 0;
-            inline constexpr int kAdviceRandom = 1;
+            inline constexpr int kProtectionRead   = 0x1;
+            inline constexpr int kProtectionWrite  = 0x2;
+            inline constexpr int kMapShared        = 0x1;
+            inline constexpr int kMapPrivate       = 0x2;
+            inline constexpr int kSynchronize      = 0x4;
+            inline constexpr int kAdviceNormal     = 0;
+            inline constexpr int kAdviceRandom     = 1;
             inline constexpr int kAdviceSequential = 2;
-            inline constexpr int kAdviceWillNeed = 3;
-            inline constexpr int kAdviceDontNeed = 4;
+            inline constexpr int kAdviceWillNeed   = 3;
+            inline constexpr int kAdviceDontNeed   = 4;
             // clang-format on
 
             /** @brief Return whether @p address is the POSIX failed-mapping sentinel. */
@@ -1248,14 +1248,10 @@ namespace Sora::PAL {
         /** @brief POSIX dynamic-loader binding and visibility flags. */
         inline namespace Module {
 
-            inline constexpr int kDynamicLazy = 0x00000001;
-            inline constexpr int kDynamicNow = 0x00000002;
-            inline constexpr int kDynamicLocal = 0x00000004;
-#    if defined(PLATFORM_LINUX)
-            inline constexpr int kDynamicGlobal = 0x00000100;
-#    else
-            inline constexpr int kDynamicGlobal = 0x00000008;
-#    endif
+            inline constexpr int kDynamicLazy   = 0x00000001;
+            inline constexpr int kDynamicNow    = 0x00000002;
+            inline constexpr int kDynamicLocal  = 0x00000004;
+            inline constexpr int kDynamicGlobal = kIsLinux ? 0x00000100 : 0x00000008;
 
         } // namespace Module
 
@@ -1583,9 +1579,7 @@ namespace Sora::PAL {
         using SessionHandle   = void*;
         using EventCallback   = void (*)(const NativeSchedulerTraceRecord&, void*) noexcept;
         using LossCallback    = void (*)(uint64_t eventsLost, void*) noexcept;
-        using StartFunction =
-            ErrorCode (*)(const NativeSchedulerTraceOptions&, EventCallback, LossCallback, void*, SessionHandle*,
-                          uint64_t*) noexcept;
+        using StartFunction   = ErrorCode (*)(const NativeSchedulerTraceOptions&, EventCallback, LossCallback, void*, SessionHandle*, uint64_t*) noexcept;
         using ProcessFunction = ErrorCode (*)(SessionHandle) noexcept;
         using StopFunction    = ErrorCode (*)(SessionHandle, NativeSchedulerTraceLosses*) noexcept;
         using CloseFunction   = void (*)(SessionHandle) noexcept;
