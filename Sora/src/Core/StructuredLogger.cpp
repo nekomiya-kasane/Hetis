@@ -336,7 +336,7 @@ namespace Sora {
             return;
         }
 
-        auto threadId = PAL::CurrentNativeThreadId();
+        auto threadId = PAL::GetCurrentNativeThreadId();
         LogRecord record{.level = level,
                          .category = category,
                          .source = source,

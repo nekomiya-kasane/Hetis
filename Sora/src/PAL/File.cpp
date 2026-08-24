@@ -58,7 +58,7 @@ namespace Sora::PAL {
         class ThreadIOEvent {
         public:
             ThreadIOEvent() noexcept {
-                const auto& api = LoadSynchronizationSystemAPI();
+                const auto& api = LoadEventSystemAPI();
                 if (EnsureSystemAPIs(api.createEventWide)) {
                     handle_ = api.createEventWide(nullptr, WindowsSystem::kFalse, WindowsSystem::kFalse, nullptr);
                 }
@@ -75,7 +75,7 @@ namespace Sora::PAL {
             ThreadIOEvent& operator=(const ThreadIOEvent&) = delete;
 
             [[nodiscard]] NativeFileHandle Prepare() noexcept {
-                const auto& api = LoadSynchronizationSystemAPI();
+                const auto& api = LoadEventSystemAPI();
                 if (IsValidFileHandle(handle_) && EnsureSystemAPIs(api.resetEvent) &&
                     api.resetEvent(handle_) != WindowsSystem::kFalse) {
                     return handle_;

@@ -43,6 +43,8 @@ struct timespec;
 #endif
 
 #if defined(PLATFORM_WINDOWS)
+
+struct _EXCEPTION_POINTERS;
 struct _IMAGEHLP_LINE64;
 struct _IMAGEHLP_MODULE64;
 struct _EVENT_TRACE_LOGFILEW;
@@ -153,6 +155,41 @@ namespace Sora::PAL {
         uint64_t offset = 0;     /**< Byte displacement from the resolved symbol start. */
     };
 
+    /** @brief Signed desktop coordinate rectangle used by display and windowing adapters. */
+    struct DisplayRect {
+        int32_t left = 0;
+        int32_t top = 0;
+        int32_t right = 0;
+        int32_t bottom = 0;
+    };
+
+    /** @brief Signed desktop coordinate point used by display and windowing adapters. */
+    struct DisplayPoint {
+        int32_t x = 0;
+        int32_t y = 0;
+    };
+
+    /** @brief DPI awareness mode understood by the Windows display adapter. */
+    enum class DisplayDpiAwareness : int {
+        Unaware = 0,
+        SystemAware,
+        PerMonitorAware,
+    };
+
+    /** @brief Fallback policy used when a point or window is not on a monitor. */
+    enum class DisplayMonitorSelection : uint32_t {
+        Null = 0,
+        Primary = 1,
+        Nearest = 2,
+    };
+
+    /** @brief DPI quantity requested from the legacy per-monitor DPI query. */
+    enum class DisplayDpiType : int {
+        Effective = 0,
+        Angular = 1,
+        Raw = 2,
+    };
+
 #if defined(PLATFORM_WINDOWS)
 
     namespace WindowsSystem {
@@ -170,6 +207,11 @@ namespace Sora::PAL {
         /** @brief Opaque native type used by the existing Win32 file API table. */
         using NativeOverlapped = ::_OVERLAPPED;
         using NativeLargeInteger = ::_LARGE_INTEGER;
+        using WindowHandle = void*;
+        using MonitorHandle = void*;
+        using DeviceContextHandle = void*;
+        using DpiAwarenessContext = void*;
+        using LParam = intptr_t;
 
         /** @brief Layout-compatible Win32 thread snapshot entry without exposing the Windows SDK. */
         struct ThreadEntry {
@@ -253,6 +295,14 @@ namespace Sora::PAL {
         /** @brief ABI-compatible signed 64-bit integer returned by Win32 file-size APIs. */
         struct LargeInteger {
             int64_t quadPart = 0;
+        };
+
+        /** @brief ABI-compatible Win32 monitor information record. */
+        struct MonitorInfo {
+            DWord size = sizeof(MonitorInfo);
+            DisplayRect monitor{};
+            DisplayRect work{};
+            DWord flags = 0;
         };
 
         /** @brief ABI-compatible end-of-file information passed to Win32 file-information APIs. */
@@ -459,6 +509,23 @@ namespace Sora::PAL {
 
             } // namespace Thread
 
+            /** @brief Monitor selection flags and the Windows reference DPI. */
+            inline namespace Display {
+                inline constexpr DWord kMonitorDefaultNull = 0;
+                inline constexpr DWord kMonitorDefaultPrimary = 1;
+                inline constexpr DWord kMonitorDefaultNearest = 2;
+                inline constexpr UInt kDefaultDpi = 96;
+            } // namespace Display
+
+            /** @brief Event, IOCP, and Windows I/O ring constants. */
+            inline namespace AsyncIO {
+                inline constexpr DWord kIoCompletionKeyNone = 0;
+                inline constexpr DWord kIoRingVersion1 = 1;
+                inline constexpr DWord kIoRingVersion3 = 3;
+                inline constexpr DWord kIoRingSubmissionQueueSize = 0x0000FFFF;
+                inline constexpr DWord kIoRingCompletionQueueSize = 0x0000FFFF;
+            } // namespace AsyncIO
+
             /** @brief File replacement and mapping constants. */
             inline namespace FileMapping {
 
@@ -546,12 +613,46 @@ namespace Sora::PAL {
         // clang-format on
     };
 
+    /** @brief Dynamically resolved Windows structured-exception and process-exception-policy operations. */
+    struct StructuredExceptionSystemAPI {
+        // clang-format off
+        using ExceptionFilterFunction                = WindowsSystem::Long(__stdcall*)(_EXCEPTION_POINTERS*);
+        using SetUnhandledExceptionFilterFunction    = ExceptionFilterFunction(__stdcall*)(ExceptionFilterFunction);
+        using AddVectoredExceptionHandlerFunction    = void*(__stdcall*)(WindowsSystem::UInt, void*);
+        using RemoveVectoredExceptionHandlerFunction = WindowsSystem::Bool(__stdcall*)(void*);
+        using RaiseExceptionFunction                 = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, const WindowsSystem::DWord*);
+        using GetErrorModeFunction                   = WindowsSystem::DWord(__stdcall*)();
+        using SetErrorModeFunction                   = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
+        using WerGetFlagsFunction                    = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
+        using WerSetFlagsFunction                    = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord);
+
+        [[= $::Syscall{"SetUnhandledExceptionFilter"}]]
+        SetUnhandledExceptionFilterFunction      setUnhandledExceptionFilter    = nullptr;
+        [[= $::Syscall{"AddVectoredExceptionHandler"}]]
+        AddVectoredExceptionHandlerFunction      addVectoredExceptionHandler    = nullptr;
+        [[= $::Syscall{"RemoveVectoredExceptionHandler"}]]
+        RemoveVectoredExceptionHandlerFunction   removeVectoredExceptionHandler = nullptr;
+        [[= $::Syscall{"RaiseException"}]]
+        RaiseExceptionFunction                   raiseException                 = nullptr;
+        [[= $::Syscall{"GetErrorMode"}]]
+        GetErrorModeFunction                     getErrorMode                   = nullptr;
+        [[= $::Syscall{"SetErrorMode"}]]
+        SetErrorModeFunction                     setErrorMode                   = nullptr;
+        [[= $::Syscall{"WerGetFlags"}]]
+        WerGetFlagsFunction                      werGetFlags                    = nullptr;
+        [[= $::Syscall{"WerSetFlags"}]]
+        WerSetFlagsFunction                      werSetFlags                    = nullptr;
+        // clang-format on
+    };
+
     /** @brief Dynamically resolved Win32 local-memory operations. */
     struct LocalMemorySystemAPI {
+        // clang-format off
         using LocalFreeFunction = void*(__stdcall*)(void*);
 
         [[= $::Syscall{"LocalFree"}]]
         LocalFreeFunction localFree = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved operations common to Win32 kernel handles. */
@@ -569,17 +670,63 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved Win32 event synchronization operations. */
     struct SynchronizationSystemAPI {
-        using CreateEventWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool,
-                                                                           WindowsSystem::Bool, const wchar_t*);
-        using ResetEventFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        // clang-format off
         using WaitForSingleObjectFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
+
+        [[= $::Syscall{"WaitForSingleObject"}]]
+        WaitForSingleObjectFunction waitForSingleObject = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Win32 event-object operations. */
+    struct EventSystemAPI {
+        // clang-format off
+        using CreateEventWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::Bool, const wchar_t*);
+        using SetEventFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using ResetEventFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
 
         [[= $::Syscall{"CreateEventW"}]]
         CreateEventWideFunction createEventWide = nullptr;
+        [[= $::Syscall{"SetEvent"}]]
+        SetEventFunction        setEvent        = nullptr;
         [[= $::Syscall{"ResetEvent"}]]
-        ResetEventFunction resetEvent = nullptr;
-        [[= $::Syscall{"WaitForSingleObject"}]]
-        WaitForSingleObjectFunction waitForSingleObject = nullptr;
+        ResetEventFunction      resetEvent      = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Windows I/O completion-port operations. */
+    struct IOCPSystemAPI {
+        // clang-format off
+        using CreateIoCompletionPortFunction      = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Size, WindowsSystem::DWord);
+        using GetQueuedCompletionStatusFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*, WindowsSystem::Size*, ::_OVERLAPPED**, WindowsSystem::DWord);
+        using PostQueuedCompletionStatusFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::Size, ::_OVERLAPPED*);
+
+        [[= $::Syscall{"CreateIoCompletionPort"}]]
+        CreateIoCompletionPortFunction     createIoCompletionPort      = nullptr;
+        [[= $::Syscall{"GetQueuedCompletionStatus"}]]
+        GetQueuedCompletionStatusFunction  getQueuedCompletionStatus   = nullptr;
+        [[= $::Syscall{"PostQueuedCompletionStatus"}]]
+        PostQueuedCompletionStatusFunction postQueuedCompletionStatus = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Windows I/O ring operations. */
+    struct IORingSystemAPI {
+        // clang-format off
+        using CreateIoRingFunction         = WindowsSystem::HResult(__stdcall*)(WindowsSystem::UInt, WindowsSystem::UInt, void**);
+        using CloseIoRingFunction          = void(__stdcall*)(void*);
+        using SubmitIoRingFunction         = WindowsSystem::HResult(__stdcall*)(void*);
+        using PopIoRingCompletionFunction = WindowsSystem::HResult(__stdcall*)(void*, void*);
+
+        [[= $::Syscall{"CreateIoRing"}]]
+        CreateIoRingFunction         createIoRing         = nullptr;
+        [[= $::Syscall{"CloseIoRing"}]]
+        CloseIoRingFunction          closeIoRing          = nullptr;
+        [[= $::Syscall{"SubmitIoRing"}]]
+        SubmitIoRingFunction         submitIoRing         = nullptr;
+        [[= $::Syscall{"PopIoRingCompletion"}]]
+        PopIoRingCompletionFunction popIoRingCompletion = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 file-backed virtual-memory mapping operations. */
@@ -605,8 +752,7 @@ namespace Sora::PAL {
     struct SystemInformationSystemAPI {
         using GetSystemInfoFunction = void(__stdcall*)(void*);
 
-        [[= $::Syscall{"GetSystemInfo"}]]
-        GetSystemInfoFunction getSystemInfo = nullptr;
+        [[= $::Syscall{"GetSystemInfo"}]] GetSystemInfoFunction getSystemInfo = nullptr;
     };
 
     /** @brief Dynamically resolved Win32 environment entry points. */
@@ -766,6 +912,82 @@ namespace Sora::PAL {
         SetClipboardDataFunction           setClipboardData           = nullptr;
         [[= $::Syscall{"IsClipboardFormatAvailable"}]]
         IsClipboardFormatAvailableFunction isClipboardFormatAvailable = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved display, monitor, geometry, and Windows DPI operations. */
+    struct DisplaySystemAPI {
+        // clang-format off
+        using EnumDisplayMonitorsCallback                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MonitorHandle, WindowsSystem::DeviceContextHandle, const DisplayRect*, WindowsSystem::LParam);
+        using EnumDisplayMonitorsFunction                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DeviceContextHandle, const DisplayRect*, EnumDisplayMonitorsCallback, WindowsSystem::LParam);
+        using GetMonitorInfoWideFunction                    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MonitorHandle, WindowsSystem::MonitorInfo*);
+        using MonitorFromPointFunction                      = WindowsSystem::MonitorHandle(__stdcall*)(DisplayPoint, WindowsSystem::DWord);
+        using MonitorFromWindowFunction                     = WindowsSystem::MonitorHandle(__stdcall*)(WindowsSystem::WindowHandle, WindowsSystem::DWord);
+        using GetWindowRectFunction                         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, DisplayRect*);
+        using GetClientRectFunction                         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, DisplayRect*);
+        using TranslatePointFunction                        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, DisplayPoint*);
+        using GetCursorPositionFunction                     = WindowsSystem::Bool(__stdcall*)(DisplayPoint*);
+        using GetSystemMetricsFunction                      = int(__stdcall*)(int);
+        using GetSystemMetricsForDpiFunction                = int(__stdcall*)(int, WindowsSystem::UInt);
+        using GetDpiForWindowFunction                       = WindowsSystem::UInt(__stdcall*)(WindowsSystem::WindowHandle);
+        using GetDpiForSystemFunction                       = WindowsSystem::UInt(__stdcall*)();
+        using GetSystemDpiForProcessFunction                = WindowsSystem::UInt(__stdcall*)(WindowsSystem::Handle);
+        using GetWindowDpiAwarenessContextFunction          = WindowsSystem::DpiAwarenessContext(__stdcall*)(WindowsSystem::WindowHandle);
+        using GetDpiForMonitorFunction                      = WindowsSystem::HResult(__stdcall*)(WindowsSystem::MonitorHandle, int, WindowsSystem::UInt*, WindowsSystem::UInt*);
+        using SetProcessDpiAwarenessContextFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DpiAwarenessContext);
+        using SetThreadDpiAwarenessContextFunction          = WindowsSystem::DpiAwarenessContext(__stdcall*)(WindowsSystem::DpiAwarenessContext);
+        using GetThreadDpiAwarenessContextFunction          = WindowsSystem::DpiAwarenessContext(__stdcall*)();
+        using GetAwarenessFromDpiAwarenessContextFunction   = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DpiAwarenessContext, int*);
+        using AdjustWindowRectExForDpiFunction              = WindowsSystem::Bool(__stdcall*)(DisplayRect*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::UInt);
+        using SetProcessDpiAwarenessFunction                = WindowsSystem::HResult(__stdcall*)(int);
+        using GetProcessDpiAwarenessFunction                = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, int*);
+
+        [[= $::Syscall{"EnumDisplayMonitors"}]]
+        EnumDisplayMonitorsFunction                 enumDisplayMonitors                 = nullptr;
+        [[= $::Syscall{"GetMonitorInfoW"}]]
+        GetMonitorInfoWideFunction                  getMonitorInfoWide                  = nullptr;
+        [[= $::Syscall{"MonitorFromPoint"}]]
+        MonitorFromPointFunction                    monitorFromPoint                    = nullptr;
+        [[= $::Syscall{"MonitorFromWindow"}]]
+        MonitorFromWindowFunction                   monitorFromWindow                   = nullptr;
+        [[= $::Syscall{"GetWindowRect"}]]
+        GetWindowRectFunction                       getWindowRect                       = nullptr;
+        [[= $::Syscall{"GetClientRect"}]]
+        GetClientRectFunction                       getClientRect                       = nullptr;
+        [[= $::Syscall{"ClientToScreen"}]]
+        TranslatePointFunction                      clientToScreen                      = nullptr;
+        [[= $::Syscall{"ScreenToClient"}]]
+        TranslatePointFunction                      screenToClient                      = nullptr;
+        [[= $::Syscall{"GetCursorPos"}]]
+        GetCursorPositionFunction                   getCursorPosition                   = nullptr;
+        [[= $::Syscall{"GetSystemMetrics"}]]
+        GetSystemMetricsFunction                    getSystemMetrics                    = nullptr;
+        [[= $::Syscall{"GetSystemMetricsForDpi"}]]
+        GetSystemMetricsForDpiFunction              getSystemMetricsForDpi              = nullptr;
+        [[= $::Syscall{"GetDpiForWindow"}]]
+        GetDpiForWindowFunction                     getDpiForWindow                     = nullptr;
+        [[= $::Syscall{"GetDpiForSystem"}]]
+        GetDpiForSystemFunction                     getDpiForSystem                     = nullptr;
+        [[= $::Syscall{"GetSystemDpiForProcess"}]]
+        GetSystemDpiForProcessFunction              getSystemDpiForProcess              = nullptr;
+        [[= $::Syscall{"GetWindowDpiAwarenessContext"}]]
+        GetWindowDpiAwarenessContextFunction        getWindowDpiAwarenessContext        = nullptr;
+        [[= $::Syscall{"GetDpiForMonitor"}]]
+        GetDpiForMonitorFunction                    getDpiForMonitor                    = nullptr;
+        [[= $::Syscall{"SetProcessDpiAwarenessContext"}]]
+        SetProcessDpiAwarenessContextFunction       setProcessDpiAwarenessContext       = nullptr;
+        [[= $::Syscall{"SetThreadDpiAwarenessContext"}]]
+        SetThreadDpiAwarenessContextFunction        setThreadDpiAwarenessContext        = nullptr;
+        [[= $::Syscall{"GetThreadDpiAwarenessContext"}]]
+        GetThreadDpiAwarenessContextFunction        getThreadDpiAwarenessContext        = nullptr;
+        [[= $::Syscall{"GetAwarenessFromDpiAwarenessContext"}]]
+        GetAwarenessFromDpiAwarenessContextFunction getAwarenessFromDpiAwarenessContext = nullptr;
+        [[= $::Syscall{"AdjustWindowRectExForDpi"}]]
+        AdjustWindowRectExForDpiFunction            adjustWindowRectExForDpi            = nullptr;
+        [[= $::Syscall{"SetProcessDpiAwareness"}]]
+        SetProcessDpiAwarenessFunction              setProcessDpiAwareness              = nullptr;
+        [[= $::Syscall{"GetProcessDpiAwareness"}]]
+        GetProcessDpiAwarenessFunction              getProcessDpiAwareness              = nullptr;
         // clang-format on
     };
 
@@ -1041,6 +1263,7 @@ namespace Sora::PAL {
 
     /** @brief POSIX has no additional native-error entry points beyond thread-local @c errno. */
     struct NativeErrorSystemAPI {};
+    struct StructuredExceptionSystemAPI {};
     struct LocalMemorySystemAPI {};
     struct HandleSystemAPI {};
     struct SynchronizationSystemAPI {};
@@ -1064,8 +1287,26 @@ namespace Sora::PAL {
     struct SystemInformationSystemAPI {
         using SystemConfigurationFunction = long (*)(int);
 
-        [[= $::Syscall{"sysconf"}]]
-        SystemConfigurationFunction systemConfiguration = nullptr;
+        [[= $::Syscall{"sysconf"}]] SystemConfigurationFunction systemConfiguration = nullptr;
+    };
+
+    /** @brief Dynamically resolved Linux io_uring submission/completion operations. */
+    struct IORingSystemAPI {
+        // clang-format off
+        using QueueInitFunction = int (*)(unsigned, void*, unsigned);
+        using QueueExitFunction = void (*)(void*);
+        using SubmitFunction    = int (*)(void*);
+        using WaitCqeFunction   = int (*)(void*, void**);
+        using PeekCqeFunction   = int (*)(void*, void**);
+        using CqeSeenFunction   = void (*)(void*, void*);
+
+        QueueInitFunction queueInit = nullptr;
+        QueueExitFunction queueExit = nullptr;
+        SubmitFunction    submit    = nullptr;
+        WaitCqeFunction   waitCqe   = nullptr;
+        PeekCqeFunction   peekCqe   = nullptr;
+        CqeSeenFunction   cqeSeen   = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved POSIX process-environment entry points. */
@@ -1213,6 +1454,9 @@ namespace Sora::PAL {
     /** @brief Clipboard is not implemented through a stable POSIX system ABI. */
     struct ClipboardSystemAPI {};
 
+    /** @brief Display system API entry points. */
+    struct DisplaySystemAPI {};
+
     /** @brief Dynamically resolved POSIX file, mapping, replacement, and monitoring entry points. */
     struct FileSystemAPI {
         // clang-format off
@@ -1311,10 +1555,14 @@ namespace Sora::PAL {
 #else
 
     struct NativeErrorSystemAPI {};
+    struct StructuredExceptionSystemAPI {};
     struct LocalMemorySystemAPI {};
     struct HandleSystemAPI {};
     struct SynchronizationSystemAPI {};
     struct FileMappingSystemAPI {};
+    struct EventSystemAPI {};
+    struct IOCPSystemAPI {};
+    struct IORingSystemAPI {};
     struct SystemInformationSystemAPI {};
     struct EnvironmentSystemAPI {};
     struct ModuleSystemAPI {};
@@ -1322,6 +1570,7 @@ namespace Sora::PAL {
     struct ThreadSystemAPI {};
     struct GlobalMemorySystemAPI {};
     struct ClipboardSystemAPI {};
+    struct DisplaySystemAPI {};
     struct FileSystemAPI {};
     struct DbgHelpSystemAPI {};
     struct StackTraceSystemAPI {};
@@ -1399,6 +1648,9 @@ namespace Sora::PAL {
     /** @brief Load and return the immutable native error-reporting function table. */
     [[nodiscard]] const NativeErrorSystemAPI& LoadNativeErrorSystemAPI() noexcept;
 
+    /** @brief Load and return the immutable structured-exception function table. */
+    [[nodiscard]] const StructuredExceptionSystemAPI& LoadStructuredExceptionSystemAPI() noexcept;
+
     /** @brief Load and return the immutable Win32 local-memory function table. */
     [[nodiscard]] const LocalMemorySystemAPI& LoadLocalMemorySystemAPI() noexcept;
 
@@ -1410,6 +1662,15 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable Win32 file-mapping function table. */
     [[nodiscard]] const FileMappingSystemAPI& LoadFileMappingSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 event function table. */
+    [[nodiscard]] const EventSystemAPI& LoadEventSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 I/O completion port function table. */
+    [[nodiscard]] const IOCPSystemAPI& LoadIOCPSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable Win32 I/O ring function table. */
+    [[nodiscard]] const IORingSystemAPI& LoadIORingSystemAPI() noexcept;
 
     /** @brief Load and return the immutable system-information function table. */
     [[nodiscard]] const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept;
@@ -1434,6 +1695,9 @@ namespace Sora::PAL {
 
     /** @brief Load and return the immutable clipboard function table. */
     [[nodiscard]] const ClipboardSystemAPI& LoadClipboardSystemAPI() noexcept;
+
+    /** @brief Load and return the immutable display, monitor, and DPI function table. */
+    [[nodiscard]] const DisplaySystemAPI& LoadDisplaySystemAPI() noexcept;
 
     /** @brief Load and return the immutable native file-system function table. */
     [[nodiscard]] const FileSystemAPI& LoadFileSystemAPI() noexcept;

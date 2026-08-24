@@ -52,6 +52,7 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadSchedulerTraceSystemAPI() == &PAL::LoadSchedulerTraceSystemAPI());
     REQUIRE(&PAL::LoadGlobalMemorySystemAPI() == &PAL::LoadGlobalMemorySystemAPI());
     REQUIRE(&PAL::LoadClipboardSystemAPI() == &PAL::LoadClipboardSystemAPI());
+    REQUIRE(&PAL::LoadDisplaySystemAPI() == &PAL::LoadDisplaySystemAPI());
     REQUIRE(&PAL::LoadStackTraceSystemAPI() == &PAL::LoadStackTraceSystemAPI());
 }
 
@@ -282,6 +283,18 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(clipboard.closeClipboard != nullptr);
     REQUIRE(clipboard.getClipboardData != nullptr);
     REQUIRE(clipboard.setClipboardData != nullptr);
+
+    const PAL::DisplaySystemAPI& display = PAL::LoadDisplaySystemAPI();
+    REQUIRE(display.enumDisplayMonitors != nullptr);
+    REQUIRE(display.getMonitorInfoWide != nullptr);
+    REQUIRE(display.monitorFromPoint != nullptr);
+    REQUIRE(display.monitorFromWindow != nullptr);
+    REQUIRE(display.getWindowRect != nullptr);
+    REQUIRE(display.getClientRect != nullptr);
+    REQUIRE(display.clientToScreen != nullptr);
+    REQUIRE(display.screenToClient != nullptr);
+    REQUIRE(display.getCursorPosition != nullptr);
+    REQUIRE(display.getSystemMetrics != nullptr);
 
     const PAL::FileSystemAPI& file = PAL::LoadFileSystemAPI();
     REQUIRE(file.getStandardHandle != nullptr);

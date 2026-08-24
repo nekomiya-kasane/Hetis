@@ -311,7 +311,7 @@ namespace Sora::PAL {
 
             // 2. Create the native monitor and retain only its resource handles in State.
 #if defined(PLATFORM_WINDOWS)
-            const auto& synchronization = LoadSynchronizationSystemAPI();
+            const auto& synchronization = LoadEventSystemAPI();
             if (!EnsureSystemAPIs(api.createFileWide, LoadHandleSystemAPI().closeHandle,
                                   synchronization.createEventWide, api.readDirectoryChanges)) {
                 return std::unexpected{ErrorCode::NotSupported};
@@ -383,8 +383,9 @@ namespace Sora::PAL {
             const auto& api = LoadFileSystemAPI();
             std::vector<FileChange> changes;
 #if defined(PLATFORM_WINDOWS)
+            const auto& events = LoadEventSystemAPI();
             const auto& synchronization = LoadSynchronizationSystemAPI();
-            if (!EnsureSystemAPIs(synchronization.resetEvent, synchronization.waitForSingleObject,
+            if (!EnsureSystemAPIs(events.resetEvent, synchronization.waitForSingleObject,
                                   api.getOverlappedResult, api.cancelIo)) {
                 return std::unexpected{ErrorCode::NotSupported};
             }
@@ -393,7 +394,7 @@ namespace Sora::PAL {
             static_assert(State::kBufferSize <= std::numeric_limits<WindowsSystem::DWord>::max());
             WindowsSystem::Overlapped overlapped{};
             overlapped.event = state_->event;
-            if (synchronization.resetEvent(state_->event) == WindowsSystem::kFalse) {
+            if (events.resetEvent(state_->event) == WindowsSystem::kFalse) {
                 return std::unexpected{ErrorCode::IoError};
             }
             WindowsSystem::DWord byteCount = 0;

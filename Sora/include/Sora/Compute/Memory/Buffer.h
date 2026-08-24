@@ -27,19 +27,27 @@ namespace Sora::Compute {
     class CompletionTransaction;
     class WeakBuffer;
 
+    /** @brief Whether a logical buffer write must remain observable after graph completion. */
+    enum class BufferPersistence : uint8_t {
+        Persistent,
+        Ephemeral,
+    };
+
     /** @brief Immutable logical schema and storage requirements of one buffer. */
     struct BufferDesc {
         BufferId id{};
         ValueType elementType{};
         LayoutKind layout = LayoutKind::Contiguous;
+        BufferPersistence persistence = BufferPersistence::Persistent;
         uint8_t rank = 1;
         uint64_t sizeBytes = 0;
         uint64_t alignment = 1;
 
         /** @brief Return whether every field forms a supported logical buffer descriptor. */
         [[nodiscard]] constexpr bool Valid() const noexcept {
-            return id.Valid() && elementType.Valid() && layout != LayoutKind::Scalar && rank != 0 &&
-                   rank <= kMaximumBufferRank && sizeBytes != 0 && std::has_single_bit(alignment);
+            return id.Valid() && elementType.Valid() && layout != LayoutKind::Scalar &&
+                   (persistence == BufferPersistence::Persistent || persistence == BufferPersistence::Ephemeral) &&
+                   rank != 0 && rank <= kMaximumBufferRank && sizeBytes != 0 && std::has_single_bit(alignment);
         }
 
         friend constexpr bool operator==(BufferDesc, BufferDesc) noexcept = default;
@@ -168,7 +176,11 @@ namespace Sora::Compute {
             return Detail::BufferLogicalCoverage(state_->desc, state_->logicalFootprint);
         }
 
-        /** @brief Return the current logical version, or zero before the first write. */
+        /**
+         * @brief Return the current published logical version, or zero before the first retained write.
+         * @note An ephemeral buffer may be eliminated after its final graph-local use, so equivalent optimized
+         * executions are not required to publish the same diagnostic version history.
+         */
         [[nodiscard]] uint64_t CurrentVersion() const {
             assert(state_ != nullptr);
             std::scoped_lock lock{state_->mutex};
@@ -266,7 +278,10 @@ namespace Sora::Compute {
         }
 
     public:
-        /** @brief Atomically snapshot the current version and every ready replica into owning planning leases. */
+        /**
+         * @brief Atomically snapshot the current version and every ready replica into owning planning leases.
+         * @note Ephemeral residency is an implementation detail and may be absent after an optimized graph execution.
+         */
         [[nodiscard]] std::expected<BufferResidencySnapshot, MemoryError> SnapshotResidency() const noexcept {
             assert(state_ != nullptr);
             std::scoped_lock lock{state_->mutex};

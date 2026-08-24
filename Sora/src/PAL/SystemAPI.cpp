@@ -95,17 +95,22 @@ namespace Sora::PAL {
             }
         }
 
-        [[nodiscard]] const ModulePtr& KernelModule() noexcept {
+        [[nodiscard]] const ModulePtr& Kernel32Module() noexcept {
             static const ModulePtr module = LoadSystemModule("kernel32.dll");
             return module;
         }
 
-        [[nodiscard]] const ModulePtr& ClipboardModule() noexcept {
+        [[nodiscard]] const ModulePtr& User32Module() noexcept {
             static const ModulePtr module = LoadSystemModule("user32.dll");
             return module;
         }
 
-        [[nodiscard]] const ModulePtr& ShellModule() noexcept {
+        [[nodiscard]] const ModulePtr& ShcoreModule() noexcept {
+            static const ModulePtr module = LoadSystemModule("shcore.dll");
+            return module;
+        }
+
+        [[nodiscard]] const ModulePtr& Shell32Module() noexcept {
             static const ModulePtr module = LoadSystemModule("shell32.dll");
             return module;
         }
@@ -115,7 +120,7 @@ namespace Sora::PAL {
             return module;
         }
 
-        [[nodiscard]] const ModulePtr& TracingModule() noexcept {
+        [[nodiscard]] const ModulePtr& Advapi32Module() noexcept {
             static const ModulePtr module = LoadSystemModule("advapi32.dll");
             return module;
         }
@@ -488,8 +493,9 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<ProcessSystemAPI::GetProcessMemoryInfoFunction,            decltype(&::K32GetProcessMemoryInfo)>);
         static_assert(std::is_same_v<ThreadSystemAPI::OpenThreadFunction,                       decltype(&::OpenThread)>);
         static_assert(std::is_same_v<HandleSystemAPI::DuplicateHandleFunction,                  decltype(&::DuplicateHandle)>);
-        static_assert(std::is_same_v<SynchronizationSystemAPI::CreateEventWideFunction,         decltype(&::CreateEventW)>);
-        static_assert(std::is_same_v<SynchronizationSystemAPI::ResetEventFunction,              decltype(&::ResetEvent)>);
+        static_assert(std::is_same_v<EventSystemAPI::CreateEventWideFunction,                   decltype(&::CreateEventW)>);
+        static_assert(std::is_same_v<EventSystemAPI::SetEventFunction,                          decltype(&::SetEvent)>);
+        static_assert(std::is_same_v<EventSystemAPI::ResetEventFunction,                        decltype(&::ResetEvent)>);
         static_assert(std::is_same_v<SynchronizationSystemAPI::WaitForSingleObjectFunction,     decltype(&::WaitForSingleObject)>);
         static_assert(std::is_same_v<FileMappingSystemAPI::CreateFileMappingWideFunction,       decltype(&::CreateFileMappingW)>);
         static_assert(std::is_same_v<FileMappingSystemAPI::MapViewOfFileFunction,               decltype(&::MapViewOfFile)>);
@@ -845,32 +851,20 @@ namespace Sora::PAL {
 #endif
 
 #if defined(PLATFORM_WINDOWS)
-        struct WindowsCrashNativeAPI {
-            // clang-format off
-            using SetUnhandledExceptionFilterFunction = decltype(&::SetUnhandledExceptionFilter);
-            using GetErrorModeFunction                = decltype(&::GetErrorMode);
-            using ExceptionFilterFunction             = decltype(::SetUnhandledExceptionFilter(nullptr));
-            using SetErrorModeFunction                = decltype(&::SetErrorMode);
-            using WerGetFlagsFunction                 = decltype(&::WerGetFlags);
-            using WerSetFlagsFunction                 = decltype(&::WerSetFlags);
-
-            SetUnhandledExceptionFilterFunction setUnhandledExceptionFilter = nullptr;
-            GetErrorModeFunction                getErrorMode                = nullptr;
-            SetErrorModeFunction                setErrorMode                = nullptr;
-            WerGetFlagsFunction                 werGetFlags                 = nullptr;
-            WerSetFlagsFunction                 werSetFlags                 = nullptr;
-            // clang-format on
-        };
+        using WindowsCrashNativeAPI = StructuredExceptionSystemAPI;
 
         [[nodiscard]] const WindowsCrashNativeAPI& LoadWindowsCrashNativeAPI() noexcept {
             static const WindowsCrashNativeAPI api = [] {
                 WindowsCrashNativeAPI loaded{};
-                const ModulePtr& kernelModule = KernelModule();
+                const ModulePtr& kernelModule = Kernel32Module();
                 if (kernelModule == nullptr) {
                     return loaded;
                 }
                 // clang-format off
                 loaded.setUnhandledExceptionFilter = kernelModule->TryFindFunction<WindowsCrashNativeAPI::SetUnhandledExceptionFilterFunction>("SetUnhandledExceptionFilter");
+                loaded.addVectoredExceptionHandler = kernelModule->TryFindFunction<WindowsCrashNativeAPI::AddVectoredExceptionHandlerFunction>("AddVectoredExceptionHandler");
+                loaded.removeVectoredExceptionHandler = kernelModule->TryFindFunction<WindowsCrashNativeAPI::RemoveVectoredExceptionHandlerFunction>("RemoveVectoredExceptionHandler");
+                loaded.raiseException              = kernelModule->TryFindFunction<WindowsCrashNativeAPI::RaiseExceptionFunction>("RaiseException");
                 loaded.getErrorMode                = kernelModule->TryFindFunction<WindowsCrashNativeAPI::GetErrorModeFunction>("GetErrorMode");
                 loaded.setErrorMode                = kernelModule->TryFindFunction<WindowsCrashNativeAPI::SetErrorModeFunction>("SetErrorMode");
                 loaded.werGetFlags                 = kernelModule->TryFindFunction<WindowsCrashNativeAPI::WerGetFlagsFunction>("WerGetFlags");
@@ -1286,7 +1280,7 @@ namespace Sora::PAL {
             using API = NativeErrorSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
             if (module == nullptr) {
                 return loaded;
             }
@@ -1301,11 +1295,20 @@ namespace Sora::PAL {
         return api;
     }
 
+    const StructuredExceptionSystemAPI& LoadStructuredExceptionSystemAPI() noexcept {
+#if defined(PLATFORM_WINDOWS)
+        return LoadWindowsCrashNativeAPI();
+#else
+        static const StructuredExceptionSystemAPI api{};
+        return api;
+#endif
+    }
+
     const LocalMemorySystemAPI& LoadLocalMemorySystemAPI() noexcept {
         static const LocalMemorySystemAPI api = [] {
             LocalMemorySystemAPI loaded{};
 #if defined(PLATFORM_WINDOWS)
-            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
                 loaded.localFree = module->TryFindFunction<LocalMemorySystemAPI::LocalFreeFunction>("LocalFree");
             }
 #endif
@@ -1318,7 +1321,7 @@ namespace Sora::PAL {
         static const HandleSystemAPI api = [] {
             HandleSystemAPI loaded{};
 #if defined(PLATFORM_WINDOWS)
-            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
                 loaded.closeHandle = module->TryFindFunction<HandleSystemAPI::CloseHandleFunction>("CloseHandle");
                 loaded.duplicateHandle =
                     module->TryFindFunction<HandleSystemAPI::DuplicateHandleFunction>("DuplicateHandle");
@@ -1333,10 +1336,7 @@ namespace Sora::PAL {
         static const SynchronizationSystemAPI api = [] {
             SynchronizationSystemAPI loaded{};
 #if defined(PLATFORM_WINDOWS)
-            if (const ModulePtr& module = KernelModule(); module != nullptr) {
-                loaded.createEventWide =
-                    module->TryFindFunction<SynchronizationSystemAPI::CreateEventWideFunction>("CreateEventW");
-                loaded.resetEvent = module->TryFindFunction<SynchronizationSystemAPI::ResetEventFunction>("ResetEvent");
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
                 loaded.waitForSingleObject = module->TryFindFunction<
                     SynchronizationSystemAPI::WaitForSingleObjectFunction>("WaitForSingleObject");
             }
@@ -1350,7 +1350,7 @@ namespace Sora::PAL {
         static const FileMappingSystemAPI api = [] {
             FileMappingSystemAPI loaded{};
 #if defined(PLATFORM_WINDOWS)
-            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
                 loaded.createFileMappingWide = module->TryFindFunction<
                     FileMappingSystemAPI::CreateFileMappingWideFunction>("CreateFileMappingW");
                 loaded.mapViewOfFile =
@@ -1373,11 +1373,66 @@ namespace Sora::PAL {
         return api;
     }
 
+    const EventSystemAPI& LoadEventSystemAPI() noexcept {
+        static const EventSystemAPI api = [] {
+            EventSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
+                loaded.createEventWide = module->TryFindFunction<EventSystemAPI::CreateEventWideFunction>("CreateEventW");
+                loaded.setEvent = module->TryFindFunction<EventSystemAPI::SetEventFunction>("SetEvent");
+                loaded.resetEvent = module->TryFindFunction<EventSystemAPI::ResetEventFunction>("ResetEvent");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const IOCPSystemAPI& LoadIOCPSystemAPI() noexcept {
+        static const IOCPSystemAPI api = [] {
+            IOCPSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
+                loaded.createIoCompletionPort = module->TryFindFunction<IOCPSystemAPI::CreateIoCompletionPortFunction>("CreateIoCompletionPort");
+                loaded.getQueuedCompletionStatus = module->TryFindFunction<IOCPSystemAPI::GetQueuedCompletionStatusFunction>("GetQueuedCompletionStatus");
+                loaded.postQueuedCompletionStatus = module->TryFindFunction<IOCPSystemAPI::PostQueuedCompletionStatusFunction>("PostQueuedCompletionStatus");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const IORingSystemAPI& LoadIORingSystemAPI() noexcept {
+        static const IORingSystemAPI api = [] {
+            IORingSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
+                loaded.createIoRing = module->TryFindFunction<IORingSystemAPI::CreateIoRingFunction>("CreateIoRing");
+                loaded.closeIoRing = module->TryFindFunction<IORingSystemAPI::CloseIoRingFunction>("CloseIoRing");
+                loaded.submitIoRing = module->TryFindFunction<IORingSystemAPI::SubmitIoRingFunction>("SubmitIoRing");
+                loaded.popIoRingCompletion = module->TryFindFunction<IORingSystemAPI::PopIoRingCompletionFunction>("PopIoRingCompletion");
+            }
+#elif defined(PLATFORM_LINUX)
+            if (const ModulePtr& module = CurrentProcessModule(); module != nullptr) {
+                loaded.queueInit = module->TryFindFunction<IORingSystemAPI::QueueInitFunction>("io_uring_queue_init");
+                loaded.queueExit = module->TryFindFunction<IORingSystemAPI::QueueExitFunction>("io_uring_queue_exit");
+                loaded.submit = module->TryFindFunction<IORingSystemAPI::SubmitFunction>("io_uring_submit");
+                loaded.waitCqe = module->TryFindFunction<IORingSystemAPI::WaitCqeFunction>("io_uring_wait_cqe");
+                loaded.peekCqe = module->TryFindFunction<IORingSystemAPI::PeekCqeFunction>("io_uring_peek_cqe");
+                loaded.cqeSeen = module->TryFindFunction<IORingSystemAPI::CqeSeenFunction>("io_uring_cqe_seen");
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
     const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept {
         static const SystemInformationSystemAPI api = [] {
             SystemInformationSystemAPI loaded{};
 #if defined(PLATFORM_WINDOWS)
-            if (const ModulePtr& module = KernelModule(); module != nullptr) {
+            if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
                 loaded.getSystemInfo =
                     module->TryFindFunction<SystemInformationSystemAPI::GetSystemInfoFunction>("GetSystemInfo");
             }
@@ -1397,7 +1452,7 @@ namespace Sora::PAL {
             using API = EnvironmentSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             const ModulePtr& module = CurrentProcessModule();
 #endif
@@ -1455,7 +1510,7 @@ namespace Sora::PAL {
             using API = ProcessSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
             if (module != nullptr) {
                 // clang-format off
                 loaded.getCurrentProcessId           = module->TryFindFunction<API::GetCurrentProcessIdFunction>("GetCurrentProcessId");
@@ -1479,7 +1534,7 @@ namespace Sora::PAL {
                 loaded.captureUsage = CaptureWindowsProcessUsage;
             }
 
-            const ModulePtr& shell = ShellModule();
+            const ModulePtr& shell = Shell32Module();
             if (shell != nullptr) {
                 loaded.commandLineToArgvWide =
                     shell->TryFindFunction<ProcessSystemAPI::CommandLineToArgvWideFunction>("CommandLineToArgvW");
@@ -1520,7 +1575,7 @@ namespace Sora::PAL {
             using API = ThreadSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             const ModulePtr& module = CurrentProcessModule();
 #endif
@@ -1565,8 +1620,8 @@ namespace Sora::PAL {
         static const SchedulerTraceSystemAPI api = [] {
             SchedulerTraceSystemAPI loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& tracing = TracingModule();
-            const ModulePtr& kernel = KernelModule();
+            const ModulePtr& tracing = Advapi32Module();
+            const ModulePtr& kernel = Kernel32Module();
             if (tracing != nullptr) {
                 // clang-format off
                 loaded.startTrace   = tracing->TryFindFunction<SchedulerTraceSystemAPI::StartTraceFunction>("StartTraceW");
@@ -1599,7 +1654,7 @@ namespace Sora::PAL {
             using API = GlobalMemorySystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
             if (module == nullptr) {
                 return loaded;
             }
@@ -1621,7 +1676,7 @@ namespace Sora::PAL {
             using API = ClipboardSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = ClipboardModule();
+            const ModulePtr& module = User32Module();
             if (module == nullptr) {
                 return loaded;
             }
@@ -1639,12 +1694,56 @@ namespace Sora::PAL {
         return api;
     }
 
+    const DisplaySystemAPI& LoadDisplaySystemAPI() noexcept {
+        static const DisplaySystemAPI api = [] {
+            using API = DisplaySystemAPI;
+            API loaded{};
+#if defined(PLATFORM_WINDOWS)
+            const ModulePtr& user32 = User32Module();
+            if (user32 != nullptr) {
+                // clang-format off
+                loaded.enumDisplayMonitors                 = user32->TryFindFunction<API::EnumDisplayMonitorsFunction>("EnumDisplayMonitors");
+                loaded.getMonitorInfoWide                  = user32->TryFindFunction<API::GetMonitorInfoWideFunction>("GetMonitorInfoW");
+                loaded.monitorFromPoint                    = user32->TryFindFunction<API::MonitorFromPointFunction>("MonitorFromPoint");
+                loaded.monitorFromWindow                   = user32->TryFindFunction<API::MonitorFromWindowFunction>("MonitorFromWindow");
+                loaded.getWindowRect                       = user32->TryFindFunction<API::GetWindowRectFunction>("GetWindowRect");
+                loaded.getClientRect                       = user32->TryFindFunction<API::GetClientRectFunction>("GetClientRect");
+                loaded.clientToScreen                      = user32->TryFindFunction<API::TranslatePointFunction>("ClientToScreen");
+                loaded.screenToClient                      = user32->TryFindFunction<API::TranslatePointFunction>("ScreenToClient");
+                loaded.getCursorPosition                   = user32->TryFindFunction<API::GetCursorPositionFunction>("GetCursorPos");
+                loaded.getSystemMetrics                    = user32->TryFindFunction<API::GetSystemMetricsFunction>("GetSystemMetrics");
+                loaded.getSystemMetricsForDpi              = user32->TryFindFunction<API::GetSystemMetricsForDpiFunction>("GetSystemMetricsForDpi");
+                loaded.getDpiForWindow                     = user32->TryFindFunction<API::GetDpiForWindowFunction>("GetDpiForWindow");
+                loaded.getDpiForSystem                     = user32->TryFindFunction<API::GetDpiForSystemFunction>("GetDpiForSystem");
+                loaded.getSystemDpiForProcess              = user32->TryFindFunction<API::GetSystemDpiForProcessFunction>("GetSystemDpiForProcess");
+                loaded.getWindowDpiAwarenessContext        = user32->TryFindFunction<API::GetWindowDpiAwarenessContextFunction>("GetWindowDpiAwarenessContext");
+                loaded.setProcessDpiAwarenessContext       = user32->TryFindFunction<API::SetProcessDpiAwarenessContextFunction>("SetProcessDpiAwarenessContext");
+                loaded.setThreadDpiAwarenessContext        = user32->TryFindFunction<API::SetThreadDpiAwarenessContextFunction>("SetThreadDpiAwarenessContext");
+                loaded.getThreadDpiAwarenessContext        = user32->TryFindFunction<API::GetThreadDpiAwarenessContextFunction>("GetThreadDpiAwarenessContext");
+                loaded.getAwarenessFromDpiAwarenessContext = user32->TryFindFunction<API::GetAwarenessFromDpiAwarenessContextFunction>("GetAwarenessFromDpiAwarenessContext");
+                loaded.adjustWindowRectExForDpi            = user32->TryFindFunction<API::AdjustWindowRectExForDpiFunction>("AdjustWindowRectExForDpi");
+                // clang-format on
+            }
+            const ModulePtr& shcore = ShcoreModule();
+            if (shcore != nullptr) {
+                // clang-format off
+                loaded.getDpiForMonitor       = shcore->TryFindFunction<API::GetDpiForMonitorFunction>("GetDpiForMonitor");
+                loaded.setProcessDpiAwareness = shcore->TryFindFunction<API::SetProcessDpiAwarenessFunction>("SetProcessDpiAwareness");
+                loaded.getProcessDpiAwareness = shcore->TryFindFunction<API::GetProcessDpiAwarenessFunction>("GetProcessDpiAwareness");
+                // clang-format on
+            }
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
     const FileSystemAPI& LoadFileSystemAPI() noexcept {
         static const FileSystemAPI api = [] {
             using API = FileSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
             const ModulePtr& module = CurrentProcessModule();
 #endif
@@ -1821,7 +1920,7 @@ namespace Sora::PAL {
             using API = StackTraceSystemAPI;
             API loaded{};
 #if defined(PLATFORM_WINDOWS)
-            const ModulePtr& module = KernelModule();
+            const ModulePtr& module = Kernel32Module();
             if (module == nullptr) {
                 return loaded;
             }
