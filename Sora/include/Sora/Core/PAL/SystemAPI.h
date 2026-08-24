@@ -1645,62 +1645,66 @@ namespace Sora::PAL {
         const DbgHelpSystemAPI& api_;
     };
 
-    /** @brief Load and return the immutable native error-reporting function table. */
-    [[nodiscard]] const NativeErrorSystemAPI& LoadNativeErrorSystemAPI() noexcept;
+    inline namespace API {
 
-    /** @brief Load and return the immutable structured-exception function table. */
-    [[nodiscard]] const StructuredExceptionSystemAPI& LoadStructuredExceptionSystemAPI() noexcept;
+        /** @brief Load and return the immutable native error-reporting function table. */
+        [[nodiscard]] const NativeErrorSystemAPI& LoadNativeErrorSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 local-memory function table. */
-    [[nodiscard]] const LocalMemorySystemAPI& LoadLocalMemorySystemAPI() noexcept;
+        /** @brief Load and return the immutable structured-exception function table. */
+        [[nodiscard]] const StructuredExceptionSystemAPI& LoadStructuredExceptionSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 kernel-handle function table. */
-    [[nodiscard]] const HandleSystemAPI& LoadHandleSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 local-memory function table. */
+        [[nodiscard]] const LocalMemorySystemAPI& LoadLocalMemorySystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 synchronization function table. */
-    [[nodiscard]] const SynchronizationSystemAPI& LoadSynchronizationSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 kernel-handle function table. */
+        [[nodiscard]] const HandleSystemAPI& LoadHandleSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 file-mapping function table. */
-    [[nodiscard]] const FileMappingSystemAPI& LoadFileMappingSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 synchronization function table. */
+        [[nodiscard]] const SynchronizationSystemAPI& LoadSynchronizationSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 event function table. */
-    [[nodiscard]] const EventSystemAPI& LoadEventSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 file-mapping function table. */
+        [[nodiscard]] const FileMappingSystemAPI& LoadFileMappingSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 I/O completion port function table. */
-    [[nodiscard]] const IOCPSystemAPI& LoadIOCPSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 event function table. */
+        [[nodiscard]] const EventSystemAPI& LoadEventSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable Win32 I/O ring function table. */
-    [[nodiscard]] const IORingSystemAPI& LoadIORingSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 I/O completion port function table. */
+        [[nodiscard]] const IOCPSystemAPI& LoadIOCPSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable system-information function table. */
-    [[nodiscard]] const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept;
+        /** @brief Load and return the immutable Win32 I/O ring function table. */
+        [[nodiscard]] const IORingSystemAPI& LoadIORingSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable process-environment function table. */
-    [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;
+        /** @brief Load and return the immutable system-information function table. */
+        [[nodiscard]] const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable normalized dynamic-module function table. */
-    [[nodiscard]] const ModuleSystemAPI& LoadModuleSystemAPI() noexcept;
+        /** @brief Load and return the immutable process-environment function table. */
+        [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable current-process introspection function table. */
-    [[nodiscard]] const ProcessSystemAPI& LoadProcessSystemAPI() noexcept;
+        /** @brief Load and return the immutable normalized dynamic-module function table. */
+        [[nodiscard]] const ModuleSystemAPI& LoadModuleSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable current-thread function table. */
-    [[nodiscard]] const ThreadSystemAPI& LoadThreadSystemAPI() noexcept;
+        /** @brief Load and return the immutable current-process introspection function table. */
+        [[nodiscard]] const ProcessSystemAPI& LoadProcessSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable native scheduler-tracing function table. */
-    [[nodiscard]] const SchedulerTraceSystemAPI& LoadSchedulerTraceSystemAPI() noexcept;
+        /** @brief Load and return the immutable current-thread function table. */
+        [[nodiscard]] const ThreadSystemAPI& LoadThreadSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable movable-global-memory function table. */
-    [[nodiscard]] const GlobalMemorySystemAPI& LoadGlobalMemorySystemAPI() noexcept;
+        /** @brief Load and return the immutable native scheduler-tracing function table. */
+        [[nodiscard]] const SchedulerTraceSystemAPI& LoadSchedulerTraceSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable clipboard function table. */
-    [[nodiscard]] const ClipboardSystemAPI& LoadClipboardSystemAPI() noexcept;
+        /** @brief Load and return the immutable movable-global-memory function table. */
+        [[nodiscard]] const GlobalMemorySystemAPI& LoadGlobalMemorySystemAPI() noexcept;
 
-    /** @brief Load and return the immutable display, monitor, and DPI function table. */
-    [[nodiscard]] const DisplaySystemAPI& LoadDisplaySystemAPI() noexcept;
+        /** @brief Load and return the immutable clipboard function table. */
+        [[nodiscard]] const ClipboardSystemAPI& LoadClipboardSystemAPI() noexcept;
 
-    /** @brief Load and return the immutable native file-system function table. */
-    [[nodiscard]] const FileSystemAPI& LoadFileSystemAPI() noexcept;
+        /** @brief Load and return the immutable display, monitor, and DPI function table. */
+        [[nodiscard]] const DisplaySystemAPI& LoadDisplaySystemAPI() noexcept;
+
+        /** @brief Load and return the immutable native file-system function table. */
+        [[nodiscard]] const FileSystemAPI& LoadFileSystemAPI() noexcept;
+
+    } // namespace API
 
     /**
      * @brief Install the process-global native crash adapter.
