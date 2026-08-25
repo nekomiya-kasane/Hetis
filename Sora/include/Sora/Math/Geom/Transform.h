@@ -7,6 +7,7 @@
 
 #include <Sora/Math/Affine.h>
 #include <Sora/Math/Geom/Queries.h>
+#include <Sora/Math/ScalarUtils.h>
 
 #include <concepts>
 #include <utility>
@@ -31,14 +32,14 @@ namespace Sora::Math {
             for (size_t column = 0; column < N; ++column) {
                 T sum = T{0};
                 for (size_t row = 0; row < N; ++row) {
-                    sum += Abs(affine.LinearPart()(row, column));
+                    sum += AbsValue(affine.LinearPart()(row, column));
                 }
                 oneNorm = oneNorm > sum ? oneNorm : sum;
             }
             for (size_t row = 0; row < N; ++row) {
                 T sum = T{0};
                 for (size_t column = 0; column < N; ++column) {
-                    sum += Abs(affine.LinearPart()(row, column));
+                    sum += AbsValue(affine.LinearPart()(row, column));
                 }
                 infinityNorm = infinityNorm > sum ? infinityNorm : sum;
             }

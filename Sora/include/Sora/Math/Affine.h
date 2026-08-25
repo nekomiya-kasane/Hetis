@@ -10,6 +10,7 @@
 #include <Sora/Math/GeomUtils.h>
 #include <Sora/Math/Matrix.h>
 #include <Sora/Math/Point.h>
+#include <Sora/Math/ScalarUtils.h>
 
 #include <array>
 #include <concepts>
@@ -120,7 +121,7 @@ namespace Sora::Math {
         for (std::size_t column = 0; column < N; ++column) {
             std::size_t pivot = column;
             for (std::size_t row = column + 1; row < N; ++row) {
-                if (Abs(augmented[row][column]) > Abs(augmented[pivot][column])) {
+                if (AbsValue(augmented[row][column]) > AbsValue(augmented[pivot][column])) {
                     pivot = row;
                 }
             }

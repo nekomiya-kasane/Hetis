@@ -6,6 +6,7 @@
 #pragma once
 
 #include <Sora/Math/Point.h>
+#include <Sora/Math/ScalarUtils.h>
 
 #include <cmath>
 #include <cstddef>
@@ -89,20 +90,7 @@ namespace Sora::Math {
             } else {
                 using Scalar = typename T::ValueType;
                 const T largest(std::numeric_limits<Scalar>::max());
-                return (value == value) & (Sora::Math::Abs(value) <= largest);
-            }
-        }
-
-        template<DifferentiableValue T>
-        [[nodiscard]] constexpr T CarrierAbs(T value) noexcept {
-            if constexpr (std::floating_point<T>) {
-                if consteval {
-                    return value < T{0} ? -value : value;
-                } else {
-                    return Sora::Math::Abs(value);
-                }
-            } else {
-                return Sora::Math::Abs(value);
+                return (value == value) & (AbsValue(value) <= largest);
             }
         }
 
@@ -131,10 +119,10 @@ namespace Sora::Math {
     [[nodiscard]] constexpr auto TryNormalize(const Vector<T, N>& value) noexcept
         -> std::expected<UnitVector<T, N>, NormalizationError> {
         auto finite = Detail::CarrierFinite(value[0]);
-        T scale = Detail::CarrierAbs(value[0]);
+        T scale = AbsValue(value[0]);
         template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{1}, N))) {
             finite = finite & Detail::CarrierFinite(value[i]);
-            scale = Detail::CarrierMax(scale, Detail::CarrierAbs(value[i]));
+            scale = Detail::CarrierMax(scale, AbsValue(value[i]));
         }
 
         if (!Detail::AllLanes<T>(finite)) {

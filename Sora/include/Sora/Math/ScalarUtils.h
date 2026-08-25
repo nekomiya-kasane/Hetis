@@ -1,11 +1,12 @@
 /**
  * @file ScalarUtils.h
- * @brief Compile-time-friendly classification utilities for arithmetic scalars.
+ * @brief Compile-time-friendly scalar and mathematical-carrier utilities.
  * @ingroup Math
  */
 #pragma once
 
 #include <Sora/Core/Contracts.h>
+#include <Sora/Math/PrimaryFunctions.h>
 
 #include <cmath>
 #include <concepts>
@@ -14,16 +15,50 @@
 
 namespace Sora::Math {
 
-    /** @brief Signed or unsigned widened carrier used for checked integral accumulation. */
+    /** @brief Broadcast a scalar constant into a scalar or SIMD mathematical carrier. */
+    template<typename T, typename Value>
+    [[nodiscard]] constexpr T Broadcast(Value value) noexcept {
+        if constexpr (std::is_arithmetic_v<T>) {
+            return static_cast<T>(value);
+        } else {
+            return T(static_cast<typename T::ValueType>(value));
+        }
+    }
+
+    /**
+     * @brief Signed or unsigned widened carrier used for checked integral accumulation.
+     * @tparam T Integral source and destination type whose signedness selects the widened carrier.
+     */
     template<std::integral T>
     using WideInteger = std::conditional_t<std::is_signed_v<T>, __int128_t, __uint128_t>;
 
-    /** @brief Cast a widened integral result after enforcing that it is representable in @p T. */
+    /**
+     * @brief Cast a widened integral result to the destination integral type.
+     * @tparam T Destination integral type.
+     * @param[in] value Widened value to narrow.
+     * @pre @p value is representable in @c T.
+     */
     template<std::integral T>
     [[nodiscard]] constexpr T CheckedCast(WideInteger<T> value) noexcept {
         SORA_PRE(value >= static_cast<WideInteger<T>>((std::numeric_limits<T>::lowest)()));
         SORA_PRE(value <= static_cast<WideInteger<T>>((std::numeric_limits<T>::max)()));
         return static_cast<T>(value);
+    }
+
+    /** @brief Return the absolute value of a scalar or mathematical carrier. */
+    template<typename T>
+        requires requires(T value) { Math::Abs(value); }
+    [[nodiscard]] constexpr auto AbsValue(T value) noexcept(noexcept(Math::Abs(value))) {
+        using Result = decltype(Math::Abs(value));
+        if constexpr (std::floating_point<T>) {
+            if consteval {
+                return value == T{0} ? Result{0} : (value < T{0} ? -value : value);
+            } else {
+                return Math::Abs(value);
+            }
+        } else {
+            return Math::Abs(value);
+        }
     }
 
     /** @brief Return whether @p value is a NaN. */
