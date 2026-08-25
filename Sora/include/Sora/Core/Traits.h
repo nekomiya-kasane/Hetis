@@ -18,7 +18,12 @@
 #include <vector>
 
 #include "Sora/Core/Traits/EnumTraits.h"
+#include "Sora/Core/Traits/MetaInfo.h"
+#include "Sora/Core/Traits/MetaPredicate.h"
+#include "Sora/Core/Traits/TypeList.h"
 #include "Sora/Core/Traits/TypeTraits.h"
+#include "Sora/Core/Traits/MetaError.h"
+#include "Sora/Core/Traits/MetaInvocable.h"
 #include "Sora/Core/Traits/InheritanceTraits.h"
 #include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Core/Traits/ScopeTraits.h"
