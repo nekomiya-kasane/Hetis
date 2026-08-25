@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #if defined(PLATFORM_WINDOWS)
 #    ifndef WIN32_LEAN_AND_MEAN
@@ -61,6 +62,22 @@
 namespace Sora::PAL {
 
     namespace {
+
+        /** @brief Load one optional window-system module for the process lifetime. */
+        [[nodiscard]] ModulePtr LoadWindowModule(std::initializer_list<std::string_view> names) noexcept {
+            try {
+                constexpr ModuleLoadOptions options{
+                    .nameKind = ModuleNameKind::Stem,
+                    .candidatePolicy = ModuleCandidatePolicy::NativeDecorated,
+                    .cachePolicy = ModuleCachePolicy::Shared,
+                    .unloadOnDestroy = false,
+                };
+                Result<ModulePtr> loaded = LoadModule(names, options);
+                return loaded ? std::move(*loaded) : nullptr;
+            } catch (...) {
+                return nullptr;
+            }
+        }
 
 #if defined(PLATFORM_WINDOWS)
         WindowsSystem::Handle LoadWindowsLibrary(const wchar_t* name) noexcept {
@@ -451,11 +468,24 @@ namespace Sora::PAL {
         static_assert(offsetof(WindowsSystem::ThreadEntry, size) == offsetof(THREADENTRY32, dwSize));
         static_assert(offsetof(WindowsSystem::ThreadEntry, usageCount) == offsetof(THREADENTRY32, cntUsage));
         static_assert(offsetof(WindowsSystem::ThreadEntry, threadId) == offsetof(THREADENTRY32, th32ThreadID));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, ownerProcessId) ==
-                      offsetof(THREADENTRY32, th32OwnerProcessID));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, ownerProcessId) == offsetof(THREADENTRY32, th32OwnerProcessID));
         static_assert(offsetof(WindowsSystem::ThreadEntry, basePriority) == offsetof(THREADENTRY32, tpBasePri));
         static_assert(offsetof(WindowsSystem::ThreadEntry, priorityDelta) == offsetof(THREADENTRY32, tpDeltaPri));
         static_assert(offsetof(WindowsSystem::ThreadEntry, flags) == offsetof(THREADENTRY32, dwFlags));
+        static_assert(sizeof(WindowsSystem::WindowClassEx) == sizeof(WNDCLASSEXW));
+        static_assert(alignof(WindowsSystem::WindowClassEx) == alignof(WNDCLASSEXW));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, size) == offsetof(WNDCLASSEXW, cbSize));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, style) == offsetof(WNDCLASSEXW, style));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, windowProcedure) == offsetof(WNDCLASSEXW, lpfnWndProc));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, className) == offsetof(WNDCLASSEXW, lpszClassName));
+        static_assert(sizeof(WindowsSystem::WindowMessage) == sizeof(MSG));
+        static_assert(alignof(WindowsSystem::WindowMessage) == alignof(MSG));
+        static_assert(offsetof(WindowsSystem::WindowMessage, window) == offsetof(MSG, hwnd));
+        static_assert(offsetof(WindowsSystem::WindowMessage, message) == offsetof(MSG, message));
+        static_assert(offsetof(WindowsSystem::WindowMessage, wParam) == offsetof(MSG, wParam));
+        static_assert(offsetof(WindowsSystem::WindowMessage, lParam) == offsetof(MSG, lParam));
+        static_assert(offsetof(WindowsSystem::WindowMessage, time) == offsetof(MSG, time));
+        static_assert(offsetof(WindowsSystem::WindowMessage, point) == offsetof(MSG, pt));
 
         static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction,                   decltype(&::SymSetOptions)>);
         static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction,                   decltype(&::SymInitialize)>);
@@ -466,18 +496,12 @@ namespace Sora::PAL {
        
         static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction,        decltype(&::RtlCaptureStackBackTrace)>);
 
-        static_assert(
-            std::is_same_v<SchedulerTraceSystemAPI::StartTraceFunction, decltype(&::StartTraceW)>);
-        static_assert(
-            std::is_same_v<SchedulerTraceSystemAPI::ControlTraceFunction, decltype(&::ControlTraceW)>);
-        static_assert(
-            std::is_same_v<SchedulerTraceSystemAPI::OpenTraceFunction, decltype(&::OpenTraceW)>);
-        static_assert(
-            std::is_same_v<SchedulerTraceSystemAPI::ProcessTraceFunction, decltype(&::ProcessTrace)>);
-        static_assert(
-            std::is_same_v<SchedulerTraceSystemAPI::CloseTraceFunction, decltype(&::CloseTrace)>);
-        static_assert(std::is_same_v<SchedulerTraceSystemAPI::QueryPerformanceFrequencyFunction,
-                                     decltype(&::QueryPerformanceFrequency)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::StartTraceFunction, decltype(&::StartTraceW)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::ControlTraceFunction, decltype(&::ControlTraceW)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::OpenTraceFunction, decltype(&::OpenTraceW)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::ProcessTraceFunction, decltype(&::ProcessTrace)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::CloseTraceFunction, decltype(&::CloseTrace)>);
+        static_assert(std::is_same_v<SchedulerTraceSystemAPI::QueryPerformanceFrequencyFunction, decltype(&::QueryPerformanceFrequency)>);
 
         static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessIdFunction,             decltype(&::GetCurrentProcessId)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetCurrentProcessFunction,               decltype(&::GetCurrentProcess)>);
@@ -1527,7 +1551,7 @@ namespace Sora::PAL {
                 // clang-format on
             }
             if (EnsureSystemAPIs(loaded.getCurrentProcessId, loaded.createProcessSnapshot, loaded.firstProcess,
-                                 loaded.nextProcess, LoadHandleSystemAPI().closeHandle)) {
+                                 loaded.nextProcess, Sora::PAL::API::LoadHandleSystemAPI().closeHandle)) {
                 loaded.queryParentProcessId = QueryWindowsParentProcessId;
             }
             if (EnsureSystemAPIs(loaded.getCurrentProcess, loaded.getProcessTimes, loaded.getProcessMemoryInfo)) {
@@ -1550,7 +1574,7 @@ namespace Sora::PAL {
                 loaded.getExecutablePath     = module->TryFindFunction<ProcessSystemAPI::GetExecutablePathFunction>("_NSGetExecutablePath");
                 loaded.getArgumentCount      = module->TryFindFunction<ProcessSystemAPI::GetArgumentCountFunction>("_NSGetArgc");
                 loaded.getArgumentVector     = module->TryFindFunction<ProcessSystemAPI::GetArgumentVectorFunction>("_NSGetArgv");
-                loaded.processResourceUsage = module->TryFindFunction<ProcessSystemAPI::ProcessResourceUsageFunction>("proc_pid_rusage");
+                loaded.processResourceUsage  = module->TryFindFunction<ProcessSystemAPI::ProcessResourceUsageFunction>("proc_pid_rusage");
 #    endif
                 // clang-format on
             }
@@ -1738,6 +1762,187 @@ namespace Sora::PAL {
         return api;
     }
 
+    const Win32WindowSystemAPI& LoadWin32WindowSystemAPI() noexcept {
+        static const Win32WindowSystemAPI api = [] {
+            using API = Win32WindowSystemAPI;
+            API loaded{};
+#if defined(PLATFORM_WINDOWS)
+            const ModulePtr& user32 = User32Module();
+            if (user32 == nullptr) {
+                return loaded;
+            }
+            // clang-format off
+            loaded.registerClassExWide         = user32->TryFindFunction<API::RegisterClassExWideFunction>("RegisterClassExW");
+            loaded.unregisterClassWide         = user32->TryFindFunction<API::UnregisterClassWideFunction>("UnregisterClassW");
+            loaded.createWindowExWide          = user32->TryFindFunction<API::CreateWindowExWideFunction>("CreateWindowExW");
+            loaded.destroyWindow               = user32->TryFindFunction<API::DestroyWindowFunction>("DestroyWindow");
+            loaded.showWindow                  = user32->TryFindFunction<API::ShowWindowFunction>("ShowWindow");
+            loaded.updateWindow                = user32->TryFindFunction<API::UpdateWindowFunction>("UpdateWindow");
+            loaded.setWindowTextWide           = user32->TryFindFunction<API::SetWindowTextWideFunction>("SetWindowTextW");
+            loaded.getWindowLongPtr            = user32->TryFindFunction<API::GetWindowLongPtrFunction>("GetWindowLongPtrW");
+            loaded.setWindowLongPtr            = user32->TryFindFunction<API::SetWindowLongPtrFunction>("SetWindowLongPtrW");
+            loaded.defWindowProc               = user32->TryFindFunction<API::WindowProcedureFunction>("DefWindowProcW");
+            loaded.peekMessage                 = user32->TryFindFunction<API::PeekMessageFunction>("PeekMessageW");
+            loaded.getMessage                  = user32->TryFindFunction<API::GetMessageFunction>("GetMessageW");
+            loaded.translateMessage            = user32->TryFindFunction<API::TranslateMessageFunction>("TranslateMessage");
+            loaded.dispatchMessage             = user32->TryFindFunction<API::DispatchMessageFunction>("DispatchMessageW");
+            loaded.postQuitMessage             = user32->TryFindFunction<API::PostQuitMessageFunction>("PostQuitMessage");
+            loaded.postMessage                 = user32->TryFindFunction<API::PostMessageFunction>("PostMessageW");
+            loaded.sendMessage                 = user32->TryFindFunction<API::SendMessageFunction>("SendMessageW");
+            loaded.setWindowPosition           = user32->TryFindFunction<API::SetWindowPositionFunction>("SetWindowPos");
+            loaded.setCapture                  = user32->TryFindFunction<API::SetCaptureFunction>("SetCapture");
+            loaded.releaseCapture              = user32->TryFindFunction<API::ReleaseCaptureFunction>("ReleaseCapture");
+            loaded.setCursor                   = user32->TryFindFunction<API::SetCursorFunction>("SetCursor");
+            loaded.showCursor                  = user32->TryFindFunction<API::ShowCursorFunction>("ShowCursor");
+            loaded.setCursorPosition           = user32->TryFindFunction<API::SetCursorPositionFunction>("SetCursorPos");
+            loaded.clipCursor                  = user32->TryFindFunction<API::ClipCursorFunction>("ClipCursor");
+            loaded.setFocus                    = user32->TryFindFunction<API::SetFocusFunction>("SetFocus");
+            loaded.getFocus                    = user32->TryFindFunction<API::GetFocusFunction>("GetFocus");
+            loaded.setForegroundWindow         = user32->TryFindFunction<API::SetForegroundWindowFunction>("SetForegroundWindow");
+            loaded.isWindow                    = user32->TryFindFunction<API::IsWindowFunction>("IsWindow");
+            loaded.isWindowVisible             = user32->TryFindFunction<API::IsWindowVisibleFunction>("IsWindowVisible");
+            loaded.isIconic                    = user32->TryFindFunction<API::IsIconicFunction>("IsIconic");
+            loaded.isZoomed                    = user32->TryFindFunction<API::IsZoomedFunction>("IsZoomed");
+            loaded.waitMessage                 = user32->TryFindFunction<API::WaitMessageFunction>("WaitMessage");
+            loaded.msgWaitForMultipleObjectsEx = user32->TryFindFunction<API::MsgWaitForMultipleObjectsExFunction>("MsgWaitForMultipleObjectsEx");
+            // clang-format on
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const X11WindowSystemAPI& LoadX11WindowSystemAPI() noexcept {
+        static const X11WindowSystemAPI api = [] {
+            using API = X11WindowSystemAPI;
+            API loaded{};
+#if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
+            const ModulePtr module = LoadWindowModule({"X11", "libX11.so.6"});
+            if (module == nullptr) {
+                return loaded;
+            }
+            // clang-format off
+            loaded.openDisplay           = module->TryFindFunction<API::OpenDisplayFunction>("XOpenDisplay");
+            loaded.closeDisplay          = module->TryFindFunction<API::CloseDisplayFunction>("XCloseDisplay");
+            loaded.defaultScreen         = module->TryFindFunction<API::DefaultScreenFunction>("XDefaultScreen");
+            loaded.rootWindow            = module->TryFindFunction<API::RootWindowFunction>("XRootWindow");
+            loaded.defaultVisual         = module->TryFindFunction<API::DefaultVisualFunction>("XDefaultVisual");
+            loaded.defaultDepth          = module->TryFindFunction<API::DefaultDepthFunction>("XDefaultDepth");
+            loaded.createSimpleWindow    = module->TryFindFunction<API::CreateSimpleWindowFunction>("XCreateSimpleWindow");
+            loaded.createWindow          = module->TryFindFunction<API::CreateWindowFunction>("XCreateWindow");
+            loaded.destroyWindow         = module->TryFindFunction<API::DestroyWindowFunction>("XDestroyWindow");
+            loaded.mapWindow             = module->TryFindFunction<API::MapWindowFunction>("XMapWindow");
+            loaded.unmapWindow           = module->TryFindFunction<API::UnmapWindowFunction>("XUnmapWindow");
+            loaded.moveWindow            = module->TryFindFunction<API::MoveWindowFunction>("XMoveWindow");
+            loaded.resizeWindow          = module->TryFindFunction<API::ResizeWindowFunction>("XResizeWindow");
+            loaded.moveResizeWindow      = module->TryFindFunction<API::MoveResizeWindowFunction>("XMoveResizeWindow");
+            loaded.selectInput           = module->TryFindFunction<API::SelectInputFunction>("XSelectInput");
+            loaded.storeName             = module->TryFindFunction<API::StoreNameFunction>("XStoreName");
+            loaded.internAtom            = module->TryFindFunction<API::InternAtomFunction>("XInternAtom");
+            loaded.setWmProtocols        = module->TryFindFunction<API::SetWmProtocolsFunction>("XSetWMProtocols");
+            loaded.pending               = module->TryFindFunction<API::PendingFunction>("XPending");
+            loaded.nextEvent             = module->TryFindFunction<API::NextEventFunction>("XNextEvent");
+            loaded.checkMaskEvent        = module->TryFindFunction<API::CheckMaskEventFunction>("XCheckMaskEvent");
+            loaded.connectionNumber      = module->TryFindFunction<API::ConnectionNumberFunction>("XConnectionNumber");
+            loaded.flush                 = module->TryFindFunction<API::FlushFunction>("XFlush");
+            loaded.sync                  = module->TryFindFunction<API::SyncFunction>("XSync");
+            loaded.free                  = module->TryFindFunction<API::FreeFunction>("XFree");
+            loaded.getWindowAttributes   = module->TryFindFunction<API::GetWindowAttributesFunction>("XGetWindowAttributes");
+            loaded.setInputFocus         = module->TryFindFunction<API::SetInputFocusFunction>("XSetInputFocus");
+            loaded.iconifyWindow         = module->TryFindFunction<API::IconifyWindowFunction>("XIconifyWindow");
+            loaded.raiseWindow           = module->TryFindFunction<API::RaiseWindowFunction>("XRaiseWindow");
+            loaded.grabPointer           = module->TryFindFunction<API::GrabPointerFunction>("XGrabPointer");
+            loaded.ungrabPointer         = module->TryFindFunction<API::UngrabPointerFunction>("XUngrabPointer");
+            loaded.warpPointer           = module->TryFindFunction<API::WarpPointerFunction>("XWarpPointer");
+            loaded.createFontCursor      = module->TryFindFunction<API::CreateFontCursorFunction>("XCreateFontCursor");
+            loaded.defineCursor          = module->TryFindFunction<API::DefineCursorFunction>("XDefineCursor");
+            loaded.undefineCursor        = module->TryFindFunction<API::UndefineCursorFunction>("XUndefineCursor");
+            loaded.freeCursor            = module->TryFindFunction<API::FreeCursorFunction>("XFreeCursor");
+            loaded.openInputMethod       = module->TryFindFunction<API::OpenInputMethodFunction>("XOpenIM");
+            loaded.closeInputMethod      = module->TryFindFunction<API::CloseInputMethodFunction>("XCloseIM");
+            loaded.createInputContext    = module->TryFindFunction<API::CreateInputContextFunction>("XCreateIC");
+            loaded.destroyInputContext   = module->TryFindFunction<API::DestroyInputContextFunction>("XDestroyIC");
+            loaded.filterEvent           = module->TryFindFunction<API::FilterEventFunction>("XFilterEvent");
+            loaded.utf8LookupString      = module->TryFindFunction<API::Utf8LookupStringFunction>("Xutf8LookupString");
+            // clang-format on
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const XcbWindowSystemAPI& LoadXcbWindowSystemAPI() noexcept {
+        static const XcbWindowSystemAPI api = [] {
+            using API = XcbWindowSystemAPI;
+            API loaded{};
+#if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
+            const ModulePtr module = LoadWindowModule({"xcb", "libxcb.so.1"});
+            if (module == nullptr) {
+                return loaded;
+            }
+            // clang-format off
+            loaded.connect                 = module->TryFindFunction<API::ConnectFunction>("xcb_connect");
+            loaded.disconnect              = module->TryFindFunction<API::DisconnectFunction>("xcb_disconnect");
+            loaded.connectionHasError      = module->TryFindFunction<API::ConnectionHasErrorFunction>("xcb_connection_has_error");
+            loaded.getSetup                = module->TryFindFunction<API::GetSetupFunction>("xcb_get_setup");
+            loaded.generateId              = module->TryFindFunction<API::GenerateIdFunction>("xcb_generate_id");
+            loaded.createWindow            = module->TryFindFunction<API::CreateWindowFunction>("xcb_create_window");
+            loaded.changeProperty          = module->TryFindFunction<API::ChangePropertyFunction>("xcb_change_property");
+            loaded.internAtom              = module->TryFindFunction<API::InternAtomFunction>("xcb_intern_atom");
+            loaded.internAtomReply         = module->TryFindFunction<API::InternAtomReplyFunction>("xcb_intern_atom_reply");
+            loaded.destroyWindow           = module->TryFindFunction<API::DestroyWindowFunction>("xcb_destroy_window");
+            loaded.mapWindow               = module->TryFindFunction<API::MapWindowFunction>("xcb_map_window");
+            loaded.unmapWindow             = module->TryFindFunction<API::UnmapWindowFunction>("xcb_unmap_window");
+            loaded.configureWindow         = module->TryFindFunction<API::ConfigureWindowFunction>("xcb_configure_window");
+            loaded.pollForEvent            = module->TryFindFunction<API::PollForEventFunction>("xcb_poll_for_event");
+            loaded.waitForEvent            = module->TryFindFunction<API::WaitForEventFunction>("xcb_wait_for_event");
+            loaded.flush                   = module->TryFindFunction<API::FlushFunction>("xcb_flush");
+            loaded.getFileDescriptor       = module->TryFindFunction<API::GetFileDescriptorFunction>("xcb_get_file_descriptor");
+            loaded.getMaximumRequestLength = module->TryFindFunction<API::GetMaximumRequestLengthFunction>("xcb_get_maximum_request_length");
+            // clang-format on
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
+    const WaylandWindowSystemAPI& LoadWaylandWindowSystemAPI() noexcept {
+        static const WaylandWindowSystemAPI api = [] {
+            using API = WaylandWindowSystemAPI;
+            API loaded{};
+#if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
+            const ModulePtr module = LoadWindowModule({"wayland-client", "libwayland-client.so.0"});
+            if (module == nullptr) {
+                return loaded;
+            }
+            // clang-format off
+            loaded.connect                 = module->TryFindFunction<API::ConnectFunction>("wl_display_connect");
+            loaded.connectToFd             = module->TryFindFunction<API::ConnectFdFunction>("wl_display_connect_to_fd");
+            loaded.disconnect              = module->TryFindFunction<API::DisconnectFunction>("wl_display_disconnect");
+            loaded.dispatch                = module->TryFindFunction<API::DispatchFunction>("wl_display_dispatch");
+            loaded.dispatchPending         = module->TryFindFunction<API::DispatchPendingFunction>("wl_display_dispatch_pending");
+            loaded.roundtrip               = module->TryFindFunction<API::RoundtripFunction>("wl_display_roundtrip");
+            loaded.flush                   = module->TryFindFunction<API::FlushFunction>("wl_display_flush");
+            loaded.getFileDescriptor       = module->TryFindFunction<API::GetFileDescriptorFunction>("wl_display_get_fd");
+            loaded.prepareRead             = module->TryFindFunction<API::PrepareReadFunction>("wl_display_prepare_read");
+            loaded.cancelRead              = module->TryFindFunction<API::CancelReadFunction>("wl_display_cancel_read");
+            loaded.readEvents              = module->TryFindFunction<API::ReadEventsFunction>("wl_display_read_events");
+            loaded.getRegistry             = module->TryFindFunction<API::GetRegistryFunction>("wl_display_get_registry");
+            loaded.proxyAddListener        = module->TryFindFunction<API::ProxyAddListenerFunction>("wl_proxy_add_listener");
+            loaded.proxyDestroy            = module->TryFindFunction<API::ProxyDestroyFunction>("wl_proxy_destroy");
+            loaded.proxyMarshalFlags       = module->TryFindFunction<API::ProxyMarshalFlagsFunction>("wl_proxy_marshal_flags");
+            loaded.proxyGetVersion         = module->TryFindFunction<API::ProxyGetVersionFunction>("wl_proxy_get_version");
+            loaded.proxySetUserData        = module->TryFindFunction<API::ProxySetUserDataFunction>("wl_proxy_set_user_data");
+            loaded.proxyGetUserData        = module->TryFindFunction<API::ProxyGetUserDataFunction>("wl_proxy_get_user_data");
+            loaded.displayGetError         = module->TryFindFunction<API::DisplayGetErrorFunction>("wl_display_get_error");
+            loaded.displayGetProtocolError = module->TryFindFunction<API::DisplayGetProtocolErrorFunction>("wl_display_get_protocol_error");
+            // clang-format on
+#endif
+            return loaded;
+        }();
+        return api;
+    }
+
     const FileSystemAPI& LoadFileSystemAPI() noexcept {
         static const FileSystemAPI api = [] {
             using API = FileSystemAPI;
@@ -1899,7 +2104,7 @@ namespace Sora::PAL {
         try {
             std::call_once(flag, [] {
                 LockedDbgHelpSystemAPI dbgHelp = LockDbgHelpSystemAPI();
-                const ProcessSystemAPI& process = LoadProcessSystemAPI();
+                const ProcessSystemAPI& process = Sora::PAL::API::LoadProcessSystemAPI();
                 if (!EnsureSystemAPIs(dbgHelp->symSetOptions, dbgHelp->symInitialize, process.getCurrentProcess)) {
                     return;
                 }

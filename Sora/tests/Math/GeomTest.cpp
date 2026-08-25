@@ -140,6 +140,10 @@ TEST_CASE("Padded vector storage preserves explicit alignment", "[Sora][Math][Ge
 TEST_CASE("Scalar and affine coordinate utilities are reusable", "[Sora][Math][Geom]") {
     const float infinity = std::numeric_limits<float>::infinity();
     const float nan = std::numeric_limits<float>::quiet_NaN();
+    STATIC_REQUIRE(sizeof(Sora::Math::WideInteger<int>) > sizeof(int));
+    STATIC_REQUIRE(Sora::Math::CheckedCast<int>(Sora::Math::WideInteger<int>{42}) == 42);
+    STATIC_REQUIRE(Sora::Math::AbsValue(-2.0F) == 2.0F);
+    CHECK_FALSE(std::signbit(Sora::Math::AbsValue(-0.0F)));
     CHECK(Sora::Math::IsNaN(nan));
     CHECK(Sora::Math::IsNotNaN(1.0F));
     CHECK(Sora::Math::IsFinite(1.0F));

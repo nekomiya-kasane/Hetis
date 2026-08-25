@@ -53,7 +53,50 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadGlobalMemorySystemAPI() == &PAL::LoadGlobalMemorySystemAPI());
     REQUIRE(&PAL::LoadClipboardSystemAPI() == &PAL::LoadClipboardSystemAPI());
     REQUIRE(&PAL::LoadDisplaySystemAPI() == &PAL::LoadDisplaySystemAPI());
+    REQUIRE(&PAL::LoadWin32WindowSystemAPI() == &PAL::LoadWin32WindowSystemAPI());
+    REQUIRE(&PAL::LoadX11WindowSystemAPI() == &PAL::LoadX11WindowSystemAPI());
+    REQUIRE(&PAL::LoadXcbWindowSystemAPI() == &PAL::LoadXcbWindowSystemAPI());
+    REQUIRE(&PAL::LoadWaylandWindowSystemAPI() == &PAL::LoadWaylandWindowSystemAPI());
     REQUIRE(&PAL::LoadStackTraceSystemAPI() == &PAL::LoadStackTraceSystemAPI());
+}
+
+TEST_CASE("Native window views enforce concrete backend identity", "[Sora.PAL.SystemAPI]") {
+    int nativeToken = 0;
+    const PAL::NativeWindowView win32{
+        .windowSystem = Sora::Platform::WindowSystem::Win32,
+        .backend = PAL::NativeWindowBackend::Win32,
+        .window = reinterpret_cast<uintptr_t>(&nativeToken),
+    };
+    const PAL::NativeWindowView xlib{
+        .windowSystem = Sora::Platform::WindowSystem::X11,
+        .backend = PAL::NativeWindowBackend::Xlib,
+        .displayConnection = &nativeToken,
+        .window = 1,
+    };
+    const PAL::NativeWindowView xcb{
+        .windowSystem = Sora::Platform::WindowSystem::X11,
+        .backend = PAL::NativeWindowBackend::Xcb,
+        .displayConnection = &nativeToken,
+        .window = 1,
+    };
+    const PAL::NativeWindowView wayland{
+        .windowSystem = Sora::Platform::WindowSystem::Wayland,
+        .backend = PAL::NativeWindowBackend::Wayland,
+        .displayConnection = &nativeToken,
+        .surface = &nativeToken,
+    };
+    const PAL::NativeWindowView mismatched{
+        .windowSystem = Sora::Platform::WindowSystem::X11,
+        .backend = PAL::NativeWindowBackend::Wayland,
+        .displayConnection = &nativeToken,
+        .surface = &nativeToken,
+    };
+
+    REQUIRE(win32);
+    REQUIRE(xlib);
+    REQUIRE(xcb);
+    REQUIRE(wayland);
+    REQUIRE_FALSE(mismatched);
 }
 
 TEST_CASE("ModuleLoader preserves UTF-8 spellings and native Unicode search roots", "[Sora.PAL.SystemAPI]") {
@@ -215,9 +258,10 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     const PAL::HandleSystemAPI& handles = PAL::LoadHandleSystemAPI();
     REQUIRE(handles.closeHandle != nullptr);
     REQUIRE(handles.duplicateHandle != nullptr);
+    const PAL::EventSystemAPI& events = PAL::LoadEventSystemAPI();
+    REQUIRE(events.createEventWide != nullptr);
+    REQUIRE(events.resetEvent != nullptr);
     const PAL::SynchronizationSystemAPI& synchronization = PAL::LoadSynchronizationSystemAPI();
-    REQUIRE(synchronization.createEventWide != nullptr);
-    REQUIRE(synchronization.resetEvent != nullptr);
     REQUIRE(synchronization.waitForSingleObject != nullptr);
     const PAL::FileMappingSystemAPI& mapping = PAL::LoadFileMappingSystemAPI();
     REQUIRE(mapping.createFileMappingWide != nullptr);
@@ -296,6 +340,18 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     REQUIRE(display.getCursorPosition != nullptr);
     REQUIRE(display.getSystemMetrics != nullptr);
 
+    const PAL::Win32WindowSystemAPI& window = PAL::LoadWin32WindowSystemAPI();
+    REQUIRE(window.Available());
+    REQUIRE(window.registerClassExWide != nullptr);
+    REQUIRE(window.createWindowExWide != nullptr);
+    REQUIRE(window.destroyWindow != nullptr);
+    REQUIRE(window.defWindowProc != nullptr);
+    REQUIRE(window.peekMessage != nullptr);
+    REQUIRE(window.translateMessage != nullptr);
+    REQUIRE(window.dispatchMessage != nullptr);
+    REQUIRE(window.DeclaredCapabilities().windowSystem == Sora::Platform::WindowSystem::Win32);
+    REQUIRE(window.DeclaredCapabilities().Supports(PAL::WindowSystemFeature::VulkanSurface));
+
     const PAL::FileSystemAPI& file = PAL::LoadFileSystemAPI();
     REQUIRE(file.getStandardHandle != nullptr);
     REQUIRE(file.createFileWide != nullptr);
@@ -315,6 +371,35 @@ TEST_CASE("Required system API subsets are available on the running platform", "
     const PAL::StackTraceSystemAPI& stackTrace = PAL::LoadStackTraceSystemAPI();
     REQUIRE(stackTrace.captureStackBackTrace != nullptr);
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+    const PAL::X11WindowSystemAPI& x11 = PAL::LoadX11WindowSystemAPI();
+    const PAL::XcbWindowSystemAPI& xcb = PAL::LoadXcbWindowSystemAPI();
+    const PAL::WaylandWindowSystemAPI& wayland = PAL::LoadWaylandWindowSystemAPI();
+#    if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
+    REQUIRE(x11.DeclaredCapabilities().windowSystem == Sora::Platform::WindowSystem::X11);
+    REQUIRE(xcb.DeclaredCapabilities().windowSystem == Sora::Platform::WindowSystem::X11);
+    REQUIRE(wayland.DeclaredCapabilities().windowSystem == Sora::Platform::WindowSystem::Wayland);
+    REQUIRE(x11.DeclaredCapabilities().backend == PAL::NativeWindowBackend::Xlib);
+    REQUIRE(xcb.DeclaredCapabilities().backend == PAL::NativeWindowBackend::Xcb);
+    REQUIRE(wayland.DeclaredCapabilities().backend == PAL::NativeWindowBackend::Wayland);
+    REQUIRE_FALSE(wayland.DeclaredCapabilities().Supports(PAL::WindowSystemFeature::WindowCreation));
+    REQUIRE_FALSE(wayland.DeclaredCapabilities().Supports(PAL::WindowSystemFeature::VulkanSurface));
+    // Library availability is deployment-dependent; no display server is required for table resolution.
+    if (x11.Available()) {
+        REQUIRE(x11.openDisplay != nullptr);
+        REQUIRE(x11.pending != nullptr);
+        REQUIRE(x11.nextEvent != nullptr);
+    }
+    if (xcb.Available()) {
+        REQUIRE(xcb.connect != nullptr);
+        REQUIRE(xcb.getFileDescriptor != nullptr);
+        REQUIRE(xcb.pollForEvent != nullptr);
+    }
+    if (wayland.Available()) {
+        REQUIRE(wayland.connect != nullptr);
+        REQUIRE(wayland.dispatch != nullptr);
+        REQUIRE(wayland.getFileDescriptor != nullptr);
+    }
+#    endif
     const PAL::EnvironmentSystemAPI& environment = PAL::LoadEnvironmentSystemAPI();
     REQUIRE(environment.get != nullptr);
     REQUIRE(environment.set != nullptr);
