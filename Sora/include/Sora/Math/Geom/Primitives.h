@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <Sora/Platform.h>
 #include <Sora/Core/Contracts.h>
 #include <Sora/Core/Traits/TypeTraits.h>
 #include <Sora/Math/GeomUtils.h>
@@ -253,41 +254,32 @@ namespace Sora::Math {
         T radius_ = T{0};
     };
 
-    /** @brief Two-dimensional circle with a non-negative radius. */
+    /** @brief Two-dimensional circle or three-dimensional circle embedded in a plane. */
     template<std::floating_point T, size_t N>
         requires(N == 2 || N == 3)
-    class Circle;
+    class Circle {
+        struct NoNormal {};
+        using NormalStorage = [:(N == 3 ? ^^UnitVector<T, N> : ^^NoNormal):];
 
-    template<std::floating_point T>
-    class Circle<T, 2> {
     public:
-        static constexpr size_t kDimension = 2;
+        static constexpr size_t kDimension = N;
 
-        constexpr Circle() noexcept = default;
+        constexpr Circle() noexcept
+            requires(N == 2)
+        = default;
 
         /** @brief Construct a two-dimensional circle; infinite radius is valid. */
-        constexpr Circle(const Point<T, 2>& center, T radius) noexcept : center_(center), radius_(radius) {
+        constexpr Circle(const Point<T, N>& center, T radius) noexcept
+            requires(N == 2)
+            : center_(center), radius_(radius) {
             SORA_PRE(IsNotNaN(center));
             SORA_PRE(IsNotNaN(radius));
             SORA_PRE(radius >= T{0});
         }
 
-        [[nodiscard]] constexpr const Point<T, 2>& Center() const noexcept { return center_; }
-        [[nodiscard]] constexpr T Radius() const noexcept { return radius_; }
-
-    private:
-        Point<T, 2> center_{};
-        T radius_ = T{0};
-    };
-
-    /** @brief Three-dimensional circle embedded in a plane with an explicit unit normal. */
-    template<std::floating_point T>
-    class Circle<T, 3> {
-    public:
-        static constexpr size_t kDimension = 3;
-
         /** @brief Construct a three-dimensional circle from its center, plane normal, and radius. */
-        constexpr Circle(const Point<T, 3>& center, const Vector<T, 3>& normal, T radius) noexcept
+        constexpr Circle(const Point<T, N>& center, const Vector<T, N>& normal, T radius) noexcept
+            requires(N == 3)
             : center_(center), normal_(Normalize(normal)), radius_(radius) {
             SORA_PRE(IsNotNaN(center));
             SORA_PRE(IsNotNaN(normal));
@@ -295,21 +287,29 @@ namespace Sora::Math {
             SORA_PRE(radius >= T{0});
         }
 
-        [[nodiscard]] constexpr const Point<T, 3>& Center() const noexcept { return center_; }
-        [[nodiscard]] constexpr const UnitVector<T, 3>& Normal() const noexcept { return normal_; }
+        [[nodiscard]] constexpr const Point<T, N>& Center() const noexcept { return center_; }
+        [[nodiscard]] constexpr const UnitVector<T, N>& Normal() const noexcept
+            requires(N == 3)
+        {
+            return normal_;
+        }
         [[nodiscard]] constexpr T Radius() const noexcept { return radius_; }
 
     private:
-        [[nodiscard]] static constexpr UnitVector<T, 3> Normalize(const Vector<T, 3>& normal) noexcept {
+        [[nodiscard]] static constexpr UnitVector<T, N> Normalize(const Vector<T, N>& normal) noexcept
+            requires(N == 3)
+        {
             const auto unit = TryNormalize(normal);
             SORA_PRE(unit.has_value());
             return *unit;
         }
 
-        Point<T, 3> center_{};
-        UnitVector<T, 3> normal_;
+        Point<T, N> center_{};
+        SORA_NO_UNIQUE_ADDRESS NormalStorage normal_;
         T radius_ = T{0};
     };
+    static_assert(sizeof(Circle<float, 2>) == sizeof(Point<float, 2>) + sizeof(float));
+    static_assert(sizeof(Circle<float, 3>) == sizeof(Point<float, 3>) + sizeof(UnitVector<float, 3>) + sizeof(float));
 
     /** @brief Ray with a non-zero direction; infinite components are permitted. */
     template<std::floating_point T, size_t N>
@@ -412,8 +412,8 @@ namespace Sora::Math {
     using Circle2f       = Circle<Sora::Traits::Float<32>, 2>;
     using Circle3f       = Circle<Sora::Traits::Float<32>, 3>;
     using Sphere3f       = Ball<Sora::Traits::Float<32>, 3>;
-    using DirectedBox2f = DirectedBox<Sora::Traits::Float<32>, 2>;
-    using DirectedBox3f = DirectedBox<Sora::Traits::Float<32>, 3>;
+    using DirectedBox2f  = DirectedBox<Sora::Traits::Float<32>, 2>;
+    using DirectedBox3f  = DirectedBox<Sora::Traits::Float<32>, 3>;
     using Ray2f          = Ray<Sora::Traits::Float<32>, 2>;
     using Ray3f          = Ray<Sora::Traits::Float<32>, 3>;
     using Line2f         = Hyperplane<Sora::Traits::Float<32>, 2>;
