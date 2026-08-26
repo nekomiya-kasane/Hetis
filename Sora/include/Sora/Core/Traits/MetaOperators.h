@@ -144,7 +144,7 @@ namespace Sora::Meta {
     namespace Detail {
 
         [[nodiscard]] consteval std::meta::info Apply(std::meta::info function,
-                                                       std::span<const std::meta::info> arguments) {
+                                                      std::span<const std::meta::info> arguments) {
             if (IsMetaError(function)) {
                 return function;
             }
@@ -180,7 +180,7 @@ namespace Sora::Meta {
                 return function;
             }
             return std::meta::is_template(function) ? std::meta::info{}
-                                                     : MakeMetaError(^^Error::NonInvocableTag, {function});
+                                                    : MakeMetaError(^^Error::NonInvocableTag, {function});
         }
 
         [[nodiscard]] consteval std::meta::info ValidateUnaryPred(std::meta::info pred) {
@@ -191,13 +191,11 @@ namespace Sora::Meta {
                 !std::meta::is_invocable_type(std::meta::type_of(pred), {^^std::meta::info})) {
                 return MakeMetaError(^^Error::NonInvocableTag, {pred});
             }
-            return std::meta::return_type_of(pred) == ^^bool
-                       ? std::meta::info{}
-                       : MakeMetaError(^^Error::NonBooleanPredResultTag, {pred});
+            return std::meta::return_type_of(pred) == ^^bool ? std::meta::info{}
+                                                             : MakeMetaError(^^Error::NonBooleanPredResultTag, {pred});
         }
 
-        [[nodiscard]] consteval std::meta::info RequireTypeInfo(std::meta::info result,
-                                                                const InfoList& context) {
+        [[nodiscard]] consteval std::meta::info RequireTypeInfo(std::meta::info result, const InfoList& context) {
             if (IsMetaError(result) || std::meta::is_type(result)) {
                 return result;
             }
@@ -206,8 +204,7 @@ namespace Sora::Meta {
             return MakeMetaError(^^Error::NonTypeResultTag, values);
         }
 
-        [[nodiscard]] consteval std::meta::info ComposeInvoke(const InfoList& functions,
-                                                              const InfoList& arguments) {
+        [[nodiscard]] consteval std::meta::info ComposeInvoke(const InfoList& functions, const InfoList& arguments) {
             if (functions.empty()) {
                 return MakeMetaError(^^Error::NonInvocableTag);
             }
@@ -229,8 +226,7 @@ namespace Sora::Meta {
             return result;
         }
 
-        [[nodiscard]] consteval std::meta::info TransformInvoke(std::meta::info function,
-                                                                std::meta::info continuation,
+        [[nodiscard]] consteval std::meta::info TransformInvoke(std::meta::info function, std::meta::info continuation,
                                                                 const InfoList& arguments) {
             if (IsMetaError(function) || IsMetaError(continuation)) {
                 return IsMetaError(function) ? function : continuation;
@@ -328,8 +324,7 @@ namespace Sora::Meta {
      * @return Reflected `InfoList`, `LengthMismatchTag`, an invocation error, or the first input error.
      * @par Complexity Linear in the common input length.
      */
-    [[nodiscard]] consteval std::meta::info Zip(std::meta::info function, const InfoList& left,
-                                                const InfoList& right) {
+    [[nodiscard]] consteval std::meta::info Zip(std::meta::info function, const InfoList& left, const InfoList& right) {
         if (IsMetaError(function)) {
             return function;
         }
@@ -343,9 +338,8 @@ namespace Sora::Meta {
             return error;
         }
         if (left.size() != right.size()) {
-            return MakeMetaError(^^Error::LengthMismatchTag,
-                                 {function, std::meta::reflect_constant(left.size()),
-                                  std::meta::reflect_constant(right.size())});
+            return MakeMetaError(^^Error::LengthMismatchTag, {function, std::meta::reflect_constant(left.size()),
+                                                              std::meta::reflect_constant(right.size())});
         }
         std::vector<std::meta::info> output;
         output.reserve(left.size());
@@ -774,8 +768,7 @@ namespace Sora::Meta {
         template<std::meta::info Function>
         struct UncurryClosure {
             template<typename List>
-            using Apply = InfoType<Detail::RequireTypeInfo(
-                Types::Apply(Function, ^^List), InfoList{Function, ^^List})>;
+            using Apply = InfoType<Detail::RequireTypeInfo(Types::Apply(Function, ^^List), InfoList{Function, ^^List})>;
         };
 
     } // namespace Detail
@@ -1046,8 +1039,7 @@ namespace Sora::Traits {
      * @return Resulting bounded `TypeList`; invalid bounds are rejected by the constraint.
      */
     template<typename List, std::size_t Offset, std::size_t Count>
-        requires(Concept::TypeList<List> && Offset <= Length<List> &&
-                 Count <= Length<List> - Offset)
+        requires(Concept::TypeList<List> && Offset <= Length<List> && Count <= Length<List> - Offset)
     using Slice = Meta::InfoType<Meta::ToTypeList(Meta::Slice(Meta::ToInfoList(^^List), Offset, Count))>;
 
     /**
@@ -1309,8 +1301,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr bool NoneOf =
-        Meta::RequirePredResult(Meta::NoneOf(Meta::ToInfoList(^^List), Pred));
+    inline constexpr bool NoneOf = Meta::RequirePredResult(Meta::NoneOf(Meta::ToInfoList(^^List), Pred));
 
     /**
      * @brief Number of types in @p List satisfying @p Pred.
@@ -1320,8 +1311,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t CountIf =
-        Meta::RequireSizeResult(Meta::CountIf(Meta::ToInfoList(^^List), Pred));
+    inline constexpr std::size_t CountIf = Meta::RequireSizeResult(Meta::CountIf(Meta::ToInfoList(^^List), Pred));
 
     /**
      * @brief TypeList of non-static data-member types of @p Type.
@@ -1329,8 +1319,8 @@ namespace Sora::Traits {
      * @return Reflected member-type pack represented as a `TypeList` C++ type.
      */
     template<typename Type>
-    using ToTypeList = Meta::InfoType<Meta::ToTypeList(Meta::Promote(
-        std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked()) |
-        std::views::transform(std::meta::type_of)))>;
+    using ToTypeList = Meta::InfoType<Meta::ToTypeList(
+        Meta::Promote(std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked()) |
+                      std::views::transform(std::meta::type_of)))>;
 
 } // namespace Sora::Traits

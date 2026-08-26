@@ -15,7 +15,7 @@
  * Sora::PAL::OpenGL::GL::API gl;
  * gl.Resolve(resolve); // Resolve after making the target context current.
  * if (gl.glBindBuffer != nullptr) {
- *     Sora::PAL::OpenGL::GL::GLuint buffer = 0;
+ *     Sora::PAL::OpenGL::GLuint buffer = 0;
  *     gl.glBindBuffer(Sora::PAL::OpenGL::GL::GL_ARRAY_BUFFER, buffer);
  * }
  * @endcode

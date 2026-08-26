@@ -13,8 +13,10 @@
  *     const auto& loader = Sora::PAL::Vulkan::LoadVulkanAPI();
  *     if (loader.vkGetInstanceProcAddr == nullptr) return;
  *     auto instanceApi = Sora::PAL::Vulkan::ResolveInstanceAPI(instance, loader.vkGetInstanceProcAddr);
- *     if (instanceApi.vkGetDeviceProcAddr == nullptr) return;
- *     auto deviceApi = Sora::PAL::Vulkan::ResolveDeviceAPI(device, instanceApi.vkGetDeviceProcAddr);
+ *     const auto getDeviceProcAddr = reinterpret_cast<Sora::PAL::Vulkan::PFN_vkGetDeviceProcAddr>(
+ *         loader.vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
+ *     if (getDeviceProcAddr == nullptr) return;
+ *     auto deviceApi = Sora::PAL::Vulkan::ResolveDeviceAPI(device, getDeviceProcAddr);
  *     if (deviceApi.vkDeviceWaitIdle != nullptr) deviceApi.vkDeviceWaitIdle(device);
  * }
  * @endcode

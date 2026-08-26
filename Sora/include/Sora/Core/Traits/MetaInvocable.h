@@ -102,8 +102,8 @@ namespace Sora {
          * @tparam Arguments Reflected application arguments.
          */
         template<std::meta::info Function, std::meta::info... Arguments>
-        concept DirectlyInvocable = std::meta::is_template(Function) &&
-                                    std::meta::can_substitute(Function, {Arguments...});
+        concept DirectlyInvocable =
+            std::meta::is_template(Function) && std::meta::can_substitute(Function, {Arguments...});
 
         namespace Detail {
 
