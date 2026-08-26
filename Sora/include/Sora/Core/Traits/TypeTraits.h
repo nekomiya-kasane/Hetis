@@ -27,8 +27,9 @@
 
 #include "Sora/Core/Traits/ConstructionTraits.h"
 #include "Sora/Core/Traits/MetaInfo.h"
-#include "Sora/Core/Traits/MetaPredicate.h"
+#include "Sora/Core/Traits/MetaPred.h"
 #include "Sora/Core/Traits/TypeList.h"
+#include "Sora/Core/Traits/MetaOperators.h"
 #include "Sora/Platform.h"
 
 namespace Sora {

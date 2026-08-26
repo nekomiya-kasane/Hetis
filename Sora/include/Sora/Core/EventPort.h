@@ -270,6 +270,15 @@ namespace Sora {
 
     namespace Detail {
 
+        /** @brief Append types from @p list that are not already present in @p output. */
+        consteval void AppendDeclaredTypes(std::vector<std::meta::info>& output, std::meta::info list) {
+            for (const auto type : Sora::Meta::ToInfoList(list)) {
+                if (std::ranges::find(output, type) == output.end()) {
+                    output.push_back(type);
+                }
+            }
+        }
+
         /** @brief Return a merged TypeList named @p name along @p type's single-inheritance chain. */
         template<std::meta::info Validator>
         consteval std::meta::info DeclaredTypeListInfoOf(std::meta::info type, std::string_view name) {
@@ -285,12 +294,12 @@ namespace Sora {
                 if (list == std::meta::info{}) {
                     continue;
                 }
-                if (!Sora::Meta::IsTypeList(list) || !Sora::Meta::Invoke<Validator>(list)) {
+                if (!Sora::Meta::IsTypeList(list) || !Sora::Meta::InvokeReflected<Validator>(list)) {
                     throw std::define_static_string(
                         std::format("Experimental::DeclaredTypeListInfoOf: '{}' is not a valid '{}'.",
                                     Sora::Meta::DisplayStringOf(list), name));
                 }
-                Sora::Meta::AppendTypeListUnique(result, list);
+                AppendDeclaredTypes(result, list);
             }
             return std::meta::substitute(^^Sora::Traits::TypeList, result);
         }

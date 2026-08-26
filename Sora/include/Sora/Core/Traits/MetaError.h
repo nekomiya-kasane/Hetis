@@ -48,7 +48,16 @@ namespace Sora {
             struct NonTypeResultTag {};
 
             /** @brief Category for a predicate whose reflected result is not `bool`. */
-            struct NonBooleanPredicateResultTag {};
+            struct NonBooleanPredResultTag {};
+
+            /** @brief Category for an algorithm result that is not a reflected InfoList value. */
+            struct NonInfoListResultTag {};
+
+            /** @brief Category for an input that is not the required sequence representation. */
+            struct InvalidSequenceTag {};
+
+            /** @brief Category for a multi-sequence operation whose lengths differ. */
+            struct LengthMismatchTag {};
 
         } // namespace Error
 
@@ -185,6 +194,10 @@ namespace Sora {
         /** @brief True when @p Info is not a meta error. */
         template<std::meta::info Info>
         concept NoMetaError = !MetaError<Info>;
+
+        /** @brief True when @T is not a type-level meta error. */
+        template<typename T>
+        concept NoMetaErrorType = !Concept::MetaErrorType<T>;
 
         /** @brief True when at least one input reflection is an error. */
         template<std::meta::info... Inputs>

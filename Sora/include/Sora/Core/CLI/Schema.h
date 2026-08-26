@@ -580,7 +580,7 @@ namespace Sora::CLI {
         template<typename CommandsList, typename Root>
         consteval void ValidateBuilderOverrides(const SchemaBuilder<Root>& builder) {
             using CommandTypes = typename Detail::CommandTypes<CommandsList>::Type;
-            const auto commandTypes = Sora::Meta::TypeListTypesOf(std::meta::dealias(^^CommandTypes));
+            const auto commandTypes = Sora::Meta::CopyTypeInfos(std::meta::dealias(^^CommandTypes));
 
             for (const CommandOverride& override : builder.CommandOverrides()) {
                 bool found = false;

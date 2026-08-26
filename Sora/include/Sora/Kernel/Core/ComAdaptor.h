@@ -46,10 +46,11 @@ namespace Sora::Kernel {
 
         template<typename T>
         using ComAdaptorImplements =
-            Sora::Traits::ApplyT<Sora::Kernel::$::Implements, typename ComAdaptorDecl<T>::Implements>;
+            Sora::Traits::Apply<^^Sora::Kernel::$::Implements, typename ComAdaptorDecl<T>::Implements>;
 
         template<typename T>
-        using ComAdaptorExtends = Sora::Traits::ApplyT<Sora::Kernel::$::Extends, typename ComAdaptorDecl<T>::Extends>;
+        using ComAdaptorExtends =
+            Sora::Traits::Apply<^^Sora::Kernel::$::Extends, typename ComAdaptorDecl<T>::Extends>;
 
     } // namespace Detail
 
