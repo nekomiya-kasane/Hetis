@@ -25,6 +25,7 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <initializer_list>
 #include <meta>
@@ -50,8 +51,8 @@ namespace Sora::Meta {
      */
     struct InfoList {
         using value_type = std::meta::info;
-        using const_iterator = const value_type*;
-        static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+        using const_iterator = const value_type*; /**< Iterator over static reflected entities. */
+        static constexpr std::size_t npos = static_cast<std::size_t>(-1); /**< Missing-index sentinel. */
 
         const value_type* first{}; /**< First entity in static storage, or null for empty. */
         std::size_t count{};       /**< Number of entities in @p first. */
@@ -202,6 +203,8 @@ namespace Sora::Meta {
 
     /**
      * @brief Return a sequence in reverse order.
+     * @param[in] list Source sequence.
+     * @return Newly promoted sequence with reversed order; empty input remains empty.
      * @par Complexity Linear in the sequence length.
      */
     consteval InfoList Reverse(const InfoList& list) {
@@ -230,39 +233,71 @@ namespace Sora::Meta {
         return Promote(std::vector<std::meta::info>(view.begin(), view.end()));
     }
 
-    /** @brief Return the first @p count entities, clamping @p count to the sequence length. */
+    /**
+     * @brief Return the first @p count entities, clamping @p count to the sequence length.
+     * @param[in] list Source sequence.
+     * @param[in] count Maximum number of entities to retain.
+     * @return Promoted prefix sequence.
+     */
     consteval InfoList Take(const InfoList& list, std::size_t count) {
         return Slice(list, 0, std::min(count, list.size()));
     }
 
-    /** @brief Return all entities after the first @p count entities, clamping @p count to the sequence length. */
+    /**
+     * @brief Return all entities after the first @p count entities, clamping @p count to the sequence length.
+     * @param[in] list Source sequence.
+     * @param[in] count Number of leading entities to discard.
+     * @return Promoted suffix sequence.
+     */
     consteval InfoList Drop(const InfoList& list, std::size_t count) {
         const auto offset = std::min(count, list.size());
         return Slice(list, offset, list.size() - offset);
     }
 
-    /** @brief Return @p list with @p value prepended. */
+    /**
+     * @brief Return @p list with @p value prepended.
+     * @param[in] list Source sequence.
+     * @param[in] value Entity inserted at the front.
+     * @return Newly promoted sequence.
+     */
     consteval InfoList PushFront(const InfoList& list, std::meta::info value) {
         return Concat(InfoList{value}, list);
     }
 
-    /** @brief Return @p list with @p value appended. */
+    /**
+     * @brief Return @p list with @p value appended.
+     * @param[in] list Source sequence.
+     * @param[in] value Entity inserted at the back.
+     * @return Newly promoted sequence.
+     */
     consteval InfoList PushBack(const InfoList& list, std::meta::info value) {
         return Concat(list, InfoList{value});
     }
 
-    /** @brief Remove the first entity, returning empty when @p list is empty. */
+    /**
+     * @brief Remove the first entity, returning empty when @p list is empty.
+     * @param[in] list Source sequence.
+     * @return Promoted sequence without its first entity.
+     */
     consteval InfoList PopFront(const InfoList& list) {
         return Drop(list, 1);
     }
 
-    /** @brief Remove the final entity, returning empty when @p list is empty. */
+    /**
+     * @brief Remove the final entity, returning empty when @p list is empty.
+     * @param[in] list Source sequence.
+     * @return Promoted sequence without its final entity.
+     */
     consteval InfoList PopBack(const InfoList& list) {
         return Take(list, list.empty() ? 0 : list.size() - 1);
     }
 
     /**
      * @brief Replace every occurrence of @p oldValue with @p newValue.
+     * @param[in] list Source sequence.
+     * @param[in] oldValue Entity to replace.
+     * @param[in] newValue Replacement entity.
+     * @return Newly promoted sequence.
      * @par Complexity Linear in list length.
      */
     consteval InfoList Replace(const InfoList& list, std::meta::info oldValue, std::meta::info newValue) {
@@ -276,6 +311,9 @@ namespace Sora::Meta {
 
     /**
      * @brief Remove every occurrence of @p value.
+     * @param[in] list Source sequence.
+     * @param[in] value Entity to remove.
+     * @return Newly promoted sequence.
      * @par Complexity Linear in list length.
      */
     consteval InfoList Remove(const InfoList& list, std::meta::info value) {
@@ -289,13 +327,21 @@ namespace Sora::Meta {
 
     /**
      * @brief Return whether @p needle occurs in @p list.
+     * @param[in] list Sequence to inspect.
+     * @param[in] needle Entity to find.
+     * @return `true` when at least one equal entity is present.
      * @par Complexity Linear in the inspected prefix.
      */
     consteval bool Contains(const InfoList& list, std::meta::info needle) {
         return std::ranges::find(list, needle) != list.end();
     }
 
-    /** @brief Return the first index of @p needle, or InfoList::npos. */
+    /**
+     * @brief Return the first index of @p needle, or @ref InfoList::npos.
+     * @param[in] list Sequence to inspect.
+     * @param[in] needle Entity to find.
+     * @return Zero-based index, or @ref InfoList::npos when absent.
+     */
     consteval std::size_t IndexOf(const InfoList& list, std::meta::info needle) {
         std::size_t index = 0;
         for (const auto entity : list) {
@@ -309,6 +355,9 @@ namespace Sora::Meta {
 
     /**
      * @brief Return the number of occurrences of @p needle.
+     * @param[in] list Sequence to inspect.
+     * @param[in] needle Entity to count.
+     * @return Number of equal entities.
      * @par Complexity Linear in list length.
      */
     consteval std::size_t Count(const InfoList& list, std::meta::info needle) {
@@ -317,6 +366,8 @@ namespace Sora::Meta {
 
     /**
      * @brief Return whether every entity occurs exactly once.
+     * @param[in] list Sequence to inspect.
+     * @return `true` when @p list contains no duplicate entity.
      * @par Complexity Quadratic comparisons.
      */
     consteval bool IsUnique(const InfoList& list) {
@@ -325,6 +376,9 @@ namespace Sora::Meta {
 
     /**
      * @brief Return whether two sequences are equal in size and order.
+     * @param[in] left First sequence.
+     * @param[in] right Second sequence.
+     * @return `true` when both sequences have equal length and element identity.
      * @par Complexity Linear in sequence length.
      */
     consteval bool Equal(const InfoList& left, const InfoList& right) {

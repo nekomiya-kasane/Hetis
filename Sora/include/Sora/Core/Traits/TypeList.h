@@ -10,6 +10,9 @@
  *
  * @par Example
  * @code{.cpp}
+ * #include <concepts>
+ * #include <meta>
+ *
  * using Input = Sora::Traits::TypeList<int, double>;
  * constexpr auto infos = Sora::Meta::ToInfoList(^^Input);
  * constexpr auto reflected = Sora::Meta::ToTypeList(infos);
@@ -24,6 +27,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <concepts>
 #include <meta>
 #include <ranges>
 #include <type_traits>
@@ -137,26 +141,42 @@ namespace Sora {
 
     namespace Traits {
 
-        /** @brief Whether @p List is a `TypeList`. */
+        /**
+         * @brief Whether @p List is a `TypeList`.
+         * @tparam List Type to inspect.
+         */
         template<typename List>
         inline constexpr bool IsTypeList = Concept::TypeList<List>;
 
-        /** @brief Number of types in @p List. */
+        /**
+         * @brief Number of types in @p List.
+         * @tparam List `TypeList` specialization to inspect.
+         */
         template<typename List>
             requires Concept::TypeList<List>
         inline constexpr std::size_t Length = std::remove_cvref_t<List>::size;
 
-        /** @brief Return the @p Index-th type of @p List. */
+        /**
+         * @brief Return the @p Index-th type of @p List.
+         * @tparam List `TypeList` specialization to inspect.
+         * @tparam Index Zero-based type index.
+         */
         template<typename List, std::size_t Index>
             requires(Concept::TypeList<List> && Index < Length<List>)
         using At = typename std::remove_cvref_t<List>::template At<Index>;
 
-        /** @brief First type of a non-empty @p List. */
+        /**
+         * @brief First type of a non-empty @p List.
+         * @tparam List Non-empty `TypeList` specialization.
+         */
         template<typename List>
             requires(Concept::TypeList<List> && Length<List> > 0)
         using Head = At<List, 0>;
 
-        /** @brief Final type of a non-empty @p List. */
+        /**
+         * @brief Final type of a non-empty @p List.
+         * @tparam List Non-empty `TypeList` specialization.
+         */
         template<typename List>
             requires(Concept::TypeList<List> && Length<List> > 0)
         using Last = At<List, Length<List> - 1>;

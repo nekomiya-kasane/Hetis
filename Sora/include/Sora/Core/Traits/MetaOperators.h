@@ -20,6 +20,11 @@
  *
  * @par InfoList pipeline
  * @code{.cpp}
+ * #include <concepts>
+ * #include <meta>
+ * #include <type_traits>
+ * #include <variant>
+ *
  * constexpr Sora::Meta::InfoList input{^^int, ^^double, ^^const double};
  * constexpr auto decayed = Sora::Meta::RequireInfoList(Sora::Meta::Map(^^std::decay_t, input));
  * constexpr auto unique = Sora::Meta::Unique(decayed);
@@ -30,6 +35,11 @@
  *
  * @par TypeList pipeline
  * @code{.cpp}
+ * #include <concepts>
+ * #include <meta>
+ * #include <type_traits>
+ * #include <variant>
+ *
  * using Input = Sora::Traits::TypeList<int, double, const double>;
  * using Result = Sora::Traits::Apply<^^std::variant,
  *     Sora::Traits::Unique<Sora::Traits::Map<^^std::decay_t, Input>>>;
@@ -39,6 +49,10 @@
  *
  * @par Higher-order composition and errors
  * @code{.cpp}
+ * #include <concepts>
+ * #include <meta>
+ * #include <type_traits>
+ *
  * constexpr auto decayPointer = Sora::Meta::Compose<^^std::add_pointer_t, ^^std::decay_t>;
  * using Pointer = Sora::Meta::InvokeResult<decayPointer, const int&>;
  * constexpr auto error = Sora::Meta::Map(^^std::pair, Sora::Meta::InfoList{^^int});
@@ -58,6 +72,7 @@
 
 #include <Sora/Core/Traits/MetaInfoList.h>
 #include <Sora/Core/Traits/MetaInvocable.h>
+#include <Sora/Core/Traits/MetaPred.h>
 #include <Sora/Core/Traits/TypeList.h>
 
 namespace Sora::Meta {
@@ -157,6 +172,17 @@ namespace Sora::Meta {
                                                      : MakeMetaError(^^Error::NonInvocableTag, {function});
         }
 
+        [[nodiscard]] consteval std::meta::info ValidateTemplate(std::meta::info function,
+                                                                  std::size_t arity) {
+            if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
+            }
+            std::vector<std::meta::info> arguments(arity, ^^void);
+            return std::meta::can_substitute(function, arguments)
+                       ? std::meta::info{}
+                       : MakeMetaError(^^Error::NonInvocableTag, {function});
+        }
+
         [[nodiscard]] consteval std::meta::info ValidateUnaryPred(std::meta::info pred) {
             if (IsMetaError(pred)) {
                 return pred;
@@ -246,7 +272,7 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function, 1); error != std::meta::info{}) {
             return error;
         }
         std::vector<std::meta::info> output;
@@ -312,7 +338,7 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(right); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function, 2); error != std::meta::info{}) {
             return error;
         }
         if (left.size() != right.size()) {
@@ -346,7 +372,7 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function, 2); error != std::meta::info{}) {
             return error;
         }
         auto accumulator = initial;
@@ -375,7 +401,7 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function, 2); error != std::meta::info{}) {
             return error;
         }
         auto accumulator = initial;
@@ -822,59 +848,108 @@ namespace Sora::Meta {
     template<std::meta::info Function>
     inline constexpr std::meta::info Uncurry = ^^Detail::UncurryClosure<Function>::template Apply;
 
-    /** @brief Number of values in a reflection pack. */
+    /**
+     * @brief Number of values in a reflection pack.
+     * @tparam Values Reflected pack elements.
+     * @return Number of pack elements.
+     */
     template<std::meta::info... Values>
     inline constexpr std::size_t Size = sizeof...(Values);
 
-    /** @brief Whether @p Needle occurs in a reflection pack. */
+    /**
+     * @brief Whether @p Needle occurs in a reflection pack.
+     * @tparam Needle Reflected entity to find.
+     * @tparam Values Reflected pack elements.
+     * @return `true` when @p Needle occurs at least once.
+     */
     template<std::meta::info Needle, std::meta::info... Values>
     [[nodiscard]] consteval bool Contains() noexcept {
         return Contains(InfoList{Values...}, Needle);
     }
 
-    /** @brief Number of occurrences of @p Needle in a reflection pack. */
+    /**
+     * @brief Number of occurrences of @p Needle in a reflection pack.
+     * @tparam Needle Reflected entity to count.
+     * @tparam Values Reflected pack elements.
+     * @return Number of equal entities.
+     */
     template<std::meta::info Needle, std::meta::info... Values>
     [[nodiscard]] consteval std::size_t Count() noexcept {
         return Count(InfoList{Values...}, Needle);
     }
 
-    /** @brief Return whether every reflected argument satisfies @p Pred. */
+    /**
+     * @brief Return whether every reflected argument satisfies @p Pred.
+     * @tparam Pred Reflected unary predicate.
+     * @tparam Values Reflected pack elements.
+     * @return `true` for an empty pack and when all elements are accepted.
+     */
     template<std::meta::info Pred, std::meta::info... Values>
     [[nodiscard]] consteval bool AllOf() {
         return RequirePredResult(AllOf(InfoList{Values...}, Pred));
     }
 
-    /** @brief Return whether at least one reflected argument satisfies @p Pred. */
+    /**
+     * @brief Return whether at least one reflected argument satisfies @p Pred.
+     * @tparam Pred Reflected unary predicate.
+     * @tparam Values Reflected pack elements.
+     * @return `false` for an empty pack and when no element is accepted.
+     */
     template<std::meta::info Pred, std::meta::info... Values>
     [[nodiscard]] consteval bool AnyOf() {
         return RequirePredResult(AnyOf(InfoList{Values...}, Pred));
     }
 
-    /** @brief Return whether no reflected argument satisfies @p Pred. */
+    /**
+     * @brief Return whether no reflected argument satisfies @p Pred.
+     * @tparam Pred Reflected unary predicate.
+     * @tparam Values Reflected pack elements.
+     * @return Negation of @ref AnyOf for the pack.
+     */
     template<std::meta::info Pred, std::meta::info... Values>
     [[nodiscard]] consteval bool NoneOf() {
         return RequirePredResult(NoneOf(InfoList{Values...}, Pred));
     }
 
-    /** @brief Return the number of reflected arguments satisfying @p Pred. */
+    /**
+     * @brief Return the number of reflected arguments satisfying @p Pred.
+     * @tparam Pred Reflected unary predicate.
+     * @tparam Values Reflected pack elements.
+     * @return Number of accepted elements.
+     */
     template<std::meta::info Pred, std::meta::info... Values>
     [[nodiscard]] consteval std::size_t CountIf() {
         return RequireSizeResult(CountIf(InfoList{Values...}, Pred));
     }
 
-    /** @brief Return @p Needle when present, otherwise @p fallback. */
+    /**
+     * @brief Return @p Needle when present, otherwise @p fallback.
+     * @tparam Needle Reflected entity to find.
+     * @tparam Values Reflected pack elements.
+     * @param[in] fallback Reflection returned when @p Needle is absent.
+     * @return @p Needle or @p fallback.
+     */
     template<std::meta::info Needle, std::meta::info... Values>
     [[nodiscard]] consteval std::meta::info Find(std::meta::info fallback = {}) noexcept {
         return Contains(InfoList{Values...}, Needle) ? Needle : fallback;
     }
 
-    /** @brief Return the first index of @p Needle, or InfoList::npos. */
+    /**
+     * @brief Return the first index of @p Needle, or @ref InfoList::npos.
+     * @tparam Needle Reflected entity to find.
+     * @tparam Values Reflected pack elements.
+     * @return Zero-based index, or @ref InfoList::npos when absent.
+     */
     template<std::meta::info Needle, std::meta::info... Values>
     [[nodiscard]] consteval std::size_t IndexOf() noexcept {
         return IndexOf(InfoList{Values...}, Needle);
     }
 
-    /** @brief Return the first reflected argument, or an empty reflection. */
+    /**
+     * @brief Return the first reflected argument, or an empty reflection.
+     * @tparam Values Reflected pack elements.
+     * @return First element, or `std::meta::info{}` for an empty pack.
+     */
     template<std::meta::info... Values>
     [[nodiscard]] consteval std::meta::info Front() noexcept {
         if constexpr (sizeof...(Values) == 0) {
@@ -884,7 +959,11 @@ namespace Sora::Meta {
         }
     }
 
-    /** @brief Return the final reflected argument, or an empty reflection. */
+    /**
+     * @brief Return the final reflected argument, or an empty reflection.
+     * @tparam Values Reflected pack elements.
+     * @return Final element, or `std::meta::info{}` for an empty pack.
+     */
     template<std::meta::info... Values>
     [[nodiscard]] consteval std::meta::info Back() noexcept {
         if constexpr (sizeof...(Values) == 0) {
@@ -894,21 +973,35 @@ namespace Sora::Meta {
         }
     }
 
-    /** @brief Return the sole reflected argument, constrained to zero or one input. */
+    /**
+     * @brief Return the sole reflected argument, constrained to zero or one input.
+     * @tparam Values Zero or one reflected element.
+     * @return The element, or `std::meta::info{}` when no element was supplied.
+     */
     template<std::meta::info... Values>
         requires(sizeof...(Values) <= 1)
     [[nodiscard]] consteval std::meta::info Single() noexcept {
         return Front<Values...>();
     }
 
-    /** @brief Return the sole reflected argument, or @p Fallback when empty. */
+    /**
+     * @brief Return the sole reflected argument, or @p Fallback when empty.
+     * @tparam Fallback Reflected fallback value.
+     * @tparam Values Zero or one reflected element.
+     * @return The supplied element, or @p Fallback for an empty pack.
+     */
     template<std::meta::info Fallback, std::meta::info... Values>
         requires(sizeof...(Values) <= 1)
     [[nodiscard]] consteval std::meta::info SingleOr() noexcept {
         return sizeof...(Values) == 0 ? Fallback : Front<Values...>();
     }
 
-    /** @brief Return the @p Index-th reflected argument. */
+    /**
+     * @brief Return the @p Index-th reflected argument.
+     * @tparam Index Zero-based pack index.
+     * @tparam Values Reflected pack elements.
+     * @return Element at @p Index.
+     */
     template<std::size_t Index, std::meta::info... Values>
         requires(Index < sizeof...(Values))
     [[nodiscard]] consteval std::meta::info At() noexcept {
@@ -919,159 +1012,310 @@ namespace Sora::Meta {
 
 namespace Sora::Traits {
 
-    /** @brief All but the first type of @p List. */
+    /**
+     * @brief All but the first type of @p List.
+     * @tparam List `TypeList` specialization to transform.
+     */
     template<typename List>
         requires Concept::TypeList<List>
     using PopFront = Meta::InfoType<Meta::ToTypeList(Meta::Drop(Meta::ToInfoList(^^List), 1))>;
 
-    /** @brief First @p Count types of @p List, clamped to its length. */
+    /**
+     * @brief First @p Count types of @p List, clamped to its length.
+     * @tparam List `TypeList` specialization to transform.
+     * @tparam Count Maximum number of types to retain.
+     */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
     using Take = Meta::InfoType<Meta::ToTypeList(Meta::Take(Meta::ToInfoList(^^List), Count))>;
 
-    /** @brief Types after the first @p Count entries, clamped to its length. */
+    /**
+     * @brief Types after the first @p Count entries, clamped to its length.
+     * @tparam List `TypeList` specialization to transform.
+     * @tparam Count Number of leading types to discard.
+     */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
     using Drop = Meta::InfoType<Meta::ToTypeList(Meta::Drop(Meta::ToInfoList(^^List), Count))>;
 
-    /** @brief Exact bounded slice of @p List. */
+    /**
+     * @brief Exact bounded slice of @p List.
+     * @tparam List `TypeList` specialization to transform.
+     * @tparam Offset Zero-based first type.
+     * @tparam Count Number of types to copy.
+     */
     template<typename List, std::size_t Offset, std::size_t Count>
         requires(Concept::TypeList<List> && Offset <= Length<List> &&
                  Count <= Length<List> - Offset)
     using Slice = Meta::InfoType<Meta::ToTypeList(Meta::Slice(Meta::ToInfoList(^^List), Offset, Count))>;
 
-    /** @brief Empty type list with no dependency on @p List's elements. */
+    /**
+     * @brief Empty type list with no dependency on @p List's elements.
+     * @tparam List `TypeList` specialization whose element types are discarded.
+     * @return `TypeList<>`.
+     */
     template<typename List>
         requires Concept::TypeList<List>
     using Clear = TypeList<>;
 
-    /** @brief TypeList containing @p Count copies of @p Type. */
+    /**
+     * @brief TypeList containing @p Count copies of @p Type.
+     * @tparam Count Number of copies.
+     * @tparam Type Type to repeat.
+     * @details The result is a `MetaError` type only when the reflected value is not a type; invalid @p Type itself
+     * is diagnosed by the type system before this alias can be formed.
+     */
     template<std::size_t Count, typename Type>
     using Fill = Meta::InfoType<Meta::Types::Fill(Count, ^^Type)>;
 
-    /** @brief Concatenate type lists in source order. */
+    /**
+     * @brief Concatenate type lists in source order.
+     * @tparam Lists `TypeList` specializations to concatenate.
+     * @return A `TypeList` type; malformed intermediate reflection becomes a `MetaError` type.
+     */
     template<typename... Lists>
         requires(Concept::TypeList<Lists> && ...)
     using Concat = Meta::InfoType<Meta::Types::Concat(Meta::InfoList{^^Lists...})>;
 
-    /** @brief Apply reflected unary template @p Function to every type in @p List. */
+    /**
+     * @brief Apply reflected unary template @p Function to every type in @p List.
+     * @tparam Function Reflected unary template.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type when substitution fails or yields a non-type.
+     */
     template<std::meta::info Function, typename List>
         requires Concept::TypeList<List>
     using Map = Meta::InfoType<Meta::Types::Map(Function, ^^List)>;
 
-    /** @brief Retain types in @p List accepted by unary @p Pred. */
+    /**
+     * @brief Retain types in @p List accepted by unary @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to filter.
+     * @return Resulting `TypeList` or a `MetaError` type. Predicate protocol violations are represented in that type.
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
     using Filter = Meta::InfoType<Meta::Types::Filter(Pred, ^^List)>;
 
-    /** @brief Invoke reflected @p Function with every type in @p List. */
+    /**
+     * @brief Invoke reflected @p Function with every type in @p List.
+     * @tparam Function Reflected variadic template.
+     * @tparam List `TypeList` specialization supplying invocation arguments.
+     * @return The substituted type or a `MetaError` type; no exception is used for recoverable meta failure.
+     */
     template<std::meta::info Function, typename List>
         requires Concept::TypeList<List>
     using Apply = Meta::InfoType<Meta::Types::Apply(Function, ^^List)>;
 
-    /** @brief Left fold reflected @p Function over @p List. */
+    /**
+     * @brief Left fold reflected @p Function over @p List.
+     * @tparam Function Reflected binary template.
+     * @tparam Initial Initial accumulator type.
+     * @tparam List `TypeList` specialization to fold.
+     * @return Final type or a `MetaError` type from the first failed invocation.
+     */
     template<std::meta::info Function, typename Initial, typename List>
         requires Concept::TypeList<List>
     using FoldLeft = Meta::InfoType<Meta::FoldLeft(Function, ^^Initial, Meta::ToInfoList(^^List))>;
 
-    /** @brief Right fold reflected @p Function over @p List. */
+    /**
+     * @brief Right fold reflected @p Function over @p List.
+     * @tparam Function Reflected binary template.
+     * @tparam Initial Initial accumulator type.
+     * @tparam List `TypeList` specialization to fold.
+     * @return Final type or a `MetaError` type from the first failed invocation.
+     */
     template<std::meta::info Function, typename Initial, typename List>
         requires Concept::TypeList<List>
     using FoldRight = Meta::InfoType<Meta::FoldRight(Function, ^^Initial, Meta::ToInfoList(^^List))>;
 
-    /** @brief First index of @p Type in @p List, or InfoList::npos. */
+    /**
+     * @brief First index of @p Type in @p List, or @ref Meta::InfoList::npos.
+     * @tparam List `TypeList` specialization to inspect.
+     * @tparam Type Reflected type to find.
+     */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
     inline constexpr std::size_t IndexOf = Meta::IndexOf(Meta::ToInfoList(^^List), ^^Type);
 
-    /** @brief Whether @p List contains @p Type. */
+    /**
+     * @brief Whether @p List contains @p Type.
+     * @tparam List `TypeList` specialization to inspect.
+     * @tparam Type Reflected type to find.
+     */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
     inline constexpr bool Contains = Meta::Contains(Meta::ToInfoList(^^List), ^^Type);
 
-    /** @brief Number of occurrences of @p Type in @p List. */
+    /**
+     * @brief Number of occurrences of @p Type in @p List.
+     * @tparam List `TypeList` specialization to inspect.
+     * @tparam Type Reflected type to count.
+     */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
     inline constexpr std::size_t Count = Meta::Count(Meta::ToInfoList(^^List), ^^Type);
 
-    /** @brief First type in @p List accepted by @p Pred, or void. */
+    /**
+     * @brief First type in @p List accepted by @p Pred, or `void` when no type matches.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     * @return A matching type, `void`, or a `MetaError` type for predicate/input failure.
+     * @par Example
+     * @code{.cpp}
+     * using Match = Sora::Traits::FindFirst<^^std::is_class, Sora::Traits::TypeList<int, void>>;
+     * static_assert(std::same_as<Match, void>);
+     * @endcode
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    using FindFirstIf = Meta::InfoType<Meta::FindFirst(Meta::ToInfoList(^^List), Pred)>;
+    using FindFirst = Meta::InfoType<Meta::FindFirst(Meta::ToInfoList(^^List), Pred)>;
 
-    /** @brief Final type in @p List accepted by @p Pred, or void. */
+    /**
+     * @brief Final type in @p List accepted by @p Pred, or `void` when no type matches.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     * @return A matching type, `void`, or a `MetaError` type for predicate/input failure.
+     * @par Example
+     * @code{.cpp}
+     * using Match = Sora::Traits::FindLast<^^std::is_class, Sora::Traits::TypeList<int, void>>;
+     * static_assert(std::same_as<Match, void>);
+     * @endcode
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    using FindLastIf = Meta::InfoType<Meta::FindLast(Meta::ToInfoList(^^List), Pred)>;
+    using FindLast = Meta::InfoType<Meta::FindLast(Meta::ToInfoList(^^List), Pred)>;
 
-    /** @brief Prepend @p Type to @p List. */
+    /**
+     * @brief Prepend @p Type to @p List.
+     * @tparam Type Type to insert.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type if projection fails.
+     */
     template<typename Type, typename List>
         requires Concept::TypeList<List>
     using PushFront = Meta::InfoType<Meta::ToTypeList(Meta::PushFront(Meta::ToInfoList(^^List), ^^Type))>;
 
-    /** @brief Append @p Type to @p List. */
+    /**
+     * @brief Append @p Type to @p List.
+     * @tparam List `TypeList` specialization to transform.
+     * @tparam Type Type to insert.
+     * @return Resulting `TypeList` or a `MetaError` type if projection fails.
+     */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
     using PushBack = Meta::InfoType<Meta::ToTypeList(Meta::PushBack(Meta::ToInfoList(^^List), ^^Type))>;
 
-    /** @brief All but the final type of @p List. */
+    /**
+     * @brief All but the final type of @p List.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList`; an empty input remains empty.
+     */
     template<typename List>
         requires Concept::TypeList<List>
     using PopBack = Meta::InfoType<Meta::ToTypeList(Meta::PopBack(Meta::ToInfoList(^^List)))>;
 
-    /** @brief Types of @p List in reverse order. */
+    /**
+     * @brief Types of @p List in reverse order.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type if the projection fails.
+     */
     template<typename List>
         requires Concept::TypeList<List>
     using Reverse = Meta::InfoType<Meta::ToTypeList(Meta::Reverse(Meta::ToInfoList(^^List)))>;
 
-    /** @brief Remove duplicate types while retaining first occurrences. */
+    /**
+     * @brief Remove duplicate types while retaining first occurrences.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Stable unique `TypeList` or a `MetaError` type if the projection fails.
+     */
     template<typename List>
         requires Concept::TypeList<List>
     using Unique = Meta::InfoType<Meta::ToTypeList(Meta::Unique(Meta::ToInfoList(^^List)))>;
 
-    /** @brief Whether every type in @p List occurs exactly once. */
+    /**
+     * @brief Whether every type in @p List occurs exactly once.
+     * @tparam List `TypeList` specialization to inspect.
+     */
     template<typename List>
         requires Concept::TypeList<List>
     inline constexpr bool IsUnique = Meta::IsUnique(Meta::ToInfoList(^^List));
 
-    /** @brief Replace every @p Old type in @p List with @p New. */
+    /**
+     * @brief Replace every @p Old type in @p List with @p New.
+     * @tparam Old Type to replace.
+     * @tparam New Replacement type.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type for invalid reflected type arguments.
+     */
     template<typename Old, typename New, typename List>
         requires Concept::TypeList<List>
     using Replace = Meta::InfoType<Meta::Types::Replace(^^Old, ^^New, ^^List)>;
 
-    /** @brief Remove every occurrence of @p Needle from @p List. */
+    /**
+     * @brief Remove every occurrence of @p Needle from @p List.
+     * @tparam Needle Type to remove.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type for invalid reflected type arguments.
+     */
     template<typename Needle, typename List>
         requires Concept::TypeList<List>
     using Remove = Meta::InfoType<Meta::Types::Remove(^^Needle, ^^List)>;
 
-    /** @brief Zip @p Left and @p Right through reflected binary @p Function. */
+    /**
+     * @brief Zip @p Left and @p Right through reflected binary @p Function.
+     * @tparam Function Reflected binary template.
+     * @tparam Left First `TypeList` specialization.
+     * @tparam Right Second `TypeList` specialization.
+     * @return Resulting `TypeList`; unequal lengths and failed substitutions become `MetaError` types.
+     */
     template<std::meta::info Function, typename Left, typename Right>
         requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
     using Zip = Meta::InfoType<Meta::Types::Zip(Function, ^^Left, ^^Right)>;
 
-    /** @brief Whether every type in @p List satisfies @p Pred. */
+    /**
+     * @brief Whether every type in @p List satisfies @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
     inline constexpr bool AllOf = Meta::RequirePredResult(Meta::AllOf(Meta::ToInfoList(^^List), Pred));
 
-    /** @brief Whether any type in @p List satisfies @p Pred. */
+    /**
+     * @brief Whether any type in @p List satisfies @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
     inline constexpr bool AnyOf = Meta::RequirePredResult(Meta::AnyOf(Meta::ToInfoList(^^List), Pred));
 
-    /** @brief Whether no type in @p List satisfies @p Pred. */
+    /**
+     * @brief Whether no type in @p List satisfies @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
     inline constexpr bool NoneOf =
         Meta::RequirePredResult(Meta::NoneOf(Meta::ToInfoList(^^List), Pred));
 
-    /** @brief Number of types in @p List satisfying @p Pred. */
+    /**
+     * @brief Number of types in @p List satisfying @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
     inline constexpr std::size_t CountIf =
         Meta::RequireSizeResult(Meta::CountIf(Meta::ToInfoList(^^List), Pred));
 
-    /** @brief TypeList of non-static data-member types of @p Type. */
+    /**
+     * @brief TypeList of non-static data-member types of @p Type.
+     * @tparam Type Aggregate/class type whose non-static data members are projected.
+     * @return Reflected member-type pack represented as a `TypeList` C++ type.
+     */
     template<typename Type>
     using ToTypeList = Meta::InfoType<Meta::ToTypeList(Meta::Promote(
         std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked()) |

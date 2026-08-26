@@ -7,6 +7,21 @@
  * GL declarations are partitioned into inline semantic namespaces such as GL::Texture and GL::Buffer. The inline
  * namespaces preserve the concise GL::glFoo spelling while providing a stable domain index for API discovery.
  * @note The X Window System binding is GLX. Xgl is a historical X server architecture, not a context API.
+ *
+ * @par Example
+ * @code{.cpp}
+ * auto loader = [](const char*) -> void* { return nullptr; };
+ * auto resolve = [loader](const char* name) -> void* { return loader(name); };
+ * Sora::PAL::OpenGL::GL::API gl;
+ * gl.Resolve(resolve); // Resolve after making the target context current.
+ * if (gl.glBindBuffer != nullptr) {
+ *     Sora::PAL::OpenGL::GL::GLuint buffer = 0;
+ *     gl.glBindBuffer(Sora::PAL::OpenGL::GL::GL_ARRAY_BUFFER, buffer);
+ * }
+ * @endcode
+ *
+ * @note @p loader is platform-specific (wglGetProcAddress, glXGetProcAddress, or eglGetProcAddress). A context
+ * dependent table must not be shared across incompatible current contexts.
  */
 #pragma once
 
@@ -398,6 +413,7 @@ namespace Sora::PAL::OpenGL {
 
     namespace GL {
 
+        /** @brief Buffer objects, vertex/index storage, and atomic-counter buffer commands and constants. */
         inline namespace Buffer {
 
             /** @name Registry Constants @{ */
@@ -1374,6 +1390,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Buffer
 
+        /** @brief Texture object, image storage, and texture-parameter commands and constants. */
         inline namespace Texture {
 
             /** @name Registry Constants @{ */
@@ -5141,6 +5158,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Texture
 
+        /** @brief Sampler object commands and sampler-state constants. */
         inline namespace Sampler {
 
             /** @name Registry Constants @{ */
@@ -5337,6 +5355,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Sampler
 
+        /** @brief Framebuffer creation, attachment, and completeness commands and constants. */
         inline namespace Framebuffer {
 
             /** @name Registry Constants @{ */
@@ -5877,6 +5896,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Framebuffer
 
+        /** @brief Renderbuffer storage and attachment commands and constants. */
         inline namespace Renderbuffer {
 
             /** @name Registry Constants @{ */
@@ -6109,6 +6129,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Renderbuffer
 
+        /** @brief Vertex-array, attribute, and vertex-binding commands and constants. */
         inline namespace Vertex {
 
             /** @name Registry Constants @{ */
@@ -7728,6 +7749,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Vertex
 
+        /** @brief Shader creation, source, compilation, and shader-query commands and constants. */
         inline namespace Shader {
 
             /** @name Registry Constants @{ */
@@ -8027,6 +8049,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Shader
 
+        /** @brief Program linking, validation, uniform-interface, and program-query commands and constants. */
         inline namespace Program {
 
             /** @name Registry Constants @{ */
@@ -9631,6 +9654,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Program
 
+        /** @brief Program-pipeline creation and pipeline-state commands and constants. */
         inline namespace Pipeline {
 
             /** @name Registry Constants @{ */
@@ -9682,6 +9706,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Pipeline
 
+        /** @brief Uniform upload, uniform-block, and uniform-location commands and constants. */
         inline namespace Uniform {
 
             /** @name Registry Constants @{ */
@@ -10592,6 +10617,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Uniform
 
+        /** @brief Image load/store, image-unit binding, and image-format commands and constants. */
         inline namespace Image {
 
             /** @name Registry Constants @{ */
@@ -10927,6 +10953,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Image
 
+        /** @brief Explicit memory-object allocation, mapping, and residency commands and constants. */
         inline namespace Memory {
 
             /** @name Registry Constants @{ */
@@ -11019,6 +11046,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Memory
 
+        /** @brief Query-object and conditional-render commands and constants. */
         inline namespace Query {
 
             /** @name Registry Constants @{ */
@@ -11230,6 +11258,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Query
 
+        /** @brief Fence and synchronization-object commands and constants. */
         inline namespace Sync {
 
             /** @name Registry Constants @{ */
@@ -11423,6 +11452,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Sync
 
+        /** @brief Transform-feedback object and capture commands and constants. */
         inline namespace TransformFeedback {
 
             /** @name Registry Constants @{ */
@@ -11588,6 +11618,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace TransformFeedback
 
+        /** @brief Direct, indirect, instanced, and multi-draw commands and constants. */
         inline namespace Draw {
 
             /** @name Registry Constants @{ */
@@ -12216,6 +12247,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Draw
 
+        /** @brief Pixel transfer, pack/unpack, and image readback commands and constants. */
         inline namespace Pixel {
 
             /** @name Registry Constants @{ */
@@ -12483,6 +12515,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Pixel
 
+        /** @brief Context state, rasterization, blending, depth, stencil, and viewport commands and constants. */
         inline namespace State {
 
             /** @name Registry Constants @{ */
@@ -13777,6 +13810,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace State
 
+        /** @brief Debug-message control, labels, callbacks, and debug-group commands and constants. */
         inline namespace Debug {
 
             /** @name Registry Constants @{ */
@@ -14032,6 +14066,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Debug
 
+        /** @brief Compatibility-profile fixed-function and legacy evaluator commands and constants. */
         inline namespace FixedFunction {
 
             /** @name Registry Constants @{ */
@@ -14631,6 +14666,7 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace FixedFunction
 
+        /** @brief Miscellaneous extension commands not belonging to a narrower GL semantic domain. */
         inline namespace Misc {
 
             /** @name Registry Constants @{ */
@@ -19762,6 +19798,11 @@ namespace Sora::PAL::OpenGL {
 
         } // inline namespace Misc
 
+        /**
+         * @brief OpenGL command dispatch table for one current context.
+         * @details Members are grouped in the inline semantic namespaces above; the table itself is flat so that
+         * resolving and calling a function remains a single indirect load.
+         */
         struct API {
             glAccumFunction glAccum = nullptr;
             glAccumxOESFunction glAccumxOES = nullptr;
@@ -23077,7 +23118,10 @@ namespace Sora::PAL::OpenGL {
             glFramebufferParameteriMESAFunction glFramebufferParameteriMESA = nullptr;
             glGetFramebufferParameterivMESAFunction glGetFramebufferParameterivMESA = nullptr;
 
-            /** @brief Resolve every registry command through @p resolver. */
+            /**
+             * @brief Resolve every registry command through @p resolver.
+             * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
                 glAccum = reinterpret_cast<glAccumFunction>(resolver("glAccum"));
@@ -29346,6 +29390,10 @@ namespace Sora::PAL::OpenGL {
 
     } // namespace GL
 
+    /**
+     * @brief Windows OpenGL pixel-format, context, swap, and WGL extension ABI.
+     * @details WGL commands are valid only on Windows and are resolved independently from GL commands.
+     */
     namespace WGL {
 
         /** @name Registry Constants @{ */
@@ -30134,6 +30182,7 @@ namespace Sora::PAL::OpenGL {
         );
         /** @} */
 
+        /** @brief WGL dispatch table resolved for the process and target device context. */
         struct API {
             ChoosePixelFormatFunction ChoosePixelFormat = nullptr;
             DescribePixelFormatFunction DescribePixelFormat = nullptr;
@@ -30282,7 +30331,10 @@ namespace Sora::PAL::OpenGL {
             wglWaitForMscOMLFunction wglWaitForMscOML = nullptr;
             wglWaitForSbcOMLFunction wglWaitForSbcOML = nullptr;
 
-            /** @brief Resolve every registry command through @p resolver. */
+            /**
+             * @brief Resolve every WGL registry command through @p resolver.
+             * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
                 ChoosePixelFormat = reinterpret_cast<ChoosePixelFormatFunction>(resolver("ChoosePixelFormat"));
@@ -30601,6 +30653,10 @@ namespace Sora::PAL::OpenGL {
         };
     } // namespace WGL
 
+    /**
+     * @brief X11 GLX visual, context, drawable, and swap-control ABI.
+     * @details GLX is the X11 client binding; it is distinct from both Xlib/XCB window transport and EGL.
+     */
     namespace GLX {
 
         /** @name Registry Constants @{ */
@@ -31474,6 +31530,7 @@ namespace Sora::PAL::OpenGL {
         using glXWaitXFunction = void (SORA_OPENGL_APIENTRY*)();
         /** @} */
 
+        /** @brief GLX dispatch table resolved for one X11 display and context family. */
         struct API {
             glXAssociateDMPbufferSGIXFunction glXAssociateDMPbufferSGIX = nullptr;
             glXBindChannelToWindowSGIXFunction glXBindChannelToWindowSGIX = nullptr;
@@ -31610,7 +31667,10 @@ namespace Sora::PAL::OpenGL {
             glXWaitVideoSyncSGIFunction glXWaitVideoSyncSGI = nullptr;
             glXWaitXFunction glXWaitX = nullptr;
 
-            /** @brief Resolve every registry command through @p resolver. */
+            /**
+             * @brief Resolve every GLX registry command through @p resolver.
+             * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
                 glXAssociateDMPbufferSGIX =
@@ -31881,6 +31941,11 @@ namespace Sora::PAL::OpenGL {
         };
     } // namespace GLX
 
+    /**
+     * @brief EGL display, configuration, surface, synchronization, and platform-extension ABI.
+     * @details EGL commands are resolved against an EGL implementation and may be used with native window systems
+     * including Win32, X11, Wayland, Android, and device/display extensions.
+     */
     namespace EGL {
 
         /** @name Registry Constants @{ */
@@ -33279,6 +33344,7 @@ namespace Sora::PAL::OpenGL {
         using eglDestroyDisplayEXTFunction = EGLBoolean (SORA_OPENGL_APIENTRY*)(EGLDisplay dpy);
         /** @} */
 
+        /** @brief EGL dispatch table resolved for one EGL implementation. */
         struct API {
             eglBindAPIFunction eglBindAPI = nullptr;
             eglBindTexImageFunction eglBindTexImage = nullptr;
@@ -33439,7 +33505,10 @@ namespace Sora::PAL::OpenGL {
             eglQueryDeviceBinaryEXTFunction eglQueryDeviceBinaryEXT = nullptr;
             eglDestroyDisplayEXTFunction eglDestroyDisplayEXT = nullptr;
 
-            /** @brief Resolve every registry command through @p resolver. */
+            /**
+             * @brief Resolve every EGL registry command through @p resolver.
+             * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
                 eglBindAPI = reinterpret_cast<eglBindAPIFunction>(resolver("eglBindAPI"));

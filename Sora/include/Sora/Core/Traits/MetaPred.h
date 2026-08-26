@@ -23,7 +23,13 @@ namespace Sora::Meta {
 
     /**
      * @brief Test whether @p pred satisfies the arbitrary-arity meta-predicate protocol.
+     * @param[in] pred Reflection of the function to inspect.
      * @return @c true when @p pred is a function returning @c bool and every parameter accepts @c std::meta::info.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool Same(std::meta::info left, std::meta::info right) noexcept { return left == right; }
+     * static_assert(Sora::Meta::IsMetaPred(^^Same));
+     * @endcode
      */
     [[nodiscard]] consteval bool IsMetaPred(std::meta::info pred) {
         if (!std::meta::is_function(pred) || std::meta::return_type_of(pred) != ^^bool) {
@@ -120,7 +126,16 @@ namespace Sora::Meta {
 
 namespace Sora::Traits {
 
-    /** @brief Declared parameter count of reflected meta predicate @p Pred. */
+    /**
+     * @brief Declared parameter count of reflected meta predicate @p Pred.
+     * @tparam Pred Reflected predicate satisfying @ref Concept::MetaPred.
+     * @return Number of declared function parameters, including parameters with default arguments.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsPair(std::meta::info, std::meta::info) { return true; }
+     * static_assert(Sora::Traits::PredArity<^^IsPair> == 2);
+     * @endcode
+     */
     template<std::meta::info Pred>
         requires(Sora::Meta::IsMetaPred(Pred))
     inline constexpr std::size_t PredArity = std::meta::parameters_of(Pred).size();
@@ -129,11 +144,18 @@ namespace Sora::Traits {
 
 namespace Sora::Concept {
 
-    /** @brief True when @p Pred reflects an arbitrary-arity meta predicate. */
+    /**
+     * @brief True when @p Pred reflects an arbitrary-arity meta predicate.
+     * @tparam Pred Reflected function to inspect.
+     */
     template<std::meta::info Pred>
     concept MetaPred = Sora::Meta::IsMetaPred(Pred);
 
-    /** @brief True when @p Pred accepts exactly the reflected @p Arguments and returns bool. */
+    /**
+     * @brief True when @p Pred accepts exactly the reflected @p Arguments and returns bool.
+     * @tparam Pred Reflected predicate function.
+     * @tparam Arguments Reflected arguments used for the invocation check.
+     */
     template<std::meta::info Pred, std::meta::info... Arguments>
     concept PredFor = !Sora::Meta::IsMetaError(Sora::Meta::InvokePred(Pred, Arguments...));
 

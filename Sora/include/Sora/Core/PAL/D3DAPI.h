@@ -4,6 +4,21 @@
  * @ingroup PAL
  * @details Native structures and COM interfaces are generated from a pinned Windows SDK snapshot. COM methods remain
  * virtual interface calls; only actual DLL exports appear in the runtime tables.
+ *
+ * @par Example
+ * @code{.cpp}
+ * const auto& d3d12 = Sora::PAL::D3D::LoadD3D12API();
+ * if (d3d12.createDevice != nullptr) {
+ *     // Resolve the DLL entry point first; the returned device is then used through its COM vtable.
+ *     Sora::PAL::WindowsSystem::Handle adapter{};
+ *     Sora::PAL::WindowsSystem::Guid iid{};
+ *     void* device = nullptr;
+ *     auto hr = d3d12.createDevice(adapter, 0, iid, &device);
+ * }
+ * @endcode
+ *
+ * @note The example is schematic: @p adapter, @p featureLevel, and @p device are application-owned native values.
+ * Every function-table member is optional and must be checked before invocation.
  */
 #pragma once
 
@@ -16,6 +31,13 @@
 namespace Sora::PAL::D3D {
 
 #if defined(PLATFORM_WINDOWS)
+    /**
+     * @brief Resolve one exported Direct3D function through a typed symbol resolver.
+     * @tparam Function Function-pointer type to reconstruct from the native address.
+     * @param[in] resolver Callable receiving an ASCII export name and returning its address.
+     * @param[in] name Exact DLL export name.
+     * @return Typed function pointer, or null when the resolver cannot find @p name.
+     */
     template<typename Function>
     [[nodiscard]] Function ResolveD3DExport(auto&& resolver, const char* name) noexcept {
         static_assert(std::is_pointer_v<Function> && std::is_function_v<std::remove_pointer_t<Function>>);
@@ -36,6 +58,10 @@ namespace Sora::PAL::D3D {
         decltype(&Detail::D3D12CreateVersionedRootSignatureDeserializerFromSubobjectInLibrary)
             createVersionedRootSignatureDeserializerFromSubobjectInLibrary = nullptr;
 
+        /**
+         * @brief Resolve all D3D12 process-wide exports represented by this table.
+         * @param[in] resolver Callable receiving an export name and returning its address.
+         */
         void Resolve(auto&& resolver) noexcept {
             createDevice = ResolveD3DExport<decltype(createDevice)>(resolver, "D3D12CreateDevice");
             getDebugInterface = ResolveD3DExport<decltype(getDebugInterface)>(resolver, "D3D12GetDebugInterface");
@@ -65,6 +91,11 @@ namespace Sora::PAL::D3D {
         decltype(&Detail::DXGIGetDebugInterface1) getDebugInterface1 = nullptr;
         decltype(&Detail::DXGIDeclareAdapterRemovalSupport) declareAdapterRemovalSupport = nullptr;
 
+        /**
+         * @brief Resolve DXGI exports from the normal and debug DLLs.
+         * @param[in] resolver Resolver for dxgi.dll.
+         * @param[in] debugResolver Resolver for dxgidebug.dll.
+         */
         void Resolve(auto&& resolver, auto&& debugResolver) noexcept {
             createFactory = ResolveD3DExport<decltype(createFactory)>(resolver, "CreateDXGIFactory");
             createFactory1 = ResolveD3DExport<decltype(createFactory1)>(resolver, "CreateDXGIFactory1");
@@ -81,6 +112,10 @@ namespace Sora::PAL::D3D {
         using CreateAdapterFactoryFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefInterfaceId, void**);
         CreateAdapterFactoryFunction createAdapterFactory = nullptr;
 
+        /**
+         * @brief Resolve the DXCore adapter-factory export.
+         * @param[in] resolver Callable receiving an export name and returning its address.
+         */
         void Resolve(auto&& resolver) noexcept {
             createAdapterFactory =
                 ResolveD3DExport<decltype(createAdapterFactory)>(resolver, "DXCoreCreateAdapterFactory");
@@ -117,6 +152,10 @@ namespace Sora::PAL::D3D {
         SORA_D3D_COMPILER_EXPORT(disassemble10Effect, D3DDisassemble10Effect)
 #    undef SORA_D3D_COMPILER_EXPORT
 
+        /**
+         * @brief Resolve all legacy compiler exports represented by this table.
+         * @param[in] resolver Callable receiving an export name and returning its address.
+         */
         void Resolve(auto&& resolver) noexcept {
 #    define SORA_D3D_COMPILER_EXPORT(Member, Symbol) Member = ResolveD3DExport<decltype(Member)>(resolver, #Symbol);
             SORA_D3D_COMPILER_EXPORT(readFileToBlob, D3DReadFileToBlob)
@@ -153,6 +192,10 @@ namespace Sora::PAL::D3D {
         decltype(&Detail::DxcCreateInstance) createInstance = nullptr;
         decltype(&Detail::DxcCreateInstance2) createInstance2 = nullptr;
 
+        /**
+         * @brief Resolve the DXC component-factory exports.
+         * @param[in] resolver Callable receiving an export name and returning its address.
+         */
         void Resolve(auto&& resolver) noexcept {
             createInstance = ResolveD3DExport<decltype(createInstance)>(resolver, "DxcCreateInstance");
             createInstance2 = ResolveD3DExport<decltype(createInstance2)>(resolver, "DxcCreateInstance2");
@@ -166,10 +209,15 @@ namespace Sora::PAL::D3D {
     struct DXCAPI {};
 #endif
 
+    /** @brief Return the immutable process-wide D3D12 export table. */
     [[nodiscard]] const D3D12API& LoadD3D12API() noexcept;
+    /** @brief Return the immutable process-wide DXGI export table. */
     [[nodiscard]] const DXGIAPI& LoadDXGIAPI() noexcept;
+    /** @brief Return the immutable process-wide DXCore export table. */
     [[nodiscard]] const DXCoreAPI& LoadDXCoreAPI() noexcept;
+    /** @brief Return the immutable legacy d3dcompiler export table. */
     [[nodiscard]] const CompilerAPI& LoadD3DCompilerAPI() noexcept;
+    /** @brief Return the immutable dxcompiler export table. */
     [[nodiscard]] const DXCAPI& LoadDXCAPI() noexcept;
 
 } // namespace Sora::PAL::D3D

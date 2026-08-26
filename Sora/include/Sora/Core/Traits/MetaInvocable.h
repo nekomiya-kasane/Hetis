@@ -53,6 +53,10 @@ namespace Sora {
 
         /**
          * @brief Invoke @p Function or return @p Default when application fails.
+         * @tparam Default Reflected fallback returned for any `MetaError` result.
+         * @tparam Function Reflected template to apply.
+         * @tparam Arguments Reflected application arguments.
+         * @return Successful substitution result or @p Default.
          * @par Example
          * @code{.cpp}
          * static_assert(Meta::InvokeOr<^^void, ^^std::pair, ^^int> == ^^void);
@@ -92,7 +96,11 @@ namespace Sora {
         concept InvocableReturningType =
             Invocable<Function, ^^Arguments...> && std::meta::is_type(Invoke<Function, ^^Arguments...>);
 
-        /** @brief True when a reflected template can be substituted with @p Arguments. */
+        /**
+         * @brief True when a reflected template can be substituted with @p Arguments.
+         * @tparam Function Reflected template to inspect.
+         * @tparam Arguments Reflected application arguments.
+         */
         template<std::meta::info Function, std::meta::info... Arguments>
         concept DirectlyInvocable = std::meta::is_template(Function) &&
                                     std::meta::can_substitute(Function, {Arguments...});
@@ -134,6 +142,9 @@ namespace Sora {
 
         /**
          * @brief Invoke a reflected template with ordinary C++ type arguments.
+         * @tparam Function Reflected template to apply.
+         * @tparam Arguments Ordinary C++ argument types.
+         * @return Resulting C++ type, or the reflected `MetaError` type for a failed/non-type result.
          * @code{.cpp}
          * using Pair = Sora::Meta::InvokeResult<^^std::pair, int, double>;
          * static_assert(std::same_as<Pair, std::pair<int, double>>);
