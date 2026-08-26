@@ -33,9 +33,6 @@ namespace Sora {
              * @tparam Tag A reflected error-category entity, normally produced by `^^TagType`.
              * @tparam Contexts Reflected templates, values, types, members, or intermediate results.
              * @code{.cpp}
-             * #include <meta>
-             * #include <Sora/Core/Traits/MetaError.h>
-             *
              * struct MissingMember {};
              * using Failure = Sora::Meta::InfoType<
              *     ^^Sora::Meta::Error::MetaError<^^MissingMember, ^^int>>;

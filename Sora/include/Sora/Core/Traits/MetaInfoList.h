@@ -210,6 +210,13 @@ namespace Sora::Meta {
      * @param[in] left First sequence; its first occurrences keep precedence.
      * @param[in] right Second sequence.
      * @return `Unique(Concat(left, right))`, preserving first-occurrence order.
+     * @par Example
+     * @code{.cpp}
+     * constexpr Sora::Meta::InfoList a{^^int, ^^double, ^^int};
+     * constexpr Sora::Meta::InfoList b{^^double, ^^char};
+     * static_assert(Sora::Meta::Equal(Sora::Meta::SetUnion(a, b),
+     *                                  Sora::Meta::InfoList{^^int, ^^double, ^^char}));
+     * @endcode
      * @par Complexity Quadratic comparisons in the combined sequence length.
      */
     consteval InfoList SetUnion(const InfoList& left, const InfoList& right) {
@@ -221,6 +228,13 @@ namespace Sora::Meta {
      * @param[in] left Sequence whose order is preserved.
      * @param[in] right Membership sequence.
      * @return Unique entities occurring in both sequences, ordered by first occurrence in @p left.
+     * @par Example
+     * @code{.cpp}
+     * constexpr Sora::Meta::InfoList a{^^int, ^^double, ^^int};
+     * constexpr Sora::Meta::InfoList b{^^double, ^^char};
+     * static_assert(Sora::Meta::Equal(Sora::Meta::SetIntersection(a, b),
+     *                                  Sora::Meta::InfoList{^^double}));
+     * @endcode
      * @par Complexity Quadratic in the input lengths.
      */
     consteval InfoList SetIntersection(const InfoList& left, const InfoList& right) {
@@ -238,6 +252,12 @@ namespace Sora::Meta {
      * @param[in] left Sequence whose order is preserved.
      * @param[in] right Membership sequence.
      * @return Unique entities occurring in @p left but not @p right, ordered by first occurrence in @p left.
+     * @par Example
+     * @code{.cpp}
+     * constexpr Sora::Meta::InfoList a{^^int, ^^double, ^^int};
+     * constexpr Sora::Meta::InfoList b{^^double, ^^char};
+     * static_assert(Sora::Meta::Equal(Sora::Meta::SetDifference(a, b), Sora::Meta::InfoList{^^int}));
+     * @endcode
      * @par Complexity Quadratic in the input lengths.
      */
     consteval InfoList SetDifference(const InfoList& left, const InfoList& right) {

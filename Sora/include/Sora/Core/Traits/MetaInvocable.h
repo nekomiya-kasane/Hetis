@@ -31,10 +31,6 @@ namespace Sora {
          *
          * @par Example
          * @code{.cpp}
-         * #include <meta>
-         * #include <utility>
-         * #include <Sora/Core/Traits/MetaInvocable.h>
-         *
          * constexpr auto pairInfo = Sora::Meta::Invoke<^^std::pair, ^^int, ^^double>;
          * static_assert(pairInfo == ^^std::pair<int, double>);
          *
@@ -68,11 +64,6 @@ namespace Sora {
          * introduced.
          * @par Example
          * @code{.cpp}
-         * #include <meta>
-         * #include <type_traits>
-         * #include <utility>
-         * #include <Sora/Core/Traits/MetaInvocable.h>
-         *
          * static_assert(Sora::Meta::InvokeOr<^^void, ^^std::pair, ^^int> == ^^void);
          * static_assert(Sora::Meta::InvokeOr<^^void, ^^std::type_identity_t, ^^int> == ^^int);
          * @endcode
@@ -89,10 +80,6 @@ namespace Sora {
          * @tparam Arguments Reflected application arguments.
          * @par Example
          * @code{.cpp}
-         * #include <meta>
-         * #include <utility>
-         * #include <Sora/Core/Traits/MetaInvocable.h>
-         *
          * static_assert(Sora::Meta::Invocable<^^std::pair, ^^int, ^^double>);
          * static_assert(!Sora::Meta::Invocable<^^std::pair, ^^int>);
          * @endcode
@@ -106,10 +93,6 @@ namespace Sora {
          * @tparam Arguments Ordinary C++ types reflected for application.
          * @par Example
          * @code{.cpp}
-         * #include <meta>
-         * #include <utility>
-         * #include <Sora/Core/Traits/MetaInvocable.h>
-         *
          * static_assert(Sora::Meta::InvocableReturningType<^^std::pair, int, double>);
          * static_assert(!Sora::Meta::InvocableReturningType<^^std::pair, int>);
          * @endcode
@@ -139,10 +122,6 @@ namespace Sora {
              * @return @p Result when it is a type/error, otherwise a `NonTypeResultTag` error.
              * @par Example
              * @code{.cpp}
-             * #include <meta>
-             * #include <type_traits>
-             * #include <Sora/Core/Traits/MetaInvocable.h>
-             *
              * constexpr auto type = Sora::Meta::Detail::RequireType<^^int, ^^std::type_identity, ^^int>();
              * static_assert(type == ^^int);
              * @endcode
@@ -166,11 +145,6 @@ namespace Sora {
          * @details Recoverable substitution failures are preserved as types and do not throw a diagnostic.
          * @par Example
          * @code{.cpp}
-         * #include <concepts>
-         * #include <meta>
-         * #include <type_traits>
-         * #include <Sora/Core/Traits/MetaInvocable.h>
-         *
          * using Result = Sora::Meta::InvokeResultType<^^std::type_identity_t, ^^int>;
          * static_assert(std::same_as<Result, int>);
          * @endcode
@@ -186,11 +160,6 @@ namespace Sora {
          * @return Resulting C++ type, or the reflected `MetaError` type for a failed/non-type result.
          * @details Recoverable substitution failures remain type-level `MetaError` specializations and are not thrown.
          * @code{.cpp}
-         * #include <concepts>
-         * #include <meta>
-         * #include <utility>
-         * #include <Sora/Core/Traits/MetaInvocable.h>
-         *
          * using Pair = Sora::Meta::InvokeResult<^^std::pair, int, double>;
          * static_assert(std::same_as<Pair, std::pair<int, double>>);
          * @endcode

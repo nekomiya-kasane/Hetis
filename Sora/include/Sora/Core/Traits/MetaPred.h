@@ -27,9 +27,6 @@ namespace Sora::Meta {
      * @return @c true when @p pred is a function returning @c bool and every parameter accepts @c std::meta::info.
      * @par Example
      * @code{.cpp}
-     * #include <meta>
-     * #include <Sora/Core/Traits/MetaPred.h>
-     *
      * consteval bool Same(std::meta::info left, std::meta::info right) noexcept { return left == right; }
      * static_assert(Sora::Meta::IsMetaPred(^^Same));
      * @endcode
@@ -57,9 +54,6 @@ namespace Sora::Meta {
      * @tparam Arguments Reflected argument value types; each must be `std::meta::info`.
      * @return Reflected bool value or a reflection-native error.
      * @code{.cpp}
-     * #include <meta>
-     * #include <Sora/Core/Traits/MetaPred.h>
-     *
      * consteval bool Same(std::meta::info left, std::meta::info right) noexcept {
      *     return left == right;
      * }
@@ -146,9 +140,6 @@ namespace Sora::Traits {
      * @return Number of declared function parameters, including parameters with default arguments.
      * @par Example
      * @code{.cpp}
-     * #include <meta>
-     * #include <Sora/Core/Traits/MetaPred.h>
-     *
      * consteval bool IsPair(std::meta::info, std::meta::info) { return true; }
      * static_assert(Sora::Traits::PredArity<^^IsPair> == 2);
      * @endcode
