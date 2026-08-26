@@ -10,18 +10,20 @@
  *
  * @par Example
  * @code{.cpp}
- * auto loader = [](const char*) -> void* { return nullptr; };
- * auto resolve = [loader](const char* name) -> void* { return loader(name); };
- * Sora::PAL::OpenGL::GL::API gl;
- * gl.Resolve(resolve); // Resolve after making the target context current.
- * if (gl.glBindBuffer != nullptr) {
- *     Sora::PAL::OpenGL::GLuint buffer = 0;
- *     gl.glBindBuffer(Sora::PAL::OpenGL::GL::GL_ARRAY_BUFFER, buffer);
+ * #include <Sora/Core/PAL/OpenGLAPI.h>
+ *
+ * void ResolveCurrentContext(void* (*getProcAddress)(const char*)) {
+ *     Sora::PAL::OpenGL::GL::API gl;
+ *     gl.Resolve(getProcAddress); // The target native context must already be current.
+ *     if (gl.glBindBuffer != nullptr) {
+ *         Sora::PAL::OpenGL::GLuint buffer = 0;
+ *         gl.glBindBuffer(Sora::PAL::OpenGL::GL::GL_ARRAY_BUFFER, buffer);
+ *     }
  * }
  * @endcode
  *
- * @note @p loader is platform-specific (wglGetProcAddress, glXGetProcAddress, or eglGetProcAddress). A context
- * dependent table must not be shared across incompatible current contexts.
+ * @note @p getProcAddress is platform-specific (wglGetProcAddress, glXGetProcAddress, or eglGetProcAddress). A
+ * context-dependent table must not be shared across incompatible current contexts.
  */
 #pragma once
 
@@ -417,7 +419,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Buffer objects, vertex/index storage, and atomic-counter buffer commands and constants. */
         inline namespace Buffer {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ACCUM_BUFFER_BIT = 0x00000200;
             inline constexpr auto GL_ACTIVE_ATOMIC_COUNTER_BUFFERS = 0x92D9;
             inline constexpr auto GL_ARRAY_BUFFER = 0x8892;
@@ -766,7 +768,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_WEIGHT_ARRAY_BUFFER_BINDING_OES = 0x889E;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glAsyncCopyBufferSubDataNVXFunction = GLuint (SORA_OPENGL_APIENTRY*)(
                 GLsizei waitSemaphoreCount,
                 const GLuint* waitSemaphoreArray,
@@ -1394,7 +1396,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Texture object, image storage, and texture-parameter commands and constants. */
         inline namespace Texture {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_3D_COLOR_TEXTURE = 0x0603;
             inline constexpr auto GL_4D_COLOR_TEXTURE = 0x0604;
             inline constexpr auto GL_ACTIVE_TEXTURE = 0x84E0;
@@ -2067,7 +2069,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_VERTEX_TEXTURE = 0x829B;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glActiveTextureFunction = void (SORA_OPENGL_APIENTRY*)(GLenum texture);
             using glActiveTextureARBFunction = void (SORA_OPENGL_APIENTRY*)(GLenum texture);
             using glApplyTextureEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLenum mode);
@@ -5162,7 +5164,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Sampler object commands and sampler-state constants. */
         inline namespace Sampler {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_INT_SAMPLER_1D = 0x8DC9;
             inline constexpr auto GL_INT_SAMPLER_1D_ARRAY = 0x8DCE;
             inline constexpr auto GL_INT_SAMPLER_1D_ARRAY_EXT = 0x8DCE;
@@ -5255,7 +5257,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY_OES = 0x900F;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBindSamplerFunction = void (SORA_OPENGL_APIENTRY*)(GLuint unit, GLuint sampler);
             using glBindSamplersFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLuint first,
@@ -5359,7 +5361,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Framebuffer creation, attachment, and completeness commands and constants. */
         inline namespace Framebuffer {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_DRAW_FRAMEBUFFER = 0x8CA9;
             inline constexpr auto GL_DRAW_FRAMEBUFFER_ANGLE = 0x8CA9;
             inline constexpr auto GL_DRAW_FRAMEBUFFER_APPLE = 0x8CA9;
@@ -5490,7 +5492,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_RENDER_DIRECT_TO_FRAMEBUFFER_QCOM = 0x8FB3;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glApplyFramebufferAttachmentCMAAINTELFunction = void (SORA_OPENGL_APIENTRY*)();
             using glBindFramebufferFunction = void (SORA_OPENGL_APIENTRY*)(GLenum target, GLuint framebuffer);
             using glBindFramebufferEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLenum target, GLuint framebuffer);
@@ -5900,7 +5902,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Renderbuffer storage and attachment commands and constants. */
         inline namespace Renderbuffer {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_INT_SAMPLER_RENDERBUFFER_NV = 0x8E57;
             inline constexpr auto GL_MAX_RENDERBUFFER_SIZE = 0x84E8;
             inline constexpr auto GL_MAX_RENDERBUFFER_SIZE_EXT = 0x84E8;
@@ -5954,7 +5956,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_UNSIGNED_INT_SAMPLER_RENDERBUFFER_NV = 0x8E58;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBindRenderbufferFunction = void (SORA_OPENGL_APIENTRY*)(GLenum target, GLuint renderbuffer);
             using glBindRenderbufferEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLenum target, GLuint renderbuffer);
             using glBindRenderbufferOESFunction = void (SORA_OPENGL_APIENTRY*)(GLenum target, GLuint renderbuffer);
@@ -6133,7 +6135,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Vertex-array, attribute, and vertex-binding commands and constants. */
         inline namespace Vertex {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ACTIVE_VERTEX_UNITS_ARB = 0x86A5;
             inline constexpr auto GL_ATOMIC_COUNTER_BUFFER_REFERENCED_BY_VERTEX_SHADER = 0x92C7;
             inline constexpr auto GL_CLAMP_VERTEX_COLOR = 0x891A;
@@ -6415,7 +6417,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_VIEWPORT_INDEX_PROVOKING_VERTEX_OES = 0x825F;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBeginVertexShaderEXTFunction = void (SORA_OPENGL_APIENTRY*)();
             using glBindVertexArrayFunction = void (SORA_OPENGL_APIENTRY*)(GLuint array);
             using glBindVertexArrayAPPLEFunction = void (SORA_OPENGL_APIENTRY*)(GLuint array);
@@ -7753,7 +7755,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Shader creation, source, compilation, and shader-query commands and constants. */
         inline namespace Shader {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ALL_SHADER_BITS = 0xFFFFFFFF;
             inline constexpr auto GL_ALL_SHADER_BITS_EXT = 0xFFFFFFFF;
             inline constexpr auto GL_ATTACHED_SHADERS = 0x8B85;
@@ -7910,7 +7912,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_VALIDATE_SHADER_BINARY_QCOM = 0x96A3;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glActiveShaderProgramFunction = void (SORA_OPENGL_APIENTRY*)(GLuint pipeline, GLuint program);
             using glActiveShaderProgramEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLuint pipeline, GLuint program);
             using glAttachShaderFunction = void (SORA_OPENGL_APIENTRY*)(GLuint program, GLuint shader);
@@ -8053,7 +8055,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Program linking, validation, uniform-interface, and program-query commands and constants. */
         inline namespace Program {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ACTIVE_PROGRAM = 0x8259;
             inline constexpr auto GL_ACTIVE_PROGRAM_EXT = 0x8259;
             inline constexpr auto GL_COMPUTE_PROGRAM_NV = 0x90FB;
@@ -8173,7 +8175,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_TRANSPOSE_PROGRAM_MATRIX_EXT = 0x8E2E;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glActiveProgramEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLuint program);
             using glAreProgramsResidentNVFunction = GLboolean (SORA_OPENGL_APIENTRY*)(
                 GLsizei n,
@@ -9658,7 +9660,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Program-pipeline creation and pipeline-state commands and constants. */
         inline namespace Pipeline {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_PROGRAM_PIPELINE = 0x82E4;
             inline constexpr auto GL_PROGRAM_PIPELINE_BINDING = 0x825A;
             inline constexpr auto GL_PROGRAM_PIPELINE_BINDING_EXT = 0x825A;
@@ -9666,7 +9668,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_PROGRAM_PIPELINE_OBJECT_EXT = 0x8A4F;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBindProgramPipelineFunction = void (SORA_OPENGL_APIENTRY*)(GLuint pipeline);
             using glBindProgramPipelineEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLuint pipeline);
             using glCreateProgramPipelinesFunction = void (SORA_OPENGL_APIENTRY*)(GLsizei n, GLuint* pipelines);
@@ -9710,7 +9712,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Uniform upload, uniform-block, and uniform-location commands and constants. */
         inline namespace Uniform {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ACTIVE_SUBROUTINE_UNIFORMS = 0x8DE6;
             inline constexpr auto GL_ACTIVE_SUBROUTINE_UNIFORM_LOCATIONS = 0x8E47;
             inline constexpr auto GL_ACTIVE_SUBROUTINE_UNIFORM_MAX_LENGTH = 0x8E49;
@@ -9820,7 +9822,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_UNIFORM_TYPE = 0x8A37;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glGetActiveSubroutineUniformNameFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLuint program,
                 GLenum shadertype,
@@ -10621,7 +10623,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Image load/store, image-unit binding, and image-format commands and constants. */
         inline namespace Image {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_HANDLE_TYPE_D3D11_IMAGE_EXT = 0x958B;
             inline constexpr auto GL_HANDLE_TYPE_D3D11_IMAGE_KMT_EXT = 0x958C;
             inline constexpr auto GL_IMAGE_1D = 0x904C;
@@ -10755,7 +10757,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_UNSIGNED_INT_IMAGE_CUBE_MAP_ARRAY_OES = 0x906A;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glAsyncCopyImageSubDataNVXFunction = GLuint (SORA_OPENGL_APIENTRY*)(
                 GLsizei waitSemaphoreCount,
                 const GLuint* waitSemaphoreArray,
@@ -10957,7 +10959,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Explicit memory-object allocation, mapping, and residency commands and constants. */
         inline namespace Memory {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ATTACHED_MEMORY_OBJECT_NV = 0x95A4;
             inline constexpr auto GL_ATTACHED_MEMORY_OFFSET_NV = 0x95A5;
             inline constexpr auto GL_CONSERVE_MEMORY_HINT_PGI = 0x1A1FD;
@@ -10986,7 +10988,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_VBO_FREE_MEMORY_ATI = 0x87FB;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glCreateMemoryObjectsEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLsizei n, GLuint* memoryObjects);
             using glDeleteMemoryObjectsEXTFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLsizei n,
@@ -11050,7 +11052,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Query-object and conditional-render commands and constants. */
         inline namespace Query {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_CURRENT_OCCLUSION_QUERY_ID_NV = 0x8865;
             inline constexpr auto GL_CURRENT_QUERY = 0x8865;
             inline constexpr auto GL_CURRENT_QUERY_ARB = 0x8865;
@@ -11114,7 +11116,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_QUERY_WAIT_NV = 0x8E13;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBeginOcclusionQueryNVFunction = void (SORA_OPENGL_APIENTRY*)(GLuint id);
             using glBeginPerfQueryINTELFunction = void (SORA_OPENGL_APIENTRY*)(GLuint queryHandle);
             using glBeginQueryFunction = void (SORA_OPENGL_APIENTRY*)(GLenum target, GLuint id);
@@ -11262,7 +11264,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Fence and synchronization-object commands and constants. */
         inline namespace Sync {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ASYNC_DRAW_PIXELS_SGIX = 0x835D;
             inline constexpr auto GL_ASYNC_HISTOGRAM_SGIX = 0x832C;
             inline constexpr auto GL_ASYNC_MARKER_SGIX = 0x8329;
@@ -11303,7 +11305,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_TIMELINE_SEMAPHORE_VALUE_NV = 0x9595;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glAsyncMarkerSGIXFunction = void (SORA_OPENGL_APIENTRY*)(GLuint marker);
             using glClientWaitSemaphoreui64NVXFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLsizei fenceObjectCount,
@@ -11456,7 +11458,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Transform-feedback object and capture commands and constants. */
         inline namespace TransformFeedback {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_MAX_TRANSFORM_FEEDBACK_BUFFERS = 0x8E70;
             inline constexpr auto GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS = 0x8C8A;
             inline constexpr auto GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS_EXT = 0x8C8A;
@@ -11513,7 +11515,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH_EXT = 0x8C76;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBeginTransformFeedbackFunction = void (SORA_OPENGL_APIENTRY*)(GLenum primitiveMode);
             using glBeginTransformFeedbackEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLenum primitiveMode);
             using glBeginTransformFeedbackNVFunction = void (SORA_OPENGL_APIENTRY*)(GLenum primitiveMode);
@@ -11622,7 +11624,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Direct, indirect, instanced, and multi-draw commands and constants. */
         inline namespace Draw {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ALLOW_DRAW_FRG_HINT_PGI = 0x1A210;
             inline constexpr auto GL_ALLOW_DRAW_MEM_HINT_PGI = 0x1A211;
             inline constexpr auto GL_ALLOW_DRAW_OBJ_HINT_PGI = 0x1A20E;
@@ -11650,7 +11652,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_STREAM_DRAW_ARB = 0x88E0;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glDispatchComputeFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLuint num_groups_x,
                 GLuint num_groups_y,
@@ -12251,7 +12253,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Pixel transfer, pack/unpack, and image readback commands and constants. */
         inline namespace Pixel {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ALL_PIXELS_AMD = 0xFFFFFFFF;
             inline constexpr auto GL_CLIENT_PIXEL_STORE_BIT = 0x00000001;
             inline constexpr auto GL_COPY_PIXEL_TOKEN = 0x0706;
@@ -12363,7 +12365,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_WRITE_PIXEL_DATA_RANGE_POINTER_NV = 0x887C;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glClearPixelLocalStorageuiEXTFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLsizei offset,
                 GLsizei n,
@@ -12519,7 +12521,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Context state, rasterization, blending, depth, stencil, and viewport commands and constants. */
         inline namespace State {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_ACTIVE_STENCIL_FACE_EXT = 0x8911;
             inline constexpr auto GL_ADD_BLEND_IMG = 0x8C09;
             inline constexpr auto GL_ALIASED_LINE_WIDTH_RANGE = 0x846E;
@@ -13050,7 +13052,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_WIDE_LINE_HINT_PGI = 0x1A222;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glActiveStencilFaceEXTFunction = void (SORA_OPENGL_APIENTRY*)(GLenum face);
             using glAddClientPointerRangeMESAFunction = void (SORA_OPENGL_APIENTRY*)(void* addr, GLsizeiptr size);
             using glBinormalPointerEXTFunction = void (SORA_OPENGL_APIENTRY*)(
@@ -13814,7 +13816,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Debug-message control, labels, callbacks, and debug-group commands and constants. */
         inline namespace Debug {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_CONTEXT_FLAG_DEBUG_BIT = 0x00000002;
             inline constexpr auto GL_CONTEXT_FLAG_DEBUG_BIT_KHR = 0x00000002;
             inline constexpr auto GL_DEBUG_ASSERT_MESA = 0x875B;
@@ -13905,7 +13907,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_MAX_DEBUG_MESSAGE_LENGTH_KHR = 0x9143;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glDebugMessageCallbackFunction = void (SORA_OPENGL_APIENTRY*)(
                 GLDEBUGPROC callback,
                 const void* userParam
@@ -14070,7 +14072,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Compatibility-profile fixed-function and legacy evaluator commands and constants. */
         inline namespace FixedFunction {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_AUTO_NORMAL = 0x0D80;
             inline constexpr auto GL_BACK_NORMALS_HINT_PGI = 0x1A223;
             inline constexpr auto GL_BINORMAL_ARRAY_EXT = 0x843A;
@@ -14332,7 +14334,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_WRITEONLY_RENDERING_QCOM = 0x8823;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glBeginFunction = void (SORA_OPENGL_APIENTRY*)(GLenum mode);
             using glBeginConditionalRenderFunction = void (SORA_OPENGL_APIENTRY*)(GLuint id, GLenum mode);
             using glBeginConditionalRenderNVFunction = void (SORA_OPENGL_APIENTRY*)(GLuint id, GLenum mode);
@@ -14670,7 +14672,7 @@ namespace Sora::PAL::OpenGL {
         /** @brief Miscellaneous extension commands not belonging to a narrower GL semantic domain. */
         inline namespace Misc {
 
-            /** @name Registry Constants @{ */
+            /** @name Registry Constants */ /** @{ */
             inline constexpr auto GL_1PASS_EXT = 0x80A1;
             inline constexpr auto GL_1PASS_SGIS = 0x80A1;
             inline constexpr auto GL_2D = 0x0600;
@@ -17480,7 +17482,7 @@ namespace Sora::PAL::OpenGL {
             inline constexpr auto GL_Z_EXT = 0x87D7;
             /** @} */
 
-            /** @name Function Pointer Types @{ */
+            /** @name Function Pointer Types */ /** @{ */
             using glAccumFunction = void (SORA_OPENGL_APIENTRY*)(GLenum op, GLfloat value);
             using glAccumxOESFunction = void (SORA_OPENGL_APIENTRY*)(GLenum op, GLfixed value);
             using glActiveVaryingNVFunction = void (SORA_OPENGL_APIENTRY*)(GLuint program, const GLchar* name);
@@ -19801,8 +19803,9 @@ namespace Sora::PAL::OpenGL {
 
         /**
          * @brief OpenGL command dispatch table for one current context.
-         * @details Members are grouped in the inline semantic namespaces above; the table itself is flat so that
-         * resolving and calling a function remains a single indirect load.
+         * @details Members are grouped in the inline semantic namespaces above; the table itself is flat
+         * so that resolving and calling a function remains a single indirect load. The table owns no
+         * context or library and must not outlive its compatible context implementation.
          */
         struct API {
             glAccumFunction glAccum = nullptr;
@@ -23121,7 +23124,10 @@ namespace Sora::PAL::OpenGL {
 
             /**
              * @brief Resolve every registry command through @p resolver.
+             * @tparam Resolver Callable accepting a command name and returning its address.
              * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             * @pre A compatible OpenGL context is current on the calling thread.
+             * @note Unsupported core-version and extension commands remain null.
              */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
@@ -29397,7 +29403,7 @@ namespace Sora::PAL::OpenGL {
      */
     namespace WGL {
 
-        /** @name Registry Constants @{ */
+        /** @name Registry Constants */ /** @{ */
         inline constexpr auto ERROR_INCOMPATIBLE_AFFINITY_MASKS_NV = 0x20D0;
         inline constexpr auto ERROR_INCOMPATIBLE_DEVICE_CONTEXTS_ARB = 0x2054;
         inline constexpr auto ERROR_INVALID_PIXEL_TYPE_ARB = 0x2043;
@@ -29698,7 +29704,7 @@ namespace Sora::PAL::OpenGL {
         inline constexpr auto WGL_VIDEO_OUT_STACKED_FIELDS_2_1 = 0x20CC;
         /** @} */
 
-        /** @name Function Pointer Types @{ */
+        /** @name Function Pointer Types */ /** @{ */
         using ChoosePixelFormatFunction = int (SORA_OPENGL_APIENTRY*)(HDC hDc, const PIXELFORMATDESCRIPTOR* pPfd);
         using DescribePixelFormatFunction = int (SORA_OPENGL_APIENTRY*)(
             HDC hdc,
@@ -30183,7 +30189,11 @@ namespace Sora::PAL::OpenGL {
         );
         /** @} */
 
-        /** @brief WGL dispatch table resolved for the process and target device context. */
+        /**
+         * @brief WGL dispatch table resolved for its native context family.
+         * @details The table owns no native display, drawable, surface, or context. Resolved addresses
+         * must not be reused with an incompatible native context implementation.
+         */
         struct API {
             ChoosePixelFormatFunction ChoosePixelFormat = nullptr;
             DescribePixelFormatFunction DescribePixelFormat = nullptr;
@@ -30334,7 +30344,10 @@ namespace Sora::PAL::OpenGL {
 
             /**
              * @brief Resolve every WGL registry command through @p resolver.
+             * @tparam Resolver Callable accepting a WGL command name and returning
+             * its address.
              * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             * @note Unsupported core-version and extension commands remain null.
              */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
@@ -30660,7 +30673,7 @@ namespace Sora::PAL::OpenGL {
      */
     namespace GLX {
 
-        /** @name Registry Constants @{ */
+        /** @name Registry Constants */ /** @{ */
         inline constexpr auto GLX_3DFX_FULLSCREEN_MODE_MESA = 0x2;
         inline constexpr auto GLX_3DFX_WINDOW_MODE_MESA = 0x1;
         inline constexpr auto GLX_ACCUM_ALPHA_SIZE = 17;
@@ -30957,7 +30970,7 @@ namespace Sora::PAL::OpenGL {
         inline constexpr auto __GLX_NUMBER_EVENTS = 17;
         /** @} */
 
-        /** @name Function Pointer Types @{ */
+        /** @name Function Pointer Types */ /** @{ */
         using glXAssociateDMPbufferSGIXFunction = Bool (SORA_OPENGL_APIENTRY*)(
             Display* dpy,
             GLXPbufferSGIX pbuffer,
@@ -31531,7 +31544,11 @@ namespace Sora::PAL::OpenGL {
         using glXWaitXFunction = void (SORA_OPENGL_APIENTRY*)();
         /** @} */
 
-        /** @brief GLX dispatch table resolved for one X11 display and context family. */
+        /**
+         * @brief GLX dispatch table resolved for its native context family.
+         * @details The table owns no native display, drawable, surface, or context. Resolved addresses
+         * must not be reused with an incompatible native context implementation.
+         */
         struct API {
             glXAssociateDMPbufferSGIXFunction glXAssociateDMPbufferSGIX = nullptr;
             glXBindChannelToWindowSGIXFunction glXBindChannelToWindowSGIX = nullptr;
@@ -31670,7 +31687,10 @@ namespace Sora::PAL::OpenGL {
 
             /**
              * @brief Resolve every GLX registry command through @p resolver.
+             * @tparam Resolver Callable accepting a GLX command name and returning
+             * its address.
              * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             * @note Unsupported core-version and extension commands remain null.
              */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
@@ -31949,7 +31969,7 @@ namespace Sora::PAL::OpenGL {
      */
     namespace EGL {
 
-        /** @name Registry Constants @{ */
+        /** @name Registry Constants */ /** @{ */
         inline constexpr auto EGL_ALLOC_NEW_DISPLAY_EXT = 0x3379;
         inline constexpr auto EGL_ALPHA_FORMAT = 0x3088;
         inline constexpr auto EGL_ALPHA_FORMAT_NONPRE = 0x308B;
@@ -32646,7 +32666,7 @@ namespace Sora::PAL::OpenGL {
         inline constexpr auto EGL_Y_INVERTED_NOK = 0x307F;
         /** @} */
 
-        /** @name Function Pointer Types @{ */
+        /** @name Function Pointer Types */ /** @{ */
         using eglBindAPIFunction = EGLBoolean (SORA_OPENGL_APIENTRY*)(EGLenum api);
         using eglBindTexImageFunction = EGLBoolean (SORA_OPENGL_APIENTRY*)(
             EGLDisplay dpy,
@@ -33345,7 +33365,11 @@ namespace Sora::PAL::OpenGL {
         using eglDestroyDisplayEXTFunction = EGLBoolean (SORA_OPENGL_APIENTRY*)(EGLDisplay dpy);
         /** @} */
 
-        /** @brief EGL dispatch table resolved for one EGL implementation. */
+        /**
+         * @brief EGL dispatch table resolved for its native context family.
+         * @details The table owns no native display, drawable, surface, or context. Resolved addresses
+         * must not be reused with an incompatible native context implementation.
+         */
         struct API {
             eglBindAPIFunction eglBindAPI = nullptr;
             eglBindTexImageFunction eglBindTexImage = nullptr;
@@ -33508,7 +33532,10 @@ namespace Sora::PAL::OpenGL {
 
             /**
              * @brief Resolve every EGL registry command through @p resolver.
+             * @tparam Resolver Callable accepting an EGL command name and returning
+             * its address.
              * @param[in] resolver Callable receiving an ASCII command name and returning its address.
+             * @note Unsupported core-version and extension commands remain null.
              */
             template<typename Resolver>
             void Resolve(Resolver&& resolver) noexcept {
@@ -33858,11 +33885,20 @@ namespace Sora::PAL::OpenGL {
     using GLXAPI = GLX::API;
     using EGLAPI = EGL::API;
 
-    /** @brief Return process-exported WGL entry points; extension entries remain context-dependent. */
+    /**
+     * @brief Return process-exported WGL entry points; extension entries remain context-dependent.
+     * @return Immutable process-lifetime table; unavailable exports remain null.
+     */
     [[nodiscard]] const WGLAPI& LoadWGLAPI() noexcept;
-    /** @brief Return the process-lifetime GLX table resolved through libGL and glXGetProcAddress. */
+    /**
+     * @brief Return the process-lifetime GLX table resolved through libGL and glXGetProcAddress.
+     * @return Immutable process-lifetime table; unavailable exports remain null.
+     */
     [[nodiscard]] const GLXAPI& LoadGLXAPI() noexcept;
-    /** @brief Return the process-lifetime EGL table resolved through libEGL and eglGetProcAddress. */
+    /**
+     * @brief Return the process-lifetime EGL table resolved through libEGL and eglGetProcAddress.
+     * @return Immutable process-lifetime table; unavailable exports remain null.
+     */
     [[nodiscard]] const EGLAPI& LoadEGLAPI() noexcept;
 
 } // namespace Sora::PAL::OpenGL
@@ -33871,7 +33907,7 @@ namespace Sora::PAL::OpenGL {
 
 namespace Sora::PAL::OpenGL::Detail {
 
-    /** @name Generated Registry Type Coverage Anchors @{ */
+    /** @name Generated Registry Type Coverage Anchors */ /** @{ */
     using RegistryType000 = AHardwareBuffer;
     using RegistryType001 = BOOL;
     using RegistryType002 = Bool;

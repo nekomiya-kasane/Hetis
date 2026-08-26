@@ -21,26 +21,33 @@ namespace Sora {
          * @brief Apply a reflected template and propagate its first error input.
          *
          * @details
-         * \[
+         * @f[
          * I(F,A)=
          * \begin{cases} E_i & E_i\text{ is the first error in }(F,A),\\
          * \operatorname{substitute}(F,A) & \operatorname{can\_substitute}(F,A),\\
          * \operatorname{MetaError}(\mathrm{NonInvocable},F,A) & \text{otherwise.}
          * \end{cases}
-         * \]
+         * @f]
          *
          * @par Example
          * @code{.cpp}
-         * constexpr auto pairInfo = Meta::Invoke<^^std::pair, ^^int, ^^double>;
+         * #include <meta>
+         * #include <utility>
+         * #include <Sora/Core/Traits/MetaInvocable.h>
+         *
+         * constexpr auto pairInfo = Sora::Meta::Invoke<^^std::pair, ^^int, ^^double>;
          * static_assert(pairInfo == ^^std::pair<int, double>);
          *
-         * constexpr auto invalidInfo = Meta::Invoke<^^std::pair, ^^int>;
-         * static_assert(Meta::IsMetaError(invalidInfo));
+         * constexpr auto invalidInfo = Sora::Meta::Invoke<^^std::pair, ^^int>;
+         * static_assert(Sora::Meta::IsMetaError(invalidInfo));
          * @endcode
+         * @tparam Function Reflected template to apply.
+         * @tparam Arguments Reflected application arguments.
+         * @return Substitution result, first input error, or `NonInvocableTag` with invocation provenance.
          */
         template<std::meta::info Function, std::meta::info... Arguments>
         inline constexpr std::meta::info Invoke = [] consteval {
-            constexpr auto error = FirstMetaErrorInfo<Function, Arguments...>();
+            constexpr auto error = FirstMetaError<Function, Arguments...>();
             if constexpr (error != std::meta::info{}) {
                 return error;
             } else if constexpr (std::meta::is_template(Function) &&
@@ -57,10 +64,17 @@ namespace Sora {
          * @tparam Function Reflected template to apply.
          * @tparam Arguments Reflected application arguments.
          * @return Successful substitution result or @p Default.
+         * @details A failed application is represented by the supplied fallback; no runtime branch or exception is
+         * introduced.
          * @par Example
          * @code{.cpp}
-         * static_assert(Meta::InvokeOr<^^void, ^^std::pair, ^^int> == ^^void);
-         * static_assert(Meta::InvokeOr<^^void, ^^std::type_identity_t, ^^int> == ^^int);
+         * #include <meta>
+         * #include <type_traits>
+         * #include <utility>
+         * #include <Sora/Core/Traits/MetaInvocable.h>
+         *
+         * static_assert(Sora::Meta::InvokeOr<^^void, ^^std::pair, ^^int> == ^^void);
+         * static_assert(Sora::Meta::InvokeOr<^^void, ^^std::type_identity_t, ^^int> == ^^int);
          * @endcode
          */
         template<std::meta::info Default, std::meta::info Function, std::meta::info... Arguments>
@@ -75,8 +89,12 @@ namespace Sora {
          * @tparam Arguments Reflected application arguments.
          * @par Example
          * @code{.cpp}
-         * static_assert(Meta::Invocable<^^std::pair, ^^int, ^^double>);
-         * static_assert(!Meta::Invocable<^^std::pair, ^^int>);
+         * #include <meta>
+         * #include <utility>
+         * #include <Sora/Core/Traits/MetaInvocable.h>
+         *
+         * static_assert(Sora::Meta::Invocable<^^std::pair, ^^int, ^^double>);
+         * static_assert(!Sora::Meta::Invocable<^^std::pair, ^^int>);
          * @endcode
          */
         template<std::meta::info Function, std::meta::info... Arguments>
@@ -88,8 +106,12 @@ namespace Sora {
          * @tparam Arguments Ordinary C++ types reflected for application.
          * @par Example
          * @code{.cpp}
-         * static_assert(Meta::InvocableReturningType<^^std::pair, int, double>);
-         * static_assert(!Meta::InvocableReturningType<^^std::pair, int>);
+         * #include <meta>
+         * #include <utility>
+         * #include <Sora/Core/Traits/MetaInvocable.h>
+         *
+         * static_assert(Sora::Meta::InvocableReturningType<^^std::pair, int, double>);
+         * static_assert(!Sora::Meta::InvocableReturningType<^^std::pair, int>);
          * @endcode
          */
         template<std::meta::info Function, typename... Arguments>
@@ -100,6 +122,7 @@ namespace Sora {
          * @brief True when a reflected template can be substituted with @p Arguments.
          * @tparam Function Reflected template to inspect.
          * @tparam Arguments Reflected application arguments.
+         * @return `true` when direct substitution is well-formed; input `MetaError` values are not propagated.
          */
         template<std::meta::info Function, std::meta::info... Arguments>
         concept DirectlyInvocable =
@@ -109,9 +132,18 @@ namespace Sora {
 
             /**
              * @brief Convert a successful result to a type or a typed-result error.
+             * @details Internal helper; callers should use @ref InvokeResultType or @ref InvokeResult.
+             * @tparam Result Reflected invocation result to validate.
+             * @tparam Function Reflected function recorded in failure provenance.
+             * @tparam Arguments Reflected arguments recorded in failure provenance.
+             * @return @p Result when it is a type/error, otherwise a `NonTypeResultTag` error.
              * @par Example
              * @code{.cpp}
-             * constexpr auto type = Detail::RequireType<^^int, ^^std::type_identity, ^^int>();
+             * #include <meta>
+             * #include <type_traits>
+             * #include <Sora/Core/Traits/MetaInvocable.h>
+             *
+             * constexpr auto type = Sora::Meta::Detail::RequireType<^^int, ^^std::type_identity, ^^int>();
              * static_assert(type == ^^int);
              * @endcode
              */
@@ -130,9 +162,16 @@ namespace Sora {
          * @brief Type projection of @ref Invoke; a non-type result becomes `NonTypeResultTag`.
          * @tparam Function Reflected template to apply.
          * @tparam Arguments Reflected application arguments.
+         * @return Resulting C++ type or the corresponding type-level `MetaError` specialization.
+         * @details Recoverable substitution failures are preserved as types and do not throw a diagnostic.
          * @par Example
          * @code{.cpp}
-         * using Result = Meta::InvokeResultType<^^std::type_identity_t, ^^int>;
+         * #include <concepts>
+         * #include <meta>
+         * #include <type_traits>
+         * #include <Sora/Core/Traits/MetaInvocable.h>
+         *
+         * using Result = Sora::Meta::InvokeResultType<^^std::type_identity_t, ^^int>;
          * static_assert(std::same_as<Result, int>);
          * @endcode
          */
@@ -145,7 +184,13 @@ namespace Sora {
          * @tparam Function Reflected template to apply.
          * @tparam Arguments Ordinary C++ argument types.
          * @return Resulting C++ type, or the reflected `MetaError` type for a failed/non-type result.
+         * @details Recoverable substitution failures remain type-level `MetaError` specializations and are not thrown.
          * @code{.cpp}
+         * #include <concepts>
+         * #include <meta>
+         * #include <utility>
+         * #include <Sora/Core/Traits/MetaInvocable.h>
+         *
          * using Pair = Sora::Meta::InvokeResult<^^std::pair, int, double>;
          * static_assert(std::same_as<Pair, std::pair<int, double>>);
          * @endcode

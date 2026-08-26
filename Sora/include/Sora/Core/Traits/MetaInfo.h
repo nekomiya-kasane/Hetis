@@ -19,6 +19,10 @@ namespace Sora::Meta {
      *
      * @tparam Info Reflection of a type entity.
      * @code{.cpp}
+     * #include <concepts>
+     * #include <meta>
+     * #include <Sora/Core/Traits/MetaInfo.h>
+     *
      * using Integer = Sora::Meta::InfoType<^^int>;
      * static_assert(std::same_as<Integer, int>);
      * @endcode

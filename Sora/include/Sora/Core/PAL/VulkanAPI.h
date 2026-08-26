@@ -9,6 +9,8 @@
  *
  * @par Example
  * @code{.cpp}
+ * #include <Sora/Core/PAL/VulkanAPI.h>
+ *
  * void ResolveLiveObjects(Sora::PAL::Vulkan::VkInstance instance, Sora::PAL::Vulkan::VkDevice device) {
  *     const auto& loader = Sora::PAL::Vulkan::LoadVulkanAPI();
  *     if (loader.vkGetInstanceProcAddr == nullptr) return;
@@ -23,6 +25,8 @@
  *
  * @note @p instance and @p device are application-owned handles. The resolver functions must remain valid for the
  * duration of table construction; the resulting tables should be discarded before their dispatch domain is destroyed.
+ * @note Dispatch tables own no Vulkan object and do not provide synchronization; callers must obey Vulkan's external
+ * synchronization rules for every handle and command.
  */
 #pragma once
 #include <Sora/Core/PAL/SystemAPI.h>
@@ -30303,7 +30307,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
         /**
          * @brief Resolve every loader command through @p resolve.
          * @tparam Resolver Callable accepting a null-terminated Vulkan command name and returning its address.
-         * @param[in] resolve Loader-export resolver whose returned addresses remain valid for the process lifetime.
+         * @param[in] resolve Resolver whose returned addresses remain valid for the Vulkan loader process lifetime.
+         * @note Unsupported core-version and extension commands remain null. This table owns no dispatch object.
          */
         template<typename Resolver>
         void Resolve(Resolver&& resolve) noexcept {
@@ -30436,6 +30441,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
         PFN_vkReleaseDisplayEXT vkReleaseDisplayEXT = nullptr;
         PFN_vkSubmitDebugUtilsMessageEXT vkSubmitDebugUtilsMessageEXT = nullptr;
 
+        /**
+         * @brief Resolve every instance command through @p resolve.
+         * @tparam Resolver Callable accepting a null-terminated Vulkan command name and returning its address.
+         * @param[in] resolve Resolver whose returned addresses remain valid for the captured live instance.
+         * @note Unsupported core-version and extension commands remain null. This table owns no dispatch object.
+         */
         template<typename Resolver>
         void Resolve(Resolver&& resolve) noexcept {
             vkAcquireDrmDisplayEXT = reinterpret_cast<PFN_vkAcquireDrmDisplayEXT>(resolve("vkAcquireDrmDisplayEXT"));
@@ -31262,6 +31273,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
         PFN_vkWriteResourceDescriptorsEXT vkWriteResourceDescriptorsEXT = nullptr;
         PFN_vkWriteSamplerDescriptorsEXT vkWriteSamplerDescriptorsEXT = nullptr;
 
+        /**
+         * @brief Resolve every device command through @p resolve.
+         * @tparam Resolver Callable accepting a null-terminated Vulkan command name and returning its address.
+         * @param[in] resolve Resolver whose returned addresses remain valid for the captured live device.
+         * @note Unsupported core-version and extension commands remain null. This table owns no dispatch object.
+         */
         template<typename Resolver>
         void Resolve(Resolver&& resolve) noexcept {
             vkAcquireFullScreenExclusiveModeEXT = reinterpret_cast<PFN_vkAcquireFullScreenExclusiveModeEXT>(resolve("vkAcquireFullScreenExclusiveModeEXT"));
@@ -31970,7 +31987,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
     /**
      * @brief Return the immutable process-wide loader dispatch table.
      * @return Process-lifetime table; members are null when the Vulkan loader or command is unavailable.
-     * @threadsafe Initialization is synchronized and the returned table is immutable.
+     * @note Initialization is thread-safe and the returned table is immutable.
      */
     [[nodiscard]] const LoaderAPI& LoadVulkanAPI() noexcept;
     /**

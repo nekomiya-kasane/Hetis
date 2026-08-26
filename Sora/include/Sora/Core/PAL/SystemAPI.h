@@ -7,10 +7,14 @@
  * must test optional entry points before invoking them because an older operating system may not export them.
  *
  * @code{.cpp}
+ * #include <Sora/Core/PAL/SystemAPI.h>
+ *
+ * #if defined(PLATFORM_WINDOWS)
  * const Sora::PAL::ThreadSystemAPI& api = Sora::PAL::LoadThreadSystemAPI();
  * if (api.getCurrentThread != nullptr && api.setThreadDescription != nullptr) {
  *     api.setThreadDescription(api.getCurrentThread(), L"worker");
  * }
+ * #endif
  * @endcode
  *
  * @par Window-system selection
@@ -34,9 +38,11 @@
  *
  * @note Linux exposes Xlib, XCB, and Wayland as separate client ABIs. Xlib and XCB both speak the X11 protocol,
  * but their connection objects and event ownership rules cannot be mixed. The PAL therefore exposes independent
- * tables and preserves the chosen backend in @ref NativeWindowView.
+ * tables and preserves the chosen backend in @c NativeWindowView.
+ * @note All connection, window, surface, and module lifetimes remain owned by the caller; PAL tables are non-owning
+ * views over dynamically resolved entry points.
  *
- * @note @ref Module owns the native dynamic-loader bootstrap and typed symbol lookup. Loader bootstrap primitives and
+ * @note @c Module owns the native dynamic-loader bootstrap and typed symbol lookup. Loader bootstrap primitives and
  * immediate last-error capture are the only system entry points called directly because they cannot resolve
  * themselves, and symbol resolution can overwrite the error state that must be captured.
  */
@@ -244,11 +250,11 @@ namespace Sora::PAL {
 
     /** @brief Concrete native client ABI carried by a non-owning window view. */
     enum class NativeWindowBackend : uint8_t {
-        Unknown = 0,
-        Win32,
-        Xlib,
-        Xcb,
-        Wayland,
+        Unknown = 0, /**< No native window ABI has been selected. */
+        Win32,       /**< Win32 HWND and USER32 message-queue ABI. */
+        Xlib,        /**< Xlib Display and Window ABI over the X11 protocol. */
+        Xcb,         /**< XCB connection and window-id ABI over the X11 protocol. */
+        Wayland,     /**< Wayland display, proxy, and surface ABI. */
     };
 
     /** @brief Non-owning native view required by a window backend or Vulkan WSI adapter. */
@@ -276,21 +282,22 @@ namespace Sora::PAL {
             return false;
         }
 
+        /** @brief Return @ref IsValid so a view can be tested directly in a condition. */
         [[nodiscard]] constexpr explicit operator bool() const noexcept { return IsValid(); }
     };
 
     /** @brief Capabilities that a native window backend may expose without implying semantic equivalence. */
     enum class WindowSystemFeature : uint64_t {
-        None = 0,
-        WindowCreation = uint64_t{1} << 0,
-        EventQueue = uint64_t{1} << 1,
-        WindowPosition = uint64_t{1} << 2,
-        WindowResize = uint64_t{1} << 3,
-        WindowState = uint64_t{1} << 4,
-        PointerCapture = uint64_t{1} << 5,
-        TextInput = uint64_t{1} << 6,
-        VulkanSurface = uint64_t{1} << 7,
-        DisplayFd = uint64_t{1} << 8,
+        None = 0,                          /**< No optional capability. */
+        WindowCreation = uint64_t{1} << 0, /**< Create and destroy top-level native windows. */
+        EventQueue = uint64_t{1} << 1,     /**< Poll or dispatch native window-system events. */
+        WindowPosition = uint64_t{1} << 2, /**< Move a native window in global or parent coordinates. */
+        WindowResize = uint64_t{1} << 3,   /**< Resize a native window. */
+        WindowState = uint64_t{1} << 4,    /**< Map, minimize, maximize, or otherwise change window state. */
+        PointerCapture = uint64_t{1} << 5, /**< Capture, confine, or warp the pointing device. */
+        TextInput = uint64_t{1} << 6,      /**< Translate native key events through a text-input method. */
+        VulkanSurface = uint64_t{1} << 7,  /**< Supply handles required by the matching Vulkan WSI extension. */
+        DisplayFd = uint64_t{1} << 8,      /**< Expose a pollable display-connection file descriptor. */
     };
 
     /** @brief Raw feature mask for one dynamically loaded native window backend. */
@@ -299,8 +306,14 @@ namespace Sora::PAL {
         NativeWindowBackend backend = NativeWindowBackend::Unknown;
         uint64_t features = 0;
 
+        /**
+         * @brief Return whether every bit in @p feature is declared by this backend.
+         * @param[in] feature Feature bit or bitwise-combined mask to test.
+         * @return `true` when all requested bits are present; `None` is not considered a capability.
+         */
         [[nodiscard]] constexpr bool Supports(WindowSystemFeature feature) const noexcept {
-            return (features & std::to_underlying(feature)) != 0;
+            const auto requested = std::to_underlying(feature);
+            return requested != 0 && (features & requested) == requested;
         }
     };
 
@@ -1287,40 +1300,39 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved socket-runtime, endpoint, option, and readiness operations. */
     struct SocketSystemAPI {
-        using StartupFunction       = int(__stdcall*)(uint16_t, WSAData*);
-        using CleanupFunction       = int(__stdcall*)();
-        using GetLastErrorFunction  = int(__stdcall*)();
-        using SetLastErrorFunction  = void(__stdcall*)(int);
-        using SocketFunction        = WindowsSystem::Socket(__stdcall*)(int, int, int);
-        using CloseFunction         = int(__stdcall*)(WindowsSystem::Socket);
-        using BindFunction          = int(__stdcall*)(WindowsSystem::Socket, const sockaddr*, int);
-        using NameFunction          = int(__stdcall*)(WindowsSystem::Socket, sockaddr*, int*);
-        using OptionFunction        = int(__stdcall*)(WindowsSystem::Socket, int, int, const char*, int);
-        using GetOptionFunction     = int(__stdcall*)(WindowsSystem::Socket, int, int, char*, int*);
-        using IoctlFunction         = int(__stdcall*)(WindowsSystem::Socket, long, unsigned long*);
-        using PollFunction          = int(__stdcall*)(WindowsSystem::NativePollDescriptor*, unsigned long, int);
-        using GetAddressInfoFunction =
-            int(__stdcall*)(const char*, const char*, const addrinfo*, addrinfo**);
+        using StartupFunction = int(__stdcall*)(uint16_t, WSAData*);
+        using CleanupFunction = int(__stdcall*)();
+        using GetLastErrorFunction = int(__stdcall*)();
+        using SetLastErrorFunction = void(__stdcall*)(int);
+        using SocketFunction = WindowsSystem::Socket(__stdcall*)(int, int, int);
+        using CloseFunction = int(__stdcall*)(WindowsSystem::Socket);
+        using BindFunction = int(__stdcall*)(WindowsSystem::Socket, const sockaddr*, int);
+        using NameFunction = int(__stdcall*)(WindowsSystem::Socket, sockaddr*, int*);
+        using OptionFunction = int(__stdcall*)(WindowsSystem::Socket, int, int, const char*, int);
+        using GetOptionFunction = int(__stdcall*)(WindowsSystem::Socket, int, int, char*, int*);
+        using IoctlFunction = int(__stdcall*)(WindowsSystem::Socket, long, unsigned long*);
+        using PollFunction = int(__stdcall*)(WindowsSystem::NativePollDescriptor*, unsigned long, int);
+        using GetAddressInfoFunction = int(__stdcall*)(const char*, const char*, const addrinfo*, addrinfo**);
         using FreeAddressInfoFunction = void(__stdcall*)(addrinfo*);
-        using GetNameInfoFunction =
-            int(__stdcall*)(const sockaddr*, int, char*, unsigned long, char*, unsigned long, int);
+        using GetNameInfoFunction = int(__stdcall*)(const sockaddr*, int, char*, unsigned long, char*, unsigned long,
+                                                    int);
 
-        StartupFunction startup = nullptr;       /**< Initialize the process socket runtime; Windows only. */
-        CleanupFunction cleanup = nullptr;       /**< Release the process socket runtime; Windows only. */
-        GetLastErrorFunction getLastError = nullptr; /**< Capture the calling thread's Winsock error code. */
-        SetLastErrorFunction setLastError = nullptr; /**< Replace the calling thread's Winsock error code. */
-        SocketFunction create = nullptr;         /**< Create one native socket. */
-        CloseFunction close = nullptr;           /**< Close one native socket. */
-        BindFunction bind = nullptr;             /**< Bind one local endpoint. */
-        NameFunction getSocketName = nullptr;    /**< Query the local endpoint assigned to a socket. */
-        NameFunction getPeerName = nullptr;      /**< Query the connected peer endpoint. */
-        OptionFunction setOption = nullptr;      /**< Set one socket option. */
-        GetOptionFunction getOption = nullptr;   /**< Query one socket option. */
-        IoctlFunction ioctl = nullptr;           /**< Apply a native non-blocking or control operation. */
-        PollFunction poll = nullptr;             /**< Wait for readiness on a bounded descriptor array. */
-        GetAddressInfoFunction getAddressInfo = nullptr; /**< Resolve a numeric or named endpoint. */
+        StartupFunction startup = nullptr;                 /**< Initialize the process socket runtime; Windows only. */
+        CleanupFunction cleanup = nullptr;                 /**< Release the process socket runtime; Windows only. */
+        GetLastErrorFunction getLastError = nullptr;       /**< Capture the calling thread's Winsock error code. */
+        SetLastErrorFunction setLastError = nullptr;       /**< Replace the calling thread's Winsock error code. */
+        SocketFunction create = nullptr;                   /**< Create one native socket. */
+        CloseFunction close = nullptr;                     /**< Close one native socket. */
+        BindFunction bind = nullptr;                       /**< Bind one local endpoint. */
+        NameFunction getSocketName = nullptr;              /**< Query the local endpoint assigned to a socket. */
+        NameFunction getPeerName = nullptr;                /**< Query the connected peer endpoint. */
+        OptionFunction setOption = nullptr;                /**< Set one socket option. */
+        GetOptionFunction getOption = nullptr;             /**< Query one socket option. */
+        IoctlFunction ioctl = nullptr;                     /**< Apply a native non-blocking or control operation. */
+        PollFunction poll = nullptr;                       /**< Wait for readiness on a bounded descriptor array. */
+        GetAddressInfoFunction getAddressInfo = nullptr;   /**< Resolve a numeric or named endpoint. */
         FreeAddressInfoFunction freeAddressInfo = nullptr; /**< Release an address-resolution list. */
-        GetNameInfoFunction getNameInfo = nullptr; /**< Format one native endpoint as host/service text. */
+        GetNameInfoFunction getNameInfo = nullptr;         /**< Format one native endpoint as host/service text. */
 
         /** @brief Address families understood by the socket table. */
         enum class Family : int { Unspecified = 0, IPv4 = 2, IPv6 = 23 };
@@ -1356,12 +1368,12 @@ namespace Sora::PAL {
         using SendFunction = int(__stdcall*)(WindowsSystem::Socket, const char*, int, int);
         using ShutdownFunction = int(__stdcall*)(WindowsSystem::Socket, int);
 
-        ListenFunction listen = nullptr;       /**< Mark a stream socket as a passive listener. */
-        AcceptFunction accept = nullptr;       /**< Accept one pending stream connection. */
-        ConnectFunction connect = nullptr;     /**< Establish one stream connection. */
-        SendFunction send = nullptr;           /**< Send bytes; partial writes are reported explicitly. */
-        TransferFunction receive = nullptr;    /**< Receive bytes; zero denotes an orderly peer close. */
-        ShutdownFunction shutdown = nullptr;   /**< Disable one or both directions of a stream. */
+        ListenFunction listen = nullptr;     /**< Mark a stream socket as a passive listener. */
+        AcceptFunction accept = nullptr;     /**< Accept one pending stream connection. */
+        ConnectFunction connect = nullptr;   /**< Establish one stream connection. */
+        SendFunction send = nullptr;         /**< Send bytes; partial writes are reported explicitly. */
+        TransferFunction receive = nullptr;  /**< Receive bytes; zero denotes an orderly peer close. */
+        ShutdownFunction shutdown = nullptr; /**< Disable one or both directions of a stream. */
     };
 
     /** @brief Dynamically resolved connectionless datagram operations. */
@@ -1369,8 +1381,8 @@ namespace Sora::PAL {
         using SendToFunction = int(__stdcall*)(WindowsSystem::Socket, const char*, int, int, const sockaddr*, int);
         using ReceiveFromFunction = int(__stdcall*)(WindowsSystem::Socket, char*, int, int, sockaddr*, int*);
 
-        SendToFunction sendTo = nullptr;              /**< Send one datagram to an explicit endpoint. */
-        ReceiveFromFunction receiveFrom = nullptr;   /**< Receive one datagram and return its source endpoint. */
+        SendToFunction sendTo = nullptr;           /**< Send one datagram to an explicit endpoint. */
+        ReceiveFromFunction receiveFrom = nullptr; /**< Receive one datagram and return its source endpoint. */
     };
 
     /** @brief Capture the calling thread's native error slot without triggering lazy symbol resolution. */
@@ -2029,9 +2041,9 @@ namespace Sora::PAL {
         /** @brief POSIX dynamic-loader binding and visibility flags. */
         inline namespace Module {
 
-            inline constexpr int kDynamicLazy   = 0x00000001;
-            inline constexpr int kDynamicNow    = 0x00000002;
-            inline constexpr int kDynamicLocal  = 0x00000004;
+            inline constexpr int kDynamicLazy = 0x00000001;
+            inline constexpr int kDynamicNow = 0x00000002;
+            inline constexpr int kDynamicLocal = 0x00000004;
             inline constexpr int kDynamicGlobal = kIsLinux ? 0x00000100 : 0x00000008;
 
         } // namespace Module
@@ -2040,25 +2052,25 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX socket-runtime, endpoint, option, and readiness operations. */
     struct SocketSystemAPI {
-        using StartupFunction = int(*)(uint16_t, void*);
-        using CleanupFunction = int(*)();
-        using GetLastErrorFunction = int(*)();
-        using SetLastErrorFunction = void(*)(int);
-        using SocketFunction = PosixSystem::Socket(*)(int, int, int);
-        using CloseFunction = int(*)(PosixSystem::Socket);
-        using BindFunction = int(*)(PosixSystem::Socket, const sockaddr*, PosixSystem::SocketLength);
-        using NameFunction = int(*)(PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*);
-        using OptionFunction = int(*)(PosixSystem::Socket, int, int, const void*, PosixSystem::SocketLength);
-        using GetOptionFunction = int(*)(PosixSystem::Socket, int, int, void*, PosixSystem::SocketLength*);
-        using IoctlFunction = int(*)(PosixSystem::Socket, unsigned long, void*);
-        using PollFunction = int(*)(PosixSystem::NativePollDescriptor*, PosixSystem::PollCount, int);
-        using GetAddressInfoFunction = int(*)(const char*, const char*, const addrinfo*, addrinfo**);
-        using FreeAddressInfoFunction = void(*)(addrinfo*);
-        using GetNameInfoFunction = int(*)(const sockaddr*, PosixSystem::SocketLength, char*,
-                                           PosixSystem::SocketLength, char*, PosixSystem::SocketLength, int);
+        using StartupFunction = int (*)(uint16_t, void*);
+        using CleanupFunction = int (*)();
+        using GetLastErrorFunction = int (*)();
+        using SetLastErrorFunction = void (*)(int);
+        using SocketFunction = PosixSystem::Socket (*)(int, int, int);
+        using CloseFunction = int (*)(PosixSystem::Socket);
+        using BindFunction = int (*)(PosixSystem::Socket, const sockaddr*, PosixSystem::SocketLength);
+        using NameFunction = int (*)(PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*);
+        using OptionFunction = int (*)(PosixSystem::Socket, int, int, const void*, PosixSystem::SocketLength);
+        using GetOptionFunction = int (*)(PosixSystem::Socket, int, int, void*, PosixSystem::SocketLength*);
+        using IoctlFunction = int (*)(PosixSystem::Socket, unsigned long, void*);
+        using PollFunction = int (*)(PosixSystem::NativePollDescriptor*, PosixSystem::PollCount, int);
+        using GetAddressInfoFunction = int (*)(const char*, const char*, const addrinfo*, addrinfo**);
+        using FreeAddressInfoFunction = void (*)(addrinfo*);
+        using GetNameInfoFunction = int (*)(const sockaddr*, PosixSystem::SocketLength, char*,
+                                            PosixSystem::SocketLength, char*, PosixSystem::SocketLength, int);
 
-        StartupFunction startup = nullptr; /**< POSIX requires no process socket-runtime initialization. */
-        CleanupFunction cleanup = nullptr; /**< POSIX requires no process socket-runtime cleanup. */
+        StartupFunction startup = nullptr;           /**< POSIX requires no process socket-runtime initialization. */
+        CleanupFunction cleanup = nullptr;           /**< POSIX requires no process socket-runtime cleanup. */
         GetLastErrorFunction getLastError = nullptr; /**< POSIX reports socket failures through @c errno. */
         SetLastErrorFunction setLastError = nullptr; /**< POSIX reports socket failures through @c errno. */
         SocketFunction create = nullptr;
@@ -2109,13 +2121,12 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX TCP byte-stream operations. */
     struct TcpSystemAPI {
-        using ListenFunction = int(*)(PosixSystem::Socket, int);
-        using AcceptFunction =
-            PosixSystem::Socket(*)(PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*);
-        using ConnectFunction = int(*)(PosixSystem::Socket, const sockaddr*, PosixSystem::SocketLength);
-        using TransferFunction = PosixSystem::ByteCount(*)(PosixSystem::Socket, void*, size_t, int);
-        using SendFunction = PosixSystem::ByteCount(*)(PosixSystem::Socket, const void*, size_t, int);
-        using ShutdownFunction = int(*)(PosixSystem::Socket, int);
+        using ListenFunction = int (*)(PosixSystem::Socket, int);
+        using AcceptFunction = PosixSystem::Socket (*)(PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*);
+        using ConnectFunction = int (*)(PosixSystem::Socket, const sockaddr*, PosixSystem::SocketLength);
+        using TransferFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, void*, size_t, int);
+        using SendFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, const void*, size_t, int);
+        using ShutdownFunction = int (*)(PosixSystem::Socket, int);
 
         ListenFunction listen = nullptr;
         AcceptFunction accept = nullptr;
@@ -2127,10 +2138,10 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX UDP datagram operations. */
     struct UdpSystemAPI {
-        using SendToFunction = PosixSystem::ByteCount(*)(PosixSystem::Socket, const void*, size_t, int,
-                                                         const sockaddr*, PosixSystem::SocketLength);
-        using ReceiveFromFunction = PosixSystem::ByteCount(*)(PosixSystem::Socket, void*, size_t, int, sockaddr*,
-                                                              PosixSystem::SocketLength*);
+        using SendToFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, const void*, size_t, int,
+                                                          const sockaddr*, PosixSystem::SocketLength);
+        using ReceiveFromFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, void*, size_t, int, sockaddr*,
+                                                               PosixSystem::SocketLength*);
 
         SendToFunction sendTo = nullptr;
         ReceiveFromFunction receiveFrom = nullptr;

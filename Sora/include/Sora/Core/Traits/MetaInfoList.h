@@ -5,7 +5,7 @@
  *
  * @details `InfoList` is the non-owning sequence representation used by Sora's reflection algorithms. Its elements
  * may reflect types, values, templates, functions, members, or namespaces. Storage must have static lifetime;
- * initializer-list construction and @ref Promote arrange that lifetime through `std::define_static_array`.
+ * initializer-list construction and @c Promote arrange that lifetime through `std::define_static_array`.
  *
  * Structural algorithms return new static sequences and never require their elements to be types. Type-only
  * validation belongs to the `TypeList` projection boundary.
@@ -50,7 +50,7 @@ namespace Sora::Meta {
      * invariants. Prefer the constructors and @ref Promote.
      */
     struct InfoList {
-        using value_type = std::meta::info;
+        using value_type = std::meta::info;       /**< Reflection entity stored by each sequence element. */
         using const_iterator = const value_type*; /**< Iterator over static reflected entities. */
         static constexpr std::size_t npos = static_cast<std::size_t>(-1); /**< Missing-index sentinel. */
 
@@ -98,6 +98,8 @@ namespace Sora::Meta {
 
         /**
          * @brief Return the entity at @p index without bounds checking.
+         * @param[in] index Zero-based entity index.
+         * @return Reference to the entity in static storage.
          * @pre `index < size()`.
          */
         [[nodiscard]] consteval const value_type& operator[](std::size_t index) const noexcept { return first[index]; }
@@ -148,6 +150,8 @@ namespace Sora::Meta {
      * @brief Promote a sized compile-time reflection range into static storage.
      * @param[in] items Range copied by `std::define_static_array`.
      * @return Static view preserving source order; empty input returns the canonical empty view.
+     * @details The returned view refers to storage owned by the constant-evaluation environment. It is safe to copy
+     * the view, but callers must not construct it from a temporary range whose elements do not have static lifetime.
      */
     consteval InfoList Promote(auto&& items)
         requires std::ranges::sized_range<decltype(items)> &&
@@ -199,6 +203,51 @@ namespace Sora::Meta {
             }
         }
         return Promote(result);
+    }
+
+    /**
+     * @brief Return the stable union of two reflection sequences.
+     * @param[in] left First sequence; its first occurrences keep precedence.
+     * @param[in] right Second sequence.
+     * @return `Unique(Concat(left, right))`, preserving first-occurrence order.
+     * @par Complexity Quadratic comparisons in the combined sequence length.
+     */
+    consteval InfoList SetUnion(const InfoList& left, const InfoList& right) {
+        return Unique(Concat(left, right));
+    }
+
+    /**
+     * @brief Return the stable intersection of two reflection sequences.
+     * @param[in] left Sequence whose order is preserved.
+     * @param[in] right Membership sequence.
+     * @return Unique entities occurring in both sequences, ordered by first occurrence in @p left.
+     * @par Complexity Quadratic in the input lengths.
+     */
+    consteval InfoList SetIntersection(const InfoList& left, const InfoList& right) {
+        std::vector<std::meta::info> result;
+        for (const auto entity : left) {
+            if (std::ranges::find(right, entity) != right.end() && std::ranges::find(result, entity) == result.end()) {
+                result.push_back(entity);
+            }
+        }
+        return result.empty() ? InfoList{} : Promote(result);
+    }
+
+    /**
+     * @brief Return the stable difference of two reflection sequences.
+     * @param[in] left Sequence whose order is preserved.
+     * @param[in] right Membership sequence.
+     * @return Unique entities occurring in @p left but not @p right, ordered by first occurrence in @p left.
+     * @par Complexity Quadratic in the input lengths.
+     */
+    consteval InfoList SetDifference(const InfoList& left, const InfoList& right) {
+        std::vector<std::meta::info> result;
+        for (const auto entity : left) {
+            if (std::ranges::find(right, entity) == right.end() && std::ranges::find(result, entity) == result.end()) {
+                result.push_back(entity);
+            }
+        }
+        return result.empty() ? InfoList{} : Promote(result);
     }
 
     /**

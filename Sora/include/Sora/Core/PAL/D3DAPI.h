@@ -7,21 +7,23 @@
  *
  * @par Example
  * @code{.cpp}
+ * #include <type_traits>
+ * #include <Sora/Core/PAL/D3DAPI.h>
+ *
  * #if defined(PLATFORM_WINDOWS)
  * const auto& d3d12 = Sora::PAL::D3D::LoadD3D12API();
  * if (d3d12.createDevice != nullptr) {
- *     Sora::PAL::WindowsSystem::Unknown* adapter = nullptr;
- *     Sora::PAL::WindowsSystem::Guid iid{};
- *     void* device = nullptr;
- *     const auto hr = d3d12.createDevice(
- *         adapter, Sora::PAL::D3D::Detail::D3D_FEATURE_LEVEL{}, iid, &device);
- *     (void)hr;
+ *     using CreateDevice = decltype(d3d12.createDevice);
+ *     static_assert(std::is_pointer_v<CreateDevice>);
+ *     // The callable's ABI uses Sora::PAL::WindowsSystem native types.
  * }
  * #endif
  * @endcode
  *
  * @note Native outputs and COM interfaces are application-owned and follow their Windows SDK lifetime rules. Every
  * function-table member is optional and must be checked before invocation.
+ * @note The example is an ABI smoke test; actual device creation still requires a live adapter, feature level, and
+ * interface identifier selected by the application.
  * @note On non-Windows targets the table types remain available as empty placeholders so portable declarations do not
  * require preprocessor branching; Direct3D operations themselves are unavailable.
  */

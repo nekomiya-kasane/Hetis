@@ -10,9 +10,6 @@
  *
  * @par Example
  * @code{.cpp}
- * #include <concepts>
- * #include <meta>
- *
  * using Input = Sora::Traits::TypeList<int, double>;
  * constexpr auto infos = Sora::Meta::ToInfoList(^^Input);
  * constexpr auto reflected = Sora::Meta::ToTypeList(infos);
@@ -53,7 +50,12 @@ namespace Sora {
             static constexpr std::size_t size = sizeof...(Types);             /**< Number of represented types. */
             static constexpr bool empty = size == 0;                          /**< Whether the pack is empty. */
 
-            /** @brief Return the type at zero-based @p Index. */
+            /**
+             * @brief Return the type at zero-based @p Index.
+             * @tparam Index Type index in `[0, size)`.
+             * @return The selected pack element type.
+             * @note The alias is not a viable specialization when @p Index is out of range.
+             */
             template<std::size_t Index>
                 requires(Index < size)
             using At = Types...[Index];
@@ -66,6 +68,7 @@ namespace Sora {
         /**
          * @brief Return whether @p info reflects a `Traits::TypeList` specialization.
          * @param[in] info Reflection to inspect; aliases are dealiased before matching.
+         * @return `true` exactly for a specialization of `Traits::TypeList`.
          */
         [[nodiscard]] consteval bool IsTypeList(std::meta::info info) noexcept {
             info = std::meta::dealias(info);

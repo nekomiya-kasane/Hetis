@@ -8,8 +8,9 @@
  * boundary. This keeps reflection traversal, error propagation, and C++ type formation as separate layers.
  *
  * Every algorithm obeys the first-error law: the first `MetaError` in function, explicit arguments, then sequence
- * order is returned unchanged. `Meta::Map` and its peers form the `InfoList` algorithm kernel. `Meta::Types` contains
- * the reflected `Traits::TypeList` adapters, keeping braced `InfoList` calls unambiguous while preserving short names.
+ * order is returned unchanged. `Meta::Map` and its peers form the `InfoList` algorithm kernel. Structural set
+ * operations live in `MetaInfoList.h`; higher-order operations such as `FlatMap` and conditional replacement live
+ * here. `Meta::Types` contains the reflected `Traits::TypeList` adapters, keeping the type boundary explicit.
  *
  * C++26 reflection does not expose a template's parameter list, so parameter kind, arity, and constraints are
  * validated by the first actual substitution. Empty `Map` and `Zip` validate only the template category; empty folds
@@ -19,11 +20,6 @@
  *
  * @par InfoList pipeline
  * @code{.cpp}
- * #include <concepts>
- * #include <meta>
- * #include <type_traits>
- * #include <variant>
- *
  * constexpr Sora::Meta::InfoList input{^^int, ^^double, ^^const double};
  * constexpr auto decayed = Sora::Meta::RequireInfoList(Sora::Meta::Map(^^std::decay_t, input));
  * constexpr auto unique = Sora::Meta::Unique(decayed);
@@ -34,11 +30,6 @@
  *
  * @par TypeList pipeline
  * @code{.cpp}
- * #include <concepts>
- * #include <meta>
- * #include <type_traits>
- * #include <variant>
- *
  * using Input = Sora::Traits::TypeList<int, double, const double>;
  * using Result = Sora::Traits::Apply<^^std::variant,
  *     Sora::Traits::Unique<Sora::Traits::Map<^^std::decay_t, Input>>>;
@@ -48,10 +39,6 @@
  *
  * @par Higher-order composition and errors
  * @code{.cpp}
- * #include <concepts>
- * #include <meta>
- * #include <type_traits>
- *
  * constexpr auto decayPointer = Sora::Meta::Compose<^^std::add_pointer_t, ^^std::decay_t>;
  * using Pointer = Sora::Meta::InvokeResult<decayPointer, const int&>;
  * constexpr auto error = Sora::Meta::Map(^^std::pair, Sora::Meta::InfoList{^^int});
@@ -314,6 +301,105 @@ namespace Sora::Meta {
             }
         }
         return Reflect(Promote(output));
+    }
+
+    /**
+     * @brief Flatten the reflected `InfoList` returned for every input entity.
+     * @param[in] function Reflected unary template whose result must be an `InfoList` value.
+     * @param[in] input Source sequence; entities need not be types.
+     * @return Concatenated reflected `InfoList`, the first mapper error, `NonInfoListResultTag`, or a nested input
+     * error.
+     * @details The mapper result for each entity is validated before the next entity is visited. Nested `MetaError`
+     * values are propagated unchanged instead of being silently flattened.
+     * @par Complexity Linear in input and produced sequence lengths, excluding substitution cost.
+     */
+    [[nodiscard]] consteval std::meta::info FlatMap(std::meta::info function, const InfoList& input) {
+        if (IsMetaError(function)) {
+            return function;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+            return error;
+        }
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
+        std::vector<std::meta::info> output;
+        for (const auto value : input) {
+            const std::array arguments{value};
+            const auto mapped = Detail::Apply(function, arguments);
+            if (IsMetaError(mapped)) {
+                return mapped;
+            }
+            if (!IsInfoList(mapped)) {
+                return MakeMetaError(^^Error::NonInfoListResultTag, {function, value, mapped});
+            }
+            const auto mappedList = RequireInfoList(mapped);
+            if (const auto error = FirstMetaError(mappedList); error != std::meta::info{}) {
+                return error;
+            }
+            output.insert(output.end(), mappedList.begin(), mappedList.end());
+        }
+        return Reflect(output.empty() ? InfoList{} : Promote(output));
+    }
+
+    /**
+     * @brief Replace every entity accepted by a reflected unary predicate.
+     * @param[in] pred Reflected unary meta predicate.
+     * @param[in] replacement Entity inserted for each accepted input.
+     * @param[in] input Source sequence.
+     * @return Reflected stable sequence, or the first predicate/input error.
+     */
+    [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
+                                                      const InfoList& input) {
+        if (IsMetaError(pred) || IsMetaError(replacement)) {
+            return IsMetaError(pred) ? pred : replacement;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+            return error;
+        }
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            return error;
+        }
+        std::vector<std::meta::info> output;
+        output.reserve(input.size());
+        for (const auto value : input) {
+            const auto accepted = InvokePred(pred, value);
+            if (IsMetaError(accepted)) {
+                return accepted;
+            }
+            output.push_back(std::meta::extract<bool>(accepted) ? replacement : value);
+        }
+        return Reflect(Promote(output));
+    }
+
+    /**
+     * @brief Remove every entity accepted by a reflected unary predicate.
+     * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence.
+     * @return Reflected stable subsequence, or the first predicate/input error.
+     */
+    [[nodiscard]] consteval std::meta::info RemoveIf(std::meta::info pred, const InfoList& input) {
+        if (IsMetaError(pred)) {
+            return pred;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+            return error;
+        }
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            return error;
+        }
+        std::vector<std::meta::info> output;
+        output.reserve(input.size());
+        for (const auto value : input) {
+            const auto accepted = InvokePred(pred, value);
+            if (IsMetaError(accepted)) {
+                return accepted;
+            }
+            if (!std::meta::extract<bool>(accepted)) {
+                output.push_back(value);
+            }
+        }
+        return Reflect(output.empty() ? InfoList{} : Promote(output));
     }
 
     /**
@@ -601,9 +687,84 @@ namespace Sora::Meta {
                 if (!IsTypeList(list)) {
                     return MakeMetaError(^^Error::InvalidSequenceTag, {list});
                 }
-                output.append_range(ToInfoList(list));
+                const auto types = ToInfoList(list);
+                if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                    return error;
+                }
+                output.append_range(types);
             }
             return ToTypeList(output);
+        }
+
+        /**
+         * @brief Union reflected `TypeList` operands with stable first-occurrence order.
+         * @param[in] lists Sequence of reflected `Traits::TypeList` specializations.
+         * @return Reflected union `TypeList`, or the first validation/error result.
+         */
+        [[nodiscard]] consteval std::meta::info SetUnion(const InfoList& lists) {
+            if (const auto error = FirstMetaError(lists); error != std::meta::info{}) {
+                return error;
+            }
+            std::vector<std::meta::info> types;
+            for (const auto list : lists) {
+                if (!IsTypeList(list)) {
+                    return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+                }
+                const auto values = ToInfoList(list);
+                if (const auto error = FirstMetaError(values); error != std::meta::info{}) {
+                    return error;
+                }
+                types.insert(types.end(), values.begin(), values.end());
+            }
+            return ToTypeList(Sora::Meta::Unique(Promote(types)));
+        }
+
+        /**
+         * @brief Intersect reflected `TypeList` operands from left to right.
+         * @param[in] left Reflected `TypeList` whose order is preserved.
+         * @param[in] right Reflected `TypeList` used for membership.
+         * @return Reflected intersection `TypeList`, or the first validation/error result.
+         */
+        [[nodiscard]] consteval std::meta::info SetIntersection(std::meta::info left, std::meta::info right) {
+            if (IsMetaError(left) || IsMetaError(right)) {
+                return IsMetaError(left) ? left : right;
+            }
+            if (!IsTypeList(left) || !IsTypeList(right)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {left, right});
+            }
+            const auto leftTypes = ToInfoList(left);
+            const auto rightTypes = ToInfoList(right);
+            if (const auto error = FirstMetaError(leftTypes); error != std::meta::info{}) {
+                return error;
+            }
+            if (const auto error = FirstMetaError(rightTypes); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::SetIntersection(leftTypes, rightTypes));
+        }
+
+        /**
+         * @brief Subtract the right reflected `TypeList` from the left one.
+         * @param[in] left Reflected `TypeList` whose order is preserved.
+         * @param[in] right Reflected `TypeList` used for membership.
+         * @return Reflected difference `TypeList`, or the first validation/error result.
+         */
+        [[nodiscard]] consteval std::meta::info SetDifference(std::meta::info left, std::meta::info right) {
+            if (IsMetaError(left) || IsMetaError(right)) {
+                return IsMetaError(left) ? left : right;
+            }
+            if (!IsTypeList(left) || !IsTypeList(right)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {left, right});
+            }
+            const auto leftTypes = ToInfoList(left);
+            const auto rightTypes = ToInfoList(right);
+            if (const auto error = FirstMetaError(leftTypes); error != std::meta::info{}) {
+                return error;
+            }
+            if (const auto error = FirstMetaError(rightTypes); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::SetDifference(leftTypes, rightTypes));
         }
 
         /**
@@ -639,6 +800,22 @@ namespace Sora::Meta {
         }
 
         /**
+         * @brief Flatten a reflected `TypeList` produced by a unary type mapper.
+         * @param[in] function Reflected unary template returning a reflected `TypeList` value.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Concatenated `TypeList`, or the first mapper/projection error.
+         */
+        [[nodiscard]] consteval std::meta::info FlatMap(std::meta::info function, std::meta::info list) {
+            if (IsMetaError(function) || IsMetaError(list)) {
+                return IsMetaError(function) ? function : list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {function, list});
+            }
+            return ToTypeList(Sora::Meta::FlatMap(function, ToInfoList(list)));
+        }
+
+        /**
          * @brief Filter a reflected TypeList with a reflected unary predicate.
          * @param[in] pred Reflected unary meta predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
@@ -652,6 +829,43 @@ namespace Sora::Meta {
                 return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
             }
             return ToTypeList(Sora::Meta::Filter(pred, ToInfoList(list)));
+        }
+
+        /**
+         * @brief Replace every type accepted by a reflected predicate.
+         * @param[in] pred Reflected unary meta predicate.
+         * @param[in] replacement Reflected replacement type.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected `TypeList`, or the first predicate/projection error.
+         */
+        [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
+                                                           std::meta::info list) {
+            if (IsMetaError(pred) || IsMetaError(replacement) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : (IsMetaError(replacement) ? replacement : list);
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, replacement, list});
+            }
+            if (!std::meta::is_type(replacement)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {pred, replacement});
+            }
+            return ToTypeList(Sora::Meta::ReplaceIf(pred, replacement, ToInfoList(list)));
+        }
+
+        /**
+         * @brief Remove every type accepted by a reflected predicate.
+         * @param[in] pred Reflected unary meta predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected filtered `TypeList`, or the first predicate/projection error.
+         */
+        [[nodiscard]] consteval std::meta::info RemoveIf(std::meta::info pred, std::meta::info list) {
+            if (IsMetaError(pred) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            }
+            return ToTypeList(Sora::Meta::RemoveIf(pred, ToInfoList(list)));
         }
 
         /**
@@ -690,7 +904,11 @@ namespace Sora::Meta {
             if (!std::meta::is_type(oldType) || !std::meta::is_type(newType)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {oldType, newType});
             }
-            return ToTypeList(Sora::Meta::Replace(ToInfoList(list), oldType, newType));
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::Replace(types, oldType, newType));
         }
 
         /**
@@ -709,7 +927,11 @@ namespace Sora::Meta {
             if (!std::meta::is_type(needle)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {needle});
             }
-            return ToTypeList(Sora::Meta::Remove(ToInfoList(list), needle));
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::Remove(types, needle));
         }
 
         /**
@@ -795,6 +1017,7 @@ namespace Sora::Meta {
      * @brief Return a reflected function with leading arguments bound.
      * @tparam Function Reflected template invoked by the closure.
      * @tparam Front Reflections inserted before call-site type arguments.
+     * @return Reflection of an alias-template closure preserving recoverable invocation errors.
      */
     template<std::meta::info Function, std::meta::info... Front>
     inline constexpr std::meta::info BindFront = ^^Detail::BindFrontClosure<Function, Front...>::template Apply;
@@ -803,6 +1026,7 @@ namespace Sora::Meta {
      * @brief Return a reflected function with trailing arguments bound.
      * @tparam Function Reflected template invoked by the closure.
      * @tparam Back Reflections inserted after call-site type arguments.
+     * @return Reflection of an alias-template closure preserving recoverable invocation errors.
      */
     template<std::meta::info Function, std::meta::info... Back>
     inline constexpr std::meta::info BindBack = ^^Detail::BindBackClosure<Function, Back...>::template Apply;
@@ -810,6 +1034,7 @@ namespace Sora::Meta {
     /**
      * @brief Compose one or more reflected templates right-to-left.
      * @tparam Functions Non-empty sequence `F, G, ...` producing `F(G(...(arguments)))`.
+     * @return Reflection of the composed alias-template closure.
      * @details Every intermediate result must be a type because the closure is exposed as an alias template.
      */
     template<std::meta::info... Functions>
@@ -820,6 +1045,7 @@ namespace Sora::Meta {
      * @brief Transform every argument and pass the results to @p Continuation.
      * @tparam Function Reflected unary template applied pointwise.
      * @tparam Continuation Reflected variadic template receiving transformed results.
+     * @return Reflection of the transform-then-continue alias-template closure.
      */
     template<std::meta::info Function, std::meta::info Continuation = ^^Traits::TypeList>
     inline constexpr std::meta::info Transform = ^^Detail::TransformClosure<Function, Continuation>::template Apply;
@@ -827,6 +1053,7 @@ namespace Sora::Meta {
     /**
      * @brief Return a reflected function that always yields @p Result.
      * @tparam Result Reflected type returned for every invocation; non-types become `NonTypeResultTag`.
+     * @return Reflection of a constant alias-template closure.
      */
     template<std::meta::info Result>
     inline constexpr std::meta::info Constant = ^^Detail::ConstantClosure<Result>::template Apply;
@@ -834,169 +1061,10 @@ namespace Sora::Meta {
     /**
      * @brief Return a reflected function that applies @p Function to one TypeList argument.
      * @tparam Function Reflected variadic template receiving the list's types.
+     * @return Reflection of an alias-template closure accepting one `TypeList` type.
      */
     template<std::meta::info Function>
     inline constexpr std::meta::info Uncurry = ^^Detail::UncurryClosure<Function>::template Apply;
-
-    /**
-     * @brief Number of values in a reflection pack.
-     * @tparam Values Reflected pack elements.
-     * @return Number of pack elements.
-     */
-    template<std::meta::info... Values>
-    inline constexpr std::size_t Size = sizeof...(Values);
-
-    /**
-     * @brief Whether @p Needle occurs in a reflection pack.
-     * @tparam Needle Reflected entity to find.
-     * @tparam Values Reflected pack elements.
-     * @return `true` when @p Needle occurs at least once.
-     */
-    template<std::meta::info Needle, std::meta::info... Values>
-    [[nodiscard]] consteval bool Contains() noexcept {
-        return Contains(InfoList{Values...}, Needle);
-    }
-
-    /**
-     * @brief Number of occurrences of @p Needle in a reflection pack.
-     * @tparam Needle Reflected entity to count.
-     * @tparam Values Reflected pack elements.
-     * @return Number of equal entities.
-     */
-    template<std::meta::info Needle, std::meta::info... Values>
-    [[nodiscard]] consteval std::size_t Count() noexcept {
-        return Count(InfoList{Values...}, Needle);
-    }
-
-    /**
-     * @brief Return whether every reflected argument satisfies @p Pred.
-     * @tparam Pred Reflected unary predicate.
-     * @tparam Values Reflected pack elements.
-     * @return `true` for an empty pack and when all elements are accepted.
-     */
-    template<std::meta::info Pred, std::meta::info... Values>
-    [[nodiscard]] consteval bool AllOf() {
-        return RequirePredResult(AllOf(InfoList{Values...}, Pred));
-    }
-
-    /**
-     * @brief Return whether at least one reflected argument satisfies @p Pred.
-     * @tparam Pred Reflected unary predicate.
-     * @tparam Values Reflected pack elements.
-     * @return `false` for an empty pack and when no element is accepted.
-     */
-    template<std::meta::info Pred, std::meta::info... Values>
-    [[nodiscard]] consteval bool AnyOf() {
-        return RequirePredResult(AnyOf(InfoList{Values...}, Pred));
-    }
-
-    /**
-     * @brief Return whether no reflected argument satisfies @p Pred.
-     * @tparam Pred Reflected unary predicate.
-     * @tparam Values Reflected pack elements.
-     * @return Negation of @ref AnyOf for the pack.
-     */
-    template<std::meta::info Pred, std::meta::info... Values>
-    [[nodiscard]] consteval bool NoneOf() {
-        return RequirePredResult(NoneOf(InfoList{Values...}, Pred));
-    }
-
-    /**
-     * @brief Return the number of reflected arguments satisfying @p Pred.
-     * @tparam Pred Reflected unary predicate.
-     * @tparam Values Reflected pack elements.
-     * @return Number of accepted elements.
-     */
-    template<std::meta::info Pred, std::meta::info... Values>
-    [[nodiscard]] consteval std::size_t CountIf() {
-        return RequireSizeResult(CountIf(InfoList{Values...}, Pred));
-    }
-
-    /**
-     * @brief Return @p Needle when present, otherwise @p fallback.
-     * @tparam Needle Reflected entity to find.
-     * @tparam Values Reflected pack elements.
-     * @param[in] fallback Reflection returned when @p Needle is absent.
-     * @return @p Needle or @p fallback.
-     */
-    template<std::meta::info Needle, std::meta::info... Values>
-    [[nodiscard]] consteval std::meta::info Find(std::meta::info fallback = {}) noexcept {
-        return Contains(InfoList{Values...}, Needle) ? Needle : fallback;
-    }
-
-    /**
-     * @brief Return the first index of @p Needle, or @ref InfoList::npos.
-     * @tparam Needle Reflected entity to find.
-     * @tparam Values Reflected pack elements.
-     * @return Zero-based index, or @ref InfoList::npos when absent.
-     */
-    template<std::meta::info Needle, std::meta::info... Values>
-    [[nodiscard]] consteval std::size_t IndexOf() noexcept {
-        return IndexOf(InfoList{Values...}, Needle);
-    }
-
-    /**
-     * @brief Return the first reflected argument, or an empty reflection.
-     * @tparam Values Reflected pack elements.
-     * @return First element, or `std::meta::info{}` for an empty pack.
-     */
-    template<std::meta::info... Values>
-    [[nodiscard]] consteval std::meta::info Front() noexcept {
-        if constexpr (sizeof...(Values) == 0) {
-            return {};
-        } else {
-            return std::array{Values...}.front();
-        }
-    }
-
-    /**
-     * @brief Return the final reflected argument, or an empty reflection.
-     * @tparam Values Reflected pack elements.
-     * @return Final element, or `std::meta::info{}` for an empty pack.
-     */
-    template<std::meta::info... Values>
-    [[nodiscard]] consteval std::meta::info Back() noexcept {
-        if constexpr (sizeof...(Values) == 0) {
-            return {};
-        } else {
-            return std::array{Values...}.back();
-        }
-    }
-
-    /**
-     * @brief Return the sole reflected argument, constrained to zero or one input.
-     * @tparam Values Zero or one reflected element.
-     * @return The element, or `std::meta::info{}` when no element was supplied.
-     */
-    template<std::meta::info... Values>
-        requires(sizeof...(Values) <= 1)
-    [[nodiscard]] consteval std::meta::info Single() noexcept {
-        return Front<Values...>();
-    }
-
-    /**
-     * @brief Return the sole reflected argument, or @p Fallback when empty.
-     * @tparam Fallback Reflected fallback value.
-     * @tparam Values Zero or one reflected element.
-     * @return The supplied element, or @p Fallback for an empty pack.
-     */
-    template<std::meta::info Fallback, std::meta::info... Values>
-        requires(sizeof...(Values) <= 1)
-    [[nodiscard]] consteval std::meta::info SingleOr() noexcept {
-        return sizeof...(Values) == 0 ? Fallback : Front<Values...>();
-    }
-
-    /**
-     * @brief Return the @p Index-th reflected argument.
-     * @tparam Index Zero-based pack index.
-     * @tparam Values Reflected pack elements.
-     * @return Element at @p Index.
-     */
-    template<std::size_t Index, std::meta::info... Values>
-        requires(Index < sizeof...(Values))
-    [[nodiscard]] consteval std::meta::info At() noexcept {
-        return std::array{Values...}[Index];
-    }
 
 } // namespace Sora::Meta
 
@@ -1072,6 +1140,15 @@ namespace Sora::Traits {
     using Concat = Meta::InfoType<Meta::Types::Concat(Meta::InfoList{^^Lists...})>;
 
     /**
+     * @brief Stable union of `TypeList` operands, retaining first occurrences.
+     * @tparam Lists `TypeList` specializations to unite.
+     * @return Resulting `TypeList` or a `MetaError` type for invalid input.
+     */
+    template<typename... Lists>
+        requires(Concept::TypeList<Lists> && ...)
+    using SetUnion = Meta::InfoType<Meta::Types::SetUnion(Meta::InfoList{^^Lists...})>;
+
+    /**
      * @brief Apply reflected unary template @p Function to every type in @p List.
      * @tparam Function Reflected unary template.
      * @tparam List `TypeList` specialization to transform.
@@ -1082,6 +1159,16 @@ namespace Sora::Traits {
     using Map = Meta::InfoType<Meta::Types::Map(Function, ^^List)>;
 
     /**
+     * @brief Flatten a unary type mapper over @p List.
+     * @tparam Function Reflected unary template returning a `TypeList`.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Concatenated `TypeList` or a `MetaError` type when mapping fails.
+     */
+    template<std::meta::info Function, typename List>
+        requires Concept::TypeList<List>
+    using FlatMap = Meta::InfoType<Meta::Types::FlatMap(Function, ^^List)>;
+
+    /**
      * @brief Retain types in @p List accepted by unary @p Pred.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to filter.
@@ -1090,6 +1177,27 @@ namespace Sora::Traits {
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
     using Filter = Meta::InfoType<Meta::Types::Filter(Pred, ^^List)>;
+
+    /**
+     * @brief Replace every type in @p List accepted by @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam Replacement Replacement type.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type.
+     */
+    template<std::meta::info Pred, typename Replacement, typename List>
+        requires Concept::TypeList<List>
+    using ReplaceIf = Meta::InfoType<Meta::Types::ReplaceIf(Pred, ^^Replacement, ^^List)>;
+
+    /**
+     * @brief Remove every type in @p List accepted by @p Pred.
+     * @tparam Pred Reflected unary meta predicate.
+     * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList` or a `MetaError` type.
+     */
+    template<std::meta::info Pred, typename List>
+        requires Concept::TypeList<List>
+    using RemoveIf = Meta::InfoType<Meta::Types::RemoveIf(Pred, ^^List)>;
 
     /**
      * @brief Invoke reflected @p Function with every type in @p List.
@@ -1272,6 +1380,26 @@ namespace Sora::Traits {
     template<std::meta::info Function, typename Left, typename Right>
         requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
     using Zip = Meta::InfoType<Meta::Types::Zip(Function, ^^Left, ^^Right)>;
+
+    /**
+     * @brief Stable intersection of two `TypeList` operands.
+     * @tparam Left First `TypeList`; its order is preserved.
+     * @tparam Right Second `TypeList` used for membership.
+     * @return Resulting intersection `TypeList` or a `MetaError` type.
+     */
+    template<typename Left, typename Right>
+        requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
+    using SetIntersection = Meta::InfoType<Meta::Types::SetIntersection(^^Left, ^^Right)>;
+
+    /**
+     * @brief Stable difference of two `TypeList` operands.
+     * @tparam Left First `TypeList`; its order is preserved.
+     * @tparam Right Types removed from @p Left.
+     * @return Resulting difference `TypeList` or a `MetaError` type.
+     */
+    template<typename Left, typename Right>
+        requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
+    using SetDifference = Meta::InfoType<Meta::Types::SetDifference(^^Left, ^^Right)>;
 
     /**
      * @brief Whether every type in @p List satisfies @p Pred.

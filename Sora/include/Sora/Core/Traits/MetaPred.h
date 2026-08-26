@@ -27,6 +27,9 @@ namespace Sora::Meta {
      * @return @c true when @p pred is a function returning @c bool and every parameter accepts @c std::meta::info.
      * @par Example
      * @code{.cpp}
+     * #include <meta>
+     * #include <Sora/Core/Traits/MetaPred.h>
+     *
      * consteval bool Same(std::meta::info left, std::meta::info right) noexcept { return left == right; }
      * static_assert(Sora::Meta::IsMetaPred(^^Same));
      * @endcode
@@ -46,12 +49,17 @@ namespace Sora::Meta {
      *
      * @details Meta errors propagate from left to right. A non-function or incompatible arity produces
      * @c Error::NonInvocableTag; a successful invocation returning a non-bool value produces
-     * @c Error::NonBooleanPredResultTag.
+     * @c Error::NonBooleanPredResultTag. The number of supplied arguments must match the reflected function's
+     * declared arity; a zero-argument call is valid only for a zero-argument predicate.
      *
      * @param[in] pred Reflected predicate function.
      * @param[in] arguments Reflections supplied to @p pred in source order.
+     * @tparam Arguments Reflected argument value types; each must be `std::meta::info`.
      * @return Reflected bool value or a reflection-native error.
      * @code{.cpp}
+     * #include <meta>
+     * #include <Sora/Core/Traits/MetaPred.h>
+     *
      * consteval bool Same(std::meta::info left, std::meta::info right) noexcept {
      *     return left == right;
      * }
@@ -100,6 +108,7 @@ namespace Sora::Meta {
      * @brief Extract the bool result of an arbitrary-arity reflected predicate invocation.
      * @param[in] pred Reflected predicate function.
      * @param[in] arguments Reflections supplied to @p pred in source order.
+     * @tparam Arguments Reflected argument value types; each must be `std::meta::info`.
      * @return The extracted bool value.
      * @throws A translation-time diagnostic when the predicate contract is violated.
      */
@@ -137,6 +146,9 @@ namespace Sora::Traits {
      * @return Number of declared function parameters, including parameters with default arguments.
      * @par Example
      * @code{.cpp}
+     * #include <meta>
+     * #include <Sora/Core/Traits/MetaPred.h>
+     *
      * consteval bool IsPair(std::meta::info, std::meta::info) { return true; }
      * static_assert(Sora::Traits::PredArity<^^IsPair> == 2);
      * @endcode
