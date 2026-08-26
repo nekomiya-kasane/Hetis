@@ -172,18 +172,30 @@ namespace Sora {
         /**
          * @brief First type of a non-empty @p List.
          * @tparam List Non-empty `TypeList` specialization.
+         * @return The type at index zero.
+         * @par Example
+         * @code{.cpp}
+         * using First = Sora::Traits::Front<Sora::Traits::TypeList<int, double>>;
+         * static_assert(std::same_as<First, int>);
+         * @endcode
          */
         template<typename List>
             requires(Concept::TypeList<List> && Length<List> > 0)
-        using Head = At<List, 0>;
+        using Front = At<List, 0>;
 
         /**
          * @brief Final type of a non-empty @p List.
          * @tparam List Non-empty `TypeList` specialization.
+         * @return The type at index `Length<List> - 1`.
+         * @par Example
+         * @code{.cpp}
+         * using Last = Sora::Traits::Back<Sora::Traits::TypeList<int, double>>;
+         * static_assert(std::same_as<Last, double>);
+         * @endcode
          */
         template<typename List>
             requires(Concept::TypeList<List> && Length<List> > 0)
-        using Last = At<List, Length<List> - 1>;
+        using Back = At<List, Length<List> - 1>;
 
     } // namespace Traits
 

@@ -1314,12 +1314,21 @@ namespace Sora::Traits {
     inline constexpr std::size_t CountIf = Meta::RequireSizeResult(Meta::CountIf(Meta::ToInfoList(^^List), Pred));
 
     /**
-     * @brief TypeList of non-static data-member types of @p Type.
+     * @brief Project non-static data-member types of @p Type into a `TypeList`.
      * @tparam Type Aggregate/class type whose non-static data members are projected.
-     * @return Reflected member-type pack represented as a `TypeList` C++ type.
+     * @return Member-type pack represented as a `TypeList` C++ type.
+     * @details This is a reflection projection, not the general `Meta::ToTypeList` conversion. The latter converts an
+     * arbitrary `InfoList` of reflected types; this alias first enumerates the members of @p Type and then projects
+     * their declared types.
+     * @par Example
+     * @code{.cpp}
+     * struct Vertex { float x; float y; };
+     * using Members = Sora::Traits::DataMemberTypes<Vertex>;
+     * static_assert(std::same_as<Members, Sora::Traits::TypeList<float, float>>);
+     * @endcode
      */
     template<typename Type>
-    using ToTypeList = Meta::InfoType<Meta::ToTypeList(
+    using DataMemberTypes = Meta::InfoType<Meta::ToTypeList(
         Meta::Promote(std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked()) |
                       std::views::transform(std::meta::type_of)))>;
 
