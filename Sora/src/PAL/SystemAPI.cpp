@@ -457,12 +457,61 @@ namespace Sora::PAL {
         static_assert(WindowsSystem::kWaitTimeout                                == WAIT_TIMEOUT);
         static_assert(WindowsSystem::kSnapshotThreads                            == TH32CS_SNAPTHREAD);
 
-        static_assert(std::is_same_v<WindowsSystem::Bool,    BOOL>);
-        static_assert(std::is_same_v<WindowsSystem::DWord,   DWORD>);
+        static_assert(std::is_same_v<WindowsSystem::Bool, BOOL>);
+        static_assert(std::is_same_v<WindowsSystem::Byte, BYTE>);
+        static_assert(std::is_same_v<WindowsSystem::Char, CHAR>);
+        static_assert(std::is_same_v<WindowsSystem::DWord, DWORD>);
         static_assert(std::is_same_v<WindowsSystem::DWord64, DWORD64>);
-        static_assert(std::is_same_v<WindowsSystem::UInt,    UINT>);
+        static_assert(std::is_same_v<WindowsSystem::Float, FLOAT>);
+        static_assert(std::is_same_v<WindowsSystem::Handle, HANDLE>);
         static_assert(std::is_same_v<WindowsSystem::HResult, HRESULT>);
-        static_assert(std::is_same_v<WindowsSystem::Long,    LONG>);
+        static_assert(std::is_same_v<WindowsSystem::Int, INT>);
+        static_assert(std::is_same_v<WindowsSystem::Int8, INT8>);
+        static_assert(std::is_same_v<WindowsSystem::Int16, INT16>);
+        static_assert(std::is_same_v<WindowsSystem::Int32, INT32>);
+        static_assert(std::is_same_v<WindowsSystem::Int64, INT64>);
+        static_assert(std::is_same_v<WindowsSystem::Long, LONG>);
+        static_assert(std::is_same_v<WindowsSystem::PointerSizedLong, LONG_PTR>);
+        static_assert(std::is_same_v<WindowsSystem::ConstCharPointer, LPCSTR>);
+        static_assert(std::is_same_v<WindowsSystem::ConstVoidPointer, LPCVOID>);
+        static_assert(std::is_same_v<WindowsSystem::ConstWideCharPointer, LPCWSTR>);
+        static_assert(std::is_same_v<WindowsSystem::CharPointer, LPSTR>);
+        static_assert(std::is_same_v<WindowsSystem::VoidPointer, LPVOID>);
+        static_assert(std::is_same_v<WindowsSystem::WideCharPointer, LPWSTR>);
+        static_assert(sizeof(WindowsSystem::WindowHandle) == sizeof(HWND));
+        static_assert(alignof(WindowsSystem::WindowHandle) == alignof(HWND));
+        static_assert(sizeof(WindowsSystem::ModuleHandle) == sizeof(HMODULE));
+        static_assert(alignof(WindowsSystem::ModuleHandle) == alignof(HMODULE));
+        static_assert(sizeof(WindowsSystem::MonitorHandle) == sizeof(HMONITOR));
+        static_assert(alignof(WindowsSystem::MonitorHandle) == alignof(HMONITOR));
+        static_assert(sizeof(WindowsSystem::DeviceContextHandle) == sizeof(HDC));
+        static_assert(alignof(WindowsSystem::DeviceContextHandle) == alignof(HDC));
+        static_assert(std::is_same_v<WindowsSystem::Size, SIZE_T>);
+        static_assert(std::is_same_v<WindowsSystem::UInt, UINT>);
+        static_assert(std::is_same_v<WindowsSystem::UInt8, UINT8>);
+        static_assert(std::is_same_v<WindowsSystem::UInt16, UINT16>);
+        static_assert(std::is_same_v<WindowsSystem::UInt32, UINT32>);
+        static_assert(std::is_same_v<WindowsSystem::UInt64, UINT64>);
+        static_assert(std::is_same_v<WindowsSystem::ULong, ULONG>);
+        static_assert(std::is_same_v<WindowsSystem::PointerSizedULong, ULONG_PTR>);
+        static_assert(std::is_same_v<WindowsSystem::WChar, WCHAR>);
+        static_assert(sizeof(WindowsSystem::Guid) == sizeof(GUID));
+        static_assert(alignof(WindowsSystem::Guid) == alignof(GUID));
+        static_assert(offsetof(WindowsSystem::Guid, data1) == offsetof(GUID, Data1));
+        static_assert(offsetof(WindowsSystem::Guid, data4) == offsetof(GUID, Data4));
+        static_assert(sizeof(WindowsSystem::Luid) == sizeof(LUID));
+        static_assert(alignof(WindowsSystem::Luid) == alignof(LUID));
+        static_assert(offsetof(WindowsSystem::Luid, highPart) == offsetof(LUID, HighPart));
+        static_assert(sizeof(WindowsSystem::SecurityAttributes) == sizeof(SECURITY_ATTRIBUTES));
+        static_assert(alignof(WindowsSystem::SecurityAttributes) == alignof(SECURITY_ATTRIBUTES));
+        static_assert(offsetof(WindowsSystem::SecurityAttributes, inheritHandle) ==
+                      offsetof(SECURITY_ATTRIBUTES, bInheritHandle));
+        static_assert(sizeof(WindowsSystem::FileTime) == sizeof(FILETIME));
+        static_assert(alignof(WindowsSystem::FileTime) == alignof(FILETIME));
+        static_assert(sizeof(WindowsSystem::Unknown) == sizeof(void*));
+        static_assert(alignof(WindowsSystem::Unknown) == alignof(void*));
+        static_assert(sizeof(WindowsSystem::SequentialStream) == sizeof(void*));
+        static_assert(alignof(WindowsSystem::SequentialStream) == alignof(void*));
         static_assert(sizeof(WindowsSystem::ThreadEntry) == sizeof(THREADENTRY32));
         static_assert(alignof(WindowsSystem::ThreadEntry) == alignof(THREADENTRY32));
         static_assert(offsetof(WindowsSystem::ThreadEntry, size) == offsetof(THREADENTRY32, dwSize));
@@ -1299,6 +1348,8 @@ namespace Sora::PAL {
 #endif
     }
 
+    inline namespace API {
+
     const NativeErrorSystemAPI& LoadNativeErrorSystemAPI() noexcept {
         static const NativeErrorSystemAPI api = [] {
             using API = NativeErrorSystemAPI;
@@ -2009,6 +2060,8 @@ namespace Sora::PAL {
         }();
         return api;
     }
+
+    } // namespace API
 
     bool InstallNativeCrashHandler(NativeCrashCallback callback, void* userData, bool suppressDialogs) noexcept {
         return InstallNativeCrashHandlerImpl(callback, userData, suppressDialogs);

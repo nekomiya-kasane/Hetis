@@ -45,7 +45,7 @@ struct timespec;
 
 #if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
 struct _XDisplay;
-struct _XEvent;
+union _XEvent;
 struct _XIC;
 struct _XIM;
 struct _XKeyEvent;
@@ -281,13 +281,136 @@ namespace Sora::PAL {
     namespace WindowsSystem {
 
         using Bool = int;
+        using Byte = uint8_t;
+        using Char = char;
         using DWord = unsigned long;
+        using DWord64 = unsigned long long;
+        using Float = float;
         using Handle = void*;
+        using HResult = long;
+        using Int = int;
+        using Int8 = int8_t;
+        using Int16 = int16_t;
+        using Int32 = int32_t;
+        using Int64 = int64_t;
+        using Long = long;
+        using PointerSizedLong = intptr_t;
+        using ConstCharPointer = const char*;
+        using ConstVoidPointer = const void*;
+        using ConstWideCharPointer = const wchar_t*;
+        using CharPointer = char*;
+        using VoidPointer = void*;
+        using WideCharPointer = wchar_t*;
+        using RpcInterfaceHandle = void*;
+        using AutomationString = wchar_t*;
         using WindowHandle = void*;
+        using ModuleHandle = void*;
+        using MonitorHandle = void*;
+        using DeviceContextHandle = void*;
+        using Size = size_t;
+        using UInt = unsigned int;
+        using UInt8 = uint8_t;
+        using UInt16 = uint16_t;
+        using UInt32 = uint32_t;
+        using UInt64 = uint64_t;
+        using ULong = unsigned long;
+        using PointerSizedULong = uintptr_t;
+        using WChar = wchar_t;
         using WindowAtom = uint16_t;
         using WindowMessageId = uint32_t;
         using WindowProcedureResult = intptr_t;
         using WindowProcedure = WindowProcedureResult(__stdcall*)(WindowHandle, WindowMessageId, uintptr_t, intptr_t);
+
+        /** @brief Layout-compatible Win32 globally unique identifier. */
+        struct Guid {
+            uint32_t data1;
+            uint16_t data2;
+            uint16_t data3;
+            uint8_t data4[8];
+        };
+
+        using InterfaceId = Guid;
+        using ClassId = Guid;
+        using Uuid = Guid;
+        using RefGuid = const Guid&;
+        using RefInterfaceId = const InterfaceId&;
+        using RefClassId = const ClassId&;
+
+        /** @brief Layout-compatible Win32 locally unique identifier. */
+        struct Luid {
+            DWord lowPart;
+            Long highPart;
+        };
+
+        /** @brief Layout-compatible signed 64-bit Win32 integer union. */
+        union LargeInteger {
+            struct {
+                DWord lowPart;
+                Long highPart;
+            };
+            int64_t quadPart;
+        };
+
+        using Rect = DisplayRect;
+        using Point = DisplayPoint;
+
+        /** @brief Layout-compatible Win32 security-attributes record. */
+        struct SecurityAttributes {
+            DWord length;
+            void* securityDescriptor;
+            Bool inheritHandle;
+        };
+
+        /** @brief Layout-compatible Win32 file timestamp. */
+        struct FileTime {
+            DWord lowDateTime;
+            DWord highDateTime;
+        };
+
+        /** @brief ABI-compatible COM root interface. */
+        struct Unknown {
+            virtual HResult __stdcall QueryInterface(RefInterfaceId iid, void** object) = 0;
+            virtual ULong __stdcall AddRef() = 0;
+            virtual ULong __stdcall Release() = 0;
+        };
+
+        /** @brief ABI-compatible COM sequential byte-stream interface. */
+        struct SequentialStream : Unknown {
+            virtual HResult __stdcall Read(void* destination, ULong bytes, ULong* bytesRead) = 0;
+            virtual HResult __stdcall Write(const void* source, ULong bytes, ULong* bytesWritten) = 0;
+        };
+
+        struct Stream;
+        struct PropertyBag;
+        struct MemoryAllocator;
+
+        template<size_t Size>
+        struct EnumInteger;
+
+        template<>
+        struct EnumInteger<1> {
+            using Type = int8_t;
+        };
+
+        template<>
+        struct EnumInteger<2> {
+            using Type = int16_t;
+        };
+
+        template<>
+        struct EnumInteger<4> {
+            using Type = int32_t;
+        };
+
+        template<>
+        struct EnumInteger<8> {
+            using Type = int64_t;
+        };
+
+        template<typename T>
+        struct EnumFlagSizedInteger {
+            using Type = typename EnumInteger<sizeof(T)>::Type;
+        };
 
         /** @brief Layout-compatible Win32 @c WNDCLASSEXW record. */
         struct WindowClassEx {
@@ -354,38 +477,38 @@ namespace Sora::PAL {
         using WaitMessageFunction         = WindowsSystem::Bool(__stdcall*)();
         using MsgWaitForMultipleObjectsExFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const WindowsSystem::Handle*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord);
 
-        [[= $::Syscall{"RegisterClassExW"}]]           RegisterClassExWideFunction registerClassExWide = nullptr;
-        [[= $::Syscall{"UnregisterClassW"}]]           UnregisterClassWideFunction unregisterClassWide = nullptr;
-        [[= $::Syscall{"CreateWindowExW"}]]            CreateWindowExWideFunction createWindowExWide = nullptr;
-        [[= $::Syscall{"DestroyWindow"}]]              DestroyWindowFunction destroyWindow = nullptr;
-        [[= $::Syscall{"ShowWindow"}]]                 ShowWindowFunction showWindow = nullptr;
-        [[= $::Syscall{"UpdateWindow"}]]               UpdateWindowFunction updateWindow = nullptr;
-        [[= $::Syscall{"SetWindowTextW"}]]             SetWindowTextWideFunction setWindowTextWide = nullptr;
-        [[= $::Syscall{"GetWindowLongPtrW"}]]          GetWindowLongPtrFunction getWindowLongPtr = nullptr;
-        [[= $::Syscall{"SetWindowLongPtrW"}]]          SetWindowLongPtrFunction setWindowLongPtr = nullptr;
-        [[= $::Syscall{"DefWindowProcW"}]]             WindowProcedureFunction defWindowProc = nullptr;
-        [[= $::Syscall{"PeekMessageW"}]]               PeekMessageFunction peekMessage = nullptr;
-        [[= $::Syscall{"GetMessageW"}]]                GetMessageFunction getMessage = nullptr;
-        [[= $::Syscall{"TranslateMessage"}]]           TranslateMessageFunction translateMessage = nullptr;
-        [[= $::Syscall{"DispatchMessageW"}]]           DispatchMessageFunction dispatchMessage = nullptr;
-        [[= $::Syscall{"PostQuitMessage"}]]            PostQuitMessageFunction postQuitMessage = nullptr;
-        [[= $::Syscall{"PostMessageW"}]]               PostMessageFunction postMessage = nullptr;
-        [[= $::Syscall{"SendMessageW"}]]               SendMessageFunction sendMessage = nullptr;
-        [[= $::Syscall{"SetWindowPos"}]]               SetWindowPositionFunction setWindowPosition = nullptr;
-        [[= $::Syscall{"SetCapture"}]]                 SetCaptureFunction setCapture = nullptr;
-        [[= $::Syscall{"ReleaseCapture"}]]             ReleaseCaptureFunction releaseCapture = nullptr;
-        [[= $::Syscall{"SetCursor"}]]                  SetCursorFunction setCursor = nullptr;
-        [[= $::Syscall{"ShowCursor"}]]                 ShowCursorFunction showCursor = nullptr;
-        [[= $::Syscall{"SetCursorPos"}]]               SetCursorPositionFunction setCursorPosition = nullptr;
-        [[= $::Syscall{"ClipCursor"}]]                 ClipCursorFunction clipCursor = nullptr;
-        [[= $::Syscall{"SetFocus"}]]                   SetFocusFunction setFocus = nullptr;
-        [[= $::Syscall{"GetFocus"}]]                   GetFocusFunction getFocus = nullptr;
-        [[= $::Syscall{"SetForegroundWindow"}]]        SetForegroundWindowFunction setForegroundWindow = nullptr;
-        [[= $::Syscall{"IsWindow"}]]                   IsWindowFunction isWindow = nullptr;
-        [[= $::Syscall{"IsWindowVisible"}]]            IsWindowVisibleFunction isWindowVisible = nullptr;
-        [[= $::Syscall{"IsIconic"}]]                   IsIconicFunction isIconic = nullptr;
-        [[= $::Syscall{"IsZoomed"}]]                   IsZoomedFunction isZoomed = nullptr;
-        [[= $::Syscall{"WaitMessage"}]]                WaitMessageFunction waitMessage = nullptr;
+        [[= $::Syscall{"RegisterClassExW"}]]            RegisterClassExWideFunction registerClassExWide = nullptr;
+        [[= $::Syscall{"UnregisterClassW"}]]            UnregisterClassWideFunction unregisterClassWide = nullptr;
+        [[= $::Syscall{"CreateWindowExW"}]]             CreateWindowExWideFunction createWindowExWide = nullptr;
+        [[= $::Syscall{"DestroyWindow"}]]               DestroyWindowFunction destroyWindow = nullptr;
+        [[= $::Syscall{"ShowWindow"}]]                  ShowWindowFunction showWindow = nullptr;
+        [[= $::Syscall{"UpdateWindow"}]]                UpdateWindowFunction updateWindow = nullptr;
+        [[= $::Syscall{"SetWindowTextW"}]]              SetWindowTextWideFunction setWindowTextWide = nullptr;
+        [[= $::Syscall{"GetWindowLongPtrW"}]]           GetWindowLongPtrFunction getWindowLongPtr = nullptr;
+        [[= $::Syscall{"SetWindowLongPtrW"}]]           SetWindowLongPtrFunction setWindowLongPtr = nullptr;
+        [[= $::Syscall{"DefWindowProcW"}]]              WindowProcedureFunction defWindowProc = nullptr;
+        [[= $::Syscall{"PeekMessageW"}]]                PeekMessageFunction peekMessage = nullptr;
+        [[= $::Syscall{"GetMessageW"}]]                 GetMessageFunction getMessage = nullptr;
+        [[= $::Syscall{"TranslateMessage"}]]            TranslateMessageFunction translateMessage = nullptr;
+        [[= $::Syscall{"DispatchMessageW"}]]            DispatchMessageFunction dispatchMessage = nullptr;
+        [[= $::Syscall{"PostQuitMessage"}]]             PostQuitMessageFunction postQuitMessage = nullptr;
+        [[= $::Syscall{"PostMessageW"}]]                PostMessageFunction postMessage = nullptr;
+        [[= $::Syscall{"SendMessageW"}]]                SendMessageFunction sendMessage = nullptr;
+        [[= $::Syscall{"SetWindowPos"}]]                SetWindowPositionFunction setWindowPosition = nullptr;
+        [[= $::Syscall{"SetCapture"}]]                  SetCaptureFunction setCapture = nullptr;
+        [[= $::Syscall{"ReleaseCapture"}]]              ReleaseCaptureFunction releaseCapture = nullptr;
+        [[= $::Syscall{"SetCursor"}]]                   SetCursorFunction setCursor = nullptr;
+        [[= $::Syscall{"ShowCursor"}]]                  ShowCursorFunction showCursor = nullptr;
+        [[= $::Syscall{"SetCursorPos"}]]                SetCursorPositionFunction setCursorPosition = nullptr;
+        [[= $::Syscall{"ClipCursor"}]]                  ClipCursorFunction clipCursor = nullptr;
+        [[= $::Syscall{"SetFocus"}]]                    SetFocusFunction setFocus = nullptr;
+        [[= $::Syscall{"GetFocus"}]]                    GetFocusFunction getFocus = nullptr;
+        [[= $::Syscall{"SetForegroundWindow"}]]         SetForegroundWindowFunction setForegroundWindow = nullptr;
+        [[= $::Syscall{"IsWindow"}]]                    IsWindowFunction isWindow = nullptr;
+        [[= $::Syscall{"IsWindowVisible"}]]             IsWindowVisibleFunction isWindowVisible = nullptr;
+        [[= $::Syscall{"IsIconic"}]]                    IsIconicFunction isIconic = nullptr;
+        [[= $::Syscall{"IsZoomed"}]]                    IsZoomedFunction isZoomed = nullptr;
+        [[= $::Syscall{"WaitMessage"}]]                 WaitMessageFunction waitMessage = nullptr;
         [[= $::Syscall{"MsgWaitForMultipleObjectsEx"}]] MsgWaitForMultipleObjectsExFunction msgWaitForMultipleObjectsEx = nullptr;
         // clang-format on
 
@@ -439,95 +562,91 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Xlib window, event, focus, and pointer entry points. */
     struct X11WindowSystemAPI {
         // clang-format off
-        using OpenDisplayFunction             = X11Display* (*)(const char*);
-        using CloseDisplayFunction            = int (*)(X11Display*);
-        using DefaultScreenFunction           = int (*)(X11Display*);
-        using RootWindowFunction              = X11Window (*)(X11Display*, int);
-        using DefaultVisualFunction           = X11Visual* (*)(X11Display*, int);
-        using DefaultDepthFunction            = int (*)(X11Display*, int);
-        using CreateSimpleWindowFunction = X11Window (*)(X11Display*, X11Window, int, int, unsigned, unsigned,
-                                                         unsigned, unsigned long, unsigned long, unsigned long);
-        using CreateWindowFunction = X11Window (*)(X11Display*, X11Window, int, int, unsigned, unsigned, unsigned,
-                                                   int, unsigned, X11Visual*, unsigned long, X11SetWindowAttributes*);
-        using DestroyWindowFunction           = int (*)(X11Display*, X11Window);
-        using MapWindowFunction               = int (*)(X11Display*, X11Window);
-        using UnmapWindowFunction             = int (*)(X11Display*, X11Window);
-        using MoveWindowFunction              = int (*)(X11Display*, X11Window, int, int);
-        using ResizeWindowFunction            = int (*)(X11Display*, X11Window, unsigned, unsigned);
-        using MoveResizeWindowFunction        = int (*)(X11Display*, X11Window, int, int, unsigned, unsigned);
-        using SelectInputFunction             = int (*)(X11Display*, X11Window, long);
-        using StoreNameFunction               = int (*)(X11Display*, X11Window, const char*);
-        using InternAtomFunction              = X11Atom (*)(X11Display*, const char*, int);
-        using SetWmProtocolsFunction          = int (*)(X11Display*, X11Window, X11Atom*, int);
-        using PendingFunction                 = int (*)(X11Display*);
-        using NextEventFunction               = int (*)(X11Display*, X11Event*);
-        using CheckMaskEventFunction          = int (*)(X11Display*, long, X11Event*);
-        using ConnectionNumberFunction        = int (*)(X11Display*);
-        using FlushFunction                   = int (*)(X11Display*);
-        using SyncFunction                    = int (*)(X11Display*, int);
-        using FreeFunction                    = int (*)(void*);
-        using GetWindowAttributesFunction     = int (*)(X11Display*, X11Window, X11WindowAttributes*);
-        using SetInputFocusFunction           = int (*)(X11Display*, X11Window, int, unsigned long);
-        using IconifyWindowFunction           = int (*)(X11Display*, X11Window, int);
-        using RaiseWindowFunction             = int (*)(X11Display*, X11Window);
-        using GrabPointerFunction             = int (*)(X11Display*, X11Window, int, unsigned, int, int, X11Window,
-                                                         X11Cursor, unsigned long);
-        using UngrabPointerFunction           = int (*)(X11Display*, unsigned long);
-        using WarpPointerFunction             = int (*)(X11Display*, X11Window, X11Window, int, int, unsigned,
-                                                        unsigned, int, int);
-        using CreateFontCursorFunction        = X11Cursor (*)(X11Display*, unsigned);
-        using DefineCursorFunction            = int (*)(X11Display*, X11Window, X11Cursor);
-        using UndefineCursorFunction          = int (*)(X11Display*, X11Window);
-        using FreeCursorFunction              = int (*)(X11Display*, X11Cursor);
-        using OpenInputMethodFunction         = X11InputMethod* (*)(X11Display*, X11ResourceDatabase*, char*, char*);
-        using CloseInputMethodFunction        = int (*)(X11InputMethod*);
-        using CreateInputContextFunction      = X11InputContext* (*)(X11InputMethod*, ...);
-        using DestroyInputContextFunction     = void (*)(X11InputContext*);
-        using FilterEventFunction              = int (*)(X11Event*, X11Window);
-        using Utf8LookupStringFunction = int (*)(X11InputContext*, X11KeyEvent*, char*, int, X11KeySym*, X11Status*);
+        using OpenDisplayFunction          = X11Display* (*)(const char*);
+        using CloseDisplayFunction         = int (*)(X11Display*);
+        using DefaultScreenFunction        = int (*)(X11Display*);
+        using RootWindowFunction           = X11Window (*)(X11Display*, int);
+        using DefaultVisualFunction        = X11Visual* (*)(X11Display*, int);
+        using DefaultDepthFunction         = int (*)(X11Display*, int);
+        using CreateSimpleWindowFunction   = X11Window (*)(X11Display*, X11Window, int, int, unsigned, unsigned, unsigned, unsigned long, unsigned long, unsigned long);
+        using CreateWindowFunction         = X11Window (*)(X11Display*, X11Window, int, int, unsigned, unsigned, unsigned, int, unsigned, X11Visual*, unsigned long, X11SetWindowAttributes*);
+        using DestroyWindowFunction        = int (*)(X11Display*, X11Window);
+        using MapWindowFunction            = int (*)(X11Display*, X11Window);
+        using UnmapWindowFunction          = int (*)(X11Display*, X11Window);
+        using MoveWindowFunction           = int (*)(X11Display*, X11Window, int, int);
+        using ResizeWindowFunction         = int (*)(X11Display*, X11Window, unsigned, unsigned);
+        using MoveResizeWindowFunction     = int (*)(X11Display*, X11Window, int, int, unsigned, unsigned);
+        using SelectInputFunction          = int (*)(X11Display*, X11Window, long);
+        using StoreNameFunction            = int (*)(X11Display*, X11Window, const char*);
+        using InternAtomFunction           = X11Atom (*)(X11Display*, const char*, int);
+        using SetWmProtocolsFunction       = int (*)(X11Display*, X11Window, X11Atom*, int);
+        using PendingFunction              = int (*)(X11Display*);
+        using NextEventFunction            = int (*)(X11Display*, X11Event*);
+        using CheckMaskEventFunction       = int (*)(X11Display*, long, X11Event*);
+        using ConnectionNumberFunction     = int (*)(X11Display*);
+        using FlushFunction                = int (*)(X11Display*);
+        using SyncFunction                 = int (*)(X11Display*, int);
+        using FreeFunction                 = int (*)(void*);
+        using GetWindowAttributesFunction  = int (*)(X11Display*, X11Window, X11WindowAttributes*);
+        using SetInputFocusFunction        = int (*)(X11Display*, X11Window, int, unsigned long);
+        using IconifyWindowFunction        = int (*)(X11Display*, X11Window, int);
+        using RaiseWindowFunction          = int (*)(X11Display*, X11Window);
+        using GrabPointerFunction          = int (*)(X11Display*, X11Window, int, unsigned, int, int, X11Window, X11Cursor, unsigned long);
+        using UngrabPointerFunction        = int (*)(X11Display*, unsigned long);
+        using WarpPointerFunction          = int (*)(X11Display*, X11Window, X11Window, int, int, unsigned, unsigned, int, int);
+        using CreateFontCursorFunction     = X11Cursor (*)(X11Display*, unsigned);
+        using DefineCursorFunction         = int (*)(X11Display*, X11Window, X11Cursor);
+        using UndefineCursorFunction       = int (*)(X11Display*, X11Window);
+        using FreeCursorFunction           = int (*)(X11Display*, X11Cursor);
+        using OpenInputMethodFunction      = X11InputMethod* (*)(X11Display*, X11ResourceDatabase*, char*, char*);
+        using CloseInputMethodFunction     = int (*)(X11InputMethod*);
+        using CreateInputContextFunction   = X11InputContext* (*)(X11InputMethod*, ...);
+        using DestroyInputContextFunction  = void (*)(X11InputContext*);
+        using FilterEventFunction          = int (*)(X11Event*, X11Window);
+        using Utf8LookupStringFunction     = int (*)(X11InputContext*, X11KeyEvent*, char*, int, X11KeySym*, X11Status*);
 
-        [[= $::Syscall{"XOpenDisplay"}]] OpenDisplayFunction openDisplay = nullptr;
-        [[= $::Syscall{"XCloseDisplay"}]] CloseDisplayFunction closeDisplay = nullptr;
-        [[= $::Syscall{"XDefaultScreen"}]] DefaultScreenFunction defaultScreen = nullptr;
-        [[= $::Syscall{"XRootWindow"}]] RootWindowFunction rootWindow = nullptr;
-        [[= $::Syscall{"XDefaultVisual"}]] DefaultVisualFunction defaultVisual = nullptr;
-        [[= $::Syscall{"XDefaultDepth"}]] DefaultDepthFunction defaultDepth = nullptr;
-        [[= $::Syscall{"XCreateSimpleWindow"}]] CreateSimpleWindowFunction createSimpleWindow = nullptr;
-        [[= $::Syscall{"XCreateWindow"}]] CreateWindowFunction createWindow = nullptr;
-        [[= $::Syscall{"XDestroyWindow"}]] DestroyWindowFunction destroyWindow = nullptr;
-        [[= $::Syscall{"XMapWindow"}]] MapWindowFunction mapWindow = nullptr;
-        [[= $::Syscall{"XUnmapWindow"}]] UnmapWindowFunction unmapWindow = nullptr;
-        [[= $::Syscall{"XMoveWindow"}]] MoveWindowFunction moveWindow = nullptr;
-        [[= $::Syscall{"XResizeWindow"}]] ResizeWindowFunction resizeWindow = nullptr;
-        [[= $::Syscall{"XMoveResizeWindow"}]] MoveResizeWindowFunction moveResizeWindow = nullptr;
-        [[= $::Syscall{"XSelectInput"}]] SelectInputFunction selectInput = nullptr;
-        [[= $::Syscall{"XStoreName"}]] StoreNameFunction storeName = nullptr;
-        [[= $::Syscall{"XInternAtom"}]] InternAtomFunction internAtom = nullptr;
-        [[= $::Syscall{"XSetWMProtocols"}]] SetWmProtocolsFunction setWmProtocols = nullptr;
-        [[= $::Syscall{"XPending"}]] PendingFunction pending = nullptr;
-        [[= $::Syscall{"XNextEvent"}]] NextEventFunction nextEvent = nullptr;
-        [[= $::Syscall{"XCheckMaskEvent"}]] CheckMaskEventFunction checkMaskEvent = nullptr;
-        [[= $::Syscall{"XConnectionNumber"}]] ConnectionNumberFunction connectionNumber = nullptr;
-        [[= $::Syscall{"XFlush"}]] FlushFunction flush = nullptr;
-        [[= $::Syscall{"XSync"}]] SyncFunction sync = nullptr;
-        [[= $::Syscall{"XFree"}]] FreeFunction free = nullptr;
+        [[= $::Syscall{"XOpenDisplay"}]]         OpenDisplayFunction openDisplay = nullptr;
+        [[= $::Syscall{"XCloseDisplay"}]]        CloseDisplayFunction closeDisplay = nullptr;
+        [[= $::Syscall{"XDefaultScreen"}]]       DefaultScreenFunction defaultScreen = nullptr;
+        [[= $::Syscall{"XRootWindow"}]]          RootWindowFunction rootWindow = nullptr;
+        [[= $::Syscall{"XDefaultVisual"}]]       DefaultVisualFunction defaultVisual = nullptr;
+        [[= $::Syscall{"XDefaultDepth"}]]        DefaultDepthFunction defaultDepth = nullptr;
+        [[= $::Syscall{"XCreateSimpleWindow"}]]  CreateSimpleWindowFunction createSimpleWindow = nullptr;
+        [[= $::Syscall{"XCreateWindow"}]]        CreateWindowFunction createWindow = nullptr;
+        [[= $::Syscall{"XDestroyWindow"}]]       DestroyWindowFunction destroyWindow = nullptr;
+        [[= $::Syscall{"XMapWindow"}]]           MapWindowFunction mapWindow = nullptr;
+        [[= $::Syscall{"XUnmapWindow"}]]         UnmapWindowFunction unmapWindow = nullptr;
+        [[= $::Syscall{"XMoveWindow"}]]          MoveWindowFunction moveWindow = nullptr;
+        [[= $::Syscall{"XResizeWindow"}]]        ResizeWindowFunction resizeWindow = nullptr;
+        [[= $::Syscall{"XMoveResizeWindow"}]]    MoveResizeWindowFunction moveResizeWindow = nullptr;
+        [[= $::Syscall{"XSelectInput"}]]         SelectInputFunction selectInput = nullptr;
+        [[= $::Syscall{"XStoreName"}]]           StoreNameFunction storeName = nullptr;
+        [[= $::Syscall{"XInternAtom"}]]          InternAtomFunction internAtom = nullptr;
+        [[= $::Syscall{"XSetWMProtocols"}]]      SetWmProtocolsFunction setWmProtocols = nullptr;
+        [[= $::Syscall{"XPending"}]]             PendingFunction pending = nullptr;
+        [[= $::Syscall{"XNextEvent"}]]           NextEventFunction nextEvent = nullptr;
+        [[= $::Syscall{"XCheckMaskEvent"}]]      CheckMaskEventFunction checkMaskEvent = nullptr;
+        [[= $::Syscall{"XConnectionNumber"}]]    ConnectionNumberFunction connectionNumber = nullptr;
+        [[= $::Syscall{"XFlush"}]]               FlushFunction flush = nullptr;
+        [[= $::Syscall{"XSync"}]]                SyncFunction sync = nullptr;
+        [[= $::Syscall{"XFree"}]]                FreeFunction free = nullptr;
         [[= $::Syscall{"XGetWindowAttributes"}]] GetWindowAttributesFunction getWindowAttributes = nullptr;
-        [[= $::Syscall{"XSetInputFocus"}]] SetInputFocusFunction setInputFocus = nullptr;
-        [[= $::Syscall{"XIconifyWindow"}]] IconifyWindowFunction iconifyWindow = nullptr;
-        [[= $::Syscall{"XRaiseWindow"}]] RaiseWindowFunction raiseWindow = nullptr;
-        [[= $::Syscall{"XGrabPointer"}]] GrabPointerFunction grabPointer = nullptr;
-        [[= $::Syscall{"XUngrabPointer"}]] UngrabPointerFunction ungrabPointer = nullptr;
-        [[= $::Syscall{"XWarpPointer"}]] WarpPointerFunction warpPointer = nullptr;
-        [[= $::Syscall{"XCreateFontCursor"}]] CreateFontCursorFunction createFontCursor = nullptr;
-        [[= $::Syscall{"XDefineCursor"}]] DefineCursorFunction defineCursor = nullptr;
-        [[= $::Syscall{"XUndefineCursor"}]] UndefineCursorFunction undefineCursor = nullptr;
-        [[= $::Syscall{"XFreeCursor"}]] FreeCursorFunction freeCursor = nullptr;
-        [[= $::Syscall{"XOpenIM"}]] OpenInputMethodFunction openInputMethod = nullptr;
-        [[= $::Syscall{"XCloseIM"}]] CloseInputMethodFunction closeInputMethod = nullptr;
-        [[= $::Syscall{"XCreateIC"}]] CreateInputContextFunction createInputContext = nullptr;
-        [[= $::Syscall{"XDestroyIC"}]] DestroyInputContextFunction destroyInputContext = nullptr;
-        [[= $::Syscall{"XFilterEvent"}]] FilterEventFunction filterEvent = nullptr;
-        [[= $::Syscall{"Xutf8LookupString"}]] Utf8LookupStringFunction utf8LookupString = nullptr;
+        [[= $::Syscall{"XSetInputFocus"}]]       SetInputFocusFunction setInputFocus = nullptr;
+        [[= $::Syscall{"XIconifyWindow"}]]       IconifyWindowFunction iconifyWindow = nullptr;
+        [[= $::Syscall{"XRaiseWindow"}]]         RaiseWindowFunction raiseWindow = nullptr;
+        [[= $::Syscall{"XGrabPointer"}]]         GrabPointerFunction grabPointer = nullptr;
+        [[= $::Syscall{"XUngrabPointer"}]]       UngrabPointerFunction ungrabPointer = nullptr;
+        [[= $::Syscall{"XWarpPointer"}]]         WarpPointerFunction warpPointer = nullptr;
+        [[= $::Syscall{"XCreateFontCursor"}]]    CreateFontCursorFunction createFontCursor = nullptr;
+        [[= $::Syscall{"XDefineCursor"}]]        DefineCursorFunction defineCursor = nullptr;
+        [[= $::Syscall{"XUndefineCursor"}]]      UndefineCursorFunction undefineCursor = nullptr;
+        [[= $::Syscall{"XFreeCursor"}]]          FreeCursorFunction freeCursor = nullptr;
+        [[= $::Syscall{"XOpenIM"}]]              OpenInputMethodFunction openInputMethod = nullptr;
+        [[= $::Syscall{"XCloseIM"}]]             CloseInputMethodFunction closeInputMethod = nullptr;
+        [[= $::Syscall{"XCreateIC"}]]            CreateInputContextFunction createInputContext = nullptr;
+        [[= $::Syscall{"XDestroyIC"}]]           DestroyInputContextFunction destroyInputContext = nullptr;
+        [[= $::Syscall{"XFilterEvent"}]]         FilterEventFunction filterEvent = nullptr;
+        [[= $::Syscall{"Xutf8LookupString"}]]    Utf8LookupStringFunction utf8LookupString = nullptr;
         // clang-format on
 
         /** @brief Return the Xlib contract represented by this table, independent of optional symbol availability. */
@@ -583,13 +702,10 @@ namespace Sora::PAL {
         using ConnectionHasErrorFunction      = int (*)(XcbConnection*);
         using GetSetupFunction                = const XcbSetup* (*)(XcbConnection*);
         using GenerateIdFunction              = XcbWindow (*)(XcbConnection*);
-        using CreateWindowFunction = XcbVoidCookie (*)(
-            XcbConnection*, uint8_t, XcbWindow, XcbWindow, int16_t, int16_t, uint16_t, uint16_t, uint16_t, uint16_t,
-            uint32_t, uint32_t, const uint32_t*);
-        using ChangePropertyFunction = XcbVoidCookie (*)(
-            XcbConnection*, uint8_t, XcbWindow, XcbAtom, XcbAtom, uint8_t, uint32_t, const void*);
-        using InternAtomFunction = XcbInternAtomCookie (*)(XcbConnection*, uint8_t, uint16_t, const char*);
-        using InternAtomReplyFunction = XcbInternAtomReply* (*)(XcbConnection*, XcbInternAtomCookie, XcbGenericError**);
+        using CreateWindowFunction            = XcbVoidCookie (*)(XcbConnection*, uint8_t, XcbWindow, XcbWindow, int16_t, int16_t, uint16_t, uint16_t, uint16_t, uint16_t, uint32_t, uint32_t, const uint32_t*);
+        using ChangePropertyFunction          = XcbVoidCookie (*)(XcbConnection*, uint8_t, XcbWindow, XcbAtom, XcbAtom, uint8_t, uint32_t, const void*);
+        using InternAtomFunction              = XcbInternAtomCookie (*)(XcbConnection*, uint8_t, uint16_t, const char*);
+        using InternAtomReplyFunction         = XcbInternAtomReply* (*)(XcbConnection*, XcbInternAtomCookie, XcbGenericError**);
         using DestroyWindowFunction           = XcbVoidCookie (*)(XcbConnection*, XcbWindow);
         using MapWindowFunction               = XcbVoidCookie (*)(XcbConnection*, XcbWindow);
         using UnmapWindowFunction             = XcbVoidCookie (*)(XcbConnection*, XcbWindow);
@@ -600,25 +716,24 @@ namespace Sora::PAL {
         using GetFileDescriptorFunction       = int (*)(XcbConnection*);
         using GetMaximumRequestLengthFunction = uint32_t (*)(XcbConnection*);
 
-        [[= $::Syscall{"xcb_connect"}]] ConnectFunction connect = nullptr;
-        [[= $::Syscall{"xcb_disconnect"}]] DisconnectFunction disconnect = nullptr;
-        [[= $::Syscall{"xcb_connection_has_error"}]] ConnectionHasErrorFunction connectionHasError = nullptr;
-        [[= $::Syscall{"xcb_get_setup"}]] GetSetupFunction getSetup = nullptr;
-        [[= $::Syscall{"xcb_generate_id"}]] GenerateIdFunction generateId = nullptr;
-        [[= $::Syscall{"xcb_create_window"}]] CreateWindowFunction createWindow = nullptr;
-        [[= $::Syscall{"xcb_change_property"}]] ChangePropertyFunction changeProperty = nullptr;
-        [[= $::Syscall{"xcb_intern_atom"}]] InternAtomFunction internAtom = nullptr;
-        [[= $::Syscall{"xcb_intern_atom_reply"}]] InternAtomReplyFunction internAtomReply = nullptr;
-        [[= $::Syscall{"xcb_destroy_window"}]] DestroyWindowFunction destroyWindow = nullptr;
-        [[= $::Syscall{"xcb_map_window"}]] MapWindowFunction mapWindow = nullptr;
-        [[= $::Syscall{"xcb_unmap_window"}]] UnmapWindowFunction unmapWindow = nullptr;
-        [[= $::Syscall{"xcb_configure_window"}]] ConfigureWindowFunction configureWindow = nullptr;
-        [[= $::Syscall{"xcb_poll_for_event"}]] PollForEventFunction pollForEvent = nullptr;
-        [[= $::Syscall{"xcb_wait_for_event"}]] WaitForEventFunction waitForEvent = nullptr;
-        [[= $::Syscall{"xcb_flush"}]] FlushFunction flush = nullptr;
-        [[= $::Syscall{"xcb_get_file_descriptor"}]] GetFileDescriptorFunction getFileDescriptor = nullptr;
-        [[= $::Syscall{"xcb_get_maximum_request_length"}]]
-        GetMaximumRequestLengthFunction getMaximumRequestLength = nullptr;
+        [[= $::Syscall{"xcb_connect"}]]                    ConnectFunction connect = nullptr;
+        [[= $::Syscall{"xcb_disconnect"}]]                 DisconnectFunction disconnect = nullptr;
+        [[= $::Syscall{"xcb_connection_has_error"}]]       ConnectionHasErrorFunction connectionHasError = nullptr;
+        [[= $::Syscall{"xcb_get_setup"}]]                  GetSetupFunction getSetup = nullptr;
+        [[= $::Syscall{"xcb_generate_id"}]]                GenerateIdFunction generateId = nullptr;
+        [[= $::Syscall{"xcb_create_window"}]]              CreateWindowFunction createWindow = nullptr;
+        [[= $::Syscall{"xcb_change_property"}]]            ChangePropertyFunction changeProperty = nullptr;
+        [[= $::Syscall{"xcb_intern_atom"}]]                InternAtomFunction internAtom = nullptr;
+        [[= $::Syscall{"xcb_intern_atom_reply"}]]          InternAtomReplyFunction internAtomReply = nullptr;
+        [[= $::Syscall{"xcb_destroy_window"}]]             DestroyWindowFunction destroyWindow = nullptr;
+        [[= $::Syscall{"xcb_map_window"}]]                 MapWindowFunction mapWindow = nullptr;
+        [[= $::Syscall{"xcb_unmap_window"}]]               UnmapWindowFunction unmapWindow = nullptr;
+        [[= $::Syscall{"xcb_configure_window"}]]           ConfigureWindowFunction configureWindow = nullptr;
+        [[= $::Syscall{"xcb_poll_for_event"}]]             PollForEventFunction pollForEvent = nullptr;
+        [[= $::Syscall{"xcb_wait_for_event"}]]             WaitForEventFunction waitForEvent = nullptr;
+        [[= $::Syscall{"xcb_flush"}]]                      FlushFunction flush = nullptr;
+        [[= $::Syscall{"xcb_get_file_descriptor"}]]        GetFileDescriptorFunction getFileDescriptor = nullptr;
+        [[= $::Syscall{"xcb_get_maximum_request_length"}]] GetMaximumRequestLengthFunction getMaximumRequestLength = nullptr;
         // clang-format on
 
         /** @brief Return the XCB contract represented by this table, independent of optional symbol availability. */
@@ -668,33 +783,51 @@ namespace Sora::PAL {
         using GetRegistryFunction             = WaylandRegistry* (*)(WaylandDisplay*);
         using ProxyAddListenerFunction        = int (*)(WaylandProxy*, void (**)(void), void*);
         using ProxyDestroyFunction            = void (*)(WaylandProxy*);
-        using ProxyMarshalFlagsFunction = WaylandProxy* (*)(WaylandProxy*, uint32_t, const WaylandInterface*,
-                                                            uint32_t, uint32_t, ...);
+        using ProxyMarshalFlagsFunction       = WaylandProxy* (*)(WaylandProxy*, uint32_t, const WaylandInterface*, uint32_t, uint32_t, ...);
         using ProxyGetVersionFunction         = uint32_t (*)(const WaylandProxy*);
         using ProxySetUserDataFunction        = void (*)(WaylandProxy*, void*);
         using ProxyGetUserDataFunction        = void* (*)(const WaylandProxy*);
         using DisplayGetErrorFunction         = int (*)(WaylandDisplay*);
         using DisplayGetProtocolErrorFunction = uint32_t (*)(WaylandDisplay*, const WaylandInterface**, uint32_t*);
 
-        [[= $::Syscall{"wl_display_connect"}]] ConnectFunction connect = nullptr;
-        [[= $::Syscall{"wl_display_connect_to_fd"}]] ConnectFdFunction connectToFd = nullptr;
-        [[= $::Syscall{"wl_display_disconnect"}]] DisconnectFunction disconnect = nullptr;
-        [[= $::Syscall{"wl_display_dispatch"}]] DispatchFunction dispatch = nullptr;
-        [[= $::Syscall{"wl_display_dispatch_pending"}]] DispatchPendingFunction dispatchPending = nullptr;
-        [[= $::Syscall{"wl_display_roundtrip"}]] RoundtripFunction roundtrip = nullptr;
-        [[= $::Syscall{"wl_display_flush"}]] FlushFunction flush = nullptr;
-        [[= $::Syscall{"wl_display_get_fd"}]] GetFileDescriptorFunction getFileDescriptor = nullptr;
-        [[= $::Syscall{"wl_display_prepare_read"}]] PrepareReadFunction prepareRead = nullptr;
-        [[= $::Syscall{"wl_display_cancel_read"}]] CancelReadFunction cancelRead = nullptr;
-        [[= $::Syscall{"wl_display_read_events"}]] ReadEventsFunction readEvents = nullptr;
-        [[= $::Syscall{"wl_display_get_registry"}]] GetRegistryFunction getRegistry = nullptr;
-        [[= $::Syscall{"wl_proxy_add_listener"}]] ProxyAddListenerFunction proxyAddListener = nullptr;
-        [[= $::Syscall{"wl_proxy_destroy"}]] ProxyDestroyFunction proxyDestroy = nullptr;
-        [[= $::Syscall{"wl_proxy_marshal_flags"}]] ProxyMarshalFlagsFunction proxyMarshalFlags = nullptr;
-        [[= $::Syscall{"wl_proxy_get_version"}]] ProxyGetVersionFunction proxyGetVersion = nullptr;
-        [[= $::Syscall{"wl_proxy_set_user_data"}]] ProxySetUserDataFunction proxySetUserData = nullptr;
-        [[= $::Syscall{"wl_proxy_get_user_data"}]] ProxyGetUserDataFunction proxyGetUserData = nullptr;
-        [[= $::Syscall{"wl_display_get_error"}]] DisplayGetErrorFunction displayGetError = nullptr;
+        [[= $::Syscall{"wl_display_connect"}]]
+        ConnectFunction                 connect                 = nullptr;
+        [[= $::Syscall{"wl_display_connect_to_fd"}]]
+        ConnectFdFunction               connectToFd             = nullptr;
+        [[= $::Syscall{"wl_display_disconnect"}]]
+        DisconnectFunction              disconnect              = nullptr;
+        [[= $::Syscall{"wl_display_dispatch"}]]
+        DispatchFunction                dispatch                = nullptr;
+        [[= $::Syscall{"wl_display_dispatch_pending"}]]
+        DispatchPendingFunction         dispatchPending         = nullptr;
+        [[= $::Syscall{"wl_display_roundtrip"}]]
+        RoundtripFunction               roundtrip               = nullptr;
+        [[= $::Syscall{"wl_display_flush"}]]
+        FlushFunction                   flush                   = nullptr;
+        [[= $::Syscall{"wl_display_get_fd"}]]
+        GetFileDescriptorFunction       getFileDescriptor       = nullptr;
+        [[= $::Syscall{"wl_display_prepare_read"}]]
+        PrepareReadFunction             prepareRead             = nullptr;
+        [[= $::Syscall{"wl_display_cancel_read"}]]
+        CancelReadFunction              cancelRead              = nullptr;
+        [[= $::Syscall{"wl_display_read_events"}]]
+        ReadEventsFunction              readEvents              = nullptr;
+        [[= $::Syscall{"wl_display_get_registry"}]]
+        GetRegistryFunction             getRegistry             = nullptr;
+        [[= $::Syscall{"wl_proxy_add_listener"}]]
+        ProxyAddListenerFunction        proxyAddListener        = nullptr;
+        [[= $::Syscall{"wl_proxy_destroy"}]]
+        ProxyDestroyFunction            proxyDestroy            = nullptr;
+        [[= $::Syscall{"wl_proxy_marshal_flags"}]]
+        ProxyMarshalFlagsFunction       proxyMarshalFlags       = nullptr;
+        [[= $::Syscall{"wl_proxy_get_version"}]]
+        ProxyGetVersionFunction         proxyGetVersion         = nullptr;
+        [[= $::Syscall{"wl_proxy_set_user_data"}]]
+        ProxySetUserDataFunction        proxySetUserData        = nullptr;
+        [[= $::Syscall{"wl_proxy_get_user_data"}]]
+        ProxyGetUserDataFunction        proxyGetUserData        = nullptr;
+        [[= $::Syscall{"wl_display_get_error"}]]
+        DisplayGetErrorFunction         displayGetError         = nullptr;
         [[= $::Syscall{"wl_display_get_protocol_error"}]]
         DisplayGetProtocolErrorFunction displayGetProtocolError = nullptr;
         // clang-format on
@@ -730,18 +863,11 @@ namespace Sora::PAL {
 
     namespace WindowsSystem {
 
-        using DWord64 = unsigned long long;
-        using UInt = unsigned int;
-        using Long = long;
-        using HResult = long;
-        using Size = uintptr_t;
         using TraceHandle = uint64_t;
         using GlobalMemory = void*;
         /** @brief Opaque native type used by the existing Win32 file API table. */
         using NativeOverlapped = ::_OVERLAPPED;
         using NativeLargeInteger = ::_LARGE_INTEGER;
-        using MonitorHandle = void*;
-        using DeviceContextHandle = void*;
         using DpiAwarenessContext = void*;
         using LParam = intptr_t;
 
@@ -822,11 +948,6 @@ namespace Sora::PAL {
             DWord byteOffsetForSectorAlignment;
             /** Byte adjustment needed to align storage to the partition boundary; often 0. */
             DWord byteOffsetForPartitionAlignment;
-        };
-
-        /** @brief ABI-compatible signed 64-bit integer returned by Win32 file-size APIs. */
-        struct LargeInteger {
-            int64_t quadPart = 0;
         };
 
         /** @brief ABI-compatible Win32 monitor information record. */
@@ -1375,9 +1496,7 @@ namespace Sora::PAL {
         // clang-format off
         using GetCurrentThreadIdFunction          = WindowsSystem::DWord(__stdcall*)();
         using GetCurrentThreadFunction            = WindowsSystem::Handle(__stdcall*)();
-        using OpenThreadFunction                  = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord,
-                                                                                       WindowsSystem::Bool,
-                                                                                       WindowsSystem::DWord);
+        using OpenThreadFunction                  = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
         using SetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, const wchar_t*);
         using GetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, wchar_t**);
         using GetCurrentProcessorNumberExFunction = void(__stdcall*)(WindowsSystem::ProcessorNumber*);
@@ -1817,6 +1936,12 @@ namespace Sora::PAL {
 
         [[= $::Syscall{"sysconf"}]] SystemConfigurationFunction systemConfiguration = nullptr;
     };
+
+    /** @brief Win32 event objects are unavailable on POSIX targets. */
+    struct EventSystemAPI {};
+
+    /** @brief Win32 I/O completion ports are unavailable on POSIX targets. */
+    struct IOCPSystemAPI {};
 
     /** @brief Dynamically resolved Linux io_uring submission/completion operations. */
     struct IORingSystemAPI {
