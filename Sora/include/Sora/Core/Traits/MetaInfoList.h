@@ -220,24 +220,20 @@ namespace Sora::Meta {
      * @brief Return an exact bounded slice of a reflection sequence.
      * @param[in] list Source sequence.
      * @param[in] offset Zero-based first entity.
-     * @param[in] length Number of entities copied.
-     * @return Promoted copy of the selected interval.
+     * @param[in] length Number of entities selected.
+     * @return Non-owning view of the selected interval.
      * @throws std::out_of_range During translation when the interval is outside @p list.
-     * @par Complexity Linear in @p length.
+     * @par Complexity Constant.
      */
     consteval InfoList Slice(const InfoList& list, std::size_t offset, std::size_t length) {
-        const auto view = list.subspan(offset, length);
-        if (view.empty()) {
-            return {};
-        }
-        return Promote(std::vector<std::meta::info>(view.begin(), view.end()));
+        return list.subspan(offset, length);
     }
 
     /**
      * @brief Return the first @p count entities, clamping @p count to the sequence length.
      * @param[in] list Source sequence.
      * @param[in] count Maximum number of entities to retain.
-     * @return Promoted prefix sequence.
+     * @return Non-owning prefix view.
      */
     consteval InfoList Take(const InfoList& list, std::size_t count) {
         return Slice(list, 0, std::min(count, list.size()));
@@ -247,7 +243,7 @@ namespace Sora::Meta {
      * @brief Return all entities after the first @p count entities, clamping @p count to the sequence length.
      * @param[in] list Source sequence.
      * @param[in] count Number of leading entities to discard.
-     * @return Promoted suffix sequence.
+     * @return Non-owning suffix view.
      */
     consteval InfoList Drop(const InfoList& list, std::size_t count) {
         const auto offset = std::min(count, list.size());

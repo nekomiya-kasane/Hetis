@@ -8,15 +8,14 @@
  * boundary. This keeps reflection traversal, error propagation, and C++ type formation as separate layers.
  *
  * Every algorithm obeys the first-error law: the first `MetaError` in function, explicit arguments, then sequence
- * order is returned unchanged. Callables are validated even for empty sequences, so emptiness cannot hide an invalid
- * template or predicate. `Meta::Map` and its peers form the `InfoList` algorithm kernel. `Meta::Types` contains the
- * reflected `Traits::TypeList` adapters, keeping braced `InfoList` calls unambiguous while preserving short names.
+ * order is returned unchanged. `Meta::Map` and its peers form the `InfoList` algorithm kernel. `Meta::Types` contains
+ * the reflected `Traits::TypeList` adapters, keeping braced `InfoList` calls unambiguous while preserving short names.
  *
- * `Map`, `Zip`, and folds validate template category before traversing an empty input. C++26 reflection does not
- * expose a template's parameter list, so parameter kind, arity, and constraints are validated by the first actual
- * substitution; an empty input has no such substitution. Predicate parameter reflection is available and predicates
- * are therefore fully validated even for empty input. `Map` and `Zip` dealias produced entities; `Filter` preserves
- * the accepted input reflections exactly.
+ * C++26 reflection does not expose a template's parameter list, so parameter kind, arity, and constraints are
+ * validated by the first actual substitution. Empty `Map` and `Zip` validate only the template category; empty folds
+ * return their initial entity without inspecting the unused combiner. Predicates can be fully validated even for
+ * empty input because their parameters are reflectable. `Map` and `Zip` dealias produced entities; `Filter` preserves
+ * accepted input reflections exactly.
  *
  * @par InfoList pipeline
  * @code{.cpp}
@@ -67,6 +66,7 @@
 #include <cstddef>
 #include <meta>
 #include <ranges>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -141,6 +141,28 @@ namespace Sora::Meta {
         return {};
     }
 
+    namespace Detail {
+
+        [[nodiscard]] consteval std::meta::info Apply(std::meta::info function,
+                                                       std::span<const std::meta::info> arguments) {
+            if (IsMetaError(function)) {
+                return function;
+            }
+            for (const auto argument : arguments) {
+                if (IsMetaError(argument)) {
+                    return argument;
+                }
+            }
+            if (!std::meta::is_template(function) || !std::meta::can_substitute(function, arguments)) {
+                std::vector<std::meta::info> context{function};
+                context.append_range(arguments);
+                return MakeMetaError(^^Error::NonInvocableTag, context);
+            }
+            return std::meta::substitute(function, arguments);
+        }
+
+    } // namespace Detail
+
     /**
      * @brief Invoke a reflected template with a dynamically assembled argument list.
      * @param[in] function Reflected template to substitute.
@@ -148,18 +170,7 @@ namespace Sora::Meta {
      * @return Substitution result, the first input error, or `NonInvocableTag` with invocation provenance.
      */
     [[nodiscard]] consteval std::meta::info Apply(std::meta::info function, const InfoList& arguments) {
-        if (IsMetaError(function)) {
-            return function;
-        }
-        if (const auto error = FirstMetaError(arguments); error != std::meta::info{}) {
-            return error;
-        }
-        if (!std::meta::is_template(function) || !std::meta::can_substitute(function, arguments)) {
-            std::vector<std::meta::info> context{function};
-            context.append_range(arguments);
-            return MakeMetaError(^^Error::NonInvocableTag, context);
-        }
-        return std::meta::substitute(function, arguments);
+        return Detail::Apply(function, {arguments.begin(), arguments.size()});
     }
 
     namespace Detail {
@@ -170,17 +181,6 @@ namespace Sora::Meta {
             }
             return std::meta::is_template(function) ? std::meta::info{}
                                                      : MakeMetaError(^^Error::NonInvocableTag, {function});
-        }
-
-        [[nodiscard]] consteval std::meta::info ValidateTemplate(std::meta::info function,
-                                                                  std::size_t arity) {
-            if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
-                return error;
-            }
-            std::vector<std::meta::info> arguments(arity, ^^void);
-            return std::meta::can_substitute(function, arguments)
-                       ? std::meta::info{}
-                       : MakeMetaError(^^Error::NonInvocableTag, {function});
         }
 
         [[nodiscard]] consteval std::meta::info ValidateUnaryPred(std::meta::info pred) {
@@ -247,13 +247,14 @@ namespace Sora::Meta {
             std::vector<std::meta::info> transformed;
             transformed.reserve(arguments.size());
             for (const auto argument : arguments) {
-                const auto result = Apply(function, InfoList{argument});
+                const std::array invocationArguments{argument};
+                const auto result = Apply(function, invocationArguments);
                 if (IsMetaError(result)) {
                     return result;
                 }
                 transformed.push_back(result);
             }
-            return Apply(continuation, Promote(transformed));
+            return Apply(continuation, transformed);
         }
 
     } // namespace Detail
@@ -272,14 +273,14 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function, 1); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
             return error;
         }
         std::vector<std::meta::info> output;
         output.reserve(input.size());
         for (const auto value : input) {
             const std::array arguments{value};
-            const auto mapped = Apply(function, Promote(arguments));
+            const auto mapped = Detail::Apply(function, arguments);
             if (IsMetaError(mapped)) {
                 return mapped;
             }
@@ -338,17 +339,19 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(right); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function, 2); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
             return error;
         }
         if (left.size() != right.size()) {
-            return MakeMetaError(^^Error::LengthMismatchTag, {function});
+            return MakeMetaError(^^Error::LengthMismatchTag,
+                                 {function, std::meta::reflect_constant(left.size()),
+                                  std::meta::reflect_constant(right.size())});
         }
         std::vector<std::meta::info> output;
         output.reserve(left.size());
         for (std::size_t index = 0; index < left.size(); ++index) {
             const std::array arguments{left[index], right[index]};
-            const auto mapped = Apply(function, Promote(arguments));
+            const auto mapped = Detail::Apply(function, arguments);
             if (IsMetaError(mapped)) {
                 return mapped;
             }
@@ -372,13 +375,10 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function, 2); error != std::meta::info{}) {
-            return error;
-        }
         auto accumulator = initial;
         for (const auto value : input) {
             const std::array arguments{accumulator, value};
-            accumulator = Apply(function, Promote(arguments));
+            accumulator = Detail::Apply(function, arguments);
             if (IsMetaError(accumulator)) {
                 return accumulator;
             }
@@ -401,13 +401,10 @@ namespace Sora::Meta {
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function, 2); error != std::meta::info{}) {
-            return error;
-        }
         auto accumulator = initial;
         for (std::size_t index = input.size(); index > 0; --index) {
             const std::array arguments{input[index - 1], accumulator};
-            accumulator = Apply(function, Promote(arguments));
+            accumulator = Detail::Apply(function, arguments);
             if (IsMetaError(accumulator)) {
                 return accumulator;
             }
@@ -1015,6 +1012,7 @@ namespace Sora::Traits {
     /**
      * @brief All but the first type of @p List.
      * @tparam List `TypeList` specialization to transform.
+     * @return Resulting `TypeList`; an empty input remains empty.
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -1024,6 +1022,7 @@ namespace Sora::Traits {
      * @brief First @p Count types of @p List, clamped to its length.
      * @tparam List `TypeList` specialization to transform.
      * @tparam Count Maximum number of types to retain.
+     * @return Resulting prefix `TypeList`; @p Count is clamped to the input length.
      */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
@@ -1033,6 +1032,7 @@ namespace Sora::Traits {
      * @brief Types after the first @p Count entries, clamped to its length.
      * @tparam List `TypeList` specialization to transform.
      * @tparam Count Number of leading types to discard.
+     * @return Resulting suffix `TypeList`; @p Count is clamped to the input length.
      */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
@@ -1043,6 +1043,7 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to transform.
      * @tparam Offset Zero-based first type.
      * @tparam Count Number of types to copy.
+     * @return Resulting bounded `TypeList`; invalid bounds are rejected by the constraint.
      */
     template<typename List, std::size_t Offset, std::size_t Count>
         requires(Concept::TypeList<List> && Offset <= Length<List> &&
@@ -1062,6 +1063,7 @@ namespace Sora::Traits {
      * @brief TypeList containing @p Count copies of @p Type.
      * @tparam Count Number of copies.
      * @tparam Type Type to repeat.
+     * @return `TypeList` with @p Count copies, or a `MetaError` type for a non-type result.
      * @details The result is a `MetaError` type only when the reflected value is not a type; invalid @p Type itself
      * is diagnosed by the type system before this alias can be formed.
      */
@@ -1133,6 +1135,7 @@ namespace Sora::Traits {
      * @brief First index of @p Type in @p List, or @ref Meta::InfoList::npos.
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to find.
+     * @return Zero-based first matching index, or @ref Meta::InfoList::npos.
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -1142,6 +1145,7 @@ namespace Sora::Traits {
      * @brief Whether @p List contains @p Type.
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to find.
+     * @return `true` when @p Type occurs in @p List.
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -1151,6 +1155,7 @@ namespace Sora::Traits {
      * @brief Number of occurrences of @p Type in @p List.
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to count.
+     * @return Number of occurrences; zero for an empty list.
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -1163,7 +1168,8 @@ namespace Sora::Traits {
      * @return A matching type, `void`, or a `MetaError` type for predicate/input failure.
      * @par Example
      * @code{.cpp}
-     * using Match = Sora::Traits::FindFirst<^^std::is_class, Sora::Traits::TypeList<int, void>>;
+     * consteval bool IsVoid(std::meta::info info) { return info == ^^void; }
+     * using Match = Sora::Traits::FindFirst<^^IsVoid, Sora::Traits::TypeList<int, void>>;
      * static_assert(std::same_as<Match, void>);
      * @endcode
      */
@@ -1178,7 +1184,8 @@ namespace Sora::Traits {
      * @return A matching type, `void`, or a `MetaError` type for predicate/input failure.
      * @par Example
      * @code{.cpp}
-     * using Match = Sora::Traits::FindLast<^^std::is_class, Sora::Traits::TypeList<int, void>>;
+     * consteval bool IsVoid(std::meta::info info) { return info == ^^void; }
+     * using Match = Sora::Traits::FindLast<^^IsVoid, Sora::Traits::TypeList<int, void>>;
      * static_assert(std::same_as<Match, void>);
      * @endcode
      */
@@ -1236,6 +1243,7 @@ namespace Sora::Traits {
     /**
      * @brief Whether every type in @p List occurs exactly once.
      * @tparam List `TypeList` specialization to inspect.
+     * @return `true` for an empty or duplicate-free list.
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -1277,6 +1285,7 @@ namespace Sora::Traits {
      * @brief Whether every type in @p List satisfies @p Pred.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
+     * @return `true` for an empty list or when every type is accepted.
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -1286,6 +1295,7 @@ namespace Sora::Traits {
      * @brief Whether any type in @p List satisfies @p Pred.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
+     * @return `true` when at least one type is accepted; `false` for an empty list.
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -1295,6 +1305,7 @@ namespace Sora::Traits {
      * @brief Whether no type in @p List satisfies @p Pred.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
+     * @return `true` when no type is accepted; `true` for an empty list.
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -1305,6 +1316,7 @@ namespace Sora::Traits {
      * @brief Number of types in @p List satisfying @p Pred.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
+     * @return Number of accepted types; zero for an empty list.
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>

@@ -133,7 +133,11 @@ namespace Sora {
 
     namespace Concept {
 
-        /** @brief True when @p T is a `Traits::TypeList` specialization. */
+        /**
+         * @brief True when @p T is a `Traits::TypeList` specialization.
+         * @tparam T Type to inspect.
+         * @return `true` only for a `Traits::TypeList` specialization.
+         */
         template<typename T>
         concept TypeList = Meta::IsTypeList(std::meta::dealias(^^std::remove_cvref_t<T>));
 

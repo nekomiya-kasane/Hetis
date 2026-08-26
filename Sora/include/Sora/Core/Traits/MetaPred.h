@@ -98,6 +98,9 @@ namespace Sora::Meta {
 
     /**
      * @brief Extract the bool result of an arbitrary-arity reflected predicate invocation.
+     * @param[in] pred Reflected predicate function.
+     * @param[in] arguments Reflections supplied to @p pred in source order.
+     * @return The extracted bool value.
      * @throws A translation-time diagnostic when the predicate contract is violated.
      */
     template<typename... Arguments>
@@ -112,6 +115,8 @@ namespace Sora::Meta {
 
     /**
      * @brief Extract a validated bool from a predicate algorithm result.
+     * @param[in] result Reflected bool value returned by a predicate algorithm.
+     * @return Extracted bool value.
      * @pre @p result is a reflected bool value and not a @c MetaError.
      * @throws A translation-time diagnostic when @p result is invalid.
      */
@@ -147,6 +152,7 @@ namespace Sora::Concept {
     /**
      * @brief True when @p Pred reflects an arbitrary-arity meta predicate.
      * @tparam Pred Reflected function to inspect.
+     * @return `true` when the predicate protocol is satisfied.
      */
     template<std::meta::info Pred>
     concept MetaPred = Sora::Meta::IsMetaPred(Pred);
@@ -155,6 +161,7 @@ namespace Sora::Concept {
      * @brief True when @p Pred accepts exactly the reflected @p Arguments and returns bool.
      * @tparam Pred Reflected predicate function.
      * @tparam Arguments Reflected arguments used for the invocation check.
+     * @return `true` when invocation succeeds without a reflected meta error.
      */
     template<std::meta::info Pred, std::meta::info... Arguments>
     concept PredFor = !Sora::Meta::IsMetaError(Sora::Meta::InvokePred(Pred, Arguments...));
