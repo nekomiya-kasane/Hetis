@@ -809,7 +809,7 @@ namespace Sora::PAL {
 
     namespace Event {
 
-        namespace Traits {
+        namespace Concept {
 
             /** @brief Concept satisfied by every type eligible for @ref Sora::PAL::SystemEvent. */
             template<typename T>
@@ -823,138 +823,122 @@ namespace Sora::PAL {
             template<typename T>
             concept Timestamped = std::is_base_of_v<TimestampedEvent, T>;
 
+            /**
+             * @brief Concept for manager participation in platform-thread bookkeeping.
+             *
+             * A manager participates for payload @p Payload by exposing:
+             * @code{.cpp}
+             * void On(const Payload&) noexcept;
+             * @endcode
+             * The convention is structural: no registration table, manager base class, or runtime dispatch table.
+             */
+            template<typename Manager, typename Payload>
+            concept HandlesBookkeeping =
+                SystemEventPayload<Payload> && requires(Manager& manager, const Payload& payload) {
+                    { manager.On(payload) } noexcept -> std::same_as<void>;
+                };
+
+        } // namespace Concept
+
+        namespace Meta {
+
             /** @brief Return the optional operating-system restriction declared directly on @p T. */
-            template<SystemEventPayload T>
+            template<Concept::SystemEventPayload T>
             consteval std::optional<Platform::OperatingSystem> OperatingSystemOf() {
                 return Sora::$::GetSingleOptional<Platform::OperatingSystem>(^^T);
             }
 
             /** @brief Return the optional window-system restriction declared directly on @p T. */
-            template<SystemEventPayload T>
+            template<Concept::SystemEventPayload T>
             consteval std::optional<Platform::WindowSystem> WindowSystemOf() {
                 return Sora::$::GetSingleOptional<Platform::WindowSystem>(^^T);
             }
 
-            /** @brief Compile-time predicate for whether payload @p T is meaningful on @p OS and @p Window. */
-            template<SystemEventPayload T, Platform::OperatingSystem OS,
-                     Platform::WindowSystem Window = Platform::WindowSystem::Unknown>
-            inline constexpr bool AvailableOn = [] consteval {
-                constexpr auto operatingSystem = OperatingSystemOf<T>();
-                constexpr auto windowSystem = WindowSystemOf<T>();
-                return (!operatingSystem || *operatingSystem == OS) && (!windowSystem || *windowSystem == Window);
-            }();
-
-            /** @brief Whether @p T is meaningful for this translation unit's target and default window system. */
-            template<SystemEventPayload T>
-            inline constexpr bool AvailableOnCurrentPlatform =
-                AvailableOn<T, Platform::kOperatingSystem, Platform::kDefaultWindowSystem>;
-
             /** @brief Return the unqualified payload type name. */
-            template<SystemEventPayload T>
+            template<Concept::SystemEventPayload T>
             consteval std::string_view PayloadTypeName() {
                 return std::meta::identifier_of(^^T);
             }
 
-            /**
-             * @brief Concept for manager participation in the bookkeep stage.
-             *
-             * A Platform-thread manager participates for payload @p P by exposing:
-             * @code{.cpp}
-             * void On(const P&) noexcept;
-             * @endcode
-             * The convention is structural: no registration table, no marker base on the manager, and no runtime
-             * dispatch table. The @c noexcept requirement belongs to the hot path because EventPump bookkeeps on the
-             * owner thread immediately before subscriber broadcast.
-             */
-            template<typename M, typename P>
-            concept HandlesBookkeep = SystemEventPayload<P> && requires(M& m, const P& p) {
-                { m.On(p) } noexcept -> std::same_as<void>;
-            };
-
-        } // namespace Traits
-
-        /** @brief Invoke a matching, non-throwing structural bookkeeping overload; otherwise do nothing. */
-        template<typename Manager, typename Payload>
-        inline void ApplyBookkeep(Manager&, const Payload&) noexcept {}
-
-        /** @brief Invoke @p manager's bookkeeping overload for @p payload. */
-        template<typename Manager, Traits::SystemEventPayload Payload>
-            requires Traits::HandlesBookkeep<Manager, Payload>
-        inline void ApplyBookkeep(Manager& manager, const Payload& payload) noexcept {
-            manager.On(payload);
-        }
-
-    } // namespace Event
-
-    namespace Meta {
-
-        /** @brief Return whether reflected entity @p m is a complete payload candidate. */
-        consteval bool DerivesFromEventBase(std::meta::info m) {
-            if (std::meta::is_template(m)) {
-                return false;
+            /** @brief Return whether reflected entity @p member is a complete payload candidate. */
+            consteval bool DerivesFromEventBase(std::meta::info member) {
+                if (std::meta::is_template(member) || !std::meta::is_type(member) ||
+                    !std::meta::is_class_type(member) || !std::meta::is_complete_type(member)) {
+                    return false;
+                }
+                return std::meta::extract<bool>(
+                    std::meta::substitute(^^std::is_base_of_v, {^^EventPayloadBase, member}));
             }
-            if (!std::meta::is_type(m)) {
-                return false;
-            }
-            if (!std::meta::is_class_type(m)) {
-                return false;
-            }
-            if (!std::meta::is_complete_type(m)) {
-                return false;
-            }
-            return std::meta::extract<bool>(std::meta::substitute(^^std::is_base_of_v, {^^Event::EventPayloadBase, m}));
-        }
 
-        /** @brief Recursively collect payload candidates declared in @p ns and its nested namespaces. */
-        consteval void CollectEventPayloads(std::meta::info ns, std::vector<std::meta::info>& out) {
-            for (auto m : std::meta::members_of(ns, std::meta::access_context::unchecked())) {
-                if (std::meta::is_namespace(m)) {
-                    CollectEventPayloads(m, out);
-                } else if (DerivesFromEventBase(m)) {
-                    bool seen = false;
-                    for (auto e : out) {
-                        if (e == m) {
-                            seen = true;
+            /** @brief Recursively collect payload candidates declared in @p eventNamespace and nested namespaces. */
+            consteval void CollectEventPayloads(std::meta::info eventNamespace, std::vector<std::meta::info>& output) {
+                for (auto member : std::meta::members_of(eventNamespace, std::meta::access_context::unchecked())) {
+                    if (std::meta::is_namespace(member)) {
+                        CollectEventPayloads(member, output);
+                    } else if (DerivesFromEventBase(member)) {
+                        bool seen = false;
+                        for (auto existing : output) {
+                            if (existing == member) {
+                                seen = true;
+                                break;
+                            }
+                        }
+                        if (!seen) {
+                            output.push_back(member);
+                        }
+                    }
+                }
+            }
+
+            /** @brief Collect @c std::monostate plus every leaf payload reachable from @ref Sora::PAL::Event. */
+            consteval auto EventPayloadTypes() {
+                std::vector<std::meta::info> candidates{^^std::monostate};
+                CollectEventPayloads(^^Event, candidates);
+
+                std::vector<std::meta::info> baseTypes{};
+                for (auto candidate : candidates) {
+                    for (auto base : std::meta::bases_of(candidate, std::meta::access_context::unchecked())) {
+                        baseTypes.push_back(std::meta::type_of(base));
+                    }
+                }
+
+                std::vector<std::meta::info> leaves{};
+                for (auto candidate : candidates) {
+                    bool isBase = false;
+                    for (auto base : baseTypes) {
+                        if (base == candidate) {
+                            isBase = true;
                             break;
                         }
                     }
-                    if (!seen) {
-                        out.push_back(m);
+                    if (!isBase) {
+                        leaves.push_back(candidate);
                     }
                 }
-            }
-        }
-
-        /** @brief Collect @c std::monostate plus every leaf payload reachable from @ref Sora::PAL::Event. */
-        consteval auto EventPayloadTypes() {
-            std::vector<std::meta::info> candidates{};
-            candidates.push_back(^^std::monostate);
-            CollectEventPayloads(^^Event, candidates);
-
-            std::vector<std::meta::info> baseTypes{};
-            for (auto t : candidates) {
-                for (auto b : std::meta::bases_of(t, std::meta::access_context::unchecked())) {
-                    baseTypes.push_back(std::meta::type_of(b));
-                }
+                return leaves;
             }
 
-            std::vector<std::meta::info> leaves{};
-            for (auto t : candidates) {
-                bool isBase = false;
-                for (auto b : baseTypes) {
-                    if (b == t) {
-                        isBase = true;
-                        break;
-                    }
-                }
-                if (!isBase) {
-                    leaves.push_back(t);
-                }
-            }
-            return leaves;
-        }
+        } // namespace Meta
 
-    } // namespace Meta
+        namespace Traits {
+
+            /** @brief Compile-time predicate for whether payload @p T is meaningful on @p OS and @p Window. */
+            template<Concept::SystemEventPayload T, Platform::OperatingSystem OS,
+                     Platform::WindowSystem Window = Platform::WindowSystem::Unknown>
+            inline constexpr bool AvailableOn = [] consteval {
+                constexpr auto operatingSystem = Meta::OperatingSystemOf<T>();
+                constexpr auto windowSystem = Meta::WindowSystemOf<T>();
+                return (!operatingSystem || *operatingSystem == OS) && (!windowSystem || *windowSystem == Window);
+            }();
+
+            /** @brief Whether @p T is meaningful for this translation unit's target and default window system. */
+            template<Concept::SystemEventPayload T>
+            inline constexpr bool AvailableOnCurrentPlatform =
+                AvailableOn<T, Platform::kOperatingSystem, Platform::kDefaultWindowSystem>;
+
+        } // namespace Traits
+
+    } // namespace Event
 
     /**
      * @brief Sum type over every leaf system-event payload.
@@ -962,59 +946,67 @@ namespace Sora::PAL {
      * The active alternative is the discriminator. Clients should dispatch with @c std::visit or
      * @c std::holds_alternative<T>; @c std::variant::index is declaration-order dependent and not persistent.
      */
-    using SystemEvent = [:std::meta::substitute(^^std::variant, Meta::EventPayloadTypes()):];
+    using SystemEvent = [:std::meta::substitute(^^std::variant, Event::Meta::EventPayloadTypes()):];
 
     /** @brief Return the unqualified type name of the active event payload. */
-    [[nodiscard]] inline std::string_view NameOf(const SystemEvent& e) noexcept {
+    [[nodiscard]] inline std::string_view NameOf(const SystemEvent& event) noexcept {
         return std::visit(
             [](const auto& payload) noexcept -> std::string_view {
                 using T = std::remove_cvref_t<decltype(payload)>;
                 if constexpr (std::same_as<T, std::monostate>) {
                     return "monostate";
                 } else {
-                    return Event::Traits::PayloadTypeName<T>();
+                    return Event::Meta::PayloadTypeName<T>();
                 }
             },
-            e);
+            event);
     }
 
     /** @brief Return the target window when the active payload is window-scoped. */
-    [[nodiscard]] inline std::optional<uint64_t> WindowOf(const SystemEvent& e) noexcept {
+    [[nodiscard]] inline std::optional<uint64_t> WindowOf(const SystemEvent& event) noexcept {
         return std::visit(
             [](const auto& payload) noexcept -> std::optional<uint64_t> {
                 using T = std::remove_cvref_t<decltype(payload)>;
-                if constexpr (Event::Traits::WindowScoped<T>) {
+                if constexpr (Event::Concept::WindowScoped<T>) {
                     return payload.window;
                 } else {
                     return std::nullopt;
                 }
             },
-            e);
+            event);
     }
 
     /** @brief Return the capture timestamp when the active payload carries one. */
-    [[nodiscard]] inline std::optional<uint64_t> TimestampOf(const SystemEvent& e) noexcept {
+    [[nodiscard]] inline std::optional<uint64_t> TimestampOf(const SystemEvent& event) noexcept {
         return std::visit(
             [](const auto& payload) noexcept -> std::optional<uint64_t> {
                 using T = std::remove_cvref_t<decltype(payload)>;
-                if constexpr (Event::Traits::Timestamped<T>) {
+                if constexpr (Event::Concept::Timestamped<T>) {
                     return payload.timestamp;
                 } else {
                     return std::nullopt;
                 }
             },
-            e);
+            event);
     }
 
     /**
-     * @brief Visit @p e and call @c mgr.On(payload) when @p mgr handles the active payload type.
+     * @brief Visit @p event and call @c manager.On(payload) when @p manager handles the active payload type.
      *
-     * This helper is the public form of the bookkeep edge used by EventPump: it is type-driven, direct-call, and pruned
-     * by @c if @c constexpr for payloads outside a manager's responsibility.
+     * The dispatch is type-driven, direct-call, and pruned by @c if @c constexpr for payloads outside a manager's
+     * responsibility.
      */
-    template<typename M>
-    inline void DispatchBookkeep(M& mgr, const SystemEvent& e) noexcept {
-        std::visit([&mgr](const auto& payload) noexcept { Event::ApplyBookkeep(mgr, payload); }, e);
+    template<typename Manager>
+    inline void DispatchBookkeeping(Manager& manager, const SystemEvent& event) noexcept {
+        std::visit(
+            [&manager](const auto& payload) noexcept {
+                if constexpr (requires {
+                                  { manager.On(payload) } noexcept -> std::same_as<void>;
+                              }) {
+                    manager.On(payload);
+                }
+            },
+            event);
     }
 
 } // namespace Sora::PAL
