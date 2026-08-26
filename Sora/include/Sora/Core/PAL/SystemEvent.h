@@ -583,8 +583,7 @@ namespace Sora::PAL {
 
             /** @brief Where the host should anchor the candidate window (in client space). */
             struct ImePreeditCursorEvent : WindowSpecificEvent {
-                Sora::Math::Point2i caretOrigin{}; /**< Client-space pixel origin. */
-                Sora::Math::Vec2u caretSize{};
+                Sora::Math::Rect2i caretBounds{}; /**< Client-space caret bounds in pixels. */
             };
 
         } /* namespace IME */
