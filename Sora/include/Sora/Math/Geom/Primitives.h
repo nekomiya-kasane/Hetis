@@ -349,6 +349,11 @@ namespace Sora::Math {
             SORA_PRE(SquaredNorm(normal) > T{0});
         }
 
+        /** @brief Construct from an already-normalized equation. */
+        constexpr Hyperplane(UnitVector<T, N> normal, T offset) noexcept : normal_(std::move(normal)), offset_(offset) {
+            SORA_PRE(IsNotNaN(offset));
+        }
+
         [[nodiscard]] static constexpr UnitVector<T, N> Normalize(const Vector<T, N>& normal) noexcept {
             auto unit = TryNormalize(normal);
             SORA_PRE(unit.has_value());
