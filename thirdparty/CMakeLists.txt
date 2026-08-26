@@ -91,6 +91,32 @@ target_include_directories(vma INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/vma/include
 target_link_libraries(vma INTERFACE Vulkan::Headers)
 
 # -----------------------------------------------------------------------------
+# 1b. mimalloc — explicit general-purpose CPU allocation backend.
+#     Sora calls the mi_* API through its own allocator boundary. Keep every
+#     process-wide malloc/new override path disabled and use one shared runtime
+#     so host executables and dynamically loaded modules share an allocation domain.
+# -----------------------------------------------------------------------------
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _vk_tp_build_type_upper)
+set(_vk_tp_mimalloc_c_flags "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${_vk_tp_build_type_upper}}")
+if(_vk_tp_mimalloc_c_flags MATCHES "-fsanitize=[^ ]*address")
+    set(_vk_tp_mimalloc_track_asan ON)
+else()
+    set(_vk_tp_mimalloc_track_asan OFF)
+endif()
+set(MI_OVERRIDE     OFF CACHE BOOL "" FORCE)
+set(MI_BUILD_SHARED ON  CACHE BOOL "" FORCE)
+set(MI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+set(MI_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+set(MI_WIN_REDIRECT OFF CACHE BOOL "" FORCE)
+set(MI_TRACK_ASAN   ${_vk_tp_mimalloc_track_asan} CACHE BOOL "" FORCE)
+add_subdirectory(mimalloc EXCLUDE_FROM_ALL)
+add_library(mimalloc::mimalloc ALIAS mimalloc)
+unset(_vk_tp_build_type_upper)
+unset(_vk_tp_mimalloc_c_flags)
+unset(_vk_tp_mimalloc_track_asan)
+
+# -----------------------------------------------------------------------------
 # 2. volk — meta-loader (single .c + .h)
 # -----------------------------------------------------------------------------
 set(VOLK_STATIC_DEFINES "" CACHE INTERNAL "")
@@ -820,6 +846,7 @@ message(STATUS "  UI extras     : imguizmo implot")
 message(STATUS "  Physics       : $<$<BOOL:${VK_TP_BUILD_JOLT}>:Jolt> $<$<BOOL:${VK_TP_ENABLE_PHYSX}>:PhysX::Headers>")
 message(STATUS "  Geometry      : $<$<BOOL:${VK_TP_BUILD_MSDFGEN}>:msdfgen::msdfgen-core> $<$<BOOL:${VK_TP_BUILD_METIS}>:metis (gklib)>")
 message(STATUS "  Audio/IO      : miniaudio $<$<BOOL:${VK_TP_BUILD_EFSW}>:efsw>")
+message(STATUS "  Memory        : mimalloc (explicit API, no global override)")
 message(STATUS "  Testing       : $<$<BOOL:${VK_TP_BUILD_CATCH2}>:Catch2::Catch2WithMain>")
 
 # -----------------------------------------------------------------------------
