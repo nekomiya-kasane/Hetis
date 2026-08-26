@@ -9,13 +9,13 @@
  *
  * @par Example
  * @code{.cpp}
- * const auto& loader = Sora::PAL::Vulkan::LoadVulkanAPI();
- * if (loader.vkGetInstanceProcAddr != nullptr) {
+ * void ResolveLiveObjects(Sora::PAL::Vulkan::VkInstance instance, Sora::PAL::Vulkan::VkDevice device) {
+ *     const auto& loader = Sora::PAL::Vulkan::LoadVulkanAPI();
+ *     if (loader.vkGetInstanceProcAddr == nullptr) return;
  *     auto instanceApi = Sora::PAL::Vulkan::ResolveInstanceAPI(instance, loader.vkGetInstanceProcAddr);
- *     if (instanceApi.vkCreateDevice != nullptr) {
- *         auto deviceApi = Sora::PAL::Vulkan::ResolveDeviceAPI(device, instanceApi.vkGetDeviceProcAddr);
- *         // Use deviceApi.vkQueueSubmit, vkCmdDraw, ... after checking optional commands as needed.
- *     }
+ *     if (instanceApi.vkGetDeviceProcAddr == nullptr) return;
+ *     auto deviceApi = Sora::PAL::Vulkan::ResolveDeviceAPI(device, instanceApi.vkGetDeviceProcAddr);
+ *     if (deviceApi.vkDeviceWaitIdle != nullptr) deviceApi.vkDeviceWaitIdle(device);
  * }
  * @endcode
  *
@@ -30298,7 +30298,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
         PFN_vkEnumerateInstanceVersion vkEnumerateInstanceVersion = nullptr;
         PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
 
-        /** @brief Resolve every loader command through @p resolve. */
+        /**
+         * @brief Resolve every loader command through @p resolve.
+         * @tparam Resolver Callable accepting a null-terminated Vulkan command name and returning its address.
+         * @param[in] resolve Loader-export resolver whose returned addresses remain valid for the process lifetime.
+         */
         template<typename Resolver>
         void Resolve(Resolver&& resolve) noexcept {
             vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(resolve("vkCreateInstance"));
@@ -31961,13 +31965,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
         }
     };
 
-    /** @brief Return the immutable process-wide loader dispatch table. */
+    /**
+     * @brief Return the immutable process-wide loader dispatch table.
+     * @return Process-lifetime table; members are null when the Vulkan loader or command is unavailable.
+     * @threadsafe Initialization is synchronized and the returned table is immutable.
+     */
     [[nodiscard]] const LoaderAPI& LoadVulkanAPI() noexcept;
     /**
      * @brief Build an instance-scoped dispatch table.
      * @param[in] instance Live Vulkan instance used for resolution.
      * @param[in] resolver Instance-procedure resolver, normally vkGetInstanceProcAddr.
      * @return Fully populated table; optional extension commands may remain null.
+     * @pre @p instance is live and @p resolver is non-null.
+     * @warning Discard the result before destroying @p instance. The table owns neither the instance nor loader.
      */
     [[nodiscard]] InstanceAPI ResolveInstanceAPI(VkInstance instance, PFN_vkGetInstanceProcAddr resolver) noexcept;
     /**
@@ -31975,6 +31985,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetRandROutputDisplayEXT(
      * @param[in] device Live Vulkan device used for resolution.
      * @param[in] resolver Device-procedure resolver, normally vkGetDeviceProcAddr.
      * @return Fully populated table; optional extension commands may remain null.
+     * @pre @p device is live and @p resolver is non-null.
+     * @warning Discard the result before destroying @p device. The table owns neither the device nor loader.
      */
     [[nodiscard]] DeviceAPI ResolveDeviceAPI(VkDevice device, PFN_vkGetDeviceProcAddr resolver) noexcept;
 } // namespace Sora::PAL::Vulkan

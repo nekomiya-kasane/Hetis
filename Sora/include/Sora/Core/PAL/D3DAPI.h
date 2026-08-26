@@ -7,18 +7,23 @@
  *
  * @par Example
  * @code{.cpp}
+ * #if defined(PLATFORM_WINDOWS)
  * const auto& d3d12 = Sora::PAL::D3D::LoadD3D12API();
  * if (d3d12.createDevice != nullptr) {
- *     // Resolve the DLL entry point first; the returned device is then used through its COM vtable.
- *     Sora::PAL::WindowsSystem::Handle adapter{};
+ *     Sora::PAL::WindowsSystem::Unknown* adapter = nullptr;
  *     Sora::PAL::WindowsSystem::Guid iid{};
  *     void* device = nullptr;
- *     auto hr = d3d12.createDevice(adapter, 0, iid, &device);
+ *     const auto hr = d3d12.createDevice(
+ *         adapter, Sora::PAL::D3D::Detail::D3D_FEATURE_LEVEL{}, iid, &device);
+ *     (void)hr;
  * }
+ * #endif
  * @endcode
  *
- * @note The example is schematic: @p adapter, @p featureLevel, and @p device are application-owned native values.
- * Every function-table member is optional and must be checked before invocation.
+ * @note Native outputs and COM interfaces are application-owned and follow their Windows SDK lifetime rules. Every
+ * function-table member is optional and must be checked before invocation.
+ * @note On non-Windows targets the table types remain available as empty placeholders so portable declarations do not
+ * require preprocessor branching; Direct3D operations themselves are unavailable.
  */
 #pragma once
 
@@ -44,7 +49,11 @@ namespace Sora::PAL::D3D {
         return reinterpret_cast<Function>(resolver(name));
     }
 
-    /** @brief Process-wide exports from d3d12.dll; device and resource operations remain COM methods. */
+    /**
+     * @brief Process-wide exports from d3d12.dll; device and resource operations remain COM methods.
+     * @details The table owns no DLL or COM object. Members remain valid while the process-wide PAL module cache is
+     * alive; each optional export must be checked before use.
+     */
     struct D3D12API {
         decltype(&Detail::D3D12CreateDevice) createDevice = nullptr;
         decltype(&Detail::D3D12GetDebugInterface) getDebugInterface = nullptr;
@@ -83,7 +92,10 @@ namespace Sora::PAL::D3D {
         }
     };
 
-    /** @brief Process-wide DXGI factory, diagnostics, and adapter-removal exports. */
+    /**
+     * @brief Process-wide DXGI factory, diagnostics, and adapter-removal exports.
+     * @details Factory and debug interfaces returned by these functions are caller-owned COM references.
+     */
     struct DXGIAPI {
         decltype(&Detail::CreateDXGIFactory) createFactory = nullptr;
         decltype(&Detail::CreateDXGIFactory1) createFactory1 = nullptr;
@@ -107,7 +119,7 @@ namespace Sora::PAL::D3D {
         }
     };
 
-    /** @brief Process-wide DXCore adapter-factory export. */
+    /** @brief Process-wide DXCore adapter-factory export returning caller-owned COM interfaces. */
     struct DXCoreAPI {
         using CreateAdapterFactoryFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefInterfaceId, void**);
         CreateAdapterFactoryFunction createAdapterFactory = nullptr;
@@ -122,7 +134,10 @@ namespace Sora::PAL::D3D {
         }
     };
 
-    /** @brief Legacy d3dcompiler_47.dll shader compilation, reflection, transformation, and blob exports. */
+    /**
+     * @brief Legacy d3dcompiler_47.dll shader compilation, reflection, transformation, and blob exports.
+     * @details Returned blobs and reflection/linking interfaces are caller-owned according to their COM contracts.
+     */
     struct CompilerAPI {
 #    define SORA_D3D_COMPILER_EXPORT(Member, Symbol) decltype(&Detail::Symbol) Member = nullptr;
         SORA_D3D_COMPILER_EXPORT(readFileToBlob, D3DReadFileToBlob)
@@ -187,7 +202,10 @@ namespace Sora::PAL::D3D {
         }
     };
 
-    /** @brief Process-wide dxcompiler.dll component-factory exports; compilation is performed through DXC COM APIs. */
+    /**
+     * @brief Process-wide dxcompiler.dll component-factory exports; compilation is performed through DXC COM APIs.
+     * @details Successfully created DXC interfaces are caller-owned COM references.
+     */
     struct DXCAPI {
         decltype(&Detail::DxcCreateInstance) createInstance = nullptr;
         decltype(&Detail::DxcCreateInstance2) createInstance2 = nullptr;
@@ -202,22 +220,42 @@ namespace Sora::PAL::D3D {
         }
     };
 #else
+    /** @brief Empty portability placeholder when Direct3D is not available on the target platform. */
     struct D3D12API {};
+    /** @brief Empty portability placeholder when DXGI is not available on the target platform. */
     struct DXGIAPI {};
+    /** @brief Empty portability placeholder when DXCore is not available on the target platform. */
     struct DXCoreAPI {};
+    /** @brief Empty portability placeholder when the legacy compiler is not available on the target platform. */
     struct CompilerAPI {};
+    /** @brief Empty portability placeholder when DXC is not available on the target platform. */
     struct DXCAPI {};
 #endif
 
-    /** @brief Return the immutable process-wide D3D12 export table. */
+    /**
+     * @brief Return the immutable process-wide D3D12 export table.
+     * @return Process-lifetime table; members are null when Windows or the corresponding export is unavailable.
+     */
     [[nodiscard]] const D3D12API& LoadD3D12API() noexcept;
-    /** @brief Return the immutable process-wide DXGI export table. */
+    /**
+     * @brief Return the immutable process-wide DXGI export table.
+     * @return Process-lifetime table; members are null when Windows or the corresponding export is unavailable.
+     */
     [[nodiscard]] const DXGIAPI& LoadDXGIAPI() noexcept;
-    /** @brief Return the immutable process-wide DXCore export table. */
+    /**
+     * @brief Return the immutable process-wide DXCore export table.
+     * @return Process-lifetime table; the export is null when DXCore is unavailable.
+     */
     [[nodiscard]] const DXCoreAPI& LoadDXCoreAPI() noexcept;
-    /** @brief Return the immutable legacy d3dcompiler export table. */
+    /**
+     * @brief Return the immutable legacy d3dcompiler export table.
+     * @return Process-lifetime table; exports are null when d3dcompiler_47.dll is unavailable.
+     */
     [[nodiscard]] const CompilerAPI& LoadD3DCompilerAPI() noexcept;
-    /** @brief Return the immutable dxcompiler export table. */
+    /**
+     * @brief Return the immutable dxcompiler export table.
+     * @return Process-lifetime table; exports are null when dxcompiler.dll is unavailable.
+     */
     [[nodiscard]] const DXCAPI& LoadDXCAPI() noexcept;
 
 } // namespace Sora::PAL::D3D

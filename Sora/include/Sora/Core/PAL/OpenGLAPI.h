@@ -411,6 +411,7 @@ namespace Sora::PAL::OpenGL {
     // OpenGL-Registry e8f7cd0e35ac8d6f5667a021ff83d04b1fec41ef.
     // EGL-Registry 3d7796b3721d93976b6bfe536aa97bbc4bce8667.
 
+    /** @brief Core OpenGL command and constant domains, indexed by inline semantic namespaces. */
     namespace GL {
 
         /** @brief Buffer objects, vertex/index storage, and atomic-counter buffer commands and constants. */
