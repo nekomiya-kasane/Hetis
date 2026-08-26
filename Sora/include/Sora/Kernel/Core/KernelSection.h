@@ -147,9 +147,9 @@ namespace Sora::Kernel {
         }
 
         return KernelManifest{
-            .classes = Sora::Meta::StaticInfoList(classes),
-            .namespaces = Sora::Meta::StaticInfoList(namespaces),
-            .exclude = Sora::Meta::StaticInfoList(exclude),
+            .classes = Sora::Meta::Promote(classes),
+            .namespaces = Sora::Meta::Promote(namespaces),
+            .exclude = Sora::Meta::Promote(exclude),
         };
     }
 
