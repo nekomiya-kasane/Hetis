@@ -52,6 +52,17 @@ namespace Sora::Math {
         return !IsNaN(value);
     }
 
+    /** @brief Return whether every coordinate of @p value is finite. */
+    template<Sora::Concept::ArithmeticScalar T, std::size_t N>
+    [[nodiscard]] constexpr bool IsFinite(const Vector<T, N>& value) noexcept {
+        for (std::size_t index = 0; index < N; ++index) {
+            if (!IsFinite(value[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** @brief Return whether any coordinate of @p value is NaN. */
     template<Sora::Concept::ArithmeticScalar T, std::size_t N>
     [[nodiscard]] constexpr bool IsNaN(const Point<T, N>& value) noexcept {
@@ -67,6 +78,17 @@ namespace Sora::Math {
     template<Sora::Concept::ArithmeticScalar T, std::size_t N>
     [[nodiscard]] constexpr bool IsNotNaN(const Point<T, N>& value) noexcept {
         return !IsNaN(value);
+    }
+
+    /** @brief Return whether every coordinate of @p value is finite. */
+    template<Sora::Concept::ArithmeticScalar T, std::size_t N>
+    [[nodiscard]] constexpr bool IsFinite(const Point<T, N>& value) noexcept {
+        for (std::size_t index = 0; index < N; ++index) {
+            if (!IsFinite(value[index])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @brief Return a mutable vector-coordinate view of a point without allocating or copying. */

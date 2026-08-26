@@ -33,7 +33,7 @@ namespace Sora::Math {
 
         template<typename T>
             requires ZeroInitializable<T>
-        [[nodiscard]] constexpr T OneCarrier() noexcept {
+        [[nodiscard]] constexpr T OneCarrier() noexcept(kNothrowZeroCarrier<T>) {
             if constexpr (std::constructible_from<T, int>) {
                 return T{1};
             } else {
@@ -74,7 +74,11 @@ namespace Sora::Math {
         static constexpr size_t kElementCount = Rows * Columns; /**< Number of stored components. */
 
         /** @brief Construct the zero linear map. */
-        constexpr Matrix() noexcept { values_.fill(Detail::ZeroCarrier<T>()); }
+        constexpr Matrix() noexcept(Detail::kNothrowZeroCarrier<T>)
+            requires Detail::ZeroInitializable<T>
+        {
+            values_.fill(Detail::ZeroCarrier<T>());
+        }
 
         /** @brief Construct from components already arranged in physical storage order. */
         constexpr explicit Matrix(std::array<T, kElementCount> storage) noexcept(
@@ -125,8 +129,8 @@ namespace Sora::Math {
         }
 
         /** @brief Construct the identity linear map. */
-        [[nodiscard]] static constexpr Matrix Identity() noexcept
-            requires(Rows == Columns)
+        [[nodiscard]] static constexpr Matrix Identity() noexcept(Detail::kNothrowZeroCarrier<T>)
+            requires(Rows == Columns && Detail::ZeroInitializable<T>)
         {
             Matrix result;
             template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, Rows))) {

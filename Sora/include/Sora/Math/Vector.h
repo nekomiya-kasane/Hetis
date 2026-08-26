@@ -24,7 +24,17 @@ namespace Sora::Math {
 
         template<typename T>
             requires ZeroInitializable<T>
-        [[nodiscard]] constexpr T ZeroCarrier() noexcept {
+        inline constexpr bool kNothrowZeroCarrier = [] {
+            if constexpr (std::constructible_from<T, int>) {
+                return std::is_nothrow_constructible_v<T, int>;
+            } else {
+                return noexcept(T(typename T::ValueType{0}));
+            }
+        }();
+
+        template<typename T>
+            requires ZeroInitializable<T>
+        [[nodiscard]] constexpr T ZeroCarrier() noexcept(kNothrowZeroCarrier<T>) {
             if constexpr (std::constructible_from<T, int>) {
                 return T{0};
             } else {
@@ -37,7 +47,7 @@ namespace Sora::Math {
     /** @brief Trivially copyable carrier suitable for inline fixed-size mathematical values. */
     template<typename T>
     concept ValueCarrier = std::is_object_v<T> && std::same_as<T, std::remove_cv_t<T>> && std::copyable<T> &&
-                           std::is_trivially_copyable_v<T> && Detail::ZeroInitializable<T>;
+                           std::is_trivially_copyable_v<T>;
 
     /**
      * @brief Fixed-size free vector in an @p N-dimensional module over carrier @p T.
@@ -54,7 +64,11 @@ namespace Sora::Math {
         static constexpr size_t kDimension = N; /**< Number of vector components. */
 
         /** @brief Construct the additive identity. */
-        constexpr Vector() noexcept { values_.fill(Detail::ZeroCarrier<T>()); }
+        constexpr Vector() noexcept(Detail::kNothrowZeroCarrier<T>)
+            requires Detail::ZeroInitializable<T>
+        {
+            values_.fill(Detail::ZeroCarrier<T>());
+        }
 
         /** @brief Construct from the exact component array. */
         constexpr explicit Vector(std::array<T, N> values) noexcept(std::is_nothrow_move_constructible_v<T>)
@@ -87,7 +101,7 @@ namespace Sora::Math {
         }
 
     private:
-        std::array<T, N> values_{};
+        std::array<T, N> values_;
     };
 
     /** @brief Canonical short name for a fixed-size free vector. */

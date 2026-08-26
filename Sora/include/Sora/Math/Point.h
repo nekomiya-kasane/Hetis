@@ -30,7 +30,11 @@ namespace Sora::Math {
         static constexpr size_t kDimension = N; /**< Number of point coordinates. */
 
         /** @brief Construct the affine origin. */
-        constexpr Point() noexcept { values_.fill(Detail::ZeroCarrier<T>()); }
+        constexpr Point() noexcept(Detail::kNothrowZeroCarrier<T>)
+            requires Detail::ZeroInitializable<T>
+        {
+            values_.fill(Detail::ZeroCarrier<T>());
+        }
 
         /** @brief Construct from the exact coordinate array. */
         constexpr explicit Point(std::array<T, N> values) noexcept(std::is_nothrow_move_constructible_v<T>)
@@ -63,7 +67,7 @@ namespace Sora::Math {
         }
 
     private:
-        std::array<T, N> values_{};
+        std::array<T, N> values_;
     };
 
     /** @brief Subtract two points to obtain their displacement vector. */
@@ -72,11 +76,9 @@ namespace Sora::Math {
     [[nodiscard]] constexpr auto
     operator-(const Point<T, N>& left, const Point<U, N>& right) noexcept(noexcept(Sora::Math::Sub(left[0], right[0])))
         -> Vector<Detail::SubResult<T, U>, N> {
-        Vector<Detail::SubResult<T, U>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Sub(left[i], right[i]);
-        }
-        return result;
+        return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
+            return Vector<Detail::SubResult<T, U>, N>{Sora::Math::Sub(left[Indices], right[Indices])...};
+        }(std::make_index_sequence<N>{});
     }
 
     /** @brief Translate a point by a vector. */
@@ -85,11 +87,9 @@ namespace Sora::Math {
                  ValueCarrier<Detail::AddResult<T, U>>
     [[nodiscard]] constexpr auto operator+(const Point<T, N>& point, const Vector<U, N>& vector) noexcept(
         noexcept(Sora::Math::Add(point[0], vector[0]))) -> Point<Detail::AddResult<T, U>, N> {
-        Point<Detail::AddResult<T, U>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Add(point[i], vector[i]);
-        }
-        return result;
+        return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
+            return Point<Detail::AddResult<T, U>, N>{Sora::Math::Add(point[Indices], vector[Indices])...};
+        }(std::make_index_sequence<N>{});
     }
 
     /** @brief Translate a point by a vector. */
@@ -98,11 +98,9 @@ namespace Sora::Math {
                  ValueCarrier<Detail::AddResult<T, U>>
     [[nodiscard]] constexpr auto operator+(const Vector<T, N>& vector, const Point<U, N>& point) noexcept(
         noexcept(Sora::Math::Add(vector[0], point[0]))) -> Point<Detail::AddResult<T, U>, N> {
-        Point<Detail::AddResult<T, U>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Add(vector[i], point[i]);
-        }
-        return result;
+        return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
+            return Point<Detail::AddResult<T, U>, N>{Sora::Math::Add(vector[Indices], point[Indices])...};
+        }(std::make_index_sequence<N>{});
     }
 
     /** @brief Translate a point by the negation of a vector. */
@@ -111,11 +109,9 @@ namespace Sora::Math {
                  ValueCarrier<Detail::SubResult<T, U>>
     [[nodiscard]] constexpr auto operator-(const Point<T, N>& point, const Vector<U, N>& vector) noexcept(
         noexcept(Sora::Math::Sub(point[0], vector[0]))) -> Point<Detail::SubResult<T, U>, N> {
-        Point<Detail::SubResult<T, U>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Sub(point[i], vector[i]);
-        }
-        return result;
+        return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
+            return Point<Detail::SubResult<T, U>, N>{Sora::Math::Sub(point[Indices], vector[Indices])...};
+        }(std::make_index_sequence<N>{});
     }
 
     /** @brief Return the lane-wise conjunction of coordinate equalities. */

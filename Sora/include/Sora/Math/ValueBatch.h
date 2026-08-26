@@ -25,14 +25,10 @@ namespace Sora::Math {
         inline constexpr bool kCompatibleValueBatches =
             (std::same_as<ExpectedScalar, typename std::remove_cvref_t<Batches>::ScalarType> && ...);
 
-        template<HomogeneousBatch First, HomogeneousBatch... Rest>
-        inline constexpr bool kEqualValueBatchDimensions =
-            ((std::remove_cvref_t<First>::kDimension == std::remove_cvref_t<Rest>::kDimension) && ...);
-
         template<typename Carrier, typename Function, typename Output, typename... Inputs>
         concept ValueKernel =
             HomogeneousBatch<Output> && (HomogeneousBatch<Inputs> && ...) &&
-            std::is_nothrow_invocable_v<Function&, typename std::remove_cvref_t<Inputs>::template Rebind<Carrier>...> &&
+            std::invocable<Function&, typename std::remove_cvref_t<Inputs>::template Rebind<Carrier>...> &&
             std::same_as<std::remove_cvref_t<std::invoke_result_t<
                              Function&, typename std::remove_cvref_t<Inputs>::template Rebind<Carrier>...>>,
                          typename std::remove_cvref_t<Output>::template Rebind<Carrier>>;
@@ -74,11 +70,14 @@ namespace Sora::Math {
     template<Simd::SimdVecType V, size_t Unroll = 4, CoordinateMajorBatch Output, typename Function,
              CoordinateMajorBatch... Inputs>
         requires(!std::is_const_v<typename std::remove_cvref_t<Output>::ElementType>) &&
-                Detail::kEqualValueBatchDimensions<Output, Inputs...> &&
                 Detail::kCompatibleValueBatches<typename V::ValueType, Output, Inputs...> &&
                 Detail::ValueKernel<V, Function, Output, Inputs...> &&
                 Detail::ValueKernel<typename V::ValueType, Function, Output, Inputs...>
-    constexpr void TransformBatch(Output output, Function&& function, Inputs... inputs) noexcept {
+    constexpr void TransformBatch(Output output, Function&& function, Inputs... inputs) noexcept(
+        std::is_nothrow_invocable_v<Function&,
+                                    typename std::remove_cvref_t<Inputs>::template Rebind<V>...> &&
+        std::is_nothrow_invocable_v<Function&, typename std::remove_cvref_t<Inputs>::template Rebind<
+                                                   typename V::ValueType>...>) {
         static_assert(Unroll > 0, "TransformBatch requires a positive unroll factor");
         assert(((inputs.Size() == output.Size()) && ...) &&
                "TransformBatch requires equally-sized input and output batches");
@@ -113,10 +112,9 @@ namespace Sora::Math {
      */
     template<size_t Unroll = 4, HomogeneousBatch Output, typename Function, HomogeneousBatch... Inputs>
         requires(!std::is_const_v<typename std::remove_cvref_t<Output>::ElementType>) &&
-                Detail::kEqualValueBatchDimensions<Output, Inputs...> &&
                 Detail::kCompatibleValueBatches<typename std::remove_cvref_t<Output>::ScalarType, Output, Inputs...> &&
                 Detail::ValueKernel<typename std::remove_cvref_t<Output>::ScalarType, Function, Output, Inputs...>
-    constexpr void TransformBatch(Output output, Function&& function, Inputs... inputs) noexcept {
+    constexpr void TransformBatch(Output output, Function&& function, Inputs... inputs) {
         assert(((inputs.Size() == output.Size()) && ...) &&
                "TransformBatch requires equally-sized input and output batches");
 
