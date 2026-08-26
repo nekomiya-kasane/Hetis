@@ -65,15 +65,26 @@
 #include <type_traits>
 #include <utility>
 
+#if defined(PLATFORM_LINUX)
+#    include <signal.h>
+#endif
+
 struct addrinfo;
 struct sockaddr;
 
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+struct epoll_event;
+struct itimerspec;
 struct kevent;
 struct pollfd;
 struct rusage;
 struct stat;
 struct timespec;
+#if defined(PLATFORM_LINUX)
+struct io_uring;
+struct io_uring_cqe;
+struct __kernel_timespec;
+#endif
 #endif
 
 #if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
@@ -109,9 +120,11 @@ struct _FILETIME;
 struct _PROCESS_MEMORY_COUNTERS;
 union _LARGE_INTEGER;
 struct _OVERLAPPED;
+struct _OVERLAPPED_ENTRY;
 struct _SECURITY_ATTRIBUTES;
 struct _SYMBOL_INFO;
 struct _WSABUF;
+struct _WSAPROTOCOL_INFOW;
 struct WSAData;
 struct tagPROCESSENTRY32W;
 #endif
@@ -229,6 +242,7 @@ namespace Sora::PAL {
 
     /** @brief DPI awareness mode understood by the Windows display adapter. */
     enum class DisplayDpiAwareness : int {
+        Invalid = -1,
         Unaware = 0,
         SystemAware,
         PerMonitorAware,
@@ -488,6 +502,75 @@ namespace Sora::PAL {
             int16_t revents = 0;
         };
         using NativePollDescriptor = PollDescriptor;
+
+        /** @brief ABI-compatible Windows I/O ring creation flags. */
+        struct IoRingCreateFlags {
+            uint32_t required = 0;
+            uint32_t advisory = 0;
+        };
+
+        /** @brief Opaque handle returned by @c CreateIoRing and consumed by ring operations. */
+        using IoRingHandle = void*;
+
+        /** @brief ABI-compatible Windows I/O ring version and operation enumerations. */
+        using IoRingVersion = uint32_t;
+        using IoRingOperation = uint32_t;
+        using IoRingSqeFlags = uint32_t;
+        using IoRingWriteFlags = uint32_t;
+        using IoRingFlushMode = uint32_t;
+
+        /** @brief ABI-compatible Windows I/O ring handle reference. */
+        struct IoRingHandleRef {
+            uint32_t kind = 0;
+            union {
+                Handle handle;
+                uint32_t index;
+            } value{};
+        };
+
+        /** @brief ABI-compatible registered Windows I/O ring buffer reference. */
+        struct IoRingRegisteredBuffer {
+            uint32_t index = 0;
+            uint32_t offset = 0;
+        };
+
+        /** @brief ABI-compatible Windows I/O ring buffer reference. */
+        struct IoRingBufferRef {
+            uint32_t kind = 0;
+            union {
+                void* address;
+                IoRingRegisteredBuffer registeredBuffer;
+            } value{};
+        };
+
+        /** @brief ABI-compatible Windows I/O ring registered-buffer descriptor. */
+        struct IoRingBufferInfo {
+            void* address = nullptr;
+            uint32_t length = 0;
+        };
+
+        /** @brief ABI-compatible Windows I/O ring completion entry. */
+        struct IoRingCompletion {
+            uintptr_t userData = 0;
+            HResult result = 0;
+            uintptr_t information = 0;
+        };
+
+        /** @brief ABI-compatible Windows I/O ring capability record. */
+        struct IoRingCapabilities {
+            IoRingVersion maxVersion = 0;
+            uint32_t maxSubmissionQueueSize = 0;
+            uint32_t maxCompletionQueueSize = 0;
+            uint32_t featureFlags = 0;
+        };
+
+        /** @brief ABI-compatible Windows I/O ring information record. */
+        struct IoRingInfo {
+            IoRingVersion version = 0;
+            IoRingCreateFlags flags{};
+            uint32_t submissionQueueSize = 0;
+            uint32_t completionQueueSize = 0;
+        };
 
     } // namespace WindowsSystem
 
@@ -831,7 +914,6 @@ namespace Sora::PAL {
         using PrepareReadFunction             = int (*)(WaylandDisplay*);
         using CancelReadFunction              = void (*)(WaylandDisplay*);
         using ReadEventsFunction              = int (*)(WaylandDisplay*);
-        using GetRegistryFunction             = WaylandRegistry* (*)(WaylandDisplay*);
         using ProxyAddListenerFunction        = int (*)(WaylandProxy*, void (**)(void), void*);
         using ProxyDestroyFunction            = void (*)(WaylandProxy*);
         using ProxyMarshalFlagsFunction       = WaylandProxy* (*)(WaylandProxy*, uint32_t, const WaylandInterface*, uint32_t, uint32_t, ...);
@@ -863,8 +945,6 @@ namespace Sora::PAL {
         CancelReadFunction              cancelRead              = nullptr;
         [[= $::Syscall{"wl_display_read_events"}]]
         ReadEventsFunction              readEvents              = nullptr;
-        [[= $::Syscall{"wl_display_get_registry"}]]
-        GetRegistryFunction             getRegistry             = nullptr;
         [[= $::Syscall{"wl_proxy_add_listener"}]]
         ProxyAddListenerFunction        proxyAddListener        = nullptr;
         [[= $::Syscall{"wl_proxy_destroy"}]]
@@ -891,11 +971,11 @@ namespace Sora::PAL {
                                 std::to_underlying(WindowSystemFeature::DisplayFd)};
         }
 
-        /** @brief Return whether the minimum Wayland transport and registry symbols were resolved. */
+        /** @brief Return whether the minimum Wayland transport symbols were resolved. */
         [[nodiscard]] constexpr bool Available() const noexcept {
             return connect != nullptr && disconnect != nullptr && dispatch != nullptr && flush != nullptr &&
-                   getFileDescriptor != nullptr && getRegistry != nullptr && proxyAddListener != nullptr &&
-                   proxyDestroy != nullptr && proxyMarshalFlags != nullptr;
+                   getFileDescriptor != nullptr && proxyAddListener != nullptr && proxyDestroy != nullptr &&
+                   proxyMarshalFlags != nullptr;
         }
     };
 
@@ -1295,11 +1375,9 @@ namespace Sora::PAL {
 
     } // namespace WindowsSystem
 
-    /** @brief Native system error type depending on the platform. */
-    using SystemError = std::conditional_t<Sora::Platform::kIsWindows, WindowsSystem::DWord, int>;
-
     /** @brief Dynamically resolved socket-runtime, endpoint, option, and readiness operations. */
     struct SocketSystemAPI {
+        // clang-format off
         using StartupFunction = int(__stdcall*)(uint16_t, WSAData*);
         using CleanupFunction = int(__stdcall*)();
         using GetLastErrorFunction = int(__stdcall*)();
@@ -1317,22 +1395,23 @@ namespace Sora::PAL {
         using GetNameInfoFunction = int(__stdcall*)(const sockaddr*, int, char*, unsigned long, char*, unsigned long,
                                                     int);
 
-        StartupFunction startup = nullptr;                 /**< Initialize the process socket runtime; Windows only. */
-        CleanupFunction cleanup = nullptr;                 /**< Release the process socket runtime; Windows only. */
-        GetLastErrorFunction getLastError = nullptr;       /**< Capture the calling thread's Winsock error code. */
-        SetLastErrorFunction setLastError = nullptr;       /**< Replace the calling thread's Winsock error code. */
-        SocketFunction create = nullptr;                   /**< Create one native socket. */
-        CloseFunction close = nullptr;                     /**< Close one native socket. */
-        BindFunction bind = nullptr;                       /**< Bind one local endpoint. */
-        NameFunction getSocketName = nullptr;              /**< Query the local endpoint assigned to a socket. */
-        NameFunction getPeerName = nullptr;                /**< Query the connected peer endpoint. */
-        OptionFunction setOption = nullptr;                /**< Set one socket option. */
-        GetOptionFunction getOption = nullptr;             /**< Query one socket option. */
-        IoctlFunction ioctl = nullptr;                     /**< Apply a native non-blocking or control operation. */
-        PollFunction poll = nullptr;                       /**< Wait for readiness on a bounded descriptor array. */
-        GetAddressInfoFunction getAddressInfo = nullptr;   /**< Resolve a numeric or named endpoint. */
-        FreeAddressInfoFunction freeAddressInfo = nullptr; /**< Release an address-resolution list. */
-        GetNameInfoFunction getNameInfo = nullptr;         /**< Format one native endpoint as host/service text. */
+        [[= $::Syscall{"WSAStartup"}]]       StartupFunction         startup         = nullptr;
+        [[= $::Syscall{"WSACleanup"}]]       CleanupFunction         cleanup         = nullptr;
+        [[= $::Syscall{"WSAGetLastError"}]]  GetLastErrorFunction    getLastError    = nullptr;
+        [[= $::Syscall{"WSASetLastError"}]]  SetLastErrorFunction    setLastError    = nullptr;
+        [[= $::Syscall{"socket"}]]           SocketFunction          create          = nullptr;
+        [[= $::Syscall{"closesocket"}]]      CloseFunction           close           = nullptr;
+        [[= $::Syscall{"bind"}]]             BindFunction            bind            = nullptr;
+        [[= $::Syscall{"getsockname"}]]      NameFunction            getSocketName   = nullptr;
+        [[= $::Syscall{"getpeername"}]]      NameFunction            getPeerName     = nullptr;
+        [[= $::Syscall{"setsockopt"}]]       OptionFunction          setOption       = nullptr;
+        [[= $::Syscall{"getsockopt"}]]       GetOptionFunction       getOption       = nullptr;
+        [[= $::Syscall{"ioctlsocket"}]]      IoctlFunction           ioctl           = nullptr;
+        [[= $::Syscall{"WSAPoll"}]]          PollFunction            poll            = nullptr;
+        [[= $::Syscall{"getaddrinfo"}]]      GetAddressInfoFunction  getAddressInfo  = nullptr;
+        [[= $::Syscall{"freeaddrinfo"}]]     FreeAddressInfoFunction freeAddressInfo = nullptr;
+        [[= $::Syscall{"getnameinfo"}]]      GetNameInfoFunction     getNameInfo     = nullptr;
+        // clang-format on
 
         /** @brief Address families understood by the socket table. */
         enum class Family : int { Unspecified = 0, IPv4 = 2, IPv6 = 23 };
@@ -1359,8 +1438,57 @@ namespace Sora::PAL {
         inline static constexpr int kAddressInfoNumericService = 0x0008;
     };
 
+    /** @brief Dynamically resolved Windows overlapped Winsock operations. */
+    struct WinsockOverlappedSystemAPI {
+        // clang-format off
+        using CompletionRoutine = void(__stdcall*)(
+            WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*, WindowsSystem::DWord);
+        using CreateFunction = WindowsSystem::Socket(__stdcall*)(
+            int, int, int, ::_WSAPROTOCOL_INFOW*, WindowsSystem::UInt, WindowsSystem::DWord);
+        using SendFunction = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord,
+                                             WindowsSystem::DWord*, WindowsSystem::DWord, ::_OVERLAPPED*,
+                                             CompletionRoutine);
+        using ReceiveFunction = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord,
+                                                WindowsSystem::DWord*, WindowsSystem::DWord*, ::_OVERLAPPED*,
+                                                CompletionRoutine);
+        using SendToFunction = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord,
+                                               WindowsSystem::DWord*, WindowsSystem::DWord, const sockaddr*, int,
+                                               ::_OVERLAPPED*, CompletionRoutine);
+        using ReceiveFromFunction = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord,
+                                                    WindowsSystem::DWord*, WindowsSystem::DWord*, sockaddr*, int*,
+                                                    ::_OVERLAPPED*, CompletionRoutine);
+        using GetResultFunction = WindowsSystem::Bool(__stdcall*)(
+            WindowsSystem::Socket, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool, WindowsSystem::DWord*);
+        using ControlFunction = int(__stdcall*)(WindowsSystem::Socket, WindowsSystem::DWord, void*,
+                                                WindowsSystem::DWord, void*, WindowsSystem::DWord,
+                                                WindowsSystem::DWord*, ::_OVERLAPPED*, CompletionRoutine);
+
+        [[= $::Syscall{"WSASocketW"}]]             CreateFunction      create      = nullptr;
+        [[= $::Syscall{"WSASend"}]]                SendFunction        send        = nullptr;
+        [[= $::Syscall{"WSARecv"}]]                ReceiveFunction     receive     = nullptr;
+        [[= $::Syscall{"WSASendTo"}]]              SendToFunction      sendTo      = nullptr;
+        [[= $::Syscall{"WSARecvFrom"}]]            ReceiveFromFunction receiveFrom = nullptr;
+        [[= $::Syscall{"WSAGetOverlappedResult"}]] GetResultFunction   getResult   = nullptr;
+        [[= $::Syscall{"WSAIoctl"}]]               ControlFunction     control     = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved monotonic and wall-clock operations. */
+    struct ClockSystemAPI {
+        // clang-format off
+        using QueryCounterFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::NativeLargeInteger*);
+        using QueryFrequencyFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::NativeLargeInteger*);
+        using GetPreciseSystemTimeFunction = void(__stdcall*)(::_FILETIME*);
+
+        [[= $::Syscall{"QueryPerformanceCounter"}]]       QueryCounterFunction         queryCounter         = nullptr;
+        [[= $::Syscall{"QueryPerformanceFrequency"}]]     QueryFrequencyFunction       queryFrequency       = nullptr;
+        [[= $::Syscall{"GetSystemTimePreciseAsFileTime"}]] GetPreciseSystemTimeFunction getPreciseSystemTime = nullptr;
+        // clang-format on
+    };
+
     /** @brief Dynamically resolved connection-oriented byte-stream operations. */
     struct TcpSystemAPI {
+        // clang-format off
         using ListenFunction = int(__stdcall*)(WindowsSystem::Socket, int);
         using AcceptFunction = WindowsSystem::Socket(__stdcall*)(WindowsSystem::Socket, sockaddr*, int*);
         using ConnectFunction = int(__stdcall*)(WindowsSystem::Socket, const sockaddr*, int);
@@ -1368,25 +1496,25 @@ namespace Sora::PAL {
         using SendFunction = int(__stdcall*)(WindowsSystem::Socket, const char*, int, int);
         using ShutdownFunction = int(__stdcall*)(WindowsSystem::Socket, int);
 
-        ListenFunction listen = nullptr;     /**< Mark a stream socket as a passive listener. */
-        AcceptFunction accept = nullptr;     /**< Accept one pending stream connection. */
-        ConnectFunction connect = nullptr;   /**< Establish one stream connection. */
-        SendFunction send = nullptr;         /**< Send bytes; partial writes are reported explicitly. */
-        TransferFunction receive = nullptr;  /**< Receive bytes; zero denotes an orderly peer close. */
-        ShutdownFunction shutdown = nullptr; /**< Disable one or both directions of a stream. */
+        [[= $::Syscall{"listen"}]]   ListenFunction   listen   = nullptr;
+        [[= $::Syscall{"accept"}]]   AcceptFunction   accept   = nullptr;
+        [[= $::Syscall{"connect"}]]  ConnectFunction  connect  = nullptr;
+        [[= $::Syscall{"send"}]]     SendFunction     send     = nullptr;
+        [[= $::Syscall{"recv"}]]     TransferFunction receive  = nullptr;
+        [[= $::Syscall{"shutdown"}]] ShutdownFunction shutdown = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved connectionless datagram operations. */
     struct UdpSystemAPI {
+        // clang-format off
         using SendToFunction = int(__stdcall*)(WindowsSystem::Socket, const char*, int, int, const sockaddr*, int);
         using ReceiveFromFunction = int(__stdcall*)(WindowsSystem::Socket, char*, int, int, sockaddr*, int*);
 
-        SendToFunction sendTo = nullptr;           /**< Send one datagram to an explicit endpoint. */
-        ReceiveFromFunction receiveFrom = nullptr; /**< Receive one datagram and return its source endpoint. */
+        [[= $::Syscall{"sendto"}]]   SendToFunction      sendTo      = nullptr;
+        [[= $::Syscall{"recvfrom"}]] ReceiveFromFunction receiveFrom = nullptr;
+        // clang-format on
     };
-
-    /** @brief Capture the calling thread's native error slot without triggering lazy symbol resolution. */
-    [[nodiscard]] SystemError CaptureLastSystemError() noexcept;
 
     /** @brief Dynamically resolved Win32 error-reporting entry points. */
     struct NativeErrorSystemAPI {
@@ -1490,33 +1618,88 @@ namespace Sora::PAL {
         // clang-format off
         using CreateIoCompletionPortFunction      = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Size, WindowsSystem::DWord);
         using GetQueuedCompletionStatusFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*, WindowsSystem::Size*, ::_OVERLAPPED**, WindowsSystem::DWord);
+        using GetQueuedCompletionStatusExFunction = WindowsSystem::Bool(__stdcall*)(
+            WindowsSystem::Handle, ::_OVERLAPPED_ENTRY*, WindowsSystem::ULong, WindowsSystem::ULong*,
+            WindowsSystem::DWord, WindowsSystem::Bool);
         using PostQueuedCompletionStatusFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::Size, ::_OVERLAPPED*);
+        using SetFileCompletionNotificationModesFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle,
+                                                                                            WindowsSystem::Byte);
 
         [[= $::Syscall{"CreateIoCompletionPort"}]]
         CreateIoCompletionPortFunction     createIoCompletionPort      = nullptr;
         [[= $::Syscall{"GetQueuedCompletionStatus"}]]
         GetQueuedCompletionStatusFunction  getQueuedCompletionStatus   = nullptr;
+        [[= $::Syscall{"GetQueuedCompletionStatusEx"}]]
+        GetQueuedCompletionStatusExFunction getQueuedCompletionStatusEx = nullptr;
         [[= $::Syscall{"PostQueuedCompletionStatus"}]]
         PostQueuedCompletionStatusFunction postQueuedCompletionStatus = nullptr;
+        [[= $::Syscall{"SetFileCompletionNotificationModes"}]]
+        SetFileCompletionNotificationModesFunction setFileCompletionNotificationModes = nullptr;
         // clang-format on
     };
 
     /** @brief Dynamically resolved Windows I/O ring operations. */
-    struct IORingSystemAPI {
+    struct WindowsIORingSystemAPI {
         // clang-format off
-        using CreateIoRingFunction         = WindowsSystem::HResult(__stdcall*)(WindowsSystem::UInt, WindowsSystem::UInt, void**);
-        using CloseIoRingFunction          = void(__stdcall*)(void*);
-        using SubmitIoRingFunction         = WindowsSystem::HResult(__stdcall*)(void*);
-        using PopIoRingCompletionFunction = WindowsSystem::HResult(__stdcall*)(void*, void*);
+        using QueryCapabilitiesFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::IoRingCapabilities*);
+        using IsOperationSupportedFunction = WindowsSystem::Bool(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingOperation);
+        using CreateIoRingFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingVersion, WindowsSystem::IoRingCreateFlags, uint32_t, uint32_t,
+            WindowsSystem::IoRingHandle*);
+        using GetIoRingInfoFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingInfo*);
+        using SubmitIoRingFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, uint32_t, uint32_t, uint32_t*);
+        using CloseIoRingFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::IoRingHandle);
+        using PopIoRingCompletionFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingCompletion*);
+        using SetCompletionEventFunction    = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::Handle);
+        using BuildCancelFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingHandleRef, uintptr_t, uintptr_t);
+        using BuildReadFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingHandleRef, WindowsSystem::IoRingBufferRef, uint32_t,
+            uint64_t, uintptr_t, WindowsSystem::IoRingSqeFlags);
+        using BuildWriteFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingHandleRef, WindowsSystem::IoRingBufferRef, uint32_t,
+            uint64_t, WindowsSystem::IoRingWriteFlags, uintptr_t, WindowsSystem::IoRingSqeFlags);
+        using BuildFlushFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, WindowsSystem::IoRingHandleRef, WindowsSystem::IoRingFlushMode, uintptr_t,
+            WindowsSystem::IoRingSqeFlags);
+        using BuildRegisterFilesFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, uint32_t, WindowsSystem::Handle const*, uintptr_t);
+        using BuildRegisterBuffersFunction = WindowsSystem::HResult(__stdcall*)(
+            WindowsSystem::IoRingHandle, uint32_t, WindowsSystem::IoRingBufferInfo const*, uintptr_t);
 
+        [[= $::Syscall{"QueryIoRingCapabilities"}]]
+        QueryCapabilitiesFunction     queryCapabilities     = nullptr;
+        [[= $::Syscall{"IsIoRingOpSupported"}]]
+        IsOperationSupportedFunction  isOperationSupported  = nullptr;
         [[= $::Syscall{"CreateIoRing"}]]
         CreateIoRingFunction         createIoRing         = nullptr;
+        [[= $::Syscall{"GetIoRingInfo"}]]
+        GetIoRingInfoFunction        getIoRingInfo        = nullptr;
         [[= $::Syscall{"CloseIoRing"}]]
         CloseIoRingFunction          closeIoRing          = nullptr;
         [[= $::Syscall{"SubmitIoRing"}]]
         SubmitIoRingFunction         submitIoRing         = nullptr;
         [[= $::Syscall{"PopIoRingCompletion"}]]
-        PopIoRingCompletionFunction popIoRingCompletion = nullptr;
+        PopIoRingCompletionFunction  popIoRingCompletion  = nullptr;
+        [[= $::Syscall{"SetIoRingCompletionEvent"}]]
+        SetCompletionEventFunction   setCompletionEvent   = nullptr;
+        [[= $::Syscall{"BuildIoRingCancelRequest"}]]
+        BuildCancelFunction          buildCancel          = nullptr;
+        [[= $::Syscall{"BuildIoRingReadFile"}]]
+        BuildReadFunction            buildRead            = nullptr;
+        [[= $::Syscall{"BuildIoRingWriteFile"}]]
+        BuildWriteFunction           buildWrite           = nullptr;
+        [[= $::Syscall{"BuildIoRingFlushFile"}]]
+        BuildFlushFunction           buildFlush           = nullptr;
+        [[= $::Syscall{"BuildIoRingRegisterFileHandles"}]]
+        BuildRegisterFilesFunction   buildRegisterFiles   = nullptr;
+        [[= $::Syscall{"BuildIoRingRegisterBuffers"}]]
+        BuildRegisterBuffersFunction buildRegisterBuffers = nullptr;
         // clang-format on
     };
 
@@ -1726,7 +1909,8 @@ namespace Sora::PAL {
         using SetProcessDpiAwarenessContextFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DpiAwarenessContext);
         using SetThreadDpiAwarenessContextFunction          = WindowsSystem::DpiAwarenessContext(__stdcall*)(WindowsSystem::DpiAwarenessContext);
         using GetThreadDpiAwarenessContextFunction          = WindowsSystem::DpiAwarenessContext(__stdcall*)();
-        using GetAwarenessFromDpiAwarenessContextFunction   = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DpiAwarenessContext, int*);
+        using GetAwarenessFromDpiAwarenessContextFunction = DisplayDpiAwareness(__stdcall*)(
+            WindowsSystem::DpiAwarenessContext);
         using AdjustWindowRectExForDpiFunction              = WindowsSystem::Bool(__stdcall*)(DisplayRect*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::UInt);
         using SetProcessDpiAwarenessFunction                = WindowsSystem::HResult(__stdcall*)(int);
         using GetProcessDpiAwarenessFunction                = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, int*);
@@ -1876,7 +2060,7 @@ namespace Sora::PAL {
         using Socket = int;
 
         /** @brief ABI-sized POSIX thread identifier used without including @c pthread.h. */
-        using ThreadId = std::conditional_t<Platform::kIsLinux, std::uintptr_t, void*>;
+        using ThreadId = std::conditional_t<Platform::kIsMacOS, void*, std::uintptr_t>;
 
         /** @brief Opaque POSIX thread-attribute object used by the dynamically loaded table. */
         struct ThreadAttributes;
@@ -1885,17 +2069,16 @@ namespace Sora::PAL {
         using FileOffset = std::int64_t;
 
         /** @brief POSIX creation-mode ABI type without including @c sys/types.h. */
-        using FileMode = std::conditional_t<Platform::kIsLinux, uint32_t, uint16_t>;
+        using FileMode = std::conditional_t<Platform::kIsMacOS, uint16_t, uint32_t>;
 
         /** @brief POSIX poll descriptor-count ABI type without including @c poll.h. */
-        using PollCount = std::conditional_t<Platform::kIsLinux, size_t, uint32_t>;
+        using PollCount = std::conditional_t<Platform::kIsMacOS, uint32_t, size_t>;
         using SocketLength = uint32_t;
         using ByteCount = std::ptrdiff_t;
 
         /** @brief Opaque Darwin process-accounting buffer pointer used by @c proc_pid_rusage. */
         using ResourceUsageInfo = void*;
 
-        /** @brief Opaque native poll descriptor used by the POSIX file API table. */
         /** @brief Opaque native kqueue event used by the Darwin file API table. */
         using NativeKernelEvent = ::kevent;
 
@@ -1986,8 +2169,13 @@ namespace Sora::PAL {
             inline constexpr int kOpenCreate             = 0x00000040;
             inline constexpr int kOpenExclusive          = 0x00000080;
             inline constexpr int kOpenTruncate           = 0x00000200;
-            inline constexpr int kOpenDirectory          = 0x00010000;
-            inline constexpr int kOpenDirect             = 0x00004000;
+#    if defined(__aarch64__)
+             inline constexpr int kOpenDirectory          = 0x00004000;
+             inline constexpr int kOpenDirect             = 0x00010000;
+#    else
+             inline constexpr int kOpenDirectory          = 0x00010000;
+             inline constexpr int kOpenDirect             = 0x00004000;
+#    endif
             inline constexpr int kOpenSync               = 0x00101000;
             inline constexpr int kPageSizeConfiguration  = 30;
             inline constexpr int kFileAdviceSequential   = 2;
@@ -2043,8 +2231,13 @@ namespace Sora::PAL {
 
             inline constexpr int kDynamicLazy = 0x00000001;
             inline constexpr int kDynamicNow = 0x00000002;
+#    if defined(PLATFORM_MACOS)
             inline constexpr int kDynamicLocal = 0x00000004;
-            inline constexpr int kDynamicGlobal = kIsLinux ? 0x00000100 : 0x00000008;
+            inline constexpr int kDynamicGlobal = 0x00000008;
+#    else
+            inline constexpr int kDynamicLocal = 0;
+            inline constexpr int kDynamicGlobal = 0x00000100;
+#    endif
 
         } // namespace Module
 
@@ -2052,39 +2245,33 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX socket-runtime, endpoint, option, and readiness operations. */
     struct SocketSystemAPI {
-        using StartupFunction = int (*)(uint16_t, void*);
-        using CleanupFunction = int (*)();
-        using GetLastErrorFunction = int (*)();
-        using SetLastErrorFunction = void (*)(int);
+        // clang-format off
         using SocketFunction = PosixSystem::Socket (*)(int, int, int);
         using CloseFunction = int (*)(PosixSystem::Socket);
         using BindFunction = int (*)(PosixSystem::Socket, const sockaddr*, PosixSystem::SocketLength);
         using NameFunction = int (*)(PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*);
         using OptionFunction = int (*)(PosixSystem::Socket, int, int, const void*, PosixSystem::SocketLength);
         using GetOptionFunction = int (*)(PosixSystem::Socket, int, int, void*, PosixSystem::SocketLength*);
-        using IoctlFunction = int (*)(PosixSystem::Socket, unsigned long, void*);
+        using IoctlFunction = int (*)(PosixSystem::Socket, unsigned long, ...);
         using PollFunction = int (*)(PosixSystem::NativePollDescriptor*, PosixSystem::PollCount, int);
         using GetAddressInfoFunction = int (*)(const char*, const char*, const addrinfo*, addrinfo**);
         using FreeAddressInfoFunction = void (*)(addrinfo*);
         using GetNameInfoFunction = int (*)(const sockaddr*, PosixSystem::SocketLength, char*,
                                             PosixSystem::SocketLength, char*, PosixSystem::SocketLength, int);
 
-        StartupFunction startup = nullptr;           /**< POSIX requires no process socket-runtime initialization. */
-        CleanupFunction cleanup = nullptr;           /**< POSIX requires no process socket-runtime cleanup. */
-        GetLastErrorFunction getLastError = nullptr; /**< POSIX reports socket failures through @c errno. */
-        SetLastErrorFunction setLastError = nullptr; /**< POSIX reports socket failures through @c errno. */
-        SocketFunction create = nullptr;
-        CloseFunction close = nullptr;
-        BindFunction bind = nullptr;
-        NameFunction getSocketName = nullptr;
-        NameFunction getPeerName = nullptr;
-        OptionFunction setOption = nullptr;
-        GetOptionFunction getOption = nullptr;
-        IoctlFunction ioctl = nullptr;
-        PollFunction poll = nullptr;
-        GetAddressInfoFunction getAddressInfo = nullptr;
-        FreeAddressInfoFunction freeAddressInfo = nullptr;
-        GetNameInfoFunction getNameInfo = nullptr;
+        [[= $::Syscall{"socket"}]]       SocketFunction          create          = nullptr;
+        [[= $::Syscall{"close"}]]        CloseFunction           close           = nullptr;
+        [[= $::Syscall{"bind"}]]         BindFunction            bind            = nullptr;
+        [[= $::Syscall{"getsockname"}]]  NameFunction            getSocketName   = nullptr;
+        [[= $::Syscall{"getpeername"}]]  NameFunction            getPeerName     = nullptr;
+        [[= $::Syscall{"setsockopt"}]]   OptionFunction          setOption       = nullptr;
+        [[= $::Syscall{"getsockopt"}]]   GetOptionFunction       getOption       = nullptr;
+        [[= $::Syscall{"ioctl"}]]        IoctlFunction           ioctl           = nullptr;
+        [[= $::Syscall{"poll"}]]         PollFunction            poll            = nullptr;
+        [[= $::Syscall{"getaddrinfo"}]]  GetAddressInfoFunction  getAddressInfo  = nullptr;
+        [[= $::Syscall{"freeaddrinfo"}]] FreeAddressInfoFunction freeAddressInfo = nullptr;
+        [[= $::Syscall{"getnameinfo"}]]  GetNameInfoFunction     getNameInfo     = nullptr;
+        // clang-format on
 
         enum class Family : int {
             Unspecified = 0,
@@ -2121,6 +2308,7 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved POSIX TCP byte-stream operations. */
     struct TcpSystemAPI {
+        // clang-format off
         using ListenFunction = int (*)(PosixSystem::Socket, int);
         using AcceptFunction = PosixSystem::Socket (*)(PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*);
         using ConnectFunction = int (*)(PosixSystem::Socket, const sockaddr*, PosixSystem::SocketLength);
@@ -2128,24 +2316,93 @@ namespace Sora::PAL {
         using SendFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, const void*, size_t, int);
         using ShutdownFunction = int (*)(PosixSystem::Socket, int);
 
-        ListenFunction listen = nullptr;
-        AcceptFunction accept = nullptr;
-        ConnectFunction connect = nullptr;
-        SendFunction send = nullptr;
-        TransferFunction receive = nullptr;
-        ShutdownFunction shutdown = nullptr;
+        [[= $::Syscall{"listen"}]]   ListenFunction   listen   = nullptr;
+        [[= $::Syscall{"accept"}]]   AcceptFunction   accept   = nullptr;
+        [[= $::Syscall{"connect"}]]  ConnectFunction  connect  = nullptr;
+        [[= $::Syscall{"send"}]]     SendFunction     send     = nullptr;
+        [[= $::Syscall{"recv"}]]     TransferFunction receive  = nullptr;
+        [[= $::Syscall{"shutdown"}]] ShutdownFunction shutdown = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved POSIX UDP datagram operations. */
     struct UdpSystemAPI {
+        // clang-format off
         using SendToFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, const void*, size_t, int,
                                                           const sockaddr*, PosixSystem::SocketLength);
         using ReceiveFromFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, void*, size_t, int, sockaddr*,
                                                                PosixSystem::SocketLength*);
 
-        SendToFunction sendTo = nullptr;
-        ReceiveFromFunction receiveFrom = nullptr;
+        [[= $::Syscall{"sendto"}]]   SendToFunction      sendTo      = nullptr;
+        [[= $::Syscall{"recvfrom"}]] ReceiveFromFunction receiveFrom = nullptr;
+        // clang-format on
     };
+
+    /** @brief Dynamically resolved POSIX monotonic-clock operations. */
+    struct ClockSystemAPI {
+        // clang-format off
+        using GetTimeFunction   = int (*)(int, ::timespec*);
+        using GetResolutionFunction = int (*)(int, ::timespec*);
+        using SleepFunction     = int (*)(int, int, const ::timespec*, ::timespec*);
+
+        [[= $::Syscall{"clock_gettime"}]]   GetTimeFunction       getTime       = nullptr;
+        [[= $::Syscall{"clock_getres"}]]    GetResolutionFunction getResolution = nullptr;
+        [[= $::Syscall{"clock_nanosleep"}]] SleepFunction         sleep         = nullptr;
+        // clang-format on
+    };
+
+#    if defined(PLATFORM_LINUX)
+
+    /** @brief Dynamically resolved Linux epoll readiness operations. */
+    struct EpollSystemAPI {
+        // clang-format off
+        using CreateFunction = int (*)(int);
+        using ControlFunction = int (*)(int, int, int, ::epoll_event*);
+        using WaitFunction = int (*)(int, ::epoll_event*, int, int);
+        using WaitMaskedFunction = int (*)(int, ::epoll_event*, int, int, const ::sigset_t*);
+        using WaitMaskedTimeFunction = int (*)(int, ::epoll_event*, int, const ::timespec*, const ::sigset_t*);
+
+        [[= $::Syscall{"epoll_create1"}]] CreateFunction         create         = nullptr;
+        [[= $::Syscall{"epoll_ctl"}]]     ControlFunction        control        = nullptr;
+        [[= $::Syscall{"epoll_wait"}]]    WaitFunction           wait           = nullptr;
+        [[= $::Syscall{"epoll_pwait"}]]   WaitMaskedFunction     waitMasked     = nullptr;
+        [[= $::Syscall{"epoll_pwait2"}]]  WaitMaskedTimeFunction waitMaskedTime = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Linux event-counter descriptor creation. */
+    struct EventFdSystemAPI {
+        using CreateFunction = int (*)(unsigned int, int);
+        [[= $::Syscall{"eventfd"}]] CreateFunction create = nullptr;
+    };
+
+    /** @brief Dynamically resolved Linux timer-descriptor operations. */
+    struct TimerFdSystemAPI {
+        // clang-format off
+        using CreateFunction = int (*)(int, int);
+        using SetTimeFunction = int (*)(int, int, const ::itimerspec*, ::itimerspec*);
+        using GetTimeFunction = int (*)(int, ::itimerspec*);
+
+        [[= $::Syscall{"timerfd_create"}]]  CreateFunction  create  = nullptr;
+        [[= $::Syscall{"timerfd_settime"}]] SetTimeFunction setTime = nullptr;
+        [[= $::Syscall{"timerfd_gettime"}]] GetTimeFunction getTime = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Linux signal-descriptor creation. */
+    struct SignalFdSystemAPI {
+        using CreateFunction = int (*)(int, const ::sigset_t*, int);
+        [[= $::Syscall{"signalfd"}]] CreateFunction create = nullptr;
+    };
+
+#    else
+
+    struct EpollSystemAPI {};
+    struct EventFdSystemAPI {};
+    struct TimerFdSystemAPI {};
+    struct SignalFdSystemAPI {};
+
+#    endif
 
     /** @brief POSIX has no additional native-error entry points beyond thread-local @c errno. */
     struct NativeErrorSystemAPI {};
@@ -2182,23 +2439,54 @@ namespace Sora::PAL {
     /** @brief Win32 I/O completion ports are unavailable on POSIX targets. */
     struct IOCPSystemAPI {};
 
-    /** @brief Dynamically resolved Linux io_uring submission/completion operations. */
-    struct IORingSystemAPI {
+    /** @brief Dynamically resolved liburing exports; SQE preparation remains a typed header adapter. */
+    struct LinuxIoUringSystemAPI {
+#    if defined(PLATFORM_LINUX)
         // clang-format off
-        using QueueInitFunction = int (*)(unsigned, void*, unsigned);
-        using QueueExitFunction = void (*)(void*);
-        using SubmitFunction    = int (*)(void*);
-        using WaitCqeFunction   = int (*)(void*, void**);
-        using PeekCqeFunction   = int (*)(void*, void**);
-        using CqeSeenFunction   = void (*)(void*, void*);
+        using QueueInitFunction = int (*)(unsigned, ::io_uring*, unsigned);
+        using QueueExitFunction = void (*)(::io_uring*);
+        using SubmitFunction = int (*)(::io_uring*);
+        using SubmitAndWaitFunction = int (*)(::io_uring*, unsigned);
+        using SubmitAndWaitTimeoutFunction = int (*)(::io_uring*, ::io_uring_cqe**, unsigned,
+                                                     ::__kernel_timespec*, ::sigset_t*);
+        using PeekBatchCompletionFunction = unsigned (*)(::io_uring*, ::io_uring_cqe**, unsigned);
+        using WaitCompletionsFunction = int (*)(::io_uring*, ::io_uring_cqe**, unsigned,
+                                                ::__kernel_timespec*, ::sigset_t*);
+        using RegisterBuffersFunction = int (*)(::io_uring*, const void*, unsigned);
+        using UnregisterBuffersFunction = int (*)(::io_uring*);
+        using RegisterFilesFunction = int (*)(::io_uring*, const int*, unsigned);
+        using UnregisterFilesFunction = int (*)(::io_uring*);
+        using RegisterEventFunction = int (*)(::io_uring*, int);
+        using UnregisterEventFunction = int (*)(::io_uring*);
 
+        [[= $::Syscall{"io_uring_queue_init"}]]
         QueueInitFunction queueInit = nullptr;
+        [[= $::Syscall{"io_uring_queue_exit"}]]
         QueueExitFunction queueExit = nullptr;
-        SubmitFunction    submit    = nullptr;
-        WaitCqeFunction   waitCqe   = nullptr;
-        PeekCqeFunction   peekCqe   = nullptr;
-        CqeSeenFunction   cqeSeen   = nullptr;
+        [[= $::Syscall{"io_uring_submit"}]]
+        SubmitFunction submit = nullptr;
+        [[= $::Syscall{"io_uring_submit_and_wait"}]]
+        SubmitAndWaitFunction submitAndWait = nullptr;
+        [[= $::Syscall{"io_uring_submit_and_wait_timeout"}]]
+        SubmitAndWaitTimeoutFunction submitAndWaitTimeout = nullptr;
+        [[= $::Syscall{"io_uring_peek_batch_cqe"}]]
+        PeekBatchCompletionFunction peekBatchCompletion = nullptr;
+        [[= $::Syscall{"io_uring_wait_cqes"}]]
+        WaitCompletionsFunction waitCompletions = nullptr;
+        [[= $::Syscall{"io_uring_register_buffers"}]]
+        RegisterBuffersFunction registerBuffers = nullptr;
+        [[= $::Syscall{"io_uring_unregister_buffers"}]]
+        UnregisterBuffersFunction unregisterBuffers = nullptr;
+        [[= $::Syscall{"io_uring_register_files"}]]
+        RegisterFilesFunction registerFiles = nullptr;
+        [[= $::Syscall{"io_uring_unregister_files"}]]
+        UnregisterFilesFunction unregisterFiles = nullptr;
+        [[= $::Syscall{"io_uring_register_eventfd"}]]
+        RegisterEventFunction registerEvent = nullptr;
+        [[= $::Syscall{"io_uring_unregister_eventfd"}]]
+        UnregisterEventFunction unregisterEvent = nullptr;
         // clang-format on
+#    endif
     };
 
     /** @brief Dynamically resolved POSIX process-environment entry points. */
@@ -2449,6 +2737,14 @@ namespace Sora::PAL {
     struct SocketSystemAPI {};
     struct TcpSystemAPI {};
     struct UdpSystemAPI {};
+    struct WinsockOverlappedSystemAPI {};
+    struct ClockSystemAPI {};
+    struct EpollSystemAPI {};
+    struct EventFdSystemAPI {};
+    struct TimerFdSystemAPI {};
+    struct SignalFdSystemAPI {};
+    struct WindowsIORingSystemAPI {};
+    struct LinuxIoUringSystemAPI {};
     struct NativeErrorSystemAPI {};
     struct StructuredExceptionSystemAPI {};
     struct LocalMemorySystemAPI {};
@@ -2457,7 +2753,6 @@ namespace Sora::PAL {
     struct FileMappingSystemAPI {};
     struct EventSystemAPI {};
     struct IOCPSystemAPI {};
-    struct IORingSystemAPI {};
     struct SystemInformationSystemAPI {};
     struct EnvironmentSystemAPI {};
     struct ModuleSystemAPI {};
@@ -2471,6 +2766,16 @@ namespace Sora::PAL {
     struct StackTraceSystemAPI {};
 
 #endif
+
+    /** @brief Native system error type depending on the platform. */
+#if defined(PLATFORM_WINDOWS)
+    using SystemError = WindowsSystem::DWord;
+#else
+    using SystemError = int;
+#endif
+
+    /** @brief Capture the calling thread's native error slot without triggering lazy symbol resolution. */
+    [[nodiscard]] SystemError CaptureLastSystemError() noexcept;
 
     /** @brief Normalized scheduler-tracing transport implemented by the platform-specific system adapter. */
     struct SchedulerTraceSystemAPI {
@@ -2564,8 +2869,13 @@ namespace Sora::PAL {
         /** @brief Load and return the immutable Win32 I/O completion port function table. */
         [[nodiscard]] const IOCPSystemAPI& LoadIOCPSystemAPI() noexcept;
 
-        /** @brief Load and return the immutable Win32 I/O ring function table. */
-        [[nodiscard]] const IORingSystemAPI& LoadIORingSystemAPI() noexcept;
+#if defined(PLATFORM_WINDOWS)
+        /** @brief Load and return the immutable Windows I/O ring function table. */
+        [[nodiscard]] const WindowsIORingSystemAPI& LoadWindowsIORingSystemAPI() noexcept;
+#elif defined(PLATFORM_LINUX)
+        /** @brief Load and return the immutable liburing export table. */
+        [[nodiscard]] const LinuxIoUringSystemAPI& LoadLinuxIoUringSystemAPI() noexcept;
+#endif
 
         /** @brief Load and return the immutable system-information function table. */
         [[nodiscard]] const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept;
@@ -2593,6 +2903,26 @@ namespace Sora::PAL {
 
         /** @brief Load and return the immutable UDP datagram function table. */
         [[nodiscard]] const UdpSystemAPI& LoadUdpSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable native clock function table. */
+        [[nodiscard]] const ClockSystemAPI& LoadClockSystemAPI() noexcept;
+
+#if defined(PLATFORM_WINDOWS)
+        /** @brief Load and return the immutable overlapped Winsock function table. */
+        [[nodiscard]] const WinsockOverlappedSystemAPI& LoadWinsockOverlappedSystemAPI() noexcept;
+#elif defined(PLATFORM_LINUX)
+        /** @brief Load and return the immutable Linux epoll function table. */
+        [[nodiscard]] const EpollSystemAPI& LoadEpollSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Linux eventfd function table. */
+        [[nodiscard]] const EventFdSystemAPI& LoadEventFdSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Linux timerfd function table. */
+        [[nodiscard]] const TimerFdSystemAPI& LoadTimerFdSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Linux signalfd function table. */
+        [[nodiscard]] const SignalFdSystemAPI& LoadSignalFdSystemAPI() noexcept;
+#endif
 
         /** @brief Load and return the immutable movable-global-memory function table. */
         [[nodiscard]] const GlobalMemorySystemAPI& LoadGlobalMemorySystemAPI() noexcept;
