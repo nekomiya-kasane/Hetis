@@ -9,8 +9,6 @@
  *
  * @par Example
  * @code{.cpp}
- * #include <Sora/Core/PAL/VulkanAPI.h>
- *
  * void ResolveLiveObjects(Sora::PAL::Vulkan::VkInstance instance, Sora::PAL::Vulkan::VkDevice device) {
  *     const auto& loader = Sora::PAL::Vulkan::LoadVulkanAPI();
  *     if (loader.vkGetInstanceProcAddr == nullptr) return;

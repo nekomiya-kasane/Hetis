@@ -59,6 +59,9 @@ namespace Sora {
             /** @brief Category for a multi-sequence operation whose lengths differ. */
             struct LengthMismatchTag {};
 
+            /** @brief Category for a sequence operation whose requested bounds are outside the input. */
+            struct OutOfRangeTag {};
+
         } // namespace Error
 
     } // namespace Meta

@@ -7,9 +7,6 @@
  *
  * @par Example
  * @code{.cpp}
- * #include <type_traits>
- * #include <Sora/Core/PAL/D3DAPI.h>
- *
  * #if defined(PLATFORM_WINDOWS)
  * const auto& d3d12 = Sora::PAL::D3D::LoadD3D12API();
  * if (d3d12.createDevice != nullptr) {

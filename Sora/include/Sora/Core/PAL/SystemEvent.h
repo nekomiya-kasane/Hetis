@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "Sora/Platform.h"
 #include "Sora/Core/Flags.h"
 #include "Sora/Core/Traits/AnnotationTraits.h"
 #include "Sora/Math/Geom/Primitives.h"
@@ -460,8 +461,8 @@ namespace Sora::PAL {
              * @brief Pointer moved within the window's client area.
              */
             struct MouseMoveEvent : WindowSpecificEvent, TimestampedEvent {
-                Sora::Math::Vec2f position{}; /**< Client-space, sub-pixel precision. */
-                Sora::Math::Vec2f delta{};    /**< Movement since previous event. */
+                Sora::Math::Point2f position{}; /**< Client-space, sub-pixel precision. */
+                Sora::Math::Vec2f delta{};      /**< Movement since previous event. */
                 Modifiers mods{};
                 uint64_t device = 0;
             };
@@ -470,7 +471,7 @@ namespace Sora::PAL {
              * @brief Pointer button pressed or released.
              */
             struct MouseButtonEvent : WindowSpecificEvent, TimestampedEvent {
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 MouseButton button = MouseButton::Left;
                 bool pressed = false;
                 uint8_t clickCount = 1; /**< 1=single, 2=double, 3=triple, etc. */
@@ -480,7 +481,7 @@ namespace Sora::PAL {
 
             /** @brief Mouse wheel / trackpad scroll. */
             struct ScrollEvent : WindowSpecificEvent, TimestampedEvent {
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 Sora::Math::Vec2f delta{}; /**< +Y = scroll up, +X = scroll right. */
                 ScrollUnit unit = ScrollUnit::Lines;
                 bool inertial = false; /**< macOS / precision touchpad inertial phase. */
@@ -502,7 +503,7 @@ namespace Sora::PAL {
             struct TouchEvent : WindowSpecificEvent, TimestampedEvent {
                 uint64_t contact = 0; /**< Contact identity; zero is unknown. */
                 TouchPhase phase = TouchPhase::Began;
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 Sora::Math::Vec2f size{}; /**< Contact ellipse size in pixels (0 if unsupported). */
                 float pressure = 0;       /**< Normalised [0,1]. */
             };
@@ -511,7 +512,7 @@ namespace Sora::PAL {
             struct TouchGestureEvent : WindowSpecificEvent, TimestampedEvent {
                 enum class Kind : uint8_t { Pinch, Rotate, Swipe, Pan, Tap, LongPress };
                 Kind gesture = Kind::Pinch; /**< Sub-tag distinguishing the gesture kind. */
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 Sora::Math::Vec2f delta; /**< Pan/swipe direction in pixels. */
                 float scale = 1;         /**< Pinch scale factor. */
                 float rotation = 0;      /**< Rotation in radians. */
@@ -524,7 +525,7 @@ namespace Sora::PAL {
             /** @brief Stylus / pen contact event with full Wintab/Pointer-Input metadata. */
             struct PenEvent : WindowSpecificEvent, TimestampedEvent {
                 TouchPhase phase = TouchPhase::Began;
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 float pressure = 0; /**< Normalised [0,1]. */
                 float tiltX = 0;    /**< Radians, +X axis tilt. */
                 float tiltY = 0;    /**< Radians, +Y axis tilt. */
@@ -616,16 +617,16 @@ namespace Sora::PAL {
             };
 
             struct DragEnterEvent : WindowSpecificEvent {
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 DragPayloadInfo payload;
             };
 
             struct DragOverEvent : WindowSpecificEvent {
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
             };
 
             struct DragDropEvent : WindowSpecificEvent {
-                Sora::Math::Vec2f position{};
+                Sora::Math::Point2f position{};
                 std::vector<std::string> paths; /**< For @c Files payloads, decoded local paths. */
                 std::string text;               /**< For @c Text payloads. */
                 std::vector<std::byte> blob;    /**< For @c Custom / @c Image payloads, raw bytes. */
@@ -649,8 +650,8 @@ namespace Sora::PAL {
 
             /** @brief A display's mode, position, or topology changed. */
             struct DisplayChangeEvent : EventPayloadBase {
-                uint64_t display = 0; /**< Display identity; zero is invalid. */
-                Sora::Math::Vec2u resolution{};
+                uint64_t display = 0;        /**< Display identity; zero is invalid. */
+                Sora::Math::Rect2i bounds{}; /**< Display bounds in virtual-desktop pixels. */
                 float refreshHz = 0;
                 float dpiScale = 1;
             };

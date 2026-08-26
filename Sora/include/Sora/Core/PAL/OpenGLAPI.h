@@ -10,11 +10,9 @@
  *
  * @par Example
  * @code{.cpp}
- * #include <Sora/Core/PAL/OpenGLAPI.h>
- *
- * void ResolveCurrentContext(void* (*getProcAddress)(const char*)) {
+ * void ResolveCurrentContext(auto&& resolve) {
  *     Sora::PAL::OpenGL::GL::API gl;
- *     gl.Resolve(getProcAddress); // The target native context must already be current.
+ *     gl.Resolve(resolve); // The target native context must already be current.
  *     if (gl.glBindBuffer != nullptr) {
  *         Sora::PAL::OpenGL::GLuint buffer = 0;
  *         gl.glBindBuffer(Sora::PAL::OpenGL::GL::GL_ARRAY_BUFFER, buffer);
@@ -22,7 +20,8 @@
  * }
  * @endcode
  *
- * @note @p getProcAddress is platform-specific (wglGetProcAddress, glXGetProcAddress, or eglGetProcAddress). A
+ * @note @p resolve is an adapter that accepts @c const @c char* and normalizes wglGetProcAddress,
+ * glXGetProcAddress, or eglGetProcAddress results to an address suitable for function-pointer reconstruction. A
  * context-dependent table must not be shared across incompatible current contexts.
  */
 #pragma once
@@ -128,8 +127,11 @@ namespace Sora::PAL::OpenGL {
     using khronos_uint64_t = uint64_t;
     using khronos_utime_nanoseconds_t = uint64_t;
 
+    /** @brief ABI-compatible floating-point point used by WGL glyph metrics. */
     struct PointFloat { float x = 0; float y = 0; };
+    /** @brief ABI-compatible signed rectangle used by WGL and GPU-device descriptors. */
     struct Rect { int32_t left = 0; int32_t top = 0; int32_t right = 0; int32_t bottom = 0; };
+    /** @brief ABI-compatible WGL pixel-format descriptor. */
     struct PixelFormatDescriptor {
         uint16_t size = sizeof(PixelFormatDescriptor);
         uint16_t version = 1;
@@ -158,6 +160,7 @@ namespace Sora::PAL::OpenGL {
         uint32_t visibleMask = 0;
         uint32_t damageMask = 0;
     };
+    /** @brief ABI-compatible WGL layer-plane descriptor. */
     struct LayerPlaneDescriptor {
         uint16_t size = sizeof(LayerPlaneDescriptor);
         uint16_t version = 1;
@@ -184,6 +187,7 @@ namespace Sora::PAL::OpenGL {
         uint8_t reserved = 0;
         uint32_t transparentColor = 0;
     };
+    /** @brief ABI-compatible floating-point glyph metrics record. */
     struct GlyphMetricsFloat {
         float blackBoxX = 0;
         float blackBoxY = 0;
@@ -191,6 +195,7 @@ namespace Sora::PAL::OpenGL {
         float cellIncrementX = 0;
         float cellIncrementY = 0;
     };
+    /** @brief ABI-compatible GPU-device descriptor used by WGL affinity extensions. */
     struct GpuDevice {
         uint32_t size = sizeof(GpuDevice);
         char deviceName[32]{};
@@ -216,6 +221,7 @@ namespace Sora::PAL::OpenGL {
     using Font = XID;
     using Bool = int;
     using Status = int;
+    /** @brief ABI-compatible X11 visual description consumed by GLX. */
     struct XVisualInfo {
         ::_XVisual* visual = nullptr;
         XID visualId = 0;
@@ -251,6 +257,7 @@ namespace Sora::PAL::OpenGL {
     using VLServer = void*;
     using VLPath = long;
     using VLNode = long;
+    /** @brief GLX event describing a pbuffer clobber operation. */
     struct GLXPbufferClobberEvent {
         int eventType = 0;
         int drawType = 0;
@@ -267,6 +274,7 @@ namespace Sora::PAL::OpenGL {
         int count = 0;
     };
     using GLXBufferClobberEvent = GLXPbufferClobberEvent;
+    /** @brief SGIX GLX event describing a buffer clobber operation. */
     struct GLXBufferClobberEventSGIX {
         int type = 0;
         unsigned long serial = 0;
@@ -282,6 +290,7 @@ namespace Sora::PAL::OpenGL {
         int height = 0;
         int count = 0;
     };
+    /** @brief GLX event describing completion of a buffer swap. */
     struct GLXBufferSwapComplete {
         int type = 0;
         unsigned long serial = 0;
@@ -293,6 +302,7 @@ namespace Sora::PAL::OpenGL {
         int64_t msc = 0;
         int64_t sbc = 0;
     };
+    /** @brief EXT GLX event reporting a stereo-window transition. */
     struct GLXStereoNotifyEventEXT {
         int type = 0;
         unsigned long serial = 0;
@@ -303,13 +313,16 @@ namespace Sora::PAL::OpenGL {
         GLXDrawable window = 0;
         Bool stereoTree = 0;
     };
+    /** @brief SGIX hyperpipe network descriptor. */
     struct GLXHyperpipeNetwork { char pipeName[80]{}; int networkId = 0; };
+    /** @brief SGIX hyperpipe configuration descriptor. */
     struct GLXHyperpipeConfig {
         char pipeName[80]{};
         int channel = 0;
         unsigned int participationType = 0;
         int timeSlice = 0;
     };
+    /** @brief SGIX hyperpipe source and destination rectangle. */
     struct GLXPipeRect {
         char pipeName[80]{};
         int sourceX = 0;
@@ -321,6 +334,7 @@ namespace Sora::PAL::OpenGL {
         int destinationWidth = 0;
         int destinationHeight = 0;
     };
+    /** @brief SGIX hyperpipe rectangle limits. */
     struct GLXPipeRectLimits {
         char pipeName[80]{};
         int xOrigin = 0;
@@ -328,6 +342,7 @@ namespace Sora::PAL::OpenGL {
         int maximumHeight = 0;
         int maximumWidth = 0;
     };
+    /** @brief Union of GLX event payloads with registry-compatible padding. */
     union GLXEvent {
         GLXPbufferClobberEvent pbufferClobber;
         GLXBufferSwapComplete bufferSwapComplete;
@@ -387,6 +402,7 @@ namespace Sora::PAL::OpenGL {
     using NativeDisplayType = EGLNativeDisplayType;
     using NativeWindowType = EGLNativeWindowType;
     using NativePixmapType = EGLNativePixmapType;
+    /** @brief HI EGL client-pixmap descriptor supplied to pixmap import commands. */
     struct EGLClientPixmapHI { void* data = nullptr; int32_t width = 0; int32_t height = 0; int32_t stride = 0; };
     using EGLClientPixmap = EGLClientPixmapHI;
     using EGLsizeiANDROID = int32_t;

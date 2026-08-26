@@ -76,10 +76,10 @@ namespace Sora::Meta {
     /**
      * @brief Return whether @p result is a reflected InfoList value.
      * @param[in] result Reflection to inspect.
-     * @return `true` only for an object whose unqualified type is `InfoList`.
+     * @return `true` only for an object or value whose unqualified type is `InfoList`.
      */
     [[nodiscard]] consteval bool IsInfoList(std::meta::info result) noexcept {
-        if (!std::meta::is_object(result)) {
+        if (!std::meta::is_object(result) && !std::meta::is_value(result)) {
             return false;
         }
         return std::meta::remove_cvref(std::meta::type_of(result)) == ^^InfoList;
@@ -300,7 +300,8 @@ namespace Sora::Meta {
                     return MakeMetaError(^^Error::NonInvocableTag, {function});
                 }
                 const auto parameters = std::meta::parameters_of(function);
-                if (parameters.size() != 1 || std::meta::type_of(parameters.front()) != ^^std::meta::info) {
+                if (parameters.size() != 1 ||
+                    !std::meta::is_invocable_type(std::meta::type_of(function), {^^std::meta::info})) {
                     return MakeMetaError(^^Error::NonInvocableTag, {function});
                 }
                 if (std::meta::return_type_of(function) != ^^InfoList) {
@@ -767,7 +768,7 @@ namespace Sora::Meta {
 
         /**
          * @brief Concatenate reflected TypeLists in source order.
-        * @param[in] lists Sequence whose elements must each reflect a `Traits::TypeList` specialization.
+         * @param[in] lists Sequence whose elements must each reflect a `Traits::TypeList` specialization.
          * @return Reflected concatenated `TypeList`, `InvalidSequenceTag`, or the first error in flattened source
          * order.
          */
@@ -876,6 +877,462 @@ namespace Sora::Meta {
         }
 
         /**
+         * @brief Return the number of types in a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected `std::size_t`, or the input `MetaError`/`InvalidSequenceTag`.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto count = Sora::Meta::Types::Length(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(std::meta::extract<std::size_t>(count) == 2);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Length(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return std::meta::reflect_constant(types.size());
+        }
+
+        /**
+         * @brief Return the type at @p index in a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] index Zero-based type index.
+         * @return Reflected type, or the input `MetaError`, `InvalidSequenceTag`, or `OutOfRangeTag` when @p index
+         * is outside the list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto type = Sora::Meta::Types::At(^^Sora::Traits::TypeList<int, double>, 1);
+         * static_assert(type == ^^double);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info At(std::meta::info list, std::size_t index) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            if (index >= types.size()) {
+                return MakeMetaError(^^Error::OutOfRangeTag, {list});
+            }
+            return types[index];
+        }
+
+        /**
+         * @brief Return the first type in a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Its first reflected type, or the input `MetaError`, `InvalidSequenceTag`, or `OutOfRangeTag`
+         * for an empty list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto type = Sora::Meta::Types::Front(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(type == ^^int);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Front(std::meta::info list) {
+            return At(list, 0);
+        }
+
+        /**
+         * @brief Return the final type in a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Its final reflected type, or the input `MetaError`, `InvalidSequenceTag`, or `OutOfRangeTag`
+         * for an empty list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto type = Sora::Meta::Types::Back(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(type == ^^double);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Back(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            if (types.empty()) {
+                return MakeMetaError(^^Error::OutOfRangeTag, {list});
+            }
+            return types.back();
+        }
+
+        /**
+         * @brief Return a reflected `TypeList` in reverse order.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reversed reflected `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested
+         * projection error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Reverse(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<double, int>);
+         * @endcode
+         * @par Complexity Linear in the number of types.
+         */
+        [[nodiscard]] consteval std::meta::info Reverse(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::Reverse(types));
+        }
+
+        /**
+         * @brief Remove duplicate types from a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Stable first-occurrence `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested
+         * projection error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Unique(^^Sora::Traits::TypeList<int, double, int>);
+         * static_assert(result == ^^Sora::Traits::TypeList<int, double>);
+         * @endcode
+         * @par Complexity Quadratic in the number of types because identity is checked pairwise.
+         */
+        [[nodiscard]] consteval std::meta::info Unique(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::Unique(types));
+        }
+
+        /**
+         * @brief Return the first @p count types of a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] count Number of requested types; values beyond the length are clamped.
+         * @return Reflected prefix `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested projection
+         * error. An empty input or a zero @p count produces an empty list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Take(^^Sora::Traits::TypeList<int, double>, 1);
+         * static_assert(result == ^^Sora::Traits::TypeList<int>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Take(std::meta::info list, std::size_t count) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::Take(types, count));
+        }
+
+        /**
+         * @brief Drop the first @p count types of a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] count Number of types to skip; values beyond the length produce an empty list.
+         * @return Reflected suffix `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested projection
+         * error. Dropping at least the list length produces an empty list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Drop(^^Sora::Traits::TypeList<int, double>, 1);
+         * static_assert(result == ^^Sora::Traits::TypeList<double>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Drop(std::meta::info list, std::size_t count) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::Drop(types, count));
+        }
+
+        /**
+         * @brief Return an exact bounded slice of a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] offset Zero-based first type.
+         * @param[in] count Number of selected types.
+         * @return Reflected slice, or `OutOfRangeTag` when bounds are invalid.
+         * @note Unlike `Take` and `Drop`, @p offset plus @p count must fit exactly in the source list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Slice(
+         *     ^^Sora::Traits::TypeList<int, double, char>, 1, 2);
+         * static_assert(result == ^^Sora::Traits::TypeList<double, char>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Slice(std::meta::info list, std::size_t offset, std::size_t count) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            if (offset > types.size() || count > types.size() - offset) {
+                return MakeMetaError(^^Error::OutOfRangeTag, {list});
+            }
+            return ToTypeList(Sora::Meta::Slice(types, offset, count));
+        }
+
+        /**
+         * @brief Prepend a reflected type to a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] value Reflected type to insert before the existing sequence.
+         * @return Reflected `TypeList`, the first input error, `InvalidSequenceTag`, or `NonTypeResultTag` when
+         * @p value is not a type.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::PushFront(^^Sora::Traits::TypeList<int>, ^^bool);
+         * static_assert(result == ^^Sora::Traits::TypeList<bool, int>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info PushFront(std::meta::info list, std::meta::info value) {
+            if (IsMetaError(list) || IsMetaError(value)) {
+                return IsMetaError(list) ? list : value;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list, value});
+            }
+            if (!std::meta::is_type(value)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {value});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::PushFront(types, value));
+        }
+
+        /**
+         * @brief Append a reflected type to a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] value Reflected type to append after the existing sequence.
+         * @return Reflected `TypeList`, the first input error, `InvalidSequenceTag`, or `NonTypeResultTag` when
+         * @p value is not a type.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::PushBack(^^Sora::Traits::TypeList<int>, ^^bool);
+         * static_assert(result == ^^Sora::Traits::TypeList<int, bool>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info PushBack(std::meta::info list, std::meta::info value) {
+            if (IsMetaError(list) || IsMetaError(value)) {
+                return IsMetaError(list) ? list : value;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list, value});
+            }
+            if (!std::meta::is_type(value)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {value});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::PushBack(types, value));
+        }
+
+        /**
+         * @brief Remove the first type from a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected suffix; an empty input yields an empty list, while input and nested errors are propagated.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::PopFront(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<double>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info PopFront(std::meta::info list) {
+            return Drop(list, 1);
+        }
+
+        /**
+         * @brief Remove the final type from a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected prefix; an empty input yields an empty list, while input and nested errors are propagated.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::PopBack(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<int>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info PopBack(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(Sora::Meta::PopBack(types));
+        }
+
+        /**
+         * @brief Test whether a reflected `TypeList` contains @p needle.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] needle Reflected entity compared by reflection identity.
+         * @return Reflected `bool`, or the first input/sequence error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Contains(^^Sora::Traits::TypeList<int, double>, ^^double);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Contains(std::meta::info list, std::meta::info needle) {
+            if (IsMetaError(list) || IsMetaError(needle)) {
+                return IsMetaError(list) ? list : needle;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list, needle});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return std::meta::reflect_constant(Sora::Meta::Contains(types, needle));
+        }
+
+        /**
+         * @brief Return the first index of @p needle in a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] needle Reflected entity to find.
+         * @return Reflected `std::size_t`; a missing value is `TypeList::npos`.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::IndexOf(^^Sora::Traits::TypeList<int, double>, ^^double);
+         * static_assert(std::meta::extract<std::size_t>(result) == 1);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info IndexOf(std::meta::info list, std::meta::info needle) {
+            if (IsMetaError(list) || IsMetaError(needle)) {
+                return IsMetaError(list) ? list : needle;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list, needle});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return std::meta::reflect_constant(Sora::Meta::IndexOf(types, needle));
+        }
+
+        /**
+         * @brief Count occurrences of @p needle in a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] needle Reflected entity to count.
+         * @return Reflected `std::size_t`, or the first input/sequence error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Count(^^Sora::Traits::TypeList<int, int>, ^^int);
+         * static_assert(std::meta::extract<std::size_t>(result) == 2);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Count(std::meta::info list, std::meta::info needle) {
+            if (IsMetaError(list) || IsMetaError(needle)) {
+                return IsMetaError(list) ? list : needle;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list, needle});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return std::meta::reflect_constant(Sora::Meta::Count(types, needle));
+        }
+
+        /**
+         * @brief Test whether every type in a reflected `TypeList` occurs exactly once.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected `bool`; empty lists are unique, while nested errors are propagated.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::IsUnique(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info IsUnique(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return std::meta::reflect_constant(Sora::Meta::IsUnique(types));
+        }
+
+        /**
+         * @brief Compare two reflected `TypeList` sequences element by element.
+         * @param[in] left First reflected `Traits::TypeList` specialization.
+         * @param[in] right Second reflected `Traits::TypeList` specialization.
+         * @return Reflected `bool`, or the first input/sequence error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Equal(^^Sora::Traits::TypeList<int>,
+         *                                                   ^^Sora::Traits::TypeList<int>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Equal(std::meta::info left, std::meta::info right) {
+            if (IsMetaError(left) || IsMetaError(right)) {
+                return IsMetaError(left) ? left : right;
+            }
+            if (!IsTypeList(left) || !IsTypeList(right)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {left, right});
+            }
+            const auto leftTypes = ToInfoList(left);
+            const auto rightTypes = ToInfoList(right);
+            if (const auto error = FirstMetaError(leftTypes); error != std::meta::info{}) {
+                return error;
+            }
+            if (const auto error = FirstMetaError(rightTypes); error != std::meta::info{}) {
+                return error;
+            }
+            return std::meta::reflect_constant(Sora::Meta::Equal(leftTypes, rightTypes));
+        }
+
+        /**
          * @brief Apply a reflected template to all types in a reflected TypeList.
          * @param[in] function Reflected variadic template.
          * @param[in] list Reflected `Traits::TypeList` specialization.
@@ -910,7 +1367,7 @@ namespace Sora::Meta {
 
         /**
          * @brief Flatten a reflected `TypeList` produced by a unary type mapper.
-         * @param[in] function Reflected unary template returning an `InfoList` value or a `TypeList` type.
+         * @param[in] function Reflected unary alias template returning a `Traits::TypeList` specialization.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Concatenated `TypeList`, or the first mapper/projection error.
          */
@@ -1059,6 +1516,212 @@ namespace Sora::Meta {
             return ToTypeList(std::vector<std::meta::info>(count, value));
         }
 
+        /**
+         * @brief Discard all elements of a reflected `TypeList`.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Empty reflected `TypeList`, or the first input/sequence error.
+         * @note Nested `MetaError` elements are propagated before clearing so the first-error law is preserved.
+         */
+        [[nodiscard]] consteval std::meta::info Clear(std::meta::info list) {
+            if (IsMetaError(list)) {
+                return list;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return ToTypeList(InfoList{});
+        }
+
+        /**
+         * @brief Left-fold a reflected binary template over a reflected `TypeList`.
+         * @param[in] function Reflected binary template invoked as `function(accumulator, element)`.
+         * @param[in] initial Initial reflected type.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Final reflected type, or the first validation, nested, invocation, or non-type result error.
+         * @par Complexity Linear in the list length, excluding substitution cost.
+         */
+        [[nodiscard]] consteval std::meta::info FoldLeft(std::meta::info function, std::meta::info initial,
+                                                         std::meta::info list) {
+            if (IsMetaError(function) || IsMetaError(initial) || IsMetaError(list)) {
+                return IsMetaError(function) ? function : (IsMetaError(initial) ? initial : list);
+            }
+            if (!std::meta::is_type(initial)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {function, initial, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return RequireTypeResult(Sora::Meta::FoldLeft(function, initial, types), {function, initial, list});
+        }
+
+        /**
+         * @brief Right-fold a reflected binary template over a reflected `TypeList`.
+         * @param[in] function Reflected binary template invoked as `function(element, accumulator)`.
+         * @param[in] initial Initial reflected type.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Final reflected type, or the first validation, nested, invocation, or non-type result error.
+         * @par Complexity Linear in the list length, excluding substitution cost.
+         */
+        [[nodiscard]] consteval std::meta::info FoldRight(std::meta::info function, std::meta::info initial,
+                                                          std::meta::info list) {
+            if (IsMetaError(function) || IsMetaError(initial) || IsMetaError(list)) {
+                return IsMetaError(function) ? function : (IsMetaError(initial) ? initial : list);
+            }
+            if (!std::meta::is_type(initial)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {function, initial, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return RequireTypeResult(Sora::Meta::FoldRight(function, initial, types), {function, initial, list});
+        }
+
+        /**
+         * @brief Find the first type accepted by a reflected predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] fallback Reflected type returned when no element matches.
+         * @return Matching type, @p fallback, or the first validation/error result.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool Integral(std::meta::info type) { return std::meta::is_integral_type(type); }
+         * constexpr auto result = Sora::Meta::Types::FindFirst(
+         *     ^^Sora::Traits::TypeList<double, int>, ^^Integral);
+         * static_assert(result == ^^int);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info FindFirst(std::meta::info list, std::meta::info pred,
+                                                          std::meta::info fallback = ^^void) {
+            if (IsMetaError(pred) || IsMetaError(fallback) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : (IsMetaError(fallback) ? fallback : list);
+            }
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
+            }
+            if (!std::meta::is_type(fallback)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {pred, fallback});
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, fallback, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return RequireTypeResult(Sora::Meta::FindFirst(types, pred, fallback), {list, pred, fallback});
+        }
+
+        /**
+         * @brief Find the final type accepted by a reflected predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] fallback Reflected type returned when no element matches.
+         * @return Matching type, @p fallback, or the first validation/error result.
+         * @see FindFirst
+         */
+        [[nodiscard]] consteval std::meta::info FindLast(std::meta::info list, std::meta::info pred,
+                                                         std::meta::info fallback = ^^void) {
+            if (IsMetaError(pred) || IsMetaError(fallback) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : (IsMetaError(fallback) ? fallback : list);
+            }
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
+            }
+            if (!std::meta::is_type(fallback)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {pred, fallback});
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, fallback, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return RequireTypeResult(Sora::Meta::FindLast(types, pred, fallback), {list, pred, fallback});
+        }
+
+        /**
+         * @brief Test whether every type in a reflected `TypeList` satisfies a predicate.
+         * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected bool; empty lists yield `true` after predicate validation.
+         */
+        [[nodiscard]] consteval std::meta::info AllOf(std::meta::info pred, std::meta::info list) {
+            if (IsMetaError(pred) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : list;
+            }
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return Sora::Meta::AllOf(types, pred);
+        }
+
+        /** @brief Test whether any type in a reflected `TypeList` satisfies a predicate. */
+        [[nodiscard]] consteval std::meta::info AnyOf(std::meta::info pred, std::meta::info list) {
+            if (IsMetaError(pred) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : list;
+            }
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return Sora::Meta::AnyOf(types, pred);
+        }
+
+        /** @brief Test whether no type in a reflected `TypeList` satisfies a predicate. */
+        [[nodiscard]] consteval std::meta::info NoneOf(std::meta::info pred, std::meta::info list) {
+            const auto result = AnyOf(pred, list);
+            return IsMetaError(result) ? result : std::meta::reflect_constant(!std::meta::extract<bool>(result));
+        }
+
+        /**
+         * @brief Count types in a reflected `TypeList` satisfying a predicate.
+         * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected `std::size_t`, or the first validation/error result.
+         */
+        [[nodiscard]] consteval std::meta::info CountIf(std::meta::info pred, std::meta::info list) {
+            if (IsMetaError(pred) || IsMetaError(list)) {
+                return IsMetaError(pred) ? pred : list;
+            }
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
+            }
+            if (!IsTypeList(list)) {
+                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            }
+            const auto types = ToInfoList(list);
+            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
+                return error;
+            }
+            return Sora::Meta::CountIf(types, pred);
+        }
+
     } // namespace Types
 
     namespace Detail {
@@ -1192,7 +1855,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    using PopFront = Meta::InfoType<Meta::ToTypeList(Meta::Drop(Meta::ToInfoList(^^List), 1))>;
+    using PopFront = Meta::InfoType<Meta::Types::PopFront(^^List)>;
 
     /**
      * @brief First @p Count types of @p List, clamped to its length.
@@ -1202,7 +1865,7 @@ namespace Sora::Traits {
      */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
-    using Take = Meta::InfoType<Meta::ToTypeList(Meta::Take(Meta::ToInfoList(^^List), Count))>;
+    using Take = Meta::InfoType<Meta::Types::Take(^^List, Count)>;
 
     /**
      * @brief Types after the first @p Count entries, clamped to its length.
@@ -1212,7 +1875,7 @@ namespace Sora::Traits {
      */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
-    using Drop = Meta::InfoType<Meta::ToTypeList(Meta::Drop(Meta::ToInfoList(^^List), Count))>;
+    using Drop = Meta::InfoType<Meta::Types::Drop(^^List, Count)>;
 
     /**
      * @brief Exact bounded slice of @p List.
@@ -1223,7 +1886,7 @@ namespace Sora::Traits {
      */
     template<typename List, std::size_t Offset, std::size_t Count>
         requires(Concept::TypeList<List> && Offset <= Length<List> && Count <= Length<List> - Offset)
-    using Slice = Meta::InfoType<Meta::ToTypeList(Meta::Slice(Meta::ToInfoList(^^List), Offset, Count))>;
+    using Slice = Meta::InfoType<Meta::Types::Slice(^^List, Offset, Count)>;
 
     /**
      * @brief Empty type list with no dependency on @p List's elements.
@@ -1232,7 +1895,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    using Clear = TypeList<>;
+    using Clear = Meta::InfoType<Meta::Types::Clear(^^List)>;
 
     /**
      * @brief TypeList containing @p Count copies of @p Type.
@@ -1357,8 +2020,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Function, typename Initial, typename List>
         requires Concept::TypeList<List>
-    using FoldLeft = Meta::InfoType<Meta::RequireTypeResult(
-        Meta::FoldLeft(Function, ^^Initial, Meta::ToInfoList(^^List)), {Function, ^^Initial, ^^List})>;
+    using FoldLeft = Meta::InfoType<Meta::Types::FoldLeft(Function, ^^Initial, ^^List)>;
 
     /**
      * @brief Right fold reflected @p Function over @p List.
@@ -1369,8 +2031,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Function, typename Initial, typename List>
         requires Concept::TypeList<List>
-    using FoldRight = Meta::InfoType<Meta::RequireTypeResult(
-        Meta::FoldRight(Function, ^^Initial, Meta::ToInfoList(^^List)), {Function, ^^Initial, ^^List})>;
+    using FoldRight = Meta::InfoType<Meta::Types::FoldRight(Function, ^^Initial, ^^List)>;
 
     /**
      * @brief First index of @p Type in @p List, or @ref Meta::InfoList::npos.
@@ -1380,7 +2041,7 @@ namespace Sora::Traits {
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t IndexOf = Meta::IndexOf(Meta::ToInfoList(^^List), ^^Type);
+    inline constexpr std::size_t IndexOf = Meta::RequireSizeResult(Meta::Types::IndexOf(^^List, ^^Type));
 
     /**
      * @brief Whether @p List contains @p Type.
@@ -1390,7 +2051,7 @@ namespace Sora::Traits {
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
-    inline constexpr bool Contains = Meta::Contains(Meta::ToInfoList(^^List), ^^Type);
+    inline constexpr bool Contains = Meta::RequirePredResult(Meta::Types::Contains(^^List, ^^Type));
 
     /**
      * @brief Number of occurrences of @p Type in @p List.
@@ -1400,7 +2061,7 @@ namespace Sora::Traits {
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t Count = Meta::Count(Meta::ToInfoList(^^List), ^^Type);
+    inline constexpr std::size_t Count = Meta::RequireSizeResult(Meta::Types::Count(^^List, ^^Type));
 
     /**
      * @brief Compare two `TypeList` sequences element by element.
@@ -1415,7 +2076,7 @@ namespace Sora::Traits {
      */
     template<typename Left, typename Right>
         requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
-    inline constexpr bool Equal = Meta::Equal(Meta::ToInfoList(^^Left), Meta::ToInfoList(^^Right));
+    inline constexpr bool Equal = Meta::RequirePredResult(Meta::Types::Equal(^^Left, ^^Right));
 
     /**
      * @brief First type in @p List accepted by @p Pred, or `void` when no type matches.
@@ -1431,7 +2092,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    using FindFirst = Meta::InfoType<Meta::FindFirst(Meta::ToInfoList(^^List), Pred)>;
+    using FindFirst = Meta::InfoType<Meta::Types::FindFirst(^^List, Pred)>;
 
     /**
      * @brief Final type in @p List accepted by @p Pred, or `void` when no type matches.
@@ -1447,7 +2108,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    using FindLast = Meta::InfoType<Meta::FindLast(Meta::ToInfoList(^^List), Pred)>;
+    using FindLast = Meta::InfoType<Meta::Types::FindLast(^^List, Pred)>;
 
     /**
      * @brief Prepend @p Type to @p List.
@@ -1457,7 +2118,7 @@ namespace Sora::Traits {
      */
     template<typename Type, typename List>
         requires Concept::TypeList<List>
-    using PushFront = Meta::InfoType<Meta::ToTypeList(Meta::PushFront(Meta::ToInfoList(^^List), ^^Type))>;
+    using PushFront = Meta::InfoType<Meta::Types::PushFront(^^List, ^^Type)>;
 
     /**
      * @brief Append @p Type to @p List.
@@ -1467,7 +2128,7 @@ namespace Sora::Traits {
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
-    using PushBack = Meta::InfoType<Meta::ToTypeList(Meta::PushBack(Meta::ToInfoList(^^List), ^^Type))>;
+    using PushBack = Meta::InfoType<Meta::Types::PushBack(^^List, ^^Type)>;
 
     /**
      * @brief All but the final type of @p List.
@@ -1476,7 +2137,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    using PopBack = Meta::InfoType<Meta::ToTypeList(Meta::PopBack(Meta::ToInfoList(^^List)))>;
+    using PopBack = Meta::InfoType<Meta::Types::PopBack(^^List)>;
 
     /**
      * @brief Types of @p List in reverse order.
@@ -1485,7 +2146,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    using Reverse = Meta::InfoType<Meta::ToTypeList(Meta::Reverse(Meta::ToInfoList(^^List)))>;
+    using Reverse = Meta::InfoType<Meta::Types::Reverse(^^List)>;
 
     /**
      * @brief Remove duplicate types while retaining first occurrences.
@@ -1494,7 +2155,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    using Unique = Meta::InfoType<Meta::ToTypeList(Meta::Unique(Meta::ToInfoList(^^List)))>;
+    using Unique = Meta::InfoType<Meta::Types::Unique(^^List)>;
 
     /**
      * @brief Whether every type in @p List occurs exactly once.
@@ -1503,7 +2164,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    inline constexpr bool IsUnique = Meta::IsUnique(Meta::ToInfoList(^^List));
+    inline constexpr bool IsUnique = Meta::RequirePredResult(Meta::Types::IsUnique(^^List));
 
     /**
      * @brief Replace every @p Old type in @p List with @p New.
@@ -1575,7 +2236,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr bool AllOf = Meta::RequirePredResult(Meta::AllOf(Meta::ToInfoList(^^List), Pred));
+    inline constexpr bool AllOf = Meta::RequirePredResult(Meta::Types::AllOf(Pred, ^^List));
 
     /**
      * @brief Whether any type in @p List satisfies @p Pred.
@@ -1585,7 +2246,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr bool AnyOf = Meta::RequirePredResult(Meta::AnyOf(Meta::ToInfoList(^^List), Pred));
+    inline constexpr bool AnyOf = Meta::RequirePredResult(Meta::Types::AnyOf(Pred, ^^List));
 
     /**
      * @brief Whether no type in @p List satisfies @p Pred.
@@ -1595,7 +2256,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr bool NoneOf = Meta::RequirePredResult(Meta::NoneOf(Meta::ToInfoList(^^List), Pred));
+    inline constexpr bool NoneOf = Meta::RequirePredResult(Meta::Types::NoneOf(Pred, ^^List));
 
     /**
      * @brief Number of types in @p List satisfying @p Pred.
@@ -1605,7 +2266,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t CountIf = Meta::RequireSizeResult(Meta::CountIf(Meta::ToInfoList(^^List), Pred));
+    inline constexpr std::size_t CountIf = Meta::RequireSizeResult(Meta::Types::CountIf(Pred, ^^List));
 
     /**
      * @brief Project non-static data-member types of @p Type into a `TypeList`.

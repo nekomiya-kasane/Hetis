@@ -7,8 +7,6 @@
  * must test optional entry points before invoking them because an older operating system may not export them.
  *
  * @code{.cpp}
- * #include <Sora/Core/PAL/SystemAPI.h>
- *
  * #if defined(PLATFORM_WINDOWS)
  * const Sora::PAL::ThreadSystemAPI& api = Sora::PAL::LoadThreadSystemAPI();
  * if (api.getCurrentThread != nullptr && api.setThreadDescription != nullptr) {
@@ -65,26 +63,28 @@
 #include <type_traits>
 #include <utility>
 
-#if defined(PLATFORM_LINUX)
-#    include <signal.h>
-#endif
-
 struct addrinfo;
 struct sockaddr;
 
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
 struct epoll_event;
+struct ifaddrs;
 struct itimerspec;
 struct kevent;
+struct mmsghdr;
+struct msghdr;
 struct pollfd;
 struct rusage;
 struct stat;
+struct statvfs;
+struct sysinfo;
 struct timespec;
-#if defined(PLATFORM_LINUX)
+#    if defined(PLATFORM_LINUX)
+struct fanotify_event_metadata;
 struct io_uring;
 struct io_uring_cqe;
 struct __kernel_timespec;
-#endif
+#    endif
 #endif
 
 #if defined(PLATFORM_LINUX) && !defined(__ANDROID__)
@@ -117,10 +117,20 @@ struct _IMAGEHLP_MODULE64;
 struct _EVENT_TRACE_LOGFILEW;
 struct _EVENT_TRACE_PROPERTIES;
 struct _FILETIME;
+struct _MEMORY_BASIC_INFORMATION;
 struct _PROCESS_MEMORY_COUNTERS;
+struct _PROCESS_INFORMATION;
+struct _REASON_CONTEXT;
+struct _STARTUPINFOW;
+struct _WIN32_FILE_ATTRIBUTE_DATA;
+struct _WIN32_FIND_DATAW;
+struct MEM_EXTENDED_PARAMETER;
+struct _IP_ADAPTER_ADDRESSES_LH;
+struct _MIB_IF_TABLE2;
 union _LARGE_INTEGER;
 struct _OVERLAPPED;
 struct _OVERLAPPED_ENTRY;
+struct _PROCESSOR_NUMBER;
 struct _SECURITY_ATTRIBUTES;
 struct _SYMBOL_INFO;
 struct _WSABUF;
@@ -139,9 +149,9 @@ namespace Sora::PAL {
             Type type = Type::Serial;
         };
 
-        /** @brief Associate a function-table entry with one exact native symbol that it exposes or delegates to. */
+        /** @brief Associate a function-table entry with one native symbol or syscall operation. */
         struct Syscall {
-            FixedString<256> name = ""; /**< Case-sensitive export name passed to the native symbol resolver. */
+            FixedString<256> name = ""; /**< Case-sensitive export or syscall operation name. */
             Platform::OperatingSystem os = Platform::kOperatingSystem; /**< Operating system that exports the symbol. */
         };
 
@@ -224,20 +234,6 @@ namespace Sora::PAL {
         std::string sourceFile;  /**< Source file path, or empty when unavailable. */
         uint32_t sourceLine = 0; /**< One-based source line, or zero when unavailable. */
         uint64_t offset = 0;     /**< Byte displacement from the resolved symbol start. */
-    };
-
-    /** @brief Signed desktop coordinate rectangle used by display and windowing adapters. */
-    struct DisplayRect {
-        int32_t left = 0;
-        int32_t top = 0;
-        int32_t right = 0;
-        int32_t bottom = 0;
-    };
-
-    /** @brief Signed desktop coordinate point used by display and windowing adapters. */
-    struct DisplayPoint {
-        int32_t x = 0;
-        int32_t y = 0;
     };
 
     /** @brief DPI awareness mode understood by the Windows display adapter. */
@@ -373,9 +369,12 @@ namespace Sora::PAL {
         using PointerSizedULong = uintptr_t;
         using WChar = wchar_t;
         using WindowAtom = uint16_t;
+        // GET_FILEEX_INFO_LEVELS is an anonymous SDK enum; int preserves its Win32 ABI without importing Windows.h.
+        using GetFileExInfoLevel = int;
         using WindowMessageId = uint32_t;
         using WindowProcedureResult = intptr_t;
         using Socket = uintptr_t;
+        using TimerApcRoutine = void(__stdcall*)(void*, DWord, DWord);
         using WindowProcedure = WindowProcedureResult(__stdcall*)(WindowHandle, WindowMessageId, uintptr_t, intptr_t);
 
         /** @brief Layout-compatible Win32 globally unique identifier. */
@@ -408,8 +407,19 @@ namespace Sora::PAL {
             int64_t quadPart;
         };
 
-        using Rect = DisplayRect;
-        using Point = DisplayPoint;
+        /** @brief Layout-compatible Win32 @c RECT record; values are left, top, right, and bottom coordinates. */
+        struct Rect {
+            Long left = 0;
+            Long top = 0;
+            Long right = 0;
+            Long bottom = 0;
+        };
+
+        /** @brief Layout-compatible Win32 @c POINT record. */
+        struct Point {
+            Long x = 0;
+            Long y = 0;
+        };
 
         /** @brief Layout-compatible Win32 security-attributes record. */
         struct SecurityAttributes {
@@ -492,7 +502,7 @@ namespace Sora::PAL {
             uintptr_t wParam = 0;
             intptr_t lParam = 0;
             DWord time = 0;
-            DisplayPoint point{};
+            Point point{};
         };
 
         /** @brief ABI-compatible Winsock readiness descriptor. */
@@ -600,7 +610,7 @@ namespace Sora::PAL {
         using SetCursorFunction           = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle);
         using ShowCursorFunction          = int(__stdcall*)(WindowsSystem::Bool);
         using SetCursorPositionFunction   = WindowsSystem::Bool(__stdcall*)(int, int);
-        using ClipCursorFunction          = WindowsSystem::Bool(__stdcall*)(const DisplayRect*);
+        using ClipCursorFunction          = WindowsSystem::Bool(__stdcall*)(const WindowsSystem::Rect*);
         using SetFocusFunction            = WindowsSystem::WindowHandle(__stdcall*)(WindowsSystem::WindowHandle);
         using GetFocusFunction            = WindowsSystem::WindowHandle(__stdcall*)();
         using SetForegroundWindowFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle);
@@ -1084,8 +1094,8 @@ namespace Sora::PAL {
         /** @brief ABI-compatible Win32 monitor information record. */
         struct MonitorInfo {
             DWord size = sizeof(MonitorInfo);
-            DisplayRect monitor{};
-            DisplayRect work{};
+            Rect monitor{};
+            Rect work{};
             DWord flags = 0;
         };
 
@@ -1591,9 +1601,84 @@ namespace Sora::PAL {
     struct SynchronizationSystemAPI {
         // clang-format off
         using WaitForSingleObjectFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
+        using WaitForSingleObjectExFunction = WindowsSystem::DWord(__stdcall*)(
+            WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::Bool);
+        using WaitForMultipleObjectsFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord,
+                                                                                  const WindowsSystem::Handle*,
+                                                                                  WindowsSystem::Bool,
+                                                                                  WindowsSystem::DWord);
+        using WaitForMultipleObjectsExFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord,
+                                                                                    const WindowsSystem::Handle*,
+                                                                                    WindowsSystem::Bool,
+                                                                                    WindowsSystem::DWord,
+                                                                                    WindowsSystem::Bool);
+        using SignalObjectAndWaitFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle,
+                                                                               WindowsSystem::Handle,
+                                                                               WindowsSystem::DWord,
+                                                                               WindowsSystem::Bool);
+        using CreateMutexExWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, const wchar_t*,
+                                                                             WindowsSystem::DWord, WindowsSystem::DWord);
+        using ReleaseMutexFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using CreateSemaphoreExWideFunction = WindowsSystem::Handle(__stdcall*)(
+            ::_SECURITY_ATTRIBUTES*, long, long, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
+        using ReleaseSemaphoreFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, long, long*);
+        using CreateWaitableTimerExWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*,
+                                                                                     const wchar_t*, WindowsSystem::DWord,
+                                                                                     WindowsSystem::DWord);
+        using SetWaitableTimerExFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle,
+                                                                            const ::_LARGE_INTEGER*, long,
+                                                                            WindowsSystem::TimerApcRoutine, void*,
+                                                                            ::_REASON_CONTEXT*, WindowsSystem::DWord);
+        using CancelWaitableTimerFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
 
         [[= $::Syscall{"WaitForSingleObject"}]]
         WaitForSingleObjectFunction waitForSingleObject = nullptr;
+        [[= $::Syscall{"WaitForSingleObjectEx"}]]
+        WaitForSingleObjectExFunction waitForSingleObjectEx = nullptr;
+        [[= $::Syscall{"WaitForMultipleObjects"}]]
+        WaitForMultipleObjectsFunction waitForMultipleObjects = nullptr;
+        [[= $::Syscall{"WaitForMultipleObjectsEx"}]]
+        WaitForMultipleObjectsExFunction waitForMultipleObjectsEx = nullptr;
+        [[= $::Syscall{"SignalObjectAndWait"}]]
+        SignalObjectAndWaitFunction signalObjectAndWait = nullptr;
+        [[= $::Syscall{"CreateMutexExW"}]]
+        CreateMutexExWideFunction createMutexExWide = nullptr;
+        [[= $::Syscall{"ReleaseMutex"}]]
+        ReleaseMutexFunction releaseMutex = nullptr;
+        [[= $::Syscall{"CreateSemaphoreExW"}]]
+        CreateSemaphoreExWideFunction createSemaphoreExWide = nullptr;
+        [[= $::Syscall{"ReleaseSemaphore"}]]
+        ReleaseSemaphoreFunction releaseSemaphore = nullptr;
+        [[= $::Syscall{"CreateWaitableTimerExW"}]]
+        CreateWaitableTimerExWideFunction createWaitableTimerExWide = nullptr;
+        [[= $::Syscall{"SetWaitableTimerEx"}]]
+        SetWaitableTimerExFunction setWaitableTimerEx = nullptr;
+        [[= $::Syscall{"CancelWaitableTimer"}]]
+        CancelWaitableTimerFunction cancelWaitableTimer = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Win32 virtual-memory reservation and protection operations. */
+    struct VirtualMemorySystemAPI {
+        // clang-format off
+        using AllocateFunction = void*(__stdcall*)(void*, size_t, WindowsSystem::DWord, WindowsSystem::DWord);
+        using FreeFunction = WindowsSystem::Bool(__stdcall*)(void*, size_t, WindowsSystem::DWord);
+        using ProtectFunction = WindowsSystem::Bool(__stdcall*)(void*, size_t, WindowsSystem::DWord,
+                                                                WindowsSystem::DWord*);
+        using QueryFunction = size_t(__stdcall*)(const void*, ::_MEMORY_BASIC_INFORMATION*, size_t);
+        using Allocate2Function = void*(__stdcall*)(WindowsSystem::Handle, void*, uint64_t, WindowsSystem::DWord,
+                                                    WindowsSystem::DWord, ::MEM_EXTENDED_PARAMETER*,
+                                                    WindowsSystem::DWord);
+        using MapViewOfFile3Function = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, void*, uint64_t,
+                                                         size_t, WindowsSystem::DWord, WindowsSystem::DWord,
+                                                         ::MEM_EXTENDED_PARAMETER*, WindowsSystem::DWord);
+
+        [[= $::Syscall{"VirtualAlloc"}]] AllocateFunction allocate = nullptr;
+        [[= $::Syscall{"VirtualFree"}]] FreeFunction free = nullptr;
+        [[= $::Syscall{"VirtualProtect"}]] ProtectFunction protect = nullptr;
+        [[= $::Syscall{"VirtualQuery"}]] QueryFunction query = nullptr;
+        [[= $::Syscall{"VirtualAlloc2"}]] Allocate2Function allocate2 = nullptr;
+        [[= $::Syscall{"MapViewOfFile3"}]] MapViewOfFile3Function mapViewOfFile3 = nullptr;
         // clang-format on
     };
 
@@ -1812,6 +1897,34 @@ namespace Sora::PAL {
         // clang-format on
     };
 
+    /** @brief Dynamically resolved Win32 process creation, lifecycle, job, and scheduling operations. */
+    struct ProcessControlSystemAPI {
+        // clang-format off
+        using OpenProcessFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::Bool,
+                                                                       WindowsSystem::DWord);
+        using CreateProcessWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, wchar_t*,
+                                                                            ::_SECURITY_ATTRIBUTES*, ::_SECURITY_ATTRIBUTES*,
+                                                                            WindowsSystem::Bool, WindowsSystem::DWord, void*,
+                                                                            const wchar_t*, ::_STARTUPINFOW*,
+                                                                            ::_PROCESS_INFORMATION*);
+        using GetExitCodeFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
+        using TerminateFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::UInt);
+        using CreateJobObjectWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, const wchar_t*);
+        using AssignJobFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle);
+        using SetPriorityClassFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
+        using SetAffinityMaskFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, uintptr_t);
+
+        [[= $::Syscall{"OpenProcess"}]] OpenProcessFunction openProcess = nullptr;
+        [[= $::Syscall{"CreateProcessW"}]] CreateProcessWideFunction createProcessWide = nullptr;
+        [[= $::Syscall{"GetExitCodeProcess"}]] GetExitCodeFunction getExitCode = nullptr;
+        [[= $::Syscall{"TerminateProcess"}]] TerminateFunction terminate = nullptr;
+        [[= $::Syscall{"CreateJobObjectW"}]] CreateJobObjectWideFunction createJobObjectWide = nullptr;
+        [[= $::Syscall{"AssignProcessToJobObject"}]] AssignJobFunction assignProcessToJob = nullptr;
+        [[= $::Syscall{"SetPriorityClass"}]] SetPriorityClassFunction setPriorityClass = nullptr;
+        [[= $::Syscall{"SetProcessAffinityMask"}]] SetAffinityMaskFunction setProcessAffinityMask = nullptr;
+        // clang-format on
+    };
+
     /** @brief Dynamically resolved Win32 current-thread entry points. */
     struct ThreadSystemAPI {
         // clang-format off
@@ -1839,6 +1952,99 @@ namespace Sora::PAL {
         GetCurrentThreadStackLimitsFunction getCurrentThreadStackLimits = nullptr;
         // clang-format on
     };
+
+    /** @brief Dynamically resolved Win32 thread scheduling and lifecycle operations. */
+    struct ThreadControlSystemAPI {
+        // clang-format off
+        using SetPriorityFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int);
+        using GetPriorityFunction = int(__stdcall*)(WindowsSystem::Handle);
+        using SetAffinityMaskFunction = uintptr_t(__stdcall*)(WindowsSystem::Handle, uintptr_t);
+        using SetIdealProcessorFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
+        using SetIdealProcessorExFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle,
+                                                                              ::_PROCESSOR_NUMBER*,
+                                                                              ::_PROCESSOR_NUMBER*);
+        using SuspendFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
+        using ResumeFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
+
+        [[= $::Syscall{"SetThreadPriority"}]] SetPriorityFunction setPriority = nullptr;
+        [[= $::Syscall{"GetThreadPriority"}]] GetPriorityFunction getPriority = nullptr;
+        [[= $::Syscall{"SetThreadAffinityMask"}]] SetAffinityMaskFunction setAffinityMask = nullptr;
+        [[= $::Syscall{"SetThreadIdealProcessor"}]] SetIdealProcessorFunction setIdealProcessor = nullptr;
+        [[= $::Syscall{"SetThreadIdealProcessorEx"}]] SetIdealProcessorExFunction setIdealProcessorEx = nullptr;
+        [[= $::Syscall{"SuspendThread"}]] SuspendFunction suspend = nullptr;
+        [[= $::Syscall{"ResumeThread"}]] ResumeFunction resume = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Windows CNG random-byte generation operation. */
+    struct RandomSystemAPI {
+        // clang-format off
+        using GenerateFunction = WindowsSystem::Long(__stdcall*)(void*, unsigned char*, WindowsSystem::ULong,
+                                                                  WindowsSystem::ULong);
+        [[= $::Syscall{"BCryptGenRandom"}]] GenerateFunction generate = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Windows network-interface enumeration operations. */
+    struct NetworkInterfaceSystemAPI {
+        // clang-format off
+        using GetAdaptersAddressesFunction = WindowsSystem::ULong(__stdcall*)(
+            WindowsSystem::ULong, WindowsSystem::ULong, void*, ::_IP_ADAPTER_ADDRESSES_LH*, WindowsSystem::ULong*);
+        using GetIfTable2Function = WindowsSystem::ULong(__stdcall*)(::_MIB_IF_TABLE2**);
+        using FreeMibTableFunction = void(__stdcall*)(void*);
+        using NotifyAddressChangeFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle*, ::_OVERLAPPED*);
+
+        [[= $::Syscall{"GetAdaptersAddresses"}]] GetAdaptersAddressesFunction getAdaptersAddresses = nullptr;
+        [[= $::Syscall{"GetIfTable2"}]] GetIfTable2Function getIfTable2 = nullptr;
+        [[= $::Syscall{"FreeMibTable"}]] FreeMibTableFunction freeMibTable = nullptr;
+        [[= $::Syscall{"NotifyAddrChange"}]] NotifyAddressChangeFunction notifyAddressChange = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved Win32 directory, metadata, link, and volume operations. */
+    struct ModernFileSystemAPI {
+        // clang-format off
+        using CreateDirectoryWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, ::_SECURITY_ATTRIBUTES*);
+        using RemoveDirectoryWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
+        using FindFirstFileWideFunction = WindowsSystem::Handle(__stdcall*)(const wchar_t*, ::_WIN32_FIND_DATAW*);
+        using FindNextFileWideFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_WIN32_FIND_DATAW*);
+        using FindCloseFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using GetFileAttributesExWideFunction = WindowsSystem::Bool(__stdcall*)(
+            const wchar_t*, WindowsSystem::GetFileExInfoLevel, void*);
+        using GetFinalPathNameByHandleWideFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, wchar_t*,
+                                                                                       WindowsSystem::DWord,
+                                                                                       WindowsSystem::DWord);
+        using CreateHardLinkWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*,
+                                                                            ::_SECURITY_ATTRIBUTES*);
+        using CreateSymbolicLinkWideFunction = WindowsSystem::Byte(__stdcall*)(const wchar_t*, const wchar_t*,
+                                                                                WindowsSystem::DWord);
+        using GetVolumeInformationWideFunction = WindowsSystem::Bool(__stdcall*)(const wchar_t*, wchar_t*,
+                                                                                   WindowsSystem::DWord, WindowsSystem::DWord*,
+                                                                                   WindowsSystem::DWord*, WindowsSystem::DWord*,
+                                                                                   wchar_t*, WindowsSystem::DWord);
+
+        [[= $::Syscall{"CreateDirectoryW"}]] CreateDirectoryWideFunction createDirectoryWide = nullptr;
+        [[= $::Syscall{"RemoveDirectoryW"}]] RemoveDirectoryWideFunction removeDirectoryWide = nullptr;
+        [[= $::Syscall{"FindFirstFileW"}]] FindFirstFileWideFunction findFirstFileWide = nullptr;
+        [[= $::Syscall{"FindNextFileW"}]] FindNextFileWideFunction findNextFileWide = nullptr;
+        [[= $::Syscall{"FindClose"}]] FindCloseFunction findClose = nullptr;
+        [[= $::Syscall{"GetFileAttributesExW"}]] GetFileAttributesExWideFunction getFileAttributesExWide = nullptr;
+        [[= $::Syscall{"GetFinalPathNameByHandleW"}]]
+        GetFinalPathNameByHandleWideFunction getFinalPathNameByHandleWide = nullptr;
+        [[= $::Syscall{"CreateHardLinkW"}]] CreateHardLinkWideFunction createHardLinkWide = nullptr;
+        [[= $::Syscall{"CreateSymbolicLinkW"}]] CreateSymbolicLinkWideFunction createSymbolicLinkWide = nullptr;
+        [[= $::Syscall{"GetVolumeInformationW"}]] GetVolumeInformationWideFunction getVolumeInformationWide = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Linux-only advanced socket operations are unavailable on Win32. */
+    struct AdvancedSocketSystemAPI {};
+    /** @brief Linux-only fanotify operations are unavailable on Win32. */
+    struct FanotifySystemAPI {};
+    /** @brief Linux syscall adapters are unavailable on Win32. */
+    struct LinuxSyscallSystemAPI {};
+    /** @brief Linux performance-event adapters are unavailable on Win32. */
+    struct PerfEventSystemAPI {};
 
     /** @brief Dynamically resolved Win32 movable-global-memory entry points. */
     struct GlobalMemorySystemAPI {
@@ -1890,15 +2096,15 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved display, monitor, geometry, and Windows DPI operations. */
     struct DisplaySystemAPI {
         // clang-format off
-        using EnumDisplayMonitorsCallback                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MonitorHandle, WindowsSystem::DeviceContextHandle, const DisplayRect*, WindowsSystem::LParam);
-        using EnumDisplayMonitorsFunction                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DeviceContextHandle, const DisplayRect*, EnumDisplayMonitorsCallback, WindowsSystem::LParam);
+        using EnumDisplayMonitorsCallback                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MonitorHandle, WindowsSystem::DeviceContextHandle, const WindowsSystem::Rect*, WindowsSystem::LParam);
+        using EnumDisplayMonitorsFunction                   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DeviceContextHandle, const WindowsSystem::Rect*, EnumDisplayMonitorsCallback, WindowsSystem::LParam);
         using GetMonitorInfoWideFunction                    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MonitorHandle, WindowsSystem::MonitorInfo*);
-        using MonitorFromPointFunction                      = WindowsSystem::MonitorHandle(__stdcall*)(DisplayPoint, WindowsSystem::DWord);
+        using MonitorFromPointFunction                      = WindowsSystem::MonitorHandle(__stdcall*)(WindowsSystem::Point, WindowsSystem::DWord);
         using MonitorFromWindowFunction                     = WindowsSystem::MonitorHandle(__stdcall*)(WindowsSystem::WindowHandle, WindowsSystem::DWord);
-        using GetWindowRectFunction                         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, DisplayRect*);
-        using GetClientRectFunction                         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, DisplayRect*);
-        using TranslatePointFunction                        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, DisplayPoint*);
-        using GetCursorPositionFunction                     = WindowsSystem::Bool(__stdcall*)(DisplayPoint*);
+        using GetWindowRectFunction                         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, WindowsSystem::Rect*);
+        using GetClientRectFunction                         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, WindowsSystem::Rect*);
+        using TranslatePointFunction                        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::WindowHandle, WindowsSystem::Point*);
+        using GetCursorPositionFunction                     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Point*);
         using GetSystemMetricsFunction                      = int(__stdcall*)(int);
         using GetSystemMetricsForDpiFunction                = int(__stdcall*)(int, WindowsSystem::UInt);
         using GetDpiForWindowFunction                       = WindowsSystem::UInt(__stdcall*)(WindowsSystem::WindowHandle);
@@ -1911,7 +2117,7 @@ namespace Sora::PAL {
         using GetThreadDpiAwarenessContextFunction          = WindowsSystem::DpiAwarenessContext(__stdcall*)();
         using GetAwarenessFromDpiAwarenessContextFunction = DisplayDpiAwareness(__stdcall*)(
             WindowsSystem::DpiAwarenessContext);
-        using AdjustWindowRectExForDpiFunction              = WindowsSystem::Bool(__stdcall*)(DisplayRect*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::UInt);
+        using AdjustWindowRectExForDpiFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Rect*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::UInt);
         using SetProcessDpiAwarenessFunction                = WindowsSystem::HResult(__stdcall*)(int);
         using GetProcessDpiAwarenessFunction                = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, int*);
 
@@ -2058,6 +2264,30 @@ namespace Sora::PAL {
 
         /** @brief Native POSIX socket descriptor. */
         using Socket = int;
+
+        /** @brief Native POSIX process identifier without including @c sys/types.h. */
+        using ProcessId = int32_t;
+
+        /** @brief Native POSIX wait-object identifier without including @c sys/types.h. */
+        using WaitId = uint32_t;
+
+        /** @brief Native POSIX wait-object category without including @c sys/wait.h. */
+        using WaitIdType = int32_t;
+
+        /** @brief Opaque POSIX spawn file-actions object owned by the caller. */
+        struct SpawnFileActions;
+
+        /** @brief Opaque POSIX spawn attributes object owned by the caller. */
+        struct SpawnAttributes;
+
+        /** @brief Opaque POSIX signal-information object owned by the caller or operating system. */
+        struct SignalInfo;
+
+        /** @brief Opaque POSIX signal-action object owned by the caller. */
+        struct SignalAction;
+
+        /** @brief Opaque POSIX signal set owned by the caller. */
+        struct SignalSet;
 
         /** @brief ABI-sized POSIX thread identifier used without including @c pthread.h. */
         using ThreadId = std::conditional_t<Platform::kIsMacOS, void*, std::uintptr_t>;
@@ -2351,7 +2581,155 @@ namespace Sora::PAL {
         // clang-format on
     };
 
+    /** @brief Dynamically resolved Linux advanced socket-message and batch datagram operations. */
+    struct AdvancedSocketSystemAPI {
+        // clang-format off
+        using Accept4Function = PosixSystem::Socket (*)(
+            PosixSystem::Socket, sockaddr*, PosixSystem::SocketLength*, int);
+        using SendMessageFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, const ::msghdr*, int);
+        using ReceiveMessageFunction = PosixSystem::ByteCount (*)(PosixSystem::Socket, ::msghdr*, int);
+        using SendMessagesFunction = int (*)(PosixSystem::Socket, ::mmsghdr*, unsigned int, int);
+#    if defined(__x86_64__)
+        using ReceiveMessagesFunction = int (*)(PosixSystem::Socket, ::mmsghdr*, unsigned int, int,
+                                                const ::timespec*);
+#    else
+        using ReceiveMessagesFunction = int (*)(PosixSystem::Socket, ::mmsghdr*, unsigned int, int, ::timespec*);
+#    endif
+
+        [[= $::Syscall{"accept4"}]] Accept4Function accept4 = nullptr;
+        [[= $::Syscall{"sendmsg"}]] SendMessageFunction sendMessage = nullptr;
+        [[= $::Syscall{"recvmsg"}]] ReceiveMessageFunction receiveMessage = nullptr;
+        [[= $::Syscall{"sendmmsg"}]] SendMessagesFunction sendMessages = nullptr;
+        [[= $::Syscall{"recvmmsg"}]]
+        ReceiveMessagesFunction receiveMessages = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved POSIX interface-name and address enumeration operations. */
+    struct NetworkInterfaceSystemAPI {
+        // clang-format off
+        using GetIfAddressesFunction = int (*)(::ifaddrs**);
+        using FreeIfAddressesFunction = void (*)(::ifaddrs*);
+        using IfNameToIndexFunction = unsigned int (*)(const char*);
+        using IfIndexToNameFunction = char* (*)(unsigned int, char*);
+
+        [[= $::Syscall{"getifaddrs"}]] GetIfAddressesFunction getIfAddresses = nullptr;
+        [[= $::Syscall{"freeifaddrs"}]] FreeIfAddressesFunction freeIfAddresses = nullptr;
+        [[= $::Syscall{"if_nametoindex"}]] IfNameToIndexFunction ifNameToIndex = nullptr;
+        [[= $::Syscall{"if_indextoname"}]] IfIndexToNameFunction ifIndexToName = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved POSIX process creation, waiting, and signal-control operations. */
+    struct ProcessControlSystemAPI {
+        // clang-format off
+        using ForkFunction = int (*)();
+        using ExecFunction = int (*)(const char*, char* const[], char* const[]);
+        using SpawnFunction = int (*)(PosixSystem::ProcessId*, const char*, const PosixSystem::SpawnFileActions*,
+                                      const PosixSystem::SpawnAttributes*, char* const[], char* const[]);
+        using WaitFunction = int (*)(PosixSystem::ProcessId, int*, int);
+        using WaitIdFunction = int (*)(PosixSystem::WaitIdType, PosixSystem::WaitId, PosixSystem::SignalInfo*, int);
+        using SignalFunction = int (*)(PosixSystem::ProcessId, int);
+        using ThreadSignalFunction = int (*)(PosixSystem::ProcessId, PosixSystem::ProcessId, int);
+        using SignalActionFunction = int (*)(int, const PosixSystem::SignalAction*, PosixSystem::SignalAction*);
+        using ProcessDescriptorOpenFunction = int (*)(PosixSystem::ProcessId, unsigned int);
+        using ProcessDescriptorSignalFunction = int (*)(int, int, PosixSystem::SignalInfo*, unsigned int);
+
+        [[= $::Syscall{"fork"}]] ForkFunction fork = nullptr;
+        [[= $::Syscall{"execve"}]] ExecFunction exec = nullptr;
+        [[= $::Syscall{"posix_spawn"}]] SpawnFunction spawn = nullptr;
+        [[= $::Syscall{"waitpid"}]] WaitFunction wait = nullptr;
+        [[= $::Syscall{"waitid"}]] WaitIdFunction waitId = nullptr;
+        [[= $::Syscall{"kill"}]] SignalFunction kill = nullptr;
+        [[= $::Syscall{"tgkill"}]] ThreadSignalFunction threadKill = nullptr;
+        [[= $::Syscall{"sigaction"}]] SignalActionFunction signalAction = nullptr;
+        [[= $::Syscall{"pidfd_open"}]] ProcessDescriptorOpenFunction processDescriptorOpen = nullptr;
+        [[= $::Syscall{"pidfd_send_signal"}]] ProcessDescriptorSignalFunction processDescriptorSendSignal = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved POSIX modern path-relative and zero-copy file operations. */
+    struct ModernFileSystemAPI {
+        // clang-format off
+        using OpenAtFunction = int (*)(int, const char*, int, ...);
+        using OpenAt2Function = int (*)(int, const char*, const void*, size_t);
+        using MakeDirectoryAtFunction = int (*)(int, const char*, PosixSystem::FileMode);
+        using UnlinkAtFunction = int (*)(int, const char*, int);
+        using RenameAtFunction = int (*)(int, const char*, int, const char*);
+        using ReadLinkAtFunction = PosixSystem::ByteCount (*)(int, const char*, char*, size_t);
+        using StatxFunction = int (*)(int, const char*, int, unsigned int, void*);
+        using CopyFileRangeFunction = PosixSystem::ByteCount (*)(int, PosixSystem::FileOffset*, int,
+                                                                  PosixSystem::FileOffset*, size_t, unsigned int);
+        using SendFileFunction = PosixSystem::ByteCount (*)(int, int, PosixSystem::FileOffset*, size_t);
+        using AllocateFunction = int (*)(int, int, PosixSystem::FileOffset, PosixSystem::FileOffset);
+        using SyncFileSystemFunction = int (*)(int);
+        using MemoryFileFunction = int (*)(const char*, unsigned int);
+
+        [[= $::Syscall{"openat"}]] OpenAtFunction openAt = nullptr;
+        /** @brief Invoke the Linux @c openat2 syscall through the generic libc syscall transport. */
+        [[= $::Syscall{"openat2"}]] OpenAt2Function openAt2 = nullptr;
+        [[= $::Syscall{"mkdirat"}]] MakeDirectoryAtFunction makeDirectoryAt = nullptr;
+        [[= $::Syscall{"unlinkat"}]] UnlinkAtFunction unlinkAt = nullptr;
+        [[= $::Syscall{"renameat"}]] RenameAtFunction renameAt = nullptr;
+        [[= $::Syscall{"readlinkat"}]] ReadLinkAtFunction readLinkAt = nullptr;
+        [[= $::Syscall{"statx"}]] StatxFunction statx = nullptr;
+        [[= $::Syscall{"copy_file_range"}]] CopyFileRangeFunction copyFileRange = nullptr;
+        [[= $::Syscall{"sendfile"}]] SendFileFunction sendFile = nullptr;
+        [[= $::Syscall{"fallocate"}]] AllocateFunction allocate = nullptr;
+        [[= $::Syscall{"syncfs"}]] SyncFileSystemFunction syncFileSystem = nullptr;
+        [[= $::Syscall{"memfd_create"}]] MemoryFileFunction memoryFile = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved POSIX random-byte generation operation. */
+    struct RandomSystemAPI {
+        // clang-format off
+        using GetRandomFunction = PosixSystem::ByteCount (*)(void*, size_t, unsigned int);
+        [[= $::Syscall{"getrandom"}]] GetRandomFunction getRandom = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved POSIX virtual-memory protection and pinning operations. */
+    struct VirtualMemorySystemAPI {
+        // clang-format off
+        using ProtectFunction = int (*)(void*, size_t, int);
+        using RemapFunction = void* (*)(void*, size_t, size_t, int, ...);
+        using LockFunction = int (*)(const void*, size_t);
+        using UnlockFunction = int (*)(const void*, size_t);
+
+        [[= $::Syscall{"mprotect"}]] ProtectFunction protect = nullptr;
+        [[= $::Syscall{"mremap"}]] RemapFunction remap = nullptr;
+        [[= $::Syscall{"mlock"}]] LockFunction lock = nullptr;
+        [[= $::Syscall{"munlock"}]] UnlockFunction unlock = nullptr;
+        // clang-format on
+    };
+
 #    if defined(PLATFORM_LINUX)
+
+    /** @brief Dynamically resolved Linux file-notification operations. */
+    struct FanotifySystemAPI {
+        // clang-format off
+        using InitializeFunction = int (*)(unsigned int, unsigned int);
+        using MarkFunction = int (*)(int, unsigned int, uint64_t, int, const char*);
+
+        [[= $::Syscall{"fanotify_init"}]] InitializeFunction initialize = nullptr;
+        [[= $::Syscall{"fanotify_mark"}]] MarkFunction mark = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Explicit Linux syscall entry used by syscall-only facilities such as perf events. */
+    struct LinuxSyscallSystemAPI {
+        // clang-format off
+        using SyscallFunction = long (*)(long, ...);
+        [[= $::Syscall{"syscall"}]] SyscallFunction syscall = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Syscall adapter boundary for Linux performance-counter creation. */
+    struct PerfEventSystemAPI {
+        using OpenFunction = long (*)(void*, int, int, int, unsigned long);
+        [[= $::Syscall{"perf_event_open"}]] OpenFunction open = nullptr;
+    };
 
     /** @brief Dynamically resolved Linux epoll readiness operations. */
     struct EpollSystemAPI {
@@ -2359,8 +2737,9 @@ namespace Sora::PAL {
         using CreateFunction = int (*)(int);
         using ControlFunction = int (*)(int, int, int, ::epoll_event*);
         using WaitFunction = int (*)(int, ::epoll_event*, int, int);
-        using WaitMaskedFunction = int (*)(int, ::epoll_event*, int, int, const ::sigset_t*);
-        using WaitMaskedTimeFunction = int (*)(int, ::epoll_event*, int, const ::timespec*, const ::sigset_t*);
+        using WaitMaskedFunction = int (*)(int, ::epoll_event*, int, int, const PosixSystem::SignalSet*);
+        using WaitMaskedTimeFunction = int (*)(int, ::epoll_event*, int, const ::timespec*,
+                                               const PosixSystem::SignalSet*);
 
         [[= $::Syscall{"epoll_create1"}]] CreateFunction         create         = nullptr;
         [[= $::Syscall{"epoll_ctl"}]]     ControlFunction        control        = nullptr;
@@ -2372,7 +2751,11 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved Linux event-counter descriptor creation. */
     struct EventFdSystemAPI {
+#    if defined(__x86_64__)
+        using CreateFunction = int (*)(int, int);
+#    else
         using CreateFunction = int (*)(unsigned int, int);
+#    endif
         [[= $::Syscall{"eventfd"}]] CreateFunction create = nullptr;
     };
 
@@ -2391,24 +2774,29 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved Linux signal-descriptor creation. */
     struct SignalFdSystemAPI {
-        using CreateFunction = int (*)(int, const ::sigset_t*, int);
+        using CreateFunction = int (*)(int, const PosixSystem::SignalSet*, int);
         [[= $::Syscall{"signalfd"}]] CreateFunction create = nullptr;
     };
 
 #    else
 
-    struct EpollSystemAPI {};
-    struct EventFdSystemAPI {};
-    struct TimerFdSystemAPI {};
-    struct SignalFdSystemAPI {};
+    /** @brief Linux fanotify is unavailable on non-Linux POSIX targets. */ struct FanotifySystemAPI {};
+    /** @brief Linux syscall adapters are unavailable on non-Linux POSIX targets. */ struct LinuxSyscallSystemAPI {};
+    /** @brief Linux perf-event adapters are unavailable on non-Linux POSIX targets. */ struct PerfEventSystemAPI {};
+    /** @brief Linux epoll adapters are unavailable on non-Linux POSIX targets. */ struct EpollSystemAPI {};
+    /** @brief Linux eventfd adapters are unavailable on non-Linux POSIX targets. */ struct EventFdSystemAPI {};
+    /** @brief Linux timerfd adapters are unavailable on non-Linux POSIX targets. */ struct TimerFdSystemAPI {};
+    /** @brief Linux signalfd adapters are unavailable on non-Linux POSIX targets. */ struct SignalFdSystemAPI {};
 
 #    endif
 
     /** @brief POSIX has no additional native-error entry points beyond thread-local @c errno. */
     struct NativeErrorSystemAPI {};
+    /** @brief Structured exception entry points are unavailable on POSIX targets. */
     struct StructuredExceptionSystemAPI {};
-    struct LocalMemorySystemAPI {};
-    struct HandleSystemAPI {};
+    /** @brief Win32 local-memory entry points are unavailable on POSIX targets. */ struct LocalMemorySystemAPI {};
+    /** @brief Win32 handle entry points are unavailable on POSIX targets. */ struct HandleSystemAPI {};
+    /** @brief Win32 synchronization entry points are unavailable on POSIX targets. */
     struct SynchronizationSystemAPI {};
     struct FileMappingSystemAPI {
         // clang-format off
@@ -2431,6 +2819,13 @@ namespace Sora::PAL {
         using SystemConfigurationFunction = long (*)(int);
 
         [[= $::Syscall{"sysconf"}]] SystemConfigurationFunction systemConfiguration = nullptr;
+#    if defined(PLATFORM_LINUX)
+        using SystemInfoFunction = int (*)(::sysinfo*);
+        using FileSystemStatisticsFunction = int (*)(const char*, ::statvfs*);
+
+        [[= $::Syscall{"sysinfo"}]] SystemInfoFunction systemInfo = nullptr;
+        [[= $::Syscall{"statvfs"}]] FileSystemStatisticsFunction fileSystemStatistics = nullptr;
+#    endif
     };
 
     /** @brief Win32 event objects are unavailable on POSIX targets. */
@@ -2448,10 +2843,10 @@ namespace Sora::PAL {
         using SubmitFunction = int (*)(::io_uring*);
         using SubmitAndWaitFunction = int (*)(::io_uring*, unsigned);
         using SubmitAndWaitTimeoutFunction = int (*)(::io_uring*, ::io_uring_cqe**, unsigned,
-                                                     ::__kernel_timespec*, ::sigset_t*);
+                                                     ::__kernel_timespec*, PosixSystem::SignalSet*);
         using PeekBatchCompletionFunction = unsigned (*)(::io_uring*, ::io_uring_cqe**, unsigned);
         using WaitCompletionsFunction = int (*)(::io_uring*, ::io_uring_cqe**, unsigned,
-                                                ::__kernel_timespec*, ::sigset_t*);
+                                                ::__kernel_timespec*, PosixSystem::SignalSet*);
         using RegisterBuffersFunction = int (*)(::io_uring*, const void*, unsigned);
         using UnregisterBuffersFunction = int (*)(::io_uring*);
         using RegisterFilesFunction = int (*)(::io_uring*, const int*, unsigned);
@@ -2566,7 +2961,7 @@ namespace Sora::PAL {
         using GetExecutablePathFunction      = int (*)(char*, uint32_t*);
         using GetArgumentCountFunction       = int* (*)();
         using GetArgumentVectorFunction      = char*** (*)();
-        using ProcessResourceUsageFunction   = int (*)(int, int, PosixSystem::ResourceUsageInfo*);
+        using ProcessResourceUsageFunction   = int (*)(int, int, PosixSystem::ResourceUsageInfo);
         
         [[= $::Syscall{"_NSGetExecutablePath"}]]
         GetExecutablePathFunction      getExecutablePath      = nullptr;
@@ -2627,6 +3022,9 @@ namespace Sora::PAL {
 #    endif
         // clang-format on
     };
+
+    /** @brief POSIX thread-control extensions are intentionally owned by the thread runtime. */
+    struct ThreadControlSystemAPI {};
 
     /** @brief Win32 movable global memory is unavailable on POSIX. */
     struct GlobalMemorySystemAPI {};
@@ -2734,36 +3132,47 @@ namespace Sora::PAL {
 
 #else
 
-    struct SocketSystemAPI {};
-    struct TcpSystemAPI {};
-    struct UdpSystemAPI {};
-    struct WinsockOverlappedSystemAPI {};
-    struct ClockSystemAPI {};
-    struct EpollSystemAPI {};
-    struct EventFdSystemAPI {};
-    struct TimerFdSystemAPI {};
-    struct SignalFdSystemAPI {};
-    struct WindowsIORingSystemAPI {};
-    struct LinuxIoUringSystemAPI {};
-    struct NativeErrorSystemAPI {};
+    /** @brief Socket entry points are unavailable on this target. */ struct SocketSystemAPI {};
+    /** @brief TCP entry points are unavailable on this target. */ struct TcpSystemAPI {};
+    /** @brief UDP entry points are unavailable on this target. */ struct UdpSystemAPI {};
+    /** @brief Advanced socket entry points are unavailable on this target. */ struct AdvancedSocketSystemAPI {};
+    /** @brief Network-interface entry points are unavailable on this target. */ struct NetworkInterfaceSystemAPI {};
+    /** @brief Winsock overlapped entry points are unavailable on this target. */ struct WinsockOverlappedSystemAPI {};
+    /** @brief Clock entry points are unavailable on this target. */ struct ClockSystemAPI {};
+    /** @brief epoll entry points are unavailable on this target. */ struct EpollSystemAPI {};
+    /** @brief eventfd entry points are unavailable on this target. */ struct EventFdSystemAPI {};
+    /** @brief timerfd entry points are unavailable on this target. */ struct TimerFdSystemAPI {};
+    /** @brief signalfd entry points are unavailable on this target. */ struct SignalFdSystemAPI {};
+    /** @brief Windows I/O ring entry points are unavailable on this target. */ struct WindowsIORingSystemAPI {};
+    /** @brief Linux io_uring entry points are unavailable on this target. */ struct LinuxIoUringSystemAPI {};
+    /** @brief Native-error entry points are unavailable on this target. */ struct NativeErrorSystemAPI {};
+    /** @brief Structured exception entry points are unavailable on this target. */
     struct StructuredExceptionSystemAPI {};
-    struct LocalMemorySystemAPI {};
-    struct HandleSystemAPI {};
-    struct SynchronizationSystemAPI {};
-    struct FileMappingSystemAPI {};
-    struct EventSystemAPI {};
-    struct IOCPSystemAPI {};
-    struct SystemInformationSystemAPI {};
-    struct EnvironmentSystemAPI {};
-    struct ModuleSystemAPI {};
-    struct ProcessSystemAPI {};
-    struct ThreadSystemAPI {};
-    struct GlobalMemorySystemAPI {};
-    struct ClipboardSystemAPI {};
-    struct DisplaySystemAPI {};
-    struct FileSystemAPI {};
-    struct DbgHelpSystemAPI {};
-    struct StackTraceSystemAPI {};
+    /** @brief Local-memory entry points are unavailable on this target. */ struct LocalMemorySystemAPI {};
+    /** @brief Native handle entry points are unavailable on this target. */ struct HandleSystemAPI {};
+    /** @brief Synchronization entry points are unavailable on this target. */ struct SynchronizationSystemAPI {};
+    /** @brief Virtual-memory entry points are unavailable on this target. */ struct VirtualMemorySystemAPI {};
+    /** @brief File-mapping entry points are unavailable on this target. */ struct FileMappingSystemAPI {};
+    /** @brief Event entry points are unavailable on this target. */ struct EventSystemAPI {};
+    /** @brief I/O completion-port entry points are unavailable on this target. */ struct IOCPSystemAPI {};
+    /** @brief System-information entry points are unavailable on this target. */ struct SystemInformationSystemAPI {};
+    /** @brief Environment entry points are unavailable on this target. */ struct EnvironmentSystemAPI {};
+    /** @brief Module entry points are unavailable on this target. */ struct ModuleSystemAPI {};
+    /** @brief Process entry points are unavailable on this target. */ struct ProcessSystemAPI {};
+    /** @brief Process-control entry points are unavailable on this target. */ struct ProcessControlSystemAPI {};
+    /** @brief Thread entry points are unavailable on this target. */ struct ThreadSystemAPI {};
+    /** @brief Thread-control entry points are unavailable on this target. */ struct ThreadControlSystemAPI {};
+    /** @brief Random-byte entry points are unavailable on this target. */ struct RandomSystemAPI {};
+    /** @brief Global-memory entry points are unavailable on this target. */ struct GlobalMemorySystemAPI {};
+    /** @brief Clipboard entry points are unavailable on this target. */ struct ClipboardSystemAPI {};
+    /** @brief Display entry points are unavailable on this target. */ struct DisplaySystemAPI {};
+    /** @brief File-system entry points are unavailable on this target. */ struct FileSystemAPI {};
+    /** @brief Modern file-system entry points are unavailable on this target. */ struct ModernFileSystemAPI {};
+    /** @brief fanotify entry points are unavailable on this target. */ struct FanotifySystemAPI {};
+    /** @brief Linux syscall adapters are unavailable on this target. */ struct LinuxSyscallSystemAPI {};
+    /** @brief perf-event adapters are unavailable on this target. */ struct PerfEventSystemAPI {};
+    /** @brief DbgHelp entry points are unavailable on this target. */ struct DbgHelpSystemAPI {};
+    /** @brief Stack-trace entry points are unavailable on this target. */ struct StackTraceSystemAPI {};
 
 #endif
 
@@ -2860,6 +3269,9 @@ namespace Sora::PAL {
         /** @brief Load and return the immutable Win32 synchronization function table. */
         [[nodiscard]] const SynchronizationSystemAPI& LoadSynchronizationSystemAPI() noexcept;
 
+        /** @brief Load and return the immutable native virtual-memory function table. */
+        [[nodiscard]] const VirtualMemorySystemAPI& LoadVirtualMemorySystemAPI() noexcept;
+
         /** @brief Load and return the immutable Win32 file-mapping function table. */
         [[nodiscard]] const FileMappingSystemAPI& LoadFileMappingSystemAPI() noexcept;
 
@@ -2889,8 +3301,17 @@ namespace Sora::PAL {
         /** @brief Load and return the immutable current-process introspection function table. */
         [[nodiscard]] const ProcessSystemAPI& LoadProcessSystemAPI() noexcept;
 
+        /** @brief Load and return the immutable process-control function table. */
+        [[nodiscard]] const ProcessControlSystemAPI& LoadProcessControlSystemAPI() noexcept;
+
         /** @brief Load and return the immutable current-thread function table. */
         [[nodiscard]] const ThreadSystemAPI& LoadThreadSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable thread-control function table. */
+        [[nodiscard]] const ThreadControlSystemAPI& LoadThreadControlSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable cryptographic random-byte function table. */
+        [[nodiscard]] const RandomSystemAPI& LoadRandomSystemAPI() noexcept;
 
         /** @brief Load and return the immutable native scheduler-tracing function table. */
         [[nodiscard]] const SchedulerTraceSystemAPI& LoadSchedulerTraceSystemAPI() noexcept;
@@ -2906,6 +3327,12 @@ namespace Sora::PAL {
 
         /** @brief Load and return the immutable native clock function table. */
         [[nodiscard]] const ClockSystemAPI& LoadClockSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable advanced socket-message function table. */
+        [[nodiscard]] const AdvancedSocketSystemAPI& LoadAdvancedSocketSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable network-interface function table. */
+        [[nodiscard]] const NetworkInterfaceSystemAPI& LoadNetworkInterfaceSystemAPI() noexcept;
 
 #if defined(PLATFORM_WINDOWS)
         /** @brief Load and return the immutable overlapped Winsock function table. */
@@ -2947,6 +3374,18 @@ namespace Sora::PAL {
 
         /** @brief Load and return the immutable native file-system function table. */
         [[nodiscard]] const FileSystemAPI& LoadFileSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable modern file-system function table. */
+        [[nodiscard]] const ModernFileSystemAPI& LoadModernFileSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Linux fanotify function table. */
+        [[nodiscard]] const FanotifySystemAPI& LoadFanotifySystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Linux syscall entry table. */
+        [[nodiscard]] const LinuxSyscallSystemAPI& LoadLinuxSyscallSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Linux performance-event syscall adapter table. */
+        [[nodiscard]] const PerfEventSystemAPI& LoadPerfEventSystemAPI() noexcept;
 
     } // namespace API
 
