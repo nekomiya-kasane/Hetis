@@ -825,7 +825,7 @@ namespace Sora {
          * @brief Transform each element into a range and lazily flatten the result.
          * @details This is equivalent to @ref Transform followed by @ref Join. The mapping callable and source
          * ranges retain the standard view ownership rules, and inner ranges are consumed only as requested.
-         * @tparam F Callable returning a viewable range for each source element.
+         * @tparam F Callable returning a range compatible with @c std::views::join for each source element.
          * @param[in] function Range-producing mapping callable.
          * @return A lazy flattened mapping view.
          * @code{.cpp}
@@ -843,7 +843,8 @@ namespace Sora {
          * @brief Cache the latest dereference of the piped input range.
          * @details Repeated dereference of the same iterator reuses one cached result until increment. Lvalue
          * references are cached as non-owning pointers; proxy and value references are materialized in view-owned
-         * storage. The cache is local to this view and is not shared by copies or separate iterators.
+         * storage. The cache belongs to this view and is shared by its iterators; copying the view creates an
+         * independent cache.
          * @return A lazy input view with per-position dereference caching.
          * @code{.cpp}
          * auto values = std::array{1, 2};
@@ -1060,8 +1061,8 @@ namespace Sora {
 
         /**
          * @brief Emit overlapping windows from a forward range.
-         * @details Each output is a subrange of exactly @p width elements unless the remaining source is shorter; no
-         * shorter trailing window is emitted. The source must model @c std::ranges::forward_range. A zero width is an
+         * @details Each output contains exactly @p width elements. If the remaining source is shorter than @p width,
+         * no trailing window is emitted. The source must model @c std::ranges::forward_range. A zero width is an
          * empty view.
          * @param[in] width Number of elements in each window.
          * @return A lazy view of overlapping subranges.
@@ -1077,7 +1078,7 @@ namespace Sora {
          * @brief Treat dereferenced lvalue elements as rvalues.
          * @details This adapter delegates to @c std::views::as_rvalue. It does not transfer ownership of the source;
          * it only changes the value category observed by downstream consumers, which is useful for moving elements out
-         * of an owned range.
+         * of the source range.
          * @return A lazy rvalue view of the piped range.
          * @code{.cpp}
          * auto values = std::array{std::string{"a"}, std::string{"b"}};
