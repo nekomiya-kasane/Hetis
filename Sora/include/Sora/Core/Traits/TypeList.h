@@ -16,8 +16,6 @@
  * using RoundTrip = Sora::Meta::InfoType<reflected>;
  *
  * static_assert(std::same_as<RoundTrip, Input>);
- * static_assert(Sora::Traits::Length<Input> == 2);
- * static_assert(std::same_as<Sora::Traits::At<Input, 1>, double>);
  * @endcode
  */
 #pragma once
@@ -154,51 +152,6 @@ namespace Sora {
          */
         template<typename List>
         inline constexpr bool IsTypeList = Concept::TypeList<List>;
-
-        /**
-         * @brief Number of types in @p List.
-         * @tparam List `TypeList` specialization to inspect.
-         */
-        template<typename List>
-            requires Concept::TypeList<List>
-        inline constexpr std::size_t Length = std::remove_cvref_t<List>::size;
-
-        /**
-         * @brief Return the @p Index-th type of @p List.
-         * @tparam List `TypeList` specialization to inspect.
-         * @tparam Index Zero-based type index.
-         */
-        template<typename List, std::size_t Index>
-            requires(Concept::TypeList<List> && Index < Length<List>)
-        using At = typename std::remove_cvref_t<List>::template At<Index>;
-
-        /**
-         * @brief First type of a non-empty @p List.
-         * @tparam List Non-empty `TypeList` specialization.
-         * @return The type at index zero.
-         * @par Example
-         * @code{.cpp}
-         * using First = Sora::Traits::Front<Sora::Traits::TypeList<int, double>>;
-         * static_assert(std::same_as<First, int>);
-         * @endcode
-         */
-        template<typename List>
-            requires(Concept::TypeList<List> && Length<List> > 0)
-        using Front = At<List, 0>;
-
-        /**
-         * @brief Final type of a non-empty @p List.
-         * @tparam List Non-empty `TypeList` specialization.
-         * @return The type at index `Length<List> - 1`.
-         * @par Example
-         * @code{.cpp}
-         * using Last = Sora::Traits::Back<Sora::Traits::TypeList<int, double>>;
-         * static_assert(std::same_as<Last, double>);
-         * @endcode
-         */
-        template<typename List>
-            requires(Concept::TypeList<List> && Length<List> > 0)
-        using Back = At<List, Length<List> - 1>;
 
     } // namespace Traits
 

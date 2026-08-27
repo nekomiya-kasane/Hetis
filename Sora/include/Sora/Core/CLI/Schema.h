@@ -323,7 +323,7 @@ namespace Sora::CLI {
 
         template<typename T, typename Children>
         struct CommandTypes<Command<T, Children>> {
-            using Type = Sora::Traits::PushFront<T, typename CommandTypes<Children>::Type>;
+            using Type = Sora::Traits::PushFront<typename CommandTypes<Children>::Type, T>;
         };
 
         template<typename T, typename Children>

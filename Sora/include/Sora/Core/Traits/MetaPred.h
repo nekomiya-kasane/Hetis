@@ -68,12 +68,6 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        for (const auto input : inputs) {
-            if (IsMetaError(input)) {
-                return input;
-            }
-        }
-
         std::vector<std::meta::info> context{pred};
         context.append_range(inputs);
         if (!std::meta::is_function(pred)) {
@@ -83,6 +77,15 @@ namespace Sora::Meta {
         const std::vector<std::meta::info> argumentTypes(inputs.size(), ^^std::meta::info);
         if (!std::meta::is_invocable_type(std::meta::type_of(pred), argumentTypes)) {
             return MakeMetaError(^^Error::NonInvocableTag, context);
+        }
+        if (std::meta::return_type_of(pred) != ^^bool) {
+            return MakeMetaError(^^Error::NonBooleanPredResultTag, context);
+        }
+
+        for (const auto input : inputs) {
+            if (IsMetaError(input)) {
+                return input;
+            }
         }
 
         std::vector<std::meta::info> reflectedArguments;

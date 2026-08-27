@@ -7,10 +7,12 @@
  * `InfoList` value; failure is a reflected `MetaError` type. `ToTypeList` is the sole collection-to-type-pack
  * boundary. This keeps reflection traversal, error propagation, and C++ type formation as separate layers.
  *
- * Every algorithm obeys the first-error law: the first `MetaError` in function, explicit arguments, then sequence
- * order is returned unchanged. `Meta::Map` and its peers form the `InfoList` algorithm kernel. Structural set
- * operations live in `MetaInfoList.h`; higher-order operations such as `FlatMap` and conditional replacement live
- * here. `Meta::Types` contains the reflected `Traits::TypeList` adapters, keeping the type boundary explicit.
+ * Every algorithm obeys the first-error law: public arguments are inspected from left to right, and a sequence
+ * argument is inspected recursively in source order before the next argument. Empty folds are the sole exception:
+ * they return their initial entity without validating the unused combiner. `Meta::Map` and its peers form the
+ * `InfoList` algorithm kernel. Structural set operations live in `MetaInfoList.h`; higher-order operations such as
+ * `FlatMap` and conditional replacement live here. `Meta::Types` contains the reflected `Traits::TypeList` adapters,
+ * keeping the type boundary explicit.
  *
  * C++26 reflection does not expose a template's parameter list, so parameter kind, arity, and constraints are
  * validated by the first actual substitution. Empty `Map` and `Zip` validate only the template category; empty folds
@@ -162,12 +164,15 @@ namespace Sora::Meta {
             if (IsMetaError(function)) {
                 return function;
             }
+            if (!std::meta::is_template(function)) {
+                return MakeMetaError(^^Error::NonInvocableTag, {function});
+            }
             for (const auto argument : arguments) {
                 if (IsMetaError(argument)) {
                     return argument;
                 }
             }
-            if (!std::meta::is_template(function) || !std::meta::can_substitute(function, arguments)) {
+            if (!std::meta::can_substitute(function, arguments)) {
                 std::vector<std::meta::info> context{function};
                 context.append_range(arguments);
                 return MakeMetaError(^^Error::NonInvocableTag, context);
@@ -221,16 +226,13 @@ namespace Sora::Meta {
             if (functions.empty()) {
                 return MakeMetaError(^^Error::NonInvocableTag);
             }
-            if (const auto error = FirstMetaError(functions); error != std::meta::info{}) {
-                return error;
-            }
-            if (const auto error = FirstMetaError(arguments); error != std::meta::info{}) {
-                return error;
-            }
             for (const auto function : functions) {
                 if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
                     return error;
                 }
+            }
+            if (const auto error = FirstMetaError(arguments); error != std::meta::info{}) {
+                return error;
             }
             auto result = Apply(functions.back(), arguments);
             for (std::size_t index = functions.size() - 1; index > 0 && !IsMetaError(result); --index) {
@@ -248,16 +250,13 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info TransformInvoke(std::meta::info function, std::meta::info continuation,
                                                                 const InfoList& arguments) {
-            if (IsMetaError(function) || IsMetaError(continuation)) {
-                return IsMetaError(function) ? function : continuation;
-            }
-            if (const auto error = FirstMetaError(arguments); error != std::meta::info{}) {
-                return error;
-            }
             if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             if (const auto error = ValidateTemplate(continuation); error != std::meta::info{}) {
+                return error;
+            }
+            if (const auto error = FirstMetaError(arguments); error != std::meta::info{}) {
                 return error;
             }
             std::vector<std::meta::info> transformed;
@@ -274,59 +273,41 @@ namespace Sora::Meta {
         }
 
         /**
-         * @brief Flatten one reflected sequence mapper using a caller-selected sequence codomain.
-         * @param[in] function Reflected unary mapper applied to every input entity.
+         * @brief Flatten `InfoList` values produced by a reflected unary consteval function.
+         * @param[in] function Reflected unary function returning `InfoList`.
          * @param[in] input Source entities.
-         * @param[in] typeCodomain Select a `TypeList` alias-template mapper instead of an `InfoList` function mapper.
          * @return Reflected flattened `InfoList`, or the first recoverable mapping/projection error.
-         * @details The traversal and error protocol are shared by the value-level `Meta::FlatMap` operation and the
-         * type-level `Meta::Types::FlatMap` adapter. The mode is selected once before traversal, so every invocation
-         * has one statically defined codomain and mixed sequence representations are rejected.
          */
-        [[nodiscard]] consteval std::meta::info FlatMap(std::meta::info function, const InfoList& input,
-                                                        bool typeCodomain) {
+        [[nodiscard]] consteval std::meta::info FlatMapInfoLists(std::meta::info function, const InfoList& input) {
             if (IsMetaError(function)) {
                 return function;
+            }
+            if (!std::meta::is_function(function)) {
+                return MakeMetaError(^^Error::NonInvocableTag, {function});
+            }
+            const auto parameters = std::meta::parameters_of(function);
+            if (parameters.size() != 1 ||
+                !std::meta::is_invocable_type(std::meta::type_of(function), {^^std::meta::info})) {
+                return MakeMetaError(^^Error::NonInvocableTag, {function});
+            }
+            if (std::meta::return_type_of(function) != ^^InfoList) {
+                return MakeMetaError(^^Error::NonInfoListResultTag, {function});
             }
             if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
                 return error;
             }
-            if (typeCodomain) {
-                if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
-                    return error;
-                }
-            } else {
-                if (!std::meta::is_function(function)) {
-                    return MakeMetaError(^^Error::NonInvocableTag, {function});
-                }
-                const auto parameters = std::meta::parameters_of(function);
-                if (parameters.size() != 1 ||
-                    !std::meta::is_invocable_type(std::meta::type_of(function), {^^std::meta::info})) {
-                    return MakeMetaError(^^Error::NonInvocableTag, {function});
-                }
-                if (std::meta::return_type_of(function) != ^^InfoList) {
-                    return MakeMetaError(^^Error::NonInfoListResultTag, {function});
-                }
-            }
 
             std::vector<std::meta::info> output;
             for (const auto value : input) {
-                std::meta::info mapped;
-                if (typeCodomain) {
-                    const std::array arguments{value};
-                    mapped = Apply(function, arguments);
-                } else {
-                    const std::array arguments{std::meta::reflect_constant(value)};
-                    mapped = std::meta::reflect_invoke(function, arguments);
-                }
+                const std::array arguments{std::meta::reflect_constant(value)};
+                const auto mapped = std::meta::reflect_invoke(function, arguments);
                 if (IsMetaError(mapped)) {
                     return mapped;
                 }
-                if (typeCodomain ? !IsTypeList(mapped) : !IsInfoList(mapped)) {
-                    const auto tag = typeCodomain ? ^^Error::InvalidSequenceTag : ^^Error::NonInfoListResultTag;
-                    return MakeMetaError(tag, {function, value, mapped});
+                if (!IsInfoList(mapped)) {
+                    return MakeMetaError(^^Error::NonInfoListResultTag, {function, value, mapped});
                 }
-                const auto mappedList = typeCodomain ? ToInfoList(mapped) : RequireInfoList(mapped);
+                const auto mappedList = RequireInfoList(mapped);
                 if (const auto error = FirstMetaError(mappedList); error != std::meta::info{}) {
                     return error;
                 }
@@ -348,10 +329,10 @@ namespace Sora::Meta {
         if (IsMetaError(function)) {
             return function;
         }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         std::vector<std::meta::info> output;
@@ -378,10 +359,10 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         std::vector<std::meta::info> output;
@@ -419,7 +400,7 @@ namespace Sora::Meta {
      * @par Complexity Linear in input and produced sequence lengths, excluding substitution cost.
      */
     [[nodiscard]] consteval std::meta::info FlatMap(std::meta::info function, const InfoList& input) {
-        return Detail::FlatMap(function, input, false);
+        return Detail::FlatMapInfoLists(function, input);
     }
 
     /**
@@ -437,13 +418,13 @@ namespace Sora::Meta {
      */
     [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
                                                       const InfoList& input) {
-        if (IsMetaError(pred) || IsMetaError(replacement)) {
-            return IsMetaError(pred) ? pred : replacement;
-        }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (IsMetaError(replacement)) {
+            return replacement;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         std::vector<std::meta::info> output;
@@ -475,10 +456,10 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         std::vector<std::meta::info> output;
@@ -507,13 +488,13 @@ namespace Sora::Meta {
         if (IsMetaError(function)) {
             return function;
         }
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
         if (const auto error = FirstMetaError(left); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(right); error != std::meta::info{}) {
-            return error;
-        }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
             return error;
         }
         if (left.size() != right.size()) {
@@ -542,8 +523,14 @@ namespace Sora::Meta {
      */
     [[nodiscard]] consteval std::meta::info FoldLeft(std::meta::info function, std::meta::info initial,
                                                      const InfoList& input) {
-        if (IsMetaError(function) || IsMetaError(initial)) {
-            return IsMetaError(function) ? function : initial;
+        if (input.empty()) {
+            return initial;
+        }
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
+        if (IsMetaError(initial)) {
+            return initial;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
@@ -568,8 +555,14 @@ namespace Sora::Meta {
      */
     [[nodiscard]] consteval std::meta::info FoldRight(std::meta::info function, std::meta::info initial,
                                                       const InfoList& input) {
-        if (IsMetaError(function) || IsMetaError(initial)) {
-            return IsMetaError(function) ? function : initial;
+        if (input.empty()) {
+            return initial;
+        }
+        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
+        if (IsMetaError(initial)) {
+            return initial;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
@@ -587,21 +580,24 @@ namespace Sora::Meta {
 
     /**
      * @brief Return the first entity accepted by @p pred, or @p fallback.
-     * @param[in] input Source sequence inspected from front to back.
      * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence inspected from front to back.
      * @param[in] fallback Entity returned when no element is accepted.
      * @return Matching entity, @p fallback, or the first predicate/input error.
      */
-    [[nodiscard]] consteval std::meta::info FindFirst(const InfoList& input, std::meta::info pred,
+    [[nodiscard]] consteval std::meta::info FindFirst(std::meta::info pred, const InfoList& input,
                                                       std::meta::info fallback = ^^void) {
-        if (IsMetaError(pred) || IsMetaError(fallback)) {
-            return IsMetaError(pred) ? pred : fallback;
+        if (IsMetaError(pred)) {
+            return pred;
+        }
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
-            return error;
+        if (IsMetaError(fallback)) {
+            return fallback;
         }
         for (const auto value : input) {
             const auto accepted = InvokePred(pred, value);
@@ -617,21 +613,24 @@ namespace Sora::Meta {
 
     /**
      * @brief Return the final entity accepted by @p pred, or @p fallback.
-     * @param[in] input Source sequence inspected in source order.
      * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence inspected in source order.
      * @param[in] fallback Entity returned when no element is accepted.
      * @return Last matching entity, @p fallback, or the first predicate/input error.
      */
-    [[nodiscard]] consteval std::meta::info FindLast(const InfoList& input, std::meta::info pred,
+    [[nodiscard]] consteval std::meta::info FindLast(std::meta::info pred, const InfoList& input,
                                                      std::meta::info fallback = ^^void) {
-        if (IsMetaError(pred) || IsMetaError(fallback)) {
-            return IsMetaError(pred) ? pred : fallback;
+        if (IsMetaError(pred)) {
+            return pred;
+        }
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
-            return error;
+        if (IsMetaError(fallback)) {
+            return fallback;
         }
         auto result = fallback;
         for (const auto value : input) {
@@ -648,18 +647,18 @@ namespace Sora::Meta {
 
     /**
      * @brief Return whether all entities satisfy @p pred.
-     * @param[in] input Source sequence.
      * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence.
      * @return Reflected bool, or the first predicate/input error. Empty input yields `true` after validating @p pred.
      */
-    [[nodiscard]] consteval std::meta::info AllOf(const InfoList& input, std::meta::info pred) {
+    [[nodiscard]] consteval std::meta::info AllOf(std::meta::info pred, const InfoList& input) {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         for (const auto value : input) {
@@ -676,18 +675,18 @@ namespace Sora::Meta {
 
     /**
      * @brief Return whether any entity satisfies @p pred.
-     * @param[in] input Source sequence.
      * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence.
      * @return Reflected bool, or the first predicate/input error. Empty input yields `false` after validating @p pred.
      */
-    [[nodiscard]] consteval std::meta::info AnyOf(const InfoList& input, std::meta::info pred) {
+    [[nodiscard]] consteval std::meta::info AnyOf(std::meta::info pred, const InfoList& input) {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         for (const auto value : input) {
@@ -704,29 +703,29 @@ namespace Sora::Meta {
 
     /**
      * @brief Return whether no entity satisfies @p pred.
-     * @param[in] input Source sequence.
      * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence.
      * @return Negated result of @ref AnyOf, preserving errors unchanged.
      */
-    [[nodiscard]] consteval std::meta::info NoneOf(const InfoList& input, std::meta::info pred) {
-        const auto result = AnyOf(input, pred);
+    [[nodiscard]] consteval std::meta::info NoneOf(std::meta::info pred, const InfoList& input) {
+        const auto result = AnyOf(pred, input);
         return IsMetaError(result) ? result : std::meta::reflect_constant(!std::meta::extract<bool>(result));
     }
 
     /**
      * @brief Count entities satisfying @p pred.
-     * @param[in] input Source sequence.
      * @param[in] pred Reflected unary meta predicate.
+     * @param[in] input Source sequence.
      * @return Reflected `std::size_t`, or the first predicate/input error.
      */
-    [[nodiscard]] consteval std::meta::info CountIf(const InfoList& input, std::meta::info pred) {
+    [[nodiscard]] consteval std::meta::info CountIf(std::meta::info pred, const InfoList& input) {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
             return error;
         }
         std::size_t count = 0;
@@ -764,6 +763,59 @@ namespace Sora::Meta {
         return ToTypeList(list);
     }
 
+    /**
+     * @brief Project the non-static data-member types of a reflected type into a reflected `TypeList`.
+     * @param[in] type Reflected class or aggregate type.
+     * @return Reflected member `TypeList`, the input error, `NonTypeResultTag` for a non-type reflection, or
+     * `NonInvocableTag` for a type that has no class-member domain.
+     */
+    [[nodiscard]] consteval std::meta::info DataMemberTypes(std::meta::info type) {
+        if (IsMetaError(type)) {
+            return type;
+        }
+        if (!std::meta::is_type(type)) {
+            return MakeMetaError(^^Error::NonTypeResultTag, {type});
+        }
+        if (!std::meta::is_class_type(type)) {
+            return MakeMetaError(^^Error::NonInvocableTag, {type});
+        }
+        const auto members = std::meta::nonstatic_data_members_of(type, std::meta::access_context::unchecked()) |
+                             std::views::transform(std::meta::type_of);
+        return ToTypeList(members);
+    }
+
+    namespace Detail {
+
+        /** @brief Validated view of one reflected `TypeList`. */
+        struct TypeListInspection {
+            InfoList types{};
+            std::meta::info error{};
+
+            /** @brief Return whether validation succeeded. */
+            [[nodiscard]] consteval explicit operator bool() const noexcept { return error == std::meta::info{}; }
+        };
+
+        /**
+         * @brief Validate one reflected `TypeList` and expose its error-free elements.
+         * @param[in] list Reflected sequence to inspect.
+         * @param[in] context Provenance used when @p list is not a `TypeList`.
+         * @return Validated elements, or the first top-level/nested error.
+         */
+        [[nodiscard]] consteval TypeListInspection InspectTypeList(std::meta::info list, const InfoList& context) {
+            if (IsMetaError(list)) {
+                return {.error = list};
+            }
+            if (!IsTypeList(list)) {
+                return {.error = MakeMetaError(
+                            ^^Error::InvalidSequenceTag,
+                            std::vector<std::meta::info>{context.begin(), context.end()})};
+            }
+            const auto types = ToInfoList(list);
+            return {.types = types, .error = FirstMetaError(types)};
+        }
+
+    } // namespace Detail
+
     namespace Types {
 
         /**
@@ -775,17 +827,11 @@ namespace Sora::Meta {
         [[nodiscard]] consteval std::meta::info Concat(const InfoList& lists) {
             std::vector<std::meta::info> output;
             for (const auto list : lists) {
-                if (IsMetaError(list)) {
-                    return list;
+                const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+                if (!inspected) {
+                    return inspected.error;
                 }
-                if (!IsTypeList(list)) {
-                    return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-                }
-                const auto types = ToInfoList(list);
-                if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                    return error;
-                }
-                output.append_range(types);
+                output.append_range(inspected.types);
             }
             return ToTypeList(output);
         }
@@ -803,17 +849,11 @@ namespace Sora::Meta {
         [[nodiscard]] consteval std::meta::info SetUnion(const InfoList& lists) {
             std::vector<std::meta::info> types;
             for (const auto list : lists) {
-                if (IsMetaError(list)) {
-                    return list;
+                const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+                if (!inspected) {
+                    return inspected.error;
                 }
-                if (!IsTypeList(list)) {
-                    return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-                }
-                const auto values = ToInfoList(list);
-                if (const auto error = FirstMetaError(values); error != std::meta::info{}) {
-                    return error;
-                }
-                types.insert(types.end(), values.begin(), values.end());
+                types.append_range(inspected.types);
             }
             return ToTypeList(Sora::Meta::Unique(Promote(types)));
         }
@@ -830,21 +870,16 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info SetIntersection(std::meta::info left, std::meta::info right) {
-            if (IsMetaError(left) || IsMetaError(right)) {
-                return IsMetaError(left) ? left : right;
+            const InfoList context{left, right};
+            const auto leftList = Detail::InspectTypeList(left, context);
+            if (!leftList) {
+                return leftList.error;
             }
-            if (!IsTypeList(left) || !IsTypeList(right)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {left, right});
+            const auto rightList = Detail::InspectTypeList(right, context);
+            if (!rightList) {
+                return rightList.error;
             }
-            const auto leftTypes = ToInfoList(left);
-            const auto rightTypes = ToInfoList(right);
-            if (const auto error = FirstMetaError(leftTypes); error != std::meta::info{}) {
-                return error;
-            }
-            if (const auto error = FirstMetaError(rightTypes); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::SetIntersection(leftTypes, rightTypes));
+            return ToTypeList(Sora::Meta::SetIntersection(leftList.types, rightList.types));
         }
 
         /**
@@ -859,21 +894,16 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info SetDifference(std::meta::info left, std::meta::info right) {
-            if (IsMetaError(left) || IsMetaError(right)) {
-                return IsMetaError(left) ? left : right;
+            const InfoList context{left, right};
+            const auto leftList = Detail::InspectTypeList(left, context);
+            if (!leftList) {
+                return leftList.error;
             }
-            if (!IsTypeList(left) || !IsTypeList(right)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {left, right});
+            const auto rightList = Detail::InspectTypeList(right, context);
+            if (!rightList) {
+                return rightList.error;
             }
-            const auto leftTypes = ToInfoList(left);
-            const auto rightTypes = ToInfoList(right);
-            if (const auto error = FirstMetaError(leftTypes); error != std::meta::info{}) {
-                return error;
-            }
-            if (const auto error = FirstMetaError(rightTypes); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::SetDifference(leftTypes, rightTypes));
+            return ToTypeList(Sora::Meta::SetDifference(leftList.types, rightList.types));
         }
 
         /**
@@ -887,17 +917,11 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Length(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return std::meta::reflect_constant(types.size());
+            return std::meta::reflect_constant(inspected.types.size());
         }
 
         /**
@@ -913,20 +937,14 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info At(std::meta::info list, std::size_t index) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            if (index >= types.size()) {
+            if (index >= inspected.types.size()) {
                 return MakeMetaError(^^Error::OutOfRangeTag, {list});
             }
-            return types[index];
+            return inspected.types[index];
         }
 
         /**
@@ -956,20 +974,14 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Back(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            if (types.empty()) {
+            if (inspected.types.empty()) {
                 return MakeMetaError(^^Error::OutOfRangeTag, {list});
             }
-            return types.back();
+            return inspected.types.back();
         }
 
         /**
@@ -985,17 +997,11 @@ namespace Sora::Meta {
          * @par Complexity Linear in the number of types.
          */
         [[nodiscard]] consteval std::meta::info Reverse(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::Reverse(types));
+            return ToTypeList(Sora::Meta::Reverse(inspected.types));
         }
 
         /**
@@ -1011,17 +1017,11 @@ namespace Sora::Meta {
          * @par Complexity Quadratic in the number of types because identity is checked pairwise.
          */
         [[nodiscard]] consteval std::meta::info Unique(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::Unique(types));
+            return ToTypeList(Sora::Meta::Unique(inspected.types));
         }
 
         /**
@@ -1037,17 +1037,11 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Take(std::meta::info list, std::size_t count) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::Take(types, count));
+            return ToTypeList(Sora::Meta::Take(inspected.types, count));
         }
 
         /**
@@ -1063,17 +1057,11 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Drop(std::meta::info list, std::size_t count) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::Drop(types, count));
+            return ToTypeList(Sora::Meta::Drop(inspected.types, count));
         }
 
         /**
@@ -1091,20 +1079,14 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Slice(std::meta::info list, std::size_t offset, std::size_t count) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            if (offset > types.size() || count > types.size() - offset) {
+            if (offset > inspected.types.size() || count > inspected.types.size() - offset) {
                 return MakeMetaError(^^Error::OutOfRangeTag, {list});
             }
-            return ToTypeList(Sora::Meta::Slice(types, offset, count));
+            return ToTypeList(Sora::Meta::Slice(inspected.types, offset, count));
         }
 
         /**
@@ -1120,20 +1102,17 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info PushFront(std::meta::info list, std::meta::info value) {
-            if (IsMetaError(list) || IsMetaError(value)) {
-                return IsMetaError(list) ? list : value;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, value});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list, value});
+            if (IsMetaError(value)) {
+                return value;
             }
             if (!std::meta::is_type(value)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {value});
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::PushFront(types, value));
+            return ToTypeList(Sora::Meta::PushFront(inspected.types, value));
         }
 
         /**
@@ -1149,20 +1128,17 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info PushBack(std::meta::info list, std::meta::info value) {
-            if (IsMetaError(list) || IsMetaError(value)) {
-                return IsMetaError(list) ? list : value;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, value});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list, value});
+            if (IsMetaError(value)) {
+                return value;
             }
             if (!std::meta::is_type(value)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {value});
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::PushBack(types, value));
+            return ToTypeList(Sora::Meta::PushBack(inspected.types, value));
         }
 
         /**
@@ -1190,17 +1166,11 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info PopBack(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::PopBack(types));
+            return ToTypeList(Sora::Meta::PopBack(inspected.types));
         }
 
         /**
@@ -1215,17 +1185,17 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Contains(std::meta::info list, std::meta::info needle) {
-            if (IsMetaError(list) || IsMetaError(needle)) {
-                return IsMetaError(list) ? list : needle;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, needle});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list, needle});
+            if (IsMetaError(needle)) {
+                return needle;
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
+            if (!std::meta::is_type(needle)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
             }
-            return std::meta::reflect_constant(Sora::Meta::Contains(types, needle));
+            return std::meta::reflect_constant(Sora::Meta::Contains(inspected.types, needle));
         }
 
         /**
@@ -1240,17 +1210,17 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info IndexOf(std::meta::info list, std::meta::info needle) {
-            if (IsMetaError(list) || IsMetaError(needle)) {
-                return IsMetaError(list) ? list : needle;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, needle});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list, needle});
+            if (IsMetaError(needle)) {
+                return needle;
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
+            if (!std::meta::is_type(needle)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
             }
-            return std::meta::reflect_constant(Sora::Meta::IndexOf(types, needle));
+            return std::meta::reflect_constant(Sora::Meta::IndexOf(inspected.types, needle));
         }
 
         /**
@@ -1265,17 +1235,17 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Count(std::meta::info list, std::meta::info needle) {
-            if (IsMetaError(list) || IsMetaError(needle)) {
-                return IsMetaError(list) ? list : needle;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, needle});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list, needle});
+            if (IsMetaError(needle)) {
+                return needle;
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
+            if (!std::meta::is_type(needle)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
             }
-            return std::meta::reflect_constant(Sora::Meta::Count(types, needle));
+            return std::meta::reflect_constant(Sora::Meta::Count(inspected.types, needle));
         }
 
         /**
@@ -1289,17 +1259,11 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info IsUnique(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return std::meta::reflect_constant(Sora::Meta::IsUnique(types));
+            return std::meta::reflect_constant(Sora::Meta::IsUnique(inspected.types));
         }
 
         /**
@@ -1315,21 +1279,16 @@ namespace Sora::Meta {
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info Equal(std::meta::info left, std::meta::info right) {
-            if (IsMetaError(left) || IsMetaError(right)) {
-                return IsMetaError(left) ? left : right;
+            const InfoList context{left, right};
+            const auto leftList = Detail::InspectTypeList(left, context);
+            if (!leftList) {
+                return leftList.error;
             }
-            if (!IsTypeList(left) || !IsTypeList(right)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {left, right});
+            const auto rightList = Detail::InspectTypeList(right, context);
+            if (!rightList) {
+                return rightList.error;
             }
-            const auto leftTypes = ToInfoList(left);
-            const auto rightTypes = ToInfoList(right);
-            if (const auto error = FirstMetaError(leftTypes); error != std::meta::info{}) {
-                return error;
-            }
-            if (const auto error = FirstMetaError(rightTypes); error != std::meta::info{}) {
-                return error;
-            }
-            return std::meta::reflect_constant(Sora::Meta::Equal(leftTypes, rightTypes));
+            return std::meta::reflect_constant(Sora::Meta::Equal(leftList.types, rightList.types));
         }
 
         /**
@@ -1340,13 +1299,17 @@ namespace Sora::Meta {
          * input error.
          */
         [[nodiscard]] consteval std::meta::info Apply(std::meta::info function, std::meta::info list) {
-            if (IsMetaError(function) || IsMetaError(list)) {
-                return IsMetaError(function) ? function : list;
+            if (IsMetaError(function)) {
+                return function;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {function, list});
+            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
             }
-            return RequireTypeResult(Sora::Meta::Apply(function, ToInfoList(list)), {function, list});
+            const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return RequireTypeResult(Sora::Meta::Apply(function, inspected.types), {function, list});
         }
 
         /**
@@ -1356,13 +1319,17 @@ namespace Sora::Meta {
          * @return Reflected `TypeList`; non-type mapped results produce `NonTypeResultTag`.
          */
         [[nodiscard]] consteval std::meta::info Map(std::meta::info function, std::meta::info list) {
-            if (IsMetaError(function) || IsMetaError(list)) {
-                return IsMetaError(function) ? function : list;
+            if (IsMetaError(function)) {
+                return function;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {function, list});
+            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
             }
-            return ToTypeList(Sora::Meta::Map(function, ToInfoList(list)));
+            const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return ToTypeList(Sora::Meta::Map(function, inspected.types));
         }
 
         /**
@@ -1372,13 +1339,33 @@ namespace Sora::Meta {
          * @return Concatenated `TypeList`, or the first mapper/projection error.
          */
         [[nodiscard]] consteval std::meta::info FlatMap(std::meta::info function, std::meta::info list) {
-            if (IsMetaError(function) || IsMetaError(list)) {
-                return IsMetaError(function) ? function : list;
+            if (IsMetaError(function)) {
+                return function;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {function, list});
+            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
             }
-            return ToTypeList(Detail::FlatMap(function, ToInfoList(list), true));
+            const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            const auto input = inspected.types;
+            std::vector<std::meta::info> output;
+            for (const auto value : input) {
+                const auto mapped = Detail::Apply(function, std::array{value});
+                if (IsMetaError(mapped)) {
+                    return mapped;
+                }
+                if (!IsTypeList(mapped)) {
+                    return MakeMetaError(^^Error::InvalidSequenceTag, {function, value, mapped});
+                }
+                const auto mappedTypes = ToInfoList(mapped);
+                if (const auto error = FirstMetaError(mappedTypes); error != std::meta::info{}) {
+                    return error;
+                }
+                output.append_range(mappedTypes);
+            }
+            return ToTypeList(output);
         }
 
         /**
@@ -1388,13 +1375,17 @@ namespace Sora::Meta {
          * @return Reflected filtered `TypeList`, predicate error, sequence error, or the first input error.
          */
         [[nodiscard]] consteval std::meta::info Filter(std::meta::info pred, std::meta::info list) {
-            if (IsMetaError(pred) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : list;
+            if (IsMetaError(pred)) {
+                return pred;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
             }
-            return ToTypeList(Sora::Meta::Filter(pred, ToInfoList(list)));
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return ToTypeList(Sora::Meta::Filter(pred, inspected.types));
         }
 
         /**
@@ -1406,16 +1397,20 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
                                                           std::meta::info list) {
-            if (IsMetaError(pred) || IsMetaError(replacement) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : (IsMetaError(replacement) ? replacement : list);
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, replacement, list});
+            if (IsMetaError(replacement)) {
+                return replacement;
             }
             if (!std::meta::is_type(replacement)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {pred, replacement});
             }
-            return ToTypeList(Sora::Meta::ReplaceIf(pred, replacement, ToInfoList(list)));
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, replacement, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return ToTypeList(Sora::Meta::ReplaceIf(pred, replacement, inspected.types));
         }
 
         /**
@@ -1425,13 +1420,17 @@ namespace Sora::Meta {
          * @return Reflected filtered `TypeList`, or the first predicate/projection error.
          */
         [[nodiscard]] consteval std::meta::info RemoveIf(std::meta::info pred, std::meta::info list) {
-            if (IsMetaError(pred) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : list;
+            if (IsMetaError(pred)) {
+                return pred;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+                return error;
             }
-            return ToTypeList(Sora::Meta::RemoveIf(pred, ToInfoList(list)));
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return ToTypeList(Sora::Meta::RemoveIf(pred, inspected.types));
         }
 
         /**
@@ -1443,61 +1442,70 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info Zip(std::meta::info function, std::meta::info left,
                                                     std::meta::info right) {
-            if (IsMetaError(function) || IsMetaError(left) || IsMetaError(right)) {
-                return IsMetaError(function) ? function : (IsMetaError(left) ? left : right);
+            if (IsMetaError(function)) {
+                return function;
             }
-            if (!IsTypeList(left) || !IsTypeList(right)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {function, left, right});
+            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
             }
-            return ToTypeList(Sora::Meta::Zip(function, ToInfoList(left), ToInfoList(right)));
+            const InfoList context{function, left, right};
+            const auto leftList = Detail::InspectTypeList(left, context);
+            if (!leftList) {
+                return leftList.error;
+            }
+            const auto rightList = Detail::InspectTypeList(right, context);
+            if (!rightList) {
+                return rightList.error;
+            }
+            return ToTypeList(Sora::Meta::Zip(function, leftList.types, rightList.types));
         }
 
         /**
          * @brief Replace every occurrence of @p oldType in a reflected TypeList.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] oldType Reflected type to replace.
          * @param[in] newType Reflected replacement type.
-         * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected result `TypeList`, validation error, or the first input error.
          */
-        [[nodiscard]] consteval std::meta::info Replace(std::meta::info oldType, std::meta::info newType,
-                                                        std::meta::info list) {
-            if (IsMetaError(oldType) || IsMetaError(newType) || IsMetaError(list)) {
-                return IsMetaError(oldType) ? oldType : (IsMetaError(newType) ? newType : list);
+        [[nodiscard]] consteval std::meta::info Replace(std::meta::info list, std::meta::info oldType,
+                                                        std::meta::info newType) {
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, oldType, newType});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {oldType, newType, list});
+            if (IsMetaError(oldType)) {
+                return oldType;
             }
-            if (!std::meta::is_type(oldType) || !std::meta::is_type(newType)) {
+            if (!std::meta::is_type(oldType)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {oldType, newType});
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
+            if (IsMetaError(newType)) {
+                return newType;
             }
-            return ToTypeList(Sora::Meta::Replace(types, oldType, newType));
+            if (!std::meta::is_type(newType)) {
+                return MakeMetaError(^^Error::NonTypeResultTag, {oldType, newType});
+            }
+            return ToTypeList(Sora::Meta::Replace(inspected.types, oldType, newType));
         }
 
         /**
          * @brief Remove every occurrence of @p needle from a reflected TypeList.
-         * @param[in] needle Reflected type to remove.
          * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @param[in] needle Reflected type to remove.
          * @return Reflected result `TypeList`, validation error, or the first input error.
          */
-        [[nodiscard]] consteval std::meta::info Remove(std::meta::info needle, std::meta::info list) {
-            if (IsMetaError(needle) || IsMetaError(list)) {
-                return IsMetaError(needle) ? needle : list;
+        [[nodiscard]] consteval std::meta::info Remove(std::meta::info list, std::meta::info needle) {
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list, needle});
+            if (!inspected) {
+                return inspected.error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {needle, list});
+            if (IsMetaError(needle)) {
+                return needle;
             }
             if (!std::meta::is_type(needle)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {needle});
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return ToTypeList(Sora::Meta::Remove(types, needle));
+            return ToTypeList(Sora::Meta::Remove(inspected.types, needle));
         }
 
         /**
@@ -1523,15 +1531,9 @@ namespace Sora::Meta {
          * @note Nested `MetaError` elements are propagated before clearing so the first-error law is preserved.
          */
         [[nodiscard]] consteval std::meta::info Clear(std::meta::info list) {
-            if (IsMetaError(list)) {
-                return list;
-            }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
+            const auto inspected = Detail::InspectTypeList(list, InfoList{list});
+            if (!inspected) {
+                return inspected.error;
             }
             return ToTypeList(InfoList{});
         }
@@ -1546,11 +1548,26 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info FoldLeft(std::meta::info function, std::meta::info initial,
                                                          std::meta::info list) {
-            if (IsMetaError(function) || IsMetaError(initial) || IsMetaError(list)) {
-                return IsMetaError(function) ? function : (IsMetaError(initial) ? initial : list);
+            if (!IsMetaError(list) && IsTypeList(list) && ToInfoList(list).empty()) {
+                if (IsMetaError(initial)) {
+                    return initial;
+                }
+                if (!std::meta::is_type(initial)) {
+                    return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+                }
+                return initial;
+            }
+            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
+            }
+            if (IsMetaError(initial)) {
+                return initial;
             }
             if (!std::meta::is_type(initial)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+            }
+            if (IsMetaError(list)) {
+                return list;
             }
             if (!IsTypeList(list)) {
                 return MakeMetaError(^^Error::InvalidSequenceTag, {function, initial, list});
@@ -1572,11 +1589,26 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info FoldRight(std::meta::info function, std::meta::info initial,
                                                           std::meta::info list) {
-            if (IsMetaError(function) || IsMetaError(initial) || IsMetaError(list)) {
-                return IsMetaError(function) ? function : (IsMetaError(initial) ? initial : list);
+            if (!IsMetaError(list) && IsTypeList(list) && ToInfoList(list).empty()) {
+                if (IsMetaError(initial)) {
+                    return initial;
+                }
+                if (!std::meta::is_type(initial)) {
+                    return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+                }
+                return initial;
+            }
+            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+                return error;
+            }
+            if (IsMetaError(initial)) {
+                return initial;
             }
             if (!std::meta::is_type(initial)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+            }
+            if (IsMetaError(list)) {
+                return list;
             }
             if (!IsTypeList(list)) {
                 return MakeMetaError(^^Error::InvalidSequenceTag, {function, initial, list});
@@ -1590,66 +1622,66 @@ namespace Sora::Meta {
 
         /**
          * @brief Find the first type accepted by a reflected predicate.
-         * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] fallback Reflected type returned when no element matches.
          * @return Matching type, @p fallback, or the first validation/error result.
          * @par Example
          * @code{.cpp}
          * consteval bool Integral(std::meta::info type) { return std::meta::is_integral_type(type); }
          * constexpr auto result = Sora::Meta::Types::FindFirst(
-         *     ^^Sora::Traits::TypeList<double, int>, ^^Integral);
+         *     ^^Integral, ^^Sora::Traits::TypeList<double, int>);
          * static_assert(result == ^^int);
          * @endcode
          */
-        [[nodiscard]] consteval std::meta::info FindFirst(std::meta::info list, std::meta::info pred,
+        [[nodiscard]] consteval std::meta::info FindFirst(std::meta::info pred, std::meta::info list,
                                                           std::meta::info fallback = ^^void) {
-            if (IsMetaError(pred) || IsMetaError(fallback) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : (IsMetaError(fallback) ? fallback : list);
+            if (IsMetaError(pred)) {
+                return pred;
             }
             if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list, fallback});
+            if (!inspected) {
+                return inspected.error;
+            }
+            if (IsMetaError(fallback)) {
+                return fallback;
+            }
             if (!std::meta::is_type(fallback)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {pred, fallback});
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, fallback, list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return RequireTypeResult(Sora::Meta::FindFirst(types, pred, fallback), {list, pred, fallback});
+            return RequireTypeResult(Sora::Meta::FindFirst(pred, inspected.types, fallback), {pred, list, fallback});
         }
 
         /**
          * @brief Find the final type accepted by a reflected predicate.
-         * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] fallback Reflected type returned when no element matches.
          * @return Matching type, @p fallback, or the first validation/error result.
          * @see FindFirst
          */
-        [[nodiscard]] consteval std::meta::info FindLast(std::meta::info list, std::meta::info pred,
+        [[nodiscard]] consteval std::meta::info FindLast(std::meta::info pred, std::meta::info list,
                                                          std::meta::info fallback = ^^void) {
-            if (IsMetaError(pred) || IsMetaError(fallback) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : (IsMetaError(fallback) ? fallback : list);
+            if (IsMetaError(pred)) {
+                return pred;
             }
             if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list, fallback});
+            if (!inspected) {
+                return inspected.error;
+            }
+            if (IsMetaError(fallback)) {
+                return fallback;
+            }
             if (!std::meta::is_type(fallback)) {
                 return MakeMetaError(^^Error::NonTypeResultTag, {pred, fallback});
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, fallback, list});
-            }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return RequireTypeResult(Sora::Meta::FindLast(types, pred, fallback), {list, pred, fallback});
+            return RequireTypeResult(Sora::Meta::FindLast(pred, inspected.types, fallback), {pred, list, fallback});
         }
 
         /**
@@ -1659,41 +1691,57 @@ namespace Sora::Meta {
          * @return Reflected bool; empty lists yield `true` after predicate validation.
          */
         [[nodiscard]] consteval std::meta::info AllOf(std::meta::info pred, std::meta::info list) {
-            if (IsMetaError(pred) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : list;
+            if (IsMetaError(pred)) {
+                return pred;
             }
             if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
+            if (!inspected) {
+                return inspected.error;
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return Sora::Meta::AllOf(types, pred);
+            return Sora::Meta::AllOf(pred, inspected.types);
         }
 
-        /** @brief Test whether any type in a reflected `TypeList` satisfies a predicate. */
+        /**
+         * @brief Test whether any type in a reflected `TypeList` satisfies a predicate.
+         * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected `bool`; empty lists yield `false`, while validation errors are propagated unchanged.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::AnyOf(
+         *     ^^IsIntegral, ^^Sora::Traits::TypeList<double, int>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
+         */
         [[nodiscard]] consteval std::meta::info AnyOf(std::meta::info pred, std::meta::info list) {
-            if (IsMetaError(pred) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : list;
+            if (IsMetaError(pred)) {
+                return pred;
             }
             if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
+            if (!inspected) {
+                return inspected.error;
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return Sora::Meta::AnyOf(types, pred);
+            return Sora::Meta::AnyOf(pred, inspected.types);
         }
 
-        /** @brief Test whether no type in a reflected `TypeList` satisfies a predicate. */
+        /**
+         * @brief Test whether no type in a reflected `TypeList` satisfies a predicate.
+         * @param[in] pred Reflected unary boolean predicate.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return Reflected `bool`; empty lists yield `true`, while validation errors are propagated unchanged.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::NoneOf(
+         *     ^^IsIntegral, ^^Sora::Traits::TypeList<double, float>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
+         */
         [[nodiscard]] consteval std::meta::info NoneOf(std::meta::info pred, std::meta::info list) {
             const auto result = AnyOf(pred, list);
             return IsMetaError(result) ? result : std::meta::reflect_constant(!std::meta::extract<bool>(result));
@@ -1706,20 +1754,17 @@ namespace Sora::Meta {
          * @return Reflected `std::size_t`, or the first validation/error result.
          */
         [[nodiscard]] consteval std::meta::info CountIf(std::meta::info pred, std::meta::info list) {
-            if (IsMetaError(pred) || IsMetaError(list)) {
-                return IsMetaError(pred) ? pred : list;
+            if (IsMetaError(pred)) {
+                return pred;
             }
             if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
-            if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {pred, list});
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
+            if (!inspected) {
+                return inspected.error;
             }
-            const auto types = ToInfoList(list);
-            if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
-                return error;
-            }
-            return Sora::Meta::CountIf(types, pred);
+            return Sora::Meta::CountIf(pred, inspected.types);
         }
 
     } // namespace Types
@@ -1847,6 +1892,45 @@ namespace Sora::Meta {
 } // namespace Sora::Meta
 
 namespace Sora::Traits {
+
+    /**
+     * @brief Number of types in @p List.
+     * @tparam List `TypeList` specialization to inspect.
+     * @return Element count after reflected sequence validation.
+     * @pre @p List contains no type-level `MetaError`; unlike `Meta::Types::Length`, this value interface cannot carry
+     * a reflected error and therefore issues a translation-time diagnostic when validation fails.
+     */
+    template<typename List>
+        requires Concept::TypeList<List>
+    inline constexpr std::size_t Length = Meta::RequireSizeResult(Meta::Types::Length(^^List));
+
+    /**
+     * @brief Return the @p Index-th type of @p List.
+     * @tparam List `TypeList` specialization to inspect.
+     * @tparam Index Zero-based type index.
+     * @return Selected type or the first nested `MetaError` type.
+     */
+    template<typename List, std::size_t Index>
+        requires(Concept::TypeList<List> && Index < std::remove_cvref_t<List>::size)
+    using At = Meta::InfoType<Meta::Types::At(^^List, Index)>;
+
+    /**
+     * @brief First type of a non-empty @p List.
+     * @tparam List Non-empty `TypeList` specialization.
+     * @return First type or the first nested `MetaError` type.
+     */
+    template<typename List>
+        requires(Concept::TypeList<List> && std::remove_cvref_t<List>::size > 0)
+    using Front = Meta::InfoType<Meta::Types::Front(^^List)>;
+
+    /**
+     * @brief Final type of a non-empty @p List.
+     * @tparam List Non-empty `TypeList` specialization.
+     * @return Final type or the first nested `MetaError` type.
+     */
+    template<typename List>
+        requires(Concept::TypeList<List> && std::remove_cvref_t<List>::size > 0)
+    using Back = Meta::InfoType<Meta::Types::Back(^^List)>;
 
     /**
      * @brief All but the first type of @p List.
@@ -2082,7 +2166,8 @@ namespace Sora::Traits {
      * @brief First type in @p List accepted by @p Pred, or `void` when no type matches.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
-     * @return A matching type, `void`, or a `MetaError` type for predicate/input failure.
+     * @tparam Fallback Type returned when no element matches.
+     * @return A matching type, @p Fallback, or a `MetaError` type for predicate/input failure.
      * @par Example
      * @code{.cpp}
      * consteval bool IsVoid(std::meta::info info) { return info == ^^void; }
@@ -2090,15 +2175,16 @@ namespace Sora::Traits {
      * static_assert(std::same_as<Match, void>);
      * @endcode
      */
-    template<std::meta::info Pred, typename List>
+    template<std::meta::info Pred, typename List, typename Fallback = void>
         requires Concept::TypeList<List>
-    using FindFirst = Meta::InfoType<Meta::Types::FindFirst(^^List, Pred)>;
+    using FindFirst = Meta::InfoType<Meta::Types::FindFirst(Pred, ^^List, ^^Fallback)>;
 
     /**
      * @brief Final type in @p List accepted by @p Pred, or `void` when no type matches.
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
-     * @return A matching type, `void`, or a `MetaError` type for predicate/input failure.
+     * @tparam Fallback Type returned when no element matches.
+     * @return A matching type, @p Fallback, or a `MetaError` type for predicate/input failure.
      * @par Example
      * @code{.cpp}
      * consteval bool IsVoid(std::meta::info info) { return info == ^^void; }
@@ -2106,17 +2192,17 @@ namespace Sora::Traits {
      * static_assert(std::same_as<Match, void>);
      * @endcode
      */
-    template<std::meta::info Pred, typename List>
+    template<std::meta::info Pred, typename List, typename Fallback = void>
         requires Concept::TypeList<List>
-    using FindLast = Meta::InfoType<Meta::Types::FindLast(^^List, Pred)>;
+    using FindLast = Meta::InfoType<Meta::Types::FindLast(Pred, ^^List, ^^Fallback)>;
 
     /**
      * @brief Prepend @p Type to @p List.
-     * @tparam Type Type to insert.
      * @tparam List `TypeList` specialization to transform.
+     * @tparam Type Type to insert.
      * @return Resulting `TypeList` or a `MetaError` type if projection fails.
      */
-    template<typename Type, typename List>
+    template<typename List, typename Type>
         requires Concept::TypeList<List>
     using PushFront = Meta::InfoType<Meta::Types::PushFront(^^List, ^^Type)>;
 
@@ -2168,24 +2254,24 @@ namespace Sora::Traits {
 
     /**
      * @brief Replace every @p Old type in @p List with @p New.
+     * @tparam List `TypeList` specialization to transform.
      * @tparam Old Type to replace.
      * @tparam New Replacement type.
-     * @tparam List `TypeList` specialization to transform.
      * @return Resulting `TypeList` or a `MetaError` type for invalid reflected type arguments.
      */
-    template<typename Old, typename New, typename List>
+    template<typename List, typename Old, typename New>
         requires Concept::TypeList<List>
-    using Replace = Meta::InfoType<Meta::Types::Replace(^^Old, ^^New, ^^List)>;
+    using Replace = Meta::InfoType<Meta::Types::Replace(^^List, ^^Old, ^^New)>;
 
     /**
      * @brief Remove every occurrence of @p Needle from @p List.
-     * @tparam Needle Type to remove.
      * @tparam List `TypeList` specialization to transform.
+     * @tparam Needle Type to remove.
      * @return Resulting `TypeList` or a `MetaError` type for invalid reflected type arguments.
      */
-    template<typename Needle, typename List>
+    template<typename List, typename Needle>
         requires Concept::TypeList<List>
-    using Remove = Meta::InfoType<Meta::Types::Remove(^^Needle, ^^List)>;
+    using Remove = Meta::InfoType<Meta::Types::Remove(^^List, ^^Needle)>;
 
     /**
      * @brief Zip @p Left and @p Right through reflected binary @p Function.
@@ -2283,8 +2369,6 @@ namespace Sora::Traits {
      * @endcode
      */
     template<typename Type>
-    using DataMemberTypes = Meta::InfoType<Meta::ToTypeList(
-        Meta::Promote(std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked()) |
-                      std::views::transform(std::meta::type_of)))>;
+    using DataMemberTypes = Meta::InfoType<Meta::DataMemberTypes(^^Type)>;
 
 } // namespace Sora::Traits

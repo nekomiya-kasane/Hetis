@@ -43,11 +43,13 @@ namespace Sora {
          */
         template<std::meta::info Function, std::meta::info... Arguments>
         inline constexpr std::meta::info Invoke = [] consteval {
-            constexpr auto error = FirstMetaError<Function, Arguments...>();
-            if constexpr (error != std::meta::info{}) {
-                return error;
-            } else if constexpr (std::meta::is_template(Function) &&
-                                 std::meta::can_substitute(Function, {Arguments...})) {
+            if constexpr (IsMetaError(Function)) {
+                return Function;
+            } else if constexpr (!std::meta::is_template(Function)) {
+                return MakeMetaError(^^Error::NonInvocableTag, {Function});
+            } else if constexpr (FirstMetaError<Arguments...>() != std::meta::info{}) {
+                return FirstMetaError<Arguments...>();
+            } else if constexpr (std::meta::can_substitute(Function, {Arguments...})) {
                 return std::meta::substitute(Function, {Arguments...});
             } else {
                 return MakeMetaError(^^Error::NonInvocableTag, {Function, Arguments...});

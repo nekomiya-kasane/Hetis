@@ -63,6 +63,8 @@
 #include <type_traits>
 #include <utility>
 
+// Keep the public PAL contract platform-header free. Native SDK/POSIX headers belong in SystemAPI.cpp;
+// this header uses opaque declarations and ABI-stable scalar aliases instead.
 struct addrinfo;
 struct sockaddr;
 
