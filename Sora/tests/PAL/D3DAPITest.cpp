@@ -25,8 +25,10 @@ namespace {
     static_assert(std::is_base_of_v<WindowsSystem::Unknown, D3D::D3D12::ID3D12Object>);
     static_assert(std::is_base_of_v<WindowsSystem::Unknown, D3D::DXGI::IDXGIFactory>);
     static_assert(std::is_base_of_v<WindowsSystem::Unknown, D3D::DXC::IDxcCompiler3>);
-    static_assert(std::is_same_v<WindowsSystem::Rect, Sora::PAL::DisplayRect>);
-    static_assert(std::is_same_v<WindowsSystem::Point, Sora::PAL::DisplayPoint>);
+    static_assert(std::is_standard_layout_v<WindowsSystem::Rect>);
+    static_assert(std::is_trivially_copyable_v<WindowsSystem::Rect>);
+    static_assert(std::is_standard_layout_v<WindowsSystem::Point>);
+    static_assert(std::is_trivially_copyable_v<WindowsSystem::Point>);
     static_assert(D3D::D3D12::D3D12_RESOURCE_DIMENSION_BUFFER == 1);
     static_assert(D3D::DXGI::DXGI_FORMAT_R8G8B8A8_UNORM == 28);
     static_assert(sizeof(D3D::D3D12::D3D12_CPU_DESCRIPTOR_HANDLE) == sizeof(uintptr_t));

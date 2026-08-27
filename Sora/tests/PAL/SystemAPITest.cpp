@@ -43,12 +43,16 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadLocalMemorySystemAPI() == &PAL::LoadLocalMemorySystemAPI());
     REQUIRE(&PAL::LoadHandleSystemAPI() == &PAL::LoadHandleSystemAPI());
     REQUIRE(&PAL::LoadSynchronizationSystemAPI() == &PAL::LoadSynchronizationSystemAPI());
+    REQUIRE(&PAL::LoadVirtualMemorySystemAPI() == &PAL::LoadVirtualMemorySystemAPI());
     REQUIRE(&PAL::LoadFileMappingSystemAPI() == &PAL::LoadFileMappingSystemAPI());
     REQUIRE(&PAL::LoadSystemInformationSystemAPI() == &PAL::LoadSystemInformationSystemAPI());
     REQUIRE(&PAL::LoadEnvironmentSystemAPI() == &PAL::LoadEnvironmentSystemAPI());
     REQUIRE(&PAL::LoadModuleSystemAPI() == &PAL::LoadModuleSystemAPI());
     REQUIRE(&PAL::LoadProcessSystemAPI() == &PAL::LoadProcessSystemAPI());
+    REQUIRE(&PAL::LoadProcessControlSystemAPI() == &PAL::LoadProcessControlSystemAPI());
     REQUIRE(&PAL::LoadThreadSystemAPI() == &PAL::LoadThreadSystemAPI());
+    REQUIRE(&PAL::LoadThreadControlSystemAPI() == &PAL::LoadThreadControlSystemAPI());
+    REQUIRE(&PAL::LoadRandomSystemAPI() == &PAL::LoadRandomSystemAPI());
     REQUIRE(&PAL::LoadSchedulerTraceSystemAPI() == &PAL::LoadSchedulerTraceSystemAPI());
     REQUIRE(&PAL::LoadGlobalMemorySystemAPI() == &PAL::LoadGlobalMemorySystemAPI());
     REQUIRE(&PAL::LoadClipboardSystemAPI() == &PAL::LoadClipboardSystemAPI());
@@ -58,6 +62,184 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadXcbWindowSystemAPI() == &PAL::LoadXcbWindowSystemAPI());
     REQUIRE(&PAL::LoadWaylandWindowSystemAPI() == &PAL::LoadWaylandWindowSystemAPI());
     REQUIRE(&PAL::LoadStackTraceSystemAPI() == &PAL::LoadStackTraceSystemAPI());
+    REQUIRE(&PAL::LoadSocketSystemAPI() == &PAL::LoadSocketSystemAPI());
+    REQUIRE(&PAL::LoadTcpSystemAPI() == &PAL::LoadTcpSystemAPI());
+    REQUIRE(&PAL::LoadUdpSystemAPI() == &PAL::LoadUdpSystemAPI());
+    REQUIRE(&PAL::LoadClockSystemAPI() == &PAL::LoadClockSystemAPI());
+    REQUIRE(&PAL::LoadAdvancedSocketSystemAPI() == &PAL::LoadAdvancedSocketSystemAPI());
+    REQUIRE(&PAL::LoadNetworkInterfaceSystemAPI() == &PAL::LoadNetworkInterfaceSystemAPI());
+    REQUIRE(&PAL::LoadModernFileSystemAPI() == &PAL::LoadModernFileSystemAPI());
+    REQUIRE(&PAL::LoadFanotifySystemAPI() == &PAL::LoadFanotifySystemAPI());
+    REQUIRE(&PAL::LoadLinuxSyscallSystemAPI() == &PAL::LoadLinuxSyscallSystemAPI());
+    REQUIRE(&PAL::LoadPerfEventSystemAPI() == &PAL::LoadPerfEventSystemAPI());
+#if defined(PLATFORM_WINDOWS)
+    REQUIRE(&PAL::LoadWinsockOverlappedSystemAPI() == &PAL::LoadWinsockOverlappedSystemAPI());
+    REQUIRE(&PAL::LoadWindowsIORingSystemAPI() == &PAL::LoadWindowsIORingSystemAPI());
+#elif defined(PLATFORM_LINUX)
+    REQUIRE(&PAL::LoadEpollSystemAPI() == &PAL::LoadEpollSystemAPI());
+    REQUIRE(&PAL::LoadEventFdSystemAPI() == &PAL::LoadEventFdSystemAPI());
+    REQUIRE(&PAL::LoadTimerFdSystemAPI() == &PAL::LoadTimerFdSystemAPI());
+    REQUIRE(&PAL::LoadSignalFdSystemAPI() == &PAL::LoadSignalFdSystemAPI());
+    REQUIRE(&PAL::LoadLinuxIoUringSystemAPI() == &PAL::LoadLinuxIoUringSystemAPI());
+#endif
+}
+
+TEST_CASE("Socket API tables expose the complete transport split", "[Sora.PAL.SystemAPI]") {
+    const PAL::SocketSystemAPI& socket = PAL::LoadSocketSystemAPI();
+    const PAL::TcpSystemAPI& tcp = PAL::LoadTcpSystemAPI();
+    const PAL::UdpSystemAPI& udp = PAL::LoadUdpSystemAPI();
+#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+    REQUIRE(socket.create != nullptr);
+    REQUIRE(socket.close != nullptr);
+    REQUIRE(socket.bind != nullptr);
+    REQUIRE(socket.getSocketName != nullptr);
+    REQUIRE(socket.getPeerName != nullptr);
+    REQUIRE(socket.setOption != nullptr);
+    REQUIRE(socket.getOption != nullptr);
+    REQUIRE(socket.ioctl != nullptr);
+    REQUIRE(socket.poll != nullptr);
+    REQUIRE(socket.getAddressInfo != nullptr);
+    REQUIRE(socket.freeAddressInfo != nullptr);
+    REQUIRE(socket.getNameInfo != nullptr);
+    REQUIRE(tcp.listen != nullptr);
+    REQUIRE(tcp.accept != nullptr);
+    REQUIRE(tcp.connect != nullptr);
+    REQUIRE(tcp.send != nullptr);
+    REQUIRE(tcp.receive != nullptr);
+    REQUIRE(tcp.shutdown != nullptr);
+    REQUIRE(udp.sendTo != nullptr);
+    REQUIRE(udp.receiveFrom != nullptr);
+#    if defined(PLATFORM_WINDOWS)
+    REQUIRE(socket.startup != nullptr);
+    REQUIRE(socket.cleanup != nullptr);
+    REQUIRE(socket.getLastError != nullptr);
+    REQUIRE(socket.setLastError != nullptr);
+#    endif
+#else
+    SUCCEED("Unsupported platforms publish empty socket tables.");
+#endif
+    REQUIRE(static_cast<int>(PAL::SocketSystemAPI::Type::Stream) !=
+            static_cast<int>(PAL::SocketSystemAPI::Type::Datagram));
+    REQUIRE(static_cast<int>(PAL::SocketSystemAPI::Protocol::Tcp) == 6);
+    REQUIRE(static_cast<int>(PAL::SocketSystemAPI::Protocol::Udp) == 17);
+}
+
+TEST_CASE("Asynchronous I/O tables expose platform-native completion and readiness entries", "[Sora.PAL.SystemAPI]") {
+    const PAL::ClockSystemAPI& clock = PAL::LoadClockSystemAPI();
+#if defined(PLATFORM_WINDOWS)
+    REQUIRE(clock.queryCounter != nullptr);
+    REQUIRE(clock.queryFrequency != nullptr);
+    REQUIRE(clock.getPreciseSystemTime != nullptr);
+
+    const PAL::WinsockOverlappedSystemAPI& winsock = PAL::LoadWinsockOverlappedSystemAPI();
+    REQUIRE(winsock.create != nullptr);
+    REQUIRE(winsock.send != nullptr);
+    REQUIRE(winsock.receive != nullptr);
+    REQUIRE(winsock.sendTo != nullptr);
+    REQUIRE(winsock.receiveFrom != nullptr);
+    REQUIRE(winsock.getResult != nullptr);
+    REQUIRE(winsock.control != nullptr);
+
+    const PAL::IOCPSystemAPI& iocp = PAL::LoadIOCPSystemAPI();
+    REQUIRE(iocp.getQueuedCompletionStatusEx != nullptr);
+    REQUIRE(iocp.setFileCompletionNotificationModes != nullptr);
+    const PAL::WindowsIORingSystemAPI& ioRing = PAL::LoadWindowsIORingSystemAPI();
+    if (ioRing.createIoRing != nullptr) {
+        REQUIRE(ioRing.queryCapabilities != nullptr);
+        REQUIRE(ioRing.getIoRingInfo != nullptr);
+        REQUIRE(ioRing.submitIoRing != nullptr);
+        REQUIRE(ioRing.closeIoRing != nullptr);
+        REQUIRE(ioRing.popIoRingCompletion != nullptr);
+    }
+#elif defined(PLATFORM_LINUX)
+    REQUIRE(clock.getTime != nullptr);
+    REQUIRE(clock.getResolution != nullptr);
+    REQUIRE(clock.sleep != nullptr);
+    REQUIRE(PAL::LoadEpollSystemAPI().create != nullptr);
+    REQUIRE(PAL::LoadEpollSystemAPI().control != nullptr);
+    REQUIRE(PAL::LoadEpollSystemAPI().wait != nullptr);
+    REQUIRE(PAL::LoadEventFdSystemAPI().create != nullptr);
+    REQUIRE(PAL::LoadTimerFdSystemAPI().create != nullptr);
+    REQUIRE(PAL::LoadTimerFdSystemAPI().setTime != nullptr);
+    REQUIRE(PAL::LoadTimerFdSystemAPI().getTime != nullptr);
+    REQUIRE(PAL::LoadSignalFdSystemAPI().create != nullptr);
+    const PAL::LinuxIoUringSystemAPI& ioRing = PAL::LoadLinuxIoUringSystemAPI();
+    if (ioRing.queueInit != nullptr) {
+        REQUIRE(ioRing.queueExit != nullptr);
+        REQUIRE(ioRing.submit != nullptr);
+        REQUIRE(ioRing.peekBatchCompletion != nullptr);
+        REQUIRE(ioRing.waitCompletions != nullptr);
+    }
+#elif defined(PLATFORM_MACOS)
+    REQUIRE(clock.getTime != nullptr);
+    REQUIRE(clock.getResolution != nullptr);
+#else
+    SUCCEED("Unsupported platforms publish empty asynchronous I/O tables.");
+#endif
+}
+
+TEST_CASE("P1 and P2 tables preserve platform-specific capability boundaries", "[Sora.PAL.SystemAPI]") {
+#if defined(PLATFORM_WINDOWS)
+    const auto& synchronization = PAL::LoadSynchronizationSystemAPI();
+    REQUIRE(synchronization.waitForSingleObject != nullptr);
+    REQUIRE(synchronization.waitForMultipleObjects != nullptr);
+    REQUIRE(synchronization.createMutexExWide != nullptr);
+    REQUIRE(synchronization.releaseMutex != nullptr);
+
+    const auto& memory = PAL::LoadVirtualMemorySystemAPI();
+    REQUIRE(memory.allocate != nullptr);
+    REQUIRE(memory.free != nullptr);
+    REQUIRE(memory.protect != nullptr);
+    REQUIRE(memory.query != nullptr);
+
+    const auto& process = PAL::LoadProcessControlSystemAPI();
+    REQUIRE(process.openProcess != nullptr);
+    REQUIRE(process.getExitCode != nullptr);
+    REQUIRE(process.terminate != nullptr);
+    REQUIRE(process.setPriorityClass != nullptr);
+
+    const auto& thread = PAL::LoadThreadControlSystemAPI();
+    REQUIRE(thread.setPriority != nullptr);
+    REQUIRE(thread.getPriority != nullptr);
+    REQUIRE(thread.setAffinityMask != nullptr);
+    REQUIRE(thread.suspend != nullptr);
+    REQUIRE(thread.resume != nullptr);
+
+    REQUIRE(PAL::LoadRandomSystemAPI().generate != nullptr);
+    REQUIRE(PAL::LoadModernFileSystemAPI().createDirectoryWide != nullptr);
+#elif defined(PLATFORM_LINUX)
+    const auto& memory = PAL::LoadVirtualMemorySystemAPI();
+    REQUIRE(memory.protect != nullptr);
+    REQUIRE(memory.lock != nullptr);
+    REQUIRE(memory.unlock != nullptr);
+
+    const auto& socket = PAL::LoadAdvancedSocketSystemAPI();
+    REQUIRE(socket.sendMessage != nullptr);
+    REQUIRE(socket.receiveMessage != nullptr);
+
+    const auto& network = PAL::LoadNetworkInterfaceSystemAPI();
+    REQUIRE(network.getIfAddresses != nullptr);
+    REQUIRE(network.freeIfAddresses != nullptr);
+    REQUIRE(network.ifNameToIndex != nullptr);
+
+    const auto& process = PAL::LoadProcessControlSystemAPI();
+    REQUIRE(process.fork != nullptr);
+    REQUIRE(process.exec != nullptr);
+    REQUIRE(process.wait != nullptr);
+    REQUIRE(process.kill != nullptr);
+    REQUIRE(process.signalAction != nullptr);
+
+    const auto& files = PAL::LoadModernFileSystemAPI();
+    REQUIRE(files.openAt != nullptr);
+    REQUIRE(files.makeDirectoryAt != nullptr);
+    REQUIRE(files.unlinkAt != nullptr);
+    REQUIRE(files.renameAt != nullptr);
+    REQUIRE(files.readLinkAt != nullptr);
+
+    REQUIRE(PAL::LoadLinuxSyscallSystemAPI().syscall != nullptr);
+#else
+    SUCCEED("The P1/P2 tables are intentionally empty on unsupported platforms.");
+#endif
 }
 
 TEST_CASE("Native window views enforce concrete backend identity", "[Sora.PAL.SystemAPI]") {
@@ -97,6 +279,23 @@ TEST_CASE("Native window views enforce concrete backend identity", "[Sora.PAL.Sy
     REQUIRE(xcb);
     REQUIRE(wayland);
     REQUIRE_FALSE(mismatched);
+}
+
+TEST_CASE("Window capabilities require the complete requested feature mask", "[Sora.PAL.SystemAPI]") {
+    constexpr PAL::WindowSystemCapabilities capabilities{
+        .features = std::to_underlying(PAL::WindowSystemFeature::WindowCreation) |
+                    std::to_underlying(PAL::WindowSystemFeature::EventQueue),
+    };
+    constexpr auto complete =
+        static_cast<PAL::WindowSystemFeature>(std::to_underlying(PAL::WindowSystemFeature::WindowCreation) |
+                                              std::to_underlying(PAL::WindowSystemFeature::EventQueue));
+    constexpr auto partial =
+        static_cast<PAL::WindowSystemFeature>(std::to_underlying(PAL::WindowSystemFeature::WindowCreation) |
+                                              std::to_underlying(PAL::WindowSystemFeature::WindowResize));
+
+    STATIC_REQUIRE(capabilities.Supports(complete));
+    STATIC_REQUIRE_FALSE(capabilities.Supports(partial));
+    STATIC_REQUIRE_FALSE(capabilities.Supports(PAL::WindowSystemFeature::None));
 }
 
 TEST_CASE("ModuleLoader preserves UTF-8 spellings and native Unicode search roots", "[Sora.PAL.SystemAPI]") {
