@@ -160,10 +160,12 @@ namespace Sora {
 
         /** @brief Number of direct bases of @p T. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t DirectBasesCount = Meta::DirectBaseTypesOf(^^T).size();
 
         /** @brief Number of recursively reachable bases of @p T. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t RecursiveBasesCount = Meta::RecursiveBaseTypesOf(^^T).size();
 
         /**
@@ -310,7 +312,7 @@ namespace Sora {
 
         /** @brief Class type whose bases can be represented as a single inheritance chain. */
         template<typename T>
-        concept SingleInheritanceChainClass = std::is_class_v<T> && Meta::InheritanceChainOf(^^T).size() > 0;
+        concept SingleInheritanceChainClass = std::is_class_v<T> && Traits::DirectBasesCount<T> <= 1;
 
     } // namespace Concept
 
@@ -330,10 +332,12 @@ namespace Sora {
 
         /** @brief Return all data members in @p T's single-inheritance chain, derived class first. */
         template<typename T>
+            requires Concept::SingleInheritanceChainClass<T>
         inline constexpr auto DataMembersInInheritanceChainOf = Meta::DataMembersInInheritanceChainOf(^^T);
 
         /** @brief Return all data members in @p T's single-inheritance chain, derived class first. */
         template<typename T>
+            requires Concept::SingleInheritanceChainClass<T>
         inline constexpr auto MembersInInheritanceChainOf = Meta::MembersInInheritanceChainOf(^^T);
 
     } // namespace Traits

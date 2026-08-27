@@ -15,6 +15,7 @@
 #include <meta>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <Sora/Core/Traits/MetaInfo.h>
@@ -30,7 +31,7 @@ namespace Sora {
 
             /**
              * @brief Reflection-native error carrying a category and provenance.
-             * @tparam Tag A reflected error-category entity, normally produced by `^^TagType`.
+             * @tparam Tag Reflected error-category entity, normally produced by `^^TagType`.
              * @tparam Contexts Reflected templates, values, types, members, or intermediate results.
              * @code{.cpp}
              * struct MissingMember {};
@@ -38,7 +39,7 @@ namespace Sora {
              *     ^^Sora::Meta::Error::MetaError<^^MissingMember, ^^int>>;
              * @endcode
              */
-            template<auto Tag, auto... Contexts>
+            template<std::meta::info Tag, std::meta::info... Contexts>
             struct MetaError {};
 
             /** @brief Category for an invalid template application. */
@@ -81,6 +82,17 @@ namespace Sora {
          */
         [[nodiscard]] consteval std::meta::info MakeMetaError(std::meta::info tag,
                                                               std::vector<std::meta::info> contexts = {}) {
+            if (tag == std::meta::info{}) {
+                throw std::define_static_string("Meta::MakeMetaError requires a non-empty category reflection.");
+            }
+            if (!std::meta::is_type(tag)) {
+                throw std::define_static_string("Meta::MakeMetaError requires a reflected category type.");
+            }
+            for (const auto context : contexts) {
+                if (context == std::meta::info{}) {
+                    throw std::define_static_string("Meta::MakeMetaError requires non-empty context reflections.");
+                }
+            }
             std::vector<std::meta::info> arguments;
             arguments.reserve(contexts.size() + 1);
             arguments.push_back(std::meta::reflect_constant(tag));
@@ -103,7 +115,11 @@ namespace Sora {
         [[nodiscard]] consteval bool IsMetaError(std::meta::info info) noexcept {
             info = std::meta::dealias(info);
             return std::meta::is_type(info) && std::meta::is_class_type(info) &&
-                   std::meta::has_template_arguments(info) && std::meta::template_of(info) == ^^Error::MetaError;
+                   std::meta::has_template_arguments(info) &&
+                   !std::meta::template_arguments_of(info).empty() &&
+                   std::meta::template_of(info) == ^^Error::MetaError &&
+                   std::meta::is_type(std::meta::extract<std::meta::info>(
+                       std::meta::template_arguments_of(info).front()));
         }
 
         /**
@@ -118,7 +134,7 @@ namespace Sora {
         }
 
         /**
-         * @brief Return the category reflection stored in @p error.
+         * @brief Return the canonical category reflection stored in @p error.
          * @param[in] error Reflected `Error::MetaError` to inspect.
          * @return Reflected category entity supplied as the error's first template argument.
          * @pre `IsMetaError(error)` is `true`.
@@ -126,15 +142,42 @@ namespace Sora {
          * @par Example
          * @code{.cpp}
          * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag);
-         * static_assert(Sora::Meta::ErrorTag(error) == ^^Sora::Meta::Error::OutOfRangeTag);
+         * static_assert(Sora::Meta::ErrorCategory(error) == ^^Sora::Meta::Error::OutOfRangeTag);
          * @endcode
          */
-        [[nodiscard]] consteval std::meta::info ErrorTag(std::meta::info error) {
+        [[nodiscard]] consteval std::meta::info ErrorCategory(std::meta::info error) {
             if (!IsMetaError(error)) {
-                throw std::define_static_string("Meta::ErrorTag requires Error::MetaError.");
+                throw std::define_static_string("Meta::ErrorCategory requires Error::MetaError.");
             }
             return std::meta::extract<std::meta::info>(
                 std::meta::template_arguments_of(std::meta::dealias(error)).front());
+        }
+
+        /**
+         * @brief Return the category reflection stored in @p error.
+         * @param[in] error Reflected `Error::MetaError` to inspect.
+         * @return Reflected category entity supplied as the error's first template argument.
+         * @pre `IsMetaError(error)` is `true`.
+         * @deprecated Prefer @ref ErrorCategory for new code; this name remains for source compatibility.
+         */
+        [[nodiscard]] consteval std::meta::info ErrorTag(std::meta::info error) {
+            return ErrorCategory(error);
+        }
+
+        /**
+         * @brief Test whether a reflected error belongs to a category.
+         * @tparam Tag Category reflection to match.
+         * @param[in] error Reflected meta error to inspect.
+         * @return `true` when @p error is a `MetaError` whose category is @p Tag.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag);
+         * static_assert(Sora::Meta::HasErrorTag<^^Sora::Meta::Error::OutOfRangeTag>(error));
+         * @endcode
+         */
+        template<std::meta::info Tag>
+        [[nodiscard]] consteval bool HasErrorTag(std::meta::info error) noexcept {
+            return IsMetaError(error) && ErrorCategory(error) == Tag;
         }
 
         /**
@@ -159,6 +202,29 @@ namespace Sora {
                 argument = std::meta::extract<std::meta::info>(argument);
             }
             return arguments;
+        }
+
+        /**
+         * @brief Append provenance to a reflected meta error.
+         * @param[in] error Reflected `Error::MetaError` to extend.
+         * @param[in] contexts Additional provenance reflections in source order.
+         * @return A reflected `MetaError` with the same category and appended contexts.
+         * @pre `IsMetaError(error)` is `true`; every context is non-empty.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int});
+         * constexpr auto extended = Sora::Meta::AppendContext(error, {^^double});
+         * static_assert(Sora::Meta::ErrorContextCount(extended) == 2);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info AppendContext(std::meta::info error,
+                                                              std::vector<std::meta::info> contexts = {}) {
+            if (!IsMetaError(error)) {
+                throw std::define_static_string("Meta::AppendContext requires Error::MetaError.");
+            }
+            auto allContexts = ErrorContexts(error);
+            allContexts.insert(allContexts.end(), contexts.begin(), contexts.end());
+            return MakeMetaError(ErrorCategory(error), std::move(allContexts));
         }
 
         /**
@@ -216,7 +282,7 @@ namespace Sora {
                 throw std::define_static_string("Meta::ErrorDescription requires Error::MetaError.");
             }
             std::string result{"MetaError<"};
-            result += std::string{std::meta::display_string_of(ErrorTag(error))};
+            result += std::string{std::meta::display_string_of(ErrorCategory(error))};
             result += ">(";
             bool first = true;
             for (const auto context : ErrorContexts(error)) {
@@ -377,6 +443,15 @@ namespace Sora {
         template<std::meta::info Error>
             requires Concept::MetaError<Error>
         inline constexpr std::meta::info ErrorTag = Meta::ErrorTag(Error);
+
+        /**
+         * @brief Error-category reflection of a native meta error.
+         * @tparam Error Reflected native meta error.
+         * @details This is the canonical Traits projection; @ref ErrorTag remains as a source-compatible alias.
+         */
+        template<std::meta::info Error>
+            requires Concept::MetaError<Error>
+        inline constexpr std::meta::info ErrorCategory = Meta::ErrorCategory(Error);
 
         /**
          * @brief Static-storage provenance reflections of a native meta error.

@@ -387,13 +387,27 @@ namespace Sora {
         template<typename T>
         concept Vectorizable = std::is_arithmetic_v<T> && !std::same_as<std::remove_cv_t<T>, bool> && sizeof(T) <= 8;
 
-        /** @brief Signed integer-like type. */
+        /** @brief Signed integer or enumeration type, classified through the underlying type for enums. */
         template<typename T>
-        concept SignedIntegerLike = IntegerLike<T> && std::is_signed_v<T>;
+        concept SignedIntegerLike = IntegerLike<T> && [] {
+            using U = std::remove_cvref_t<T>;
+            if constexpr (std::is_enum_v<U>) {
+                return std::is_signed_v<std::underlying_type_t<U>>;
+            } else {
+                return std::is_signed_v<U>;
+            }
+        }();
 
-        /** @brief Unsigned integer-like type. */
+        /** @brief Unsigned integer or enumeration type, classified through the underlying type for enums. */
         template<typename T>
-        concept UnsignedIntegerLike = IntegerLike<T> && std::is_unsigned_v<T>;
+        concept UnsignedIntegerLike = IntegerLike<T> && [] {
+            using U = std::remove_cvref_t<T>;
+            if constexpr (std::is_enum_v<U>) {
+                return std::is_unsigned_v<std::underlying_type_t<U>>;
+            } else {
+                return std::is_unsigned_v<U>;
+            }
+        }();
 
         /** @brief Signed arithmetic type. */
         template<typename T>

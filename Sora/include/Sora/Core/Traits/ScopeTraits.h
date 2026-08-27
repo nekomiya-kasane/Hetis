@@ -10,12 +10,16 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <meta>
+#include <ranges>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "Sora/Core/Traits/TypeTraits.h"
@@ -191,10 +195,12 @@ namespace Sora {
 
         /** @brief Static reflection array of @p T's members using unchecked access. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr auto Members = Meta::MembersOf(^^T);
 
         /** @brief Number of members in @p T. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t MembersCount = Members<T>.size();
 
         /** @brief Source identifier of @p T's @p I-th member. */
@@ -204,19 +210,21 @@ namespace Sora {
 
         template<typename T>
             requires std::is_class_v<T>
-        inline constexpr auto MemberIdentierArr = [] consteval {
+        inline constexpr auto MemberIdentifiersArr = [] consteval {
             return []<size_t... I>(std::index_sequence<I...>) {
                 return std::array<std::string_view, sizeof...(I)>{std::meta::identifier_of(Members<T>[I])...};
             }(std::make_index_sequence<MembersCount<T>>{});
-        };
+        }();
 
         /** @brief Static reflection array of @p T's non-static data members using unchecked access. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr auto DataMembers =
             std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
 
         /** @brief Number of non-static data members in @p T. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t DataMembersCount = DataMembers<T>.size();
 
         /**
@@ -245,6 +253,7 @@ namespace Sora {
 
         /** @brief Number of public non-static data members in @p T. */
         template<typename T>
+            requires std::is_class_v<T>
         inline constexpr size_t PublicDataMembersCount = PublicDataMembers<T>.size();
 
         /** @brief Static array containing source identifiers for every public non-static data member of @p T. */

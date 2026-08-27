@@ -13,6 +13,7 @@
 #include <meta>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Sora {
 
@@ -24,7 +25,7 @@ namespace Sora {
          * @return Static-storage unique name view.
          *
          * @details Type and member spellings preserve the historical Sora naming scheme. Callable declarations use
-         * the compile-time MSVC mangler because it already encodes the owning scope, name, return type, parameter
+         * the compile-time Itanium mangler because it already encodes the owning scope, name, return type, parameter
          * types, static/free/member form, and member cv/ref qualifiers. This keeps overload discrimination in one
          * implementation instead of duplicating a fragile signature renderer here.
          */
