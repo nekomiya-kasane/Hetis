@@ -76,6 +76,8 @@ namespace Sora {
          * @param[in] context Reflection access context used for member and base discovery.
          */
         template<typename Visit>
+            requires(std::invocable<Visit, size_t, std::meta::info> &&
+                     std::same_as<std::invoke_result_t<Visit, size_t, std::meta::info>, bool>)
         consteval void
         WalkHierarchyMembers(std::meta::info root, Visit&& visit,
                              std::meta::access_context context = std::meta::access_context::unchecked()) {
@@ -84,8 +86,15 @@ namespace Sora {
             std::vector<std::meta::info> seen{root};
             for (size_t i = 0; i < queue.size(); ++i) {
                 const auto [type, depth] = queue[i];
+                bool stop = false;
                 for (auto m : std::meta::members_of(type, context)) {
-                    visit(depth, m);
+                    if (!visit(depth, m)) {
+                        stop = true;
+                        break;
+                    }
+                }
+                if (stop) {
+                    return;
                 }
 
                 for (auto base : BasesOf(type, context)) {
@@ -129,7 +138,9 @@ namespace Sora {
                         std::meta::has_identifier(member) && std::meta::identifier_of(member) == identifier &&
                         std::meta::parameters_of(member).size() == parameterCount) {
                         found = true;
+                        return false;
                     }
+                    return true;
                 },
                 context);
             return found;
@@ -152,6 +163,21 @@ namespace Sora {
 
             return std::ranges::any_of(Meta::BasesOf(type),
                                        [&base](auto b) { return DerivedFrom(std::meta::type_of(b), base); });
+        }
+
+        consteval std::optional<std::meta::info>
+        GetMemberNamed(std::meta::info type, std::string_view name,
+                       std::meta::access_context context = std::meta::access_context::unchecked()) {
+            std::optional<std::meta::info> ret = std::nullopt;
+            auto&& visitor = [&name, &ret](size_t, std::meta::info member) {
+                if (std::meta::has_identifier(member) && std::meta::identifier_of(member) == name) {
+                    ret = member;
+                    return false;
+                }
+                return true;
+            };
+            WalkHierarchyMembers(type, visitor, context);
+            return ret;
         }
 
     } // namespace Meta
@@ -250,7 +276,7 @@ namespace Sora {
                     desc += delimiter;
                 }
                 desc += std::meta::has_identifier(type) ? std::meta::identifier_of(type)
-                                                         : std::meta::display_string_of(type);
+                                                        : std::meta::display_string_of(type);
             }
             auto ret = std::define_static_array(desc);
             return std::string_view{ret.data(), ret.size()};

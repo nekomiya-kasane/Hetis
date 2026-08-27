@@ -381,8 +381,8 @@ namespace Sora {
 
         /** @brief Arithmetic scalar type (either integer-like or floating-point). */
         template<typename T>
-        concept ArithmeticScalar = std::is_arithmetic_v<std::remove_cvref_t<T>> &&
-                                   !std::same_as<std::remove_cvref_t<T>, bool>;
+        concept ArithmeticScalar =
+            std::is_arithmetic_v<std::remove_cvref_t<T>> && !std::same_as<std::remove_cvref_t<T>, bool>;
 
         /** @brief Type that can be efficiently vectorized (arithmetic scalar of size <= 8 bytes). */
         template<typename T>
@@ -441,11 +441,16 @@ namespace Sora {
             { value.size() } -> std::convertible_to<size_t>;
         };
 
+        /** @brief A range of bytes. */
         template<typename T>
         concept ByteRange = std::ranges::range<T> && requires { typename std::ranges::range_value_t<T>; } &&
                             (std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, std::byte> ||
                              std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, unsigned char> ||
                              std::same_as<std::remove_cv_t<std::ranges::range_value_t<T>>, std::uint8_t>);
+
+        /** @brief Checks if a type is a specialization of a given template. */
+        template<template<typename...> class Template, typename T>
+        concept SpecializationOf = Sora::Meta::IsSpecializationOf<Template>(Sora::Meta::TypeOf(^^T));
 
     } // namespace Concept
 
@@ -482,7 +487,6 @@ namespace Sora {
         using FunctionPointer = Ret (*)(Args...);
 
     } // namespace Traits
-
 
     /** @brief Always returns true. */
     bool AlwaysTrue(auto&&...) {

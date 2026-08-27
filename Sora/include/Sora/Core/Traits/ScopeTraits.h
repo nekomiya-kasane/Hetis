@@ -42,6 +42,40 @@ namespace Sora {
             TemplateParameter, /**< Template-parameter scope. */
         };
 
+        /** @brief Coarse lexical-scope access specifier used by scope-oriented reflection utilities. */
+        enum class ScopeAccess : std::uint8_t {
+            Public,    /**< Public access specifier. */
+            Protected, /**< Protected access specifier. */
+            Private,   /**< Private access specifier. */
+            Unknown,   /**< Unknown or unspecified access specifier. */
+        };
+
+        /** @brief Flags describing special properties of a class member. */
+        enum class MemberFlag : std::uint32_t {
+            Undefined = 0xFFFFFFFF,    /**< Undefined or unknown member flags. */
+            None = 0,                  /**< No special member flags. */
+            Static = 1 << 0,           /**< Static member. */
+            Const = 1 << 1,            /**< Const-qualified member. */
+            Volatile = 1 << 2,         /**< Volatile-qualified member. */
+            Mutable = 1 << 3,          /**< Mutable member. */
+            Inline = 1 << 4,           /**< Inline member. */
+            Virtual = 1 << 5,          /**< Virtual member. */
+            Override = 1 << 6,         /**< Override specifier. */
+            Final = 1 << 7,            /**< Final specifier. */
+            Constexpr = 1 << 8,        /**< Constexpr specifier. */
+            Explicit = 1 << 9,         /**< Explicit specifier. */
+            Noexcept = 1 << 10,        /**< Noexcept specifier. */
+            Deleted = 1 << 11,         /**< Deleted member. */
+            Friend = 1 << 12,          /**< Friend member. */
+            Defaulted = 1 << 13,       /**< Defaulted member. */
+            TransactionSafe = 1 << 14, /**< Transaction-safe member. */
+            ThreadLocal = 1 << 15,     /**< Thread-local member. */
+            Function = 1 << 16,        /**< Function member. */
+            Variable = 1 << 17,        /**< Variable member. */
+            TypeAlias = 1 << 18,       /**< Type alias member. */
+            Template = 1 << 19,        /**< Template member. */
+        };
+
         /**
          * @brief Return the parent scope of @p info.
          * @param[in] info Reflected declaration or type whose parent scope is requested.
