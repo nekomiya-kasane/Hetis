@@ -702,6 +702,13 @@ namespace Sora::Math {
      * can be invoked from another @c Compile call; its expression is transparently inlined into the outer tree.
      * Repeated invocations duplicate that subtree. Staging is opt-in and may replace local multiply-add/subtract
      * patterns with explicitly fused primitives, changing intermediate rounding.
+     * @code{.cpp}
+     * constexpr auto square = Sora::Math::Compile<1>([](auto value) {
+     *     return Sora::Math::Square(value);
+     * });
+     * auto input = 3.0F;
+     * auto output = square(input); // 9.0F
+     * @endcode
      */
     template<size_t Arity, typename Function>
     [[nodiscard]] consteval auto Compile(Function&& function) {

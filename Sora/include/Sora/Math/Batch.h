@@ -31,6 +31,15 @@ namespace Sora::Math {
      * @tparam Unroll Number of independent SIMD batches issued per full loop iteration.
      * @details Full batches use unchecked vector loads and stores. The final incomplete batch uses partial operations,
      * so no inactive lane accesses memory. The function performs no dynamic allocation.
+     * @code{.cpp}
+     * std::array<float, 3> output{};
+     * const std::array left{1.0F, 2.0F, 3.0F};
+     * const std::array right{10.0F, 20.0F, 30.0F};
+     * Sora::Math::TransformBatch(std::span(output),
+     *     [](auto x, auto y) noexcept { return Sora::Math::Fma(x, y, 1.0F); },
+     *     std::span<const float>(left), std::span<const float>(right));
+     * // output == [11.0F, 41.0F, 91.0F]
+     * @endcode
      */
     template<Simd::SimdVecType V, size_t Unroll = 4, typename Output, typename Function, typename... Inputs>
         requires(!std::is_const_v<Output>) &&
@@ -71,6 +80,12 @@ namespace Sora::Math {
      * @brief Transform using the preferred throughput ABI and the measured default unroll factor.
      * @details The preferred ABI is capped by @ref Simd::kDefaultPreferredVectorBytes. Use the explicit @c V overload
      * to select another compile-time width or @ref TransformBatchNative for the widest native register.
+     * @code{.cpp}
+     * std::array<float, 2> output{};
+     * Sora::Math::TransformBatch(std::span(output), [](auto value) noexcept { return value + 1.0F; },
+     *     std::span<const float>(std::array{1.0F, 2.0F}));
+     * // output == [2.0F, 3.0F]
+     * @endcode
      */
     template<Simd::Vectorizable T, size_t Unroll = 4, size_t Extent = std::dynamic_extent, typename Function,
              typename... Inputs>
@@ -80,7 +95,15 @@ namespace Sora::Math {
         TransformBatch<V, Unroll>(std::span<T>(output), std::forward<Function>(function), inputs...);
     }
 
-    /** @brief Transform using the widest native SIMD register selected for @p T by the active target. */
+    /**
+     * @brief Transform using the widest native SIMD register selected for @p T by the active target.
+     * @code{.cpp}
+     * std::array<float, 2> output{};
+     * const std::array input{1.0F, 2.0F};
+     * Sora::Math::TransformBatchNative(std::span(output), Sora::Math::Neg, std::span<const float>(input));
+     * // output == [-1.0F, -2.0F]
+     * @endcode
+     */
     template<Simd::Vectorizable T, size_t Unroll = 4, typename Function, typename... Inputs>
     constexpr void TransformBatchNative(std::span<T> output, Function&& function,
                                         std::span<const Inputs>... inputs) noexcept {
@@ -93,6 +116,16 @@ namespace Sora::Math {
      * @tparam Unroll Number of independent SIMD batches issued per full loop iteration.
      * @details Both output channels and every input channel must have equal lengths. No temporary allocation or AoS
      * transposition is performed.
+     * @code{.cpp}
+     * std::array<float, 2> primal{};
+     * std::array<float, 2> tangent{};
+     * const std::array input{2.0F, 3.0F};
+     * const std::array direction{1.0F, 1.0F};
+     * Sora::Math::TransformBatchJvp(std::span(primal), std::span(tangent),
+     *     [](auto x) noexcept { return Sora::Math::Square(x); },
+     *     Sora::Math::JvpInput<float>{std::span<const float>(input), std::span<const float>(direction)});
+     * // primal == [4.0F, 9.0F], tangent == [4.0F, 6.0F]
+     * @endcode
      */
     template<Simd::SimdVecType V, size_t Unroll = 4, typename Output, typename Function, typename... Inputs>
         requires(!std::is_const_v<Output>) &&
@@ -143,6 +176,16 @@ namespace Sora::Math {
      * @brief Batched JVP using the preferred throughput ABI and the measured default unroll factor.
      * @details Use the explicit @c V overload to select another compile-time width or @ref TransformBatchJvpNative
      * for the widest native register.
+     * @code{.cpp}
+     * std::array<float, 1> primal{};
+     * std::array<float, 1> tangent{};
+     * const std::array input{2.0F};
+     * const std::array direction{1.0F};
+     * Sora::Math::TransformBatchJvp(std::span(primal), std::span(tangent),
+     *     [](auto x) noexcept { return Sora::Math::Square(x); },
+     *     Sora::Math::JvpInput<float>{std::span<const float>(input), std::span<const float>(direction)});
+     * // primal == [4.0F], tangent == [4.0F]
+     * @endcode
      */
     template<Simd::Vectorizable T, size_t Unroll = 4, size_t PrimalExtent = std::dynamic_extent,
              size_t TangentExtent = std::dynamic_extent, typename Function, typename... Inputs>
@@ -153,7 +196,19 @@ namespace Sora::Math {
                                      std::forward<Function>(function), inputs...);
     }
 
-    /** @brief Batched JVP using the widest native SIMD register selected for @p T. */
+    /**
+     * @brief Batched JVP using the widest native SIMD register selected for @p T.
+     * @code{.cpp}
+     * std::array<float, 1> primal{};
+     * std::array<float, 1> tangent{};
+     * const std::array input{2.0F};
+     * const std::array direction{1.0F};
+     * Sora::Math::TransformBatchJvpNative(std::span(primal), std::span(tangent),
+     *     [](auto x) noexcept { return Sora::Math::Square(x); },
+     *     Sora::Math::JvpInput<float>{std::span<const float>(input), std::span<const float>(direction)});
+     * // primal == [4.0F], tangent == [4.0F]
+     * @endcode
+     */
     template<Simd::Vectorizable T, size_t Unroll = 4, typename Function, typename... Inputs>
     constexpr void TransformBatchJvpNative(std::span<T> primalOutput, std::span<T> tangentOutput, Function&& function,
                                            JvpInput<Inputs>... inputs) noexcept {

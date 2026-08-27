@@ -222,6 +222,13 @@ namespace Sora::Math {
      * @details A constexpr portable definition can be invoked from another compilation and is transparently inlined
      * into the outer expression and module. Repeated invocations are emitted independently; this API does not create
      * a shared call node or preserve an inner numerical-policy boundary.
+     * @code{.cpp}
+     * constexpr auto definition = Sora::Math::CompilePortable<float, 1>([](auto value) {
+     *     return Sora::Math::Square(value);
+     * });
+     * auto input = 3.0F;
+     * auto output = definition(input); // 9.0F; definition also exposes PortableModule()
+     * @endcode
      */
     template<Compute::PortableScalar Scalar, size_t Arity, Compute::NumericalPolicy Policy = kContractedKernelPolicy,
              typename Function>

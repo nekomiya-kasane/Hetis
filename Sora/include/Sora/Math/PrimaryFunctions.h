@@ -60,7 +60,12 @@ namespace Sora::Math {
         using BackendFor = [:JoinBackends<Traits::BackendTypeOf<std::remove_cvref_t<Carriers>>...>():];
         /** @endcond */
 
-        /** @brief CPO implementing backend-dispatched addition. */
+        /**
+         * @brief CPO implementing backend-dispatched addition.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Add(2.0F, 3.0F); // 5.0F
+         * @endcode
+         */
         struct AddFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
@@ -73,7 +78,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched subtraction. */
+        /**
+         * @brief CPO implementing backend-dispatched subtraction.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Sub(5.0F, 2.0F); // 3.0F
+         * @endcode
+         */
         struct SubFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
@@ -86,7 +96,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched multiplication. */
+        /**
+         * @brief CPO implementing backend-dispatched multiplication.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Mul(2.0F, 3.0F); // 6.0F
+         * @endcode
+         */
         struct MulFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
@@ -99,7 +114,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched division. */
+        /**
+         * @brief CPO implementing backend-dispatched division.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Div(6.0F, 2.0F); // 3.0F
+         * @endcode
+         */
         struct DivFn {
             template<typename First, typename... Rest>
                 requires requires(First&& first, Rest&&... rest) {
@@ -112,7 +132,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched negation. */
+        /**
+         * @brief CPO implementing backend-dispatched negation.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Neg(2.0F); // -2.0F
+         * @endcode
+         */
         struct NegFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Neg(std::forward<First>(first)); }
@@ -122,7 +147,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched multiplicative inversion. */
+        /**
+         * @brief CPO implementing backend-dispatched multiplicative inversion.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Inv(4.0F); // 0.25F
+         * @endcode
+         */
         struct InvFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Inv(std::forward<First>(first)); }
@@ -132,7 +162,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched squaring. */
+        /**
+         * @brief CPO implementing backend-dispatched squaring.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Square(3.0F); // 9.0F
+         * @endcode
+         */
         struct SquareFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Square(std::forward<First>(first)); }
@@ -142,7 +177,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched absolute value. */
+        /**
+         * @brief CPO implementing backend-dispatched absolute value.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Abs(-3.0F); // 3.0F
+         * @endcode
+         */
         struct AbsFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Abs(std::forward<First>(first)); }
@@ -152,7 +192,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched sine. */
+        /**
+         * @brief CPO implementing backend-dispatched sine.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Sin(0.0F); // 0.0F
+         * @endcode
+         */
         struct SinFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Sin(std::forward<First>(first)); }
@@ -162,7 +207,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched cosine. */
+        /**
+         * @brief CPO implementing backend-dispatched cosine.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Cos(0.0F); // 1.0F
+         * @endcode
+         */
         struct CosFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Cos(std::forward<First>(first)); }
@@ -172,7 +222,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched tangent. */
+        /**
+         * @brief CPO implementing backend-dispatched tangent.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Tan(0.0F); // 0.0F
+         * @endcode
+         */
         struct TanFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Tan(std::forward<First>(first)); }
@@ -182,7 +237,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched arcsine. */
+        /**
+         * @brief CPO implementing backend-dispatched arcsine.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Asin(0.0F); // 0.0F
+         * @endcode
+         */
         struct AsinFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Asin(std::forward<First>(first)); }
@@ -192,7 +252,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched arccosine. */
+        /**
+         * @brief CPO implementing backend-dispatched arccosine.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Acos(1.0F); // 0.0F
+         * @endcode
+         */
         struct AcosFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Acos(std::forward<First>(first)); }
@@ -202,7 +267,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched arctangent. */
+        /**
+         * @brief CPO implementing backend-dispatched arctangent.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Atan(0.0F); // 0.0F
+         * @endcode
+         */
         struct AtanFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Atan(std::forward<First>(first)); }
@@ -212,7 +282,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched four-quadrant arctangent. */
+        /**
+         * @brief CPO implementing backend-dispatched four-quadrant arctangent.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Atan2(0.0F, 1.0F); // 0.0F
+         * @endcode
+         */
         struct Atan2Fn {
             template<typename First, typename Second>
                 requires requires(First&& first, Second&& second) {
@@ -225,7 +300,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched natural exponential. */
+        /**
+         * @brief CPO implementing backend-dispatched natural exponential.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Exp(0.0F); // 1.0F
+         * @endcode
+         */
         struct ExpFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Exp(std::forward<First>(first)); }
@@ -235,7 +315,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched natural logarithm. */
+        /**
+         * @brief CPO implementing backend-dispatched natural logarithm.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Log(1.0F); // 0.0F
+         * @endcode
+         */
         struct LogFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Log(std::forward<First>(first)); }
@@ -245,7 +330,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched square root. */
+        /**
+         * @brief CPO implementing backend-dispatched square root.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Sqrt(9.0F); // 3.0F
+         * @endcode
+         */
         struct SqrtFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Sqrt(std::forward<First>(first)); }
@@ -255,7 +345,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched exponentiation. */
+        /**
+         * @brief CPO implementing backend-dispatched exponentiation.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Pow(2.0F, 3.0F); // 8.0F
+         * @endcode
+         */
         struct PowFn {
             template<typename First, typename Second>
                 requires requires(First&& first, Second&& second) {
@@ -268,7 +363,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched @c a*b+c. */
+        /**
+         * @brief CPO implementing backend-dispatched @c a*b+c.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Fma(2.0F, 3.0F, 1.0F); // 7.0F
+         * @endcode
+         */
         struct FmaFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
@@ -285,7 +385,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched @c a*b-c. */
+        /**
+         * @brief CPO implementing backend-dispatched @c a*b-c.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Mfs(2.0F, 3.0F, 1.0F); // 5.0F
+         * @endcode
+         */
         struct MfsFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
@@ -302,7 +407,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched @c -a*b-c. */
+        /**
+         * @brief CPO implementing backend-dispatched @c -a*b-c.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Nms(2.0F, 3.0F, 1.0F); // -7.0F
+         * @endcode
+         */
         struct NmsFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
@@ -319,7 +429,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched @c -a*b+c. */
+        /**
+         * @brief CPO implementing backend-dispatched @c -a*b+c.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Nma(2.0F, 3.0F, 1.0F); // -5.0F
+         * @endcode
+         */
         struct NmaFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
@@ -336,7 +451,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched linear interpolation. */
+        /**
+         * @brief CPO implementing backend-dispatched linear interpolation.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Lerp(0.0F, 10.0F, 0.25F); // 2.5F
+         * @endcode
+         */
         struct LerpFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
@@ -353,7 +473,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched clamping. */
+        /**
+         * @brief CPO implementing backend-dispatched clamping.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Clamp(12.0F, 0.0F, 10.0F); // 10.0F
+         * @endcode
+         */
         struct ClampFn {
             template<typename First, typename Second, typename Third>
                 requires requires(First&& first, Second&& second, Third&& third) {
@@ -370,7 +495,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched lane selection. */
+        /**
+         * @brief CPO implementing backend-dispatched lane selection.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Select(true, 7.0F, 3.0F); // 7.0F
+         * @endcode
+         */
         struct SelectFn {
             template<typename Condition, typename First, typename Second>
                 requires requires(Condition&& condition, First&& first, Second&& second) {
@@ -386,7 +516,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched unit-interval clamping. */
+        /**
+         * @brief CPO implementing backend-dispatched unit-interval clamping.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Saturate(1.25F); // 1.0F
+         * @endcode
+         */
         struct SaturateFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Saturate(std::forward<First>(first)); }
@@ -396,7 +531,12 @@ namespace Sora::Math {
             }
         };
 
-        /** @brief CPO implementing backend-dispatched sign extraction. */
+        /**
+         * @brief CPO implementing backend-dispatched sign extraction.
+         * @code{.cpp}
+         * constexpr auto output = Sora::Math::Sign(-4.0F); // -1.0F
+         * @endcode
+         */
         struct SignFn {
             template<typename First>
                 requires requires(First&& first) { BackendFor<First>::Sign(std::forward<First>(first)); }
