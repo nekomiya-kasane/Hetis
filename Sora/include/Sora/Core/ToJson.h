@@ -703,10 +703,22 @@ namespace Sora {
 
     } // namespace CPO
 
-    /** @brief Customisation-point object that converts supported values to @c Sora::Json. */
+    /**
+     * @brief Customisation-point object that converts supported values to @c Sora::Json.
+     * @code{.cpp}
+     * auto input = std::array{1, 2, 3};
+     * auto output = Sora::ToJson(input); // [1, 2, 3]
+     * @endcode
+     */
     inline constexpr CPO::ToJsonFn ToJson{};
 
-    /** @brief Customisation-point object that deserializes JSON into an explicitly tagged or existing value. */
+    /**
+     * @brief Customisation-point object that deserializes JSON into an explicitly tagged or existing value.
+     * @code{.cpp}
+     * auto input = Sora::Json{42};
+     * auto output = Sora::FromJson(std::in_place_type<int>, input); // 42
+     * @endcode
+     */
     inline constexpr CPO::FromJsonFn FromJson{};
 
 } // namespace Sora

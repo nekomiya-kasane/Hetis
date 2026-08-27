@@ -68,8 +68,10 @@ namespace Sora {
 
     /**
      * @brief Invoke a Sora adaptor closure with a piped value.
-     * @details Both operands retain their cv-ref categories, so an owning rvalue range can be transferred into an
-     * adapter while an lvalue range remains borrowed. The closure must be invocable with the value.
+     * @details This overload is the value-application form of @c operator|: the left operand is the input and the
+     * right operand is an adaptor closure. Both operands retain their cv-ref categories, so an owning rvalue range can
+     * be transferred into an adaptor while an lvalue range remains borrowed. The closure must be invocable with the
+     * value. In Mathematica terms, @c value | adaptor is the explicit C++ spelling of @c value // function.
      * @param[in] value Input value or range.
      * @param[in] adaptor Pipeable closure to invoke.
      * @return The adaptor invocation result, preserving its declared value category.
@@ -331,7 +333,10 @@ namespace Sora {
     /**
      * @brief Compose two Sora adaptor closures from left to right.
      * @details The resulting closure owns both operands and invokes the left closure before the right closure when it
-     * is eventually called. This overload is selected only when both operands are adaptor closures.
+     * is eventually called. This is the composition form of @c operator| and is selected only when both operands are
+     * adaptor closures; ordinary values cannot enter this overload. Use @ref Compose when right-to-left composition is
+     * required. In Mathematica terms, @c first | second is the typed C++ spelling of applying @c first and then
+     * @c second, rather than introducing an ambiguous new operator token.
      * @tparam Left Left closure type.
      * @tparam Right Right closure type.
      * @param[in] left First adaptor closure.
@@ -346,6 +351,8 @@ namespace Sora {
      * @endcode
      */
     template<Concept::AdaptorClosure Left, Concept::AdaptorClosure Right>
+        requires std::constructible_from<std::decay_t<Left>, Left> &&
+                 std::constructible_from<std::decay_t<Right>, Right>
     [[nodiscard]] constexpr auto operator|(Left&& left, Right&& right) {
         return Then(std::forward<Left>(left), std::forward<Right>(right));
     }

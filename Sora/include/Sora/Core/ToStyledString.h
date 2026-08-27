@@ -517,7 +517,13 @@ namespace Sora {
 
     } // namespace CPO
 
-    /** @brief Customisation-point object that converts a supported value to tapioca-styled terminal text. */
+    /**
+     * @brief Customisation-point object that converts a supported value to tapioca-styled terminal text.
+     * @code{.cpp}
+     * auto input = 42;
+     * auto output = Sora::ToStyledString(input, {.color = false}); // "42"
+     * @endcode
+     */
     inline constexpr CPO::ToStyledStringFn ToStyledString{};
 
     namespace Meta {

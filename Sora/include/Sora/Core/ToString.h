@@ -682,13 +682,31 @@ namespace Sora {
 
     } // namespace CPO
 
-    /** @brief Customization-point object that converts a supported value to an owning UTF-8 string. */
+    /**
+     * @brief Customization-point object that converts a supported value to an owning UTF-8 string.
+     * @code{.cpp}
+     * auto input = 42;
+     * auto output = Sora::ToString(input); // "42"
+     * @endcode
+     */
     inline constexpr CPO::ToStringFn ToString{};
 
-    /** @brief Customization-point object that exposes a stable string view without allocation. */
+    /**
+     * @brief Customization-point object that exposes a stable string view without allocation.
+     * @code{.cpp}
+     * std::string input = "hello";
+     * auto output = Sora::ToStringView(input); // "hello"
+     * @endcode
+     */
     inline constexpr CPO::ToStringViewFn ToStringView{};
 
-    /** @brief Customization-point object that strictly deserializes UTF-8 text to an explicitly tagged target type. */
+    /**
+     * @brief Customization-point object that strictly deserializes UTF-8 text to an explicitly tagged target type.
+     * @code{.cpp}
+     * auto input = std::string_view{"42"};
+     * auto output = Sora::FromString(std::in_place_type<int>, input); // expected value 42
+     * @endcode
+     */
     inline constexpr CPO::FromStringFn FromString{};
 
     namespace Meta {
