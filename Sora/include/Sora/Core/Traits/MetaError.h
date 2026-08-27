@@ -11,6 +11,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <meta>
 #include <string>
@@ -32,7 +33,7 @@ namespace Sora {
 
             /**
              * @brief Reflection-native error carrying a category and provenance.
-             * @tparam Tag Reflected error-category entity, normally produced by `^^TagType`.
+             * @tparam Category Reflected error-category entity, normally produced by `^^CategoryType`.
              * @tparam Contexts Reflected templates, values, types, members, or intermediate results.
              * @code{.cpp}
              * struct MissingMember {};
@@ -40,31 +41,35 @@ namespace Sora {
              *     ^^Sora::Meta::Error::MetaError<^^MissingMember, ^^int>>;
              * @endcode
              */
-            template<auto Tag, auto... Contexts>
-                requires(std::same_as<decltype(Tag), std::meta::info> &&
+            template<auto Category, auto... Contexts>
+                requires(std::same_as<decltype(Category), std::meta::info> &&
                          (std::same_as<decltype(Contexts), std::meta::info> && ...))
             struct MetaError {};
 
-            /** @brief Category for an invalid template application. */
-            struct NonInvocableTag {};
+            inline namespace Category {
 
-            /** @brief Category for a valid application whose result is not a type. */
-            struct NonTypeResultTag {};
+                /** @brief Category for an invalid template application. */
+                struct NonInvocable {};
 
-            /** @brief Category for a predicate whose reflected result is not `bool`. */
-            struct NonBooleanPredResultTag {};
+                /** @brief Category for a valid application whose result is not a type. */
+                struct NonTypeResult {};
 
-            /** @brief Category for an algorithm result that is not a reflected InfoList value. */
-            struct NonInfoListResultTag {};
+                /** @brief Category for a predicate whose reflected result is not `bool`. */
+                struct NonBooleanPredResult {};
 
-            /** @brief Category for an input that is not the required sequence representation. */
-            struct InvalidSequenceTag {};
+                /** @brief Category for an algorithm result that is not a reflected InfoList value. */
+                struct NonInfoListResult {};
 
-            /** @brief Category for a multi-sequence operation whose lengths differ. */
-            struct LengthMismatchTag {};
+                /** @brief Category for an input that is not the required sequence representation. */
+                struct InvalidSequence {};
 
-            /** @brief Category for a sequence operation whose requested bounds are outside the input. */
-            struct OutOfRangeTag {};
+                /** @brief Category for a multi-sequence operation whose lengths differ. */
+                struct LengthMismatch {};
+
+                /** @brief Category for a sequence operation whose requested bounds are outside the input. */
+                struct OutOfRange {};
+
+            } // namespace Category
 
         } // namespace Error
 
@@ -79,7 +84,7 @@ namespace Sora {
          * @return Reflection of `Error::MetaError<tag, contexts...>`.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable, {^^int});
          * static_assert(Sora::Meta::IsMetaError(error));
          * @endcode
          */
@@ -111,19 +116,17 @@ namespace Sora {
          * @return `true` when the dealiased entity is a native meta error.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable);
          * static_assert(Sora::Meta::IsMetaError(error));
          * @endcode
          */
         [[nodiscard]] consteval bool IsMetaError(std::meta::info info) noexcept {
             info = std::meta::dealias(info);
             return std::meta::is_type(info) && std::meta::is_class_type(info) &&
-                   std::meta::has_template_arguments(info) &&
-                   !std::meta::template_arguments_of(info).empty() &&
-                   std::meta::template_of(info) ==
-                       std::meta::template_of(^^Error::MetaError<^^Error::MetaSuccess>) &&
-                   std::meta::is_type(std::meta::extract<std::meta::info>(
-                       std::meta::template_arguments_of(info).front()));
+                   std::meta::has_template_arguments(info) && !std::meta::template_arguments_of(info).empty() &&
+                   std::meta::template_of(info) == std::meta::template_of(^^Error::MetaError<^^Error::MetaSuccess>) &&
+                   std::meta::is_type(
+                       std::meta::extract<std::meta::info>(std::meta::template_arguments_of(info).front()));
         }
 
         /**
@@ -145,8 +148,8 @@ namespace Sora {
          * @throws A translation-time diagnostic when @p error is not a `MetaError`.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag);
-         * static_assert(Sora::Meta::ErrorCategory(error) == ^^Sora::Meta::Error::OutOfRangeTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange);
+         * static_assert(Sora::Meta::ErrorCategory(error) == ^^Sora::Meta::Error::OutOfRange);
          * @endcode
          */
         [[nodiscard]] consteval std::meta::info ErrorCategory(std::meta::info error) {
@@ -158,30 +161,19 @@ namespace Sora {
         }
 
         /**
-         * @brief Return the category reflection stored in @p error.
-         * @param[in] error Reflected `Error::MetaError` to inspect.
-         * @return Reflected category entity supplied as the error's first template argument.
-         * @pre `IsMetaError(error)` is `true`.
-         * @deprecated Prefer @ref ErrorCategory for new code; this name remains for source compatibility.
-         */
-        [[nodiscard]] consteval std::meta::info ErrorTag(std::meta::info error) {
-            return ErrorCategory(error);
-        }
-
-        /**
          * @brief Test whether a reflected error belongs to a category.
-         * @tparam Tag Category reflection to match.
+         * @tparam Category Category reflection to match.
          * @param[in] error Reflected meta error to inspect.
-         * @return `true` when @p error is a `MetaError` whose category is @p Tag.
+         * @return `true` when @p error is a `MetaError` whose category is @p Category.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag);
-         * static_assert(Sora::Meta::HasErrorTag<^^Sora::Meta::Error::OutOfRangeTag>(error));
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange);
+         * static_assert(Sora::Meta::HasErrorCategory<^^Sora::Meta::Error::OutOfRange>(error));
          * @endcode
          */
-        template<std::meta::info Tag>
-        [[nodiscard]] consteval bool HasErrorTag(std::meta::info error) noexcept {
-            return IsMetaError(error) && ErrorCategory(error) == Tag;
+        template<std::meta::info Category>
+        [[nodiscard]] consteval bool HasErrorCategory(std::meta::info error) noexcept {
+            return IsMetaError(error) && ErrorCategory(error) == Category;
         }
 
         /**
@@ -192,7 +184,7 @@ namespace Sora {
          * @throws A translation-time diagnostic when @p error is not a `MetaError`.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int});
          * static_assert(Sora::Meta::ErrorContexts(error).size() == 1);
          * @endcode
          */
@@ -216,7 +208,7 @@ namespace Sora {
          * @pre `IsMetaError(error)` is `true`; every context is non-empty.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int});
          * constexpr auto extended = Sora::Meta::AppendContext(error, {^^double});
          * static_assert(Sora::Meta::ErrorContextCount(extended) == 2);
          * @endcode
@@ -239,7 +231,7 @@ namespace Sora {
          * @throws A translation-time diagnostic when @p error is not a `MetaError`.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int});
          * static_assert(Sora::Meta::ErrorContextCount(error) == 1);
          * @endcode
          */
@@ -254,7 +246,7 @@ namespace Sora {
          * @return First native meta error unchanged, or `std::meta::info{}` when every input is error-free.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable);
          * static_assert(Sora::Meta::FirstMetaError<^^int, error>() == error);
          * @endcode
          */
@@ -276,7 +268,7 @@ namespace Sora {
          * @throws A translation-time diagnostic when @p error is not a `MetaError`.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable, {^^int});
          * constexpr auto text = Sora::Meta::ErrorDescription(error);
          * static_assert(!text.empty());
          * @endcode
@@ -308,7 +300,7 @@ namespace Sora {
          * @par Example
          * @code{.cpp}
          * using Failure = Sora::Meta::InfoType<
-         *     Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag)>;
+         *     Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable)>;
          * constexpr auto text = Sora::Meta::ErrorDescriptionOf<Failure>();
          * static_assert(!text.empty());
          * @endcode
@@ -328,7 +320,7 @@ namespace Sora {
          * @tparam Info Reflection to inspect.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable);
          * static_assert(Sora::Concept::MetaError<error>);
          * @endcode
          */
@@ -341,7 +333,7 @@ namespace Sora {
          * @par Example
          * @code{.cpp}
          * using Failure = Sora::Meta::InfoType<
-         *     Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag)>;
+         *     Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable)>;
          * static_assert(Sora::Concept::MetaErrorType<Failure>);
          * @endcode
          */
@@ -386,7 +378,7 @@ namespace Sora {
          * @tparam Inputs Reflections inspected as one error domain.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable);
          * static_assert(Sora::Concept::HasMetaError<^^int, error>);
          * @endcode
          */
@@ -413,7 +405,7 @@ namespace Sora {
          * @tparam Inputs Reflections inspected from left to right.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable);
          * static_assert(Sora::Traits::FirstMetaError<^^int, error> == error);
          * @endcode
          */
@@ -440,18 +432,9 @@ namespace Sora {
          * @tparam Error Reflected native meta error.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag);
-         * static_assert(Sora::Traits::ErrorTag<error> == ^^Sora::Meta::Error::OutOfRangeTag);
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange);
+         * static_assert(Sora::Traits::ErrorCategory<error> == ^^Sora::Meta::Error::OutOfRange);
          * @endcode
-         */
-        template<std::meta::info Error>
-            requires Concept::MetaError<Error>
-        inline constexpr std::meta::info ErrorTag = Meta::ErrorTag(Error);
-
-        /**
-         * @brief Error-category reflection of a native meta error.
-         * @tparam Error Reflected native meta error.
-         * @details This is the canonical Traits projection; @ref ErrorTag remains as a source-compatible alias.
          */
         template<std::meta::info Error>
             requires Concept::MetaError<Error>
@@ -463,7 +446,7 @@ namespace Sora {
          * @note The returned array has static storage duration and preserves source order.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int});
          * static_assert(Sora::Traits::ErrorContexts<error>.size() == 1);
          * @endcode
          */
@@ -476,7 +459,7 @@ namespace Sora {
          * @tparam Error Reflected native meta error.
          * @par Example
          * @code{.cpp}
-         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int});
+         * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int});
          * static_assert(Sora::Traits::ErrorContextCount<error> == 1);
          * @endcode
          */
@@ -490,7 +473,7 @@ namespace Sora {
          * @par Example
          * @code{.cpp}
          * using Failure = Sora::Meta::InfoType<
-         *     Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRangeTag, {^^int})>;
+         *     Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int})>;
          * static_assert(Sora::Traits::ErrorContextCountOf<Failure> == 1);
          * @endcode
          */

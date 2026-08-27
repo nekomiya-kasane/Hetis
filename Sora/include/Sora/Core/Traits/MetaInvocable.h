@@ -39,20 +39,20 @@ namespace Sora {
          * @endcode
          * @tparam Function Reflected template to apply.
          * @tparam Arguments Reflected application arguments.
-         * @return Substitution result, first input error, or `NonInvocableTag` with invocation provenance.
+         * @return Substitution result, first input error, or `NonInvocable` with invocation provenance.
          */
         template<std::meta::info Function, std::meta::info... Arguments>
         inline constexpr std::meta::info Invoke = [] consteval {
             if constexpr (IsMetaError(Function)) {
                 return Function;
             } else if constexpr (!std::meta::is_template(Function)) {
-                return MakeMetaError(^^Error::NonInvocableTag, {Function});
+                return MakeMetaError(^^Error::NonInvocable, {Function});
             } else if constexpr (FirstMetaError<Arguments...>() != std::meta::info{}) {
                 return FirstMetaError<Arguments...>();
             } else if constexpr (std::meta::can_substitute(Function, {Arguments...})) {
                 return std::meta::substitute(Function, {Arguments...});
             } else {
-                return MakeMetaError(^^Error::NonInvocableTag, {Function, Arguments...});
+                return MakeMetaError(^^Error::NonInvocable, {Function, Arguments...});
             }
         }();
 
@@ -126,7 +126,7 @@ namespace Sora {
              * @tparam Result Reflected invocation result to validate.
              * @tparam Function Reflected function recorded in failure provenance.
              * @tparam Arguments Reflected arguments recorded in failure provenance.
-             * @return @p Result when it is a type/error, otherwise a `NonTypeResultTag` error.
+             * @return @p Result when it is a type/error, otherwise a `NonTypeResult` error.
              * @par Example
              * @code{.cpp}
              * constexpr auto type = Sora::Meta::Detail::RequireType<^^int, ^^std::type_identity, ^^int>();
@@ -138,14 +138,14 @@ namespace Sora {
                 if constexpr (IsMetaError(Result) || std::meta::is_type(Result)) {
                     return Result;
                 } else {
-                    return MakeMetaError(^^Error::NonTypeResultTag, {Function, Arguments...});
+                    return MakeMetaError(^^Error::NonTypeResult, {Function, Arguments...});
                 }
             }
 
         } // namespace Detail
 
         /**
-         * @brief Type projection of @ref Invoke; a non-type result becomes `NonTypeResultTag`.
+         * @brief Type projection of @ref Invoke; a non-type result becomes `NonTypeResult`.
          * @tparam Function Reflected template to apply.
          * @tparam Arguments Reflected application arguments.
          * @return Resulting C++ type or the corresponding type-level `MetaError` specialization.

@@ -139,7 +139,7 @@ namespace Sora::Meta {
      * @brief Preserve a reflected type or convert a non-type result into a recoverable meta error.
      * @param[in] result Reflection produced by a type-level operation.
      * @param[in] context Optional provenance entities placed before a non-type result in the error context.
-     * @return @p result when it is a type or `MetaError`; otherwise `NonTypeResultTag` with provenance.
+     * @return @p result when it is a type or `MetaError`; otherwise `NonTypeResult` with provenance.
      * @par Example
      * @code{.cpp}
      * constexpr auto value = std::meta::reflect_constant(42);
@@ -153,7 +153,7 @@ namespace Sora::Meta {
         }
         std::vector<std::meta::info> values(context.begin(), context.end());
         values.push_back(result);
-        return MakeMetaError(^^Error::NonTypeResultTag, values);
+        return MakeMetaError(^^Error::NonTypeResult, values);
     }
 
     /**
@@ -163,7 +163,7 @@ namespace Sora::Meta {
      * @par Complexity Linear in the inspected prefix.
      * @par Example
      * @code{.cpp}
-     * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+     * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocable);
      * static_assert(Sora::Meta::FirstMetaError(Sora::Meta::InfoList{^^int, error}) == error);
      * @endcode
      */
@@ -190,7 +190,7 @@ namespace Sora::Meta {
                 return function;
             }
             if (!std::meta::is_template(function)) {
-                return MakeMetaError(^^Error::NonInvocableTag, {function});
+                return MakeMetaError(^^Error::NonInvocable, {function});
             }
             for (const auto argument : arguments) {
                 if (IsMetaError(argument)) {
@@ -200,7 +200,7 @@ namespace Sora::Meta {
             if (!std::meta::can_substitute(function, arguments)) {
                 std::vector<std::meta::info> context{function};
                 context.append_range(arguments);
-                return MakeMetaError(^^Error::NonInvocableTag, context);
+                return MakeMetaError(^^Error::NonInvocable, context);
             }
             return std::meta::substitute(function, arguments);
         }
@@ -211,7 +211,7 @@ namespace Sora::Meta {
      * @brief Invoke a reflected template with a dynamically assembled argument list.
      * @param[in] function Reflected template to substitute.
      * @param[in] arguments Reflected template arguments in source order.
-     * @return Substitution result, the first input error, or `NonInvocableTag` with invocation provenance.
+     * @return Substitution result, the first input error, or `NonInvocable` with invocation provenance.
      * @par Example
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::Apply(^^std::pair, Sora::Meta::InfoList{^^int, ^^double});
@@ -230,7 +230,7 @@ namespace Sora::Meta {
                 return function;
             }
             return std::meta::is_template(function) ? std::meta::info{}
-                                                    : MakeMetaError(^^Error::NonInvocableTag, {function});
+                                                    : MakeMetaError(^^Error::NonInvocable, {function});
         }
 
         /** @brief Validate the unary boolean predicate protocol used by collection algorithms. */
@@ -240,10 +240,10 @@ namespace Sora::Meta {
             }
             if (!std::meta::is_function(pred) || std::meta::parameters_of(pred).size() != 1 ||
                 !std::meta::is_invocable_type(std::meta::type_of(pred), {^^std::meta::info})) {
-                return MakeMetaError(^^Error::NonInvocableTag, {pred});
+                return MakeMetaError(^^Error::NonInvocable, {pred});
             }
             return std::meta::return_type_of(pred) == ^^bool ? std::meta::info{}
-                                                             : MakeMetaError(^^Error::NonBooleanPredResultTag, {pred});
+                                                             : MakeMetaError(^^Error::NonBooleanPredResult, {pred});
         }
 
         /**
@@ -260,7 +260,7 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info ComposeInvoke(const InfoList& functions, const InfoList& arguments) {
             if (functions.empty()) {
-                return MakeMetaError(^^Error::NonInvocableTag);
+                return MakeMetaError(^^Error::NonInvocable);
             }
             for (const auto function : functions) {
                 if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
@@ -335,15 +335,15 @@ namespace Sora::Meta {
                 return function;
             }
             if (!std::meta::is_function(function)) {
-                return MakeMetaError(^^Error::NonInvocableTag, {function});
+                return MakeMetaError(^^Error::NonInvocable, {function});
             }
             const auto parameters = std::meta::parameters_of(function);
             if (parameters.size() != 1 ||
                 !std::meta::is_invocable_type(std::meta::type_of(function), {^^std::meta::info})) {
-                return MakeMetaError(^^Error::NonInvocableTag, {function});
+                return MakeMetaError(^^Error::NonInvocable, {function});
             }
             if (std::meta::dealias(std::meta::remove_cvref(std::meta::return_type_of(function))) != ^^InfoList) {
-                return MakeMetaError(^^Error::NonInfoListResultTag, {function});
+                return MakeMetaError(^^Error::NonInfoListResult, {function});
             }
             if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
                 return error;
@@ -357,7 +357,7 @@ namespace Sora::Meta {
                     return mapped;
                 }
                 if (!IsInfoList(mapped)) {
-                    return MakeMetaError(^^Error::NonInfoListResultTag, {function, value, mapped});
+                    return MakeMetaError(^^Error::NonInfoListResult, {function, value, mapped});
                 }
                 const auto mappedList = RequireInfoList(mapped);
                 if (const auto error = FirstMetaError(mappedList); error != std::meta::info{}) {
@@ -411,7 +411,7 @@ namespace Sora::Meta {
      * @brief Retain entities accepted by a reflected unary predicate.
      * @param[in] pred Reflected function satisfying the unary meta-predicate protocol.
      * @param[in] input Source sequence.
-     * @return Reflected stable subsequence, `NonInvocableTag`, `NonBooleanPredResultTag`, or the first input error.
+     * @return Reflected stable subsequence, `NonInvocable`, `NonBooleanPredResult`, or the first input error.
      * @par Example
      * @code{.cpp}
      * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
@@ -449,7 +449,7 @@ namespace Sora::Meta {
      * @brief Flatten the reflected `InfoList` returned for every input entity.
      * @param[in] function Reflected unary consteval function accepting `std::meta::info` and returning `InfoList`.
      * @param[in] input Source sequence; entities need not be types.
-     * @return Concatenated reflected `InfoList`, the first mapper error, `NonInfoListResultTag`, or a nested input
+     * @return Concatenated reflected `InfoList`, the first mapper error, `NonInfoListResult`, or a nested input
      * error.
      * @details The mapper result for each entity is validated before the next entity is visited. Nested `MetaError`
      * values are propagated unchanged instead of being silently flattened. Type-pack mapping belongs to
@@ -547,7 +547,7 @@ namespace Sora::Meta {
      * @param[in] function Reflected template accepting one entity from each input.
      * @param[in] left First source sequence.
      * @param[in] right Second source sequence.
-     * @return Reflected `InfoList`, `LengthMismatchTag`, an invocation error, or the first input error.
+     * @return Reflected `InfoList`, `LengthMismatch`, an invocation error, or the first input error.
      * @par Example
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::Zip(^^std::pair,
@@ -570,7 +570,7 @@ namespace Sora::Meta {
             return error;
         }
         if (left.size() != right.size()) {
-            return MakeMetaError(^^Error::LengthMismatchTag, {function, std::meta::reflect_constant(left.size()),
+            return MakeMetaError(^^Error::LengthMismatch, {function, std::meta::reflect_constant(left.size()),
                                                               std::meta::reflect_constant(right.size())});
         }
         std::vector<std::meta::info> output;
@@ -861,7 +861,7 @@ namespace Sora::Meta {
     /**
      * @brief Project a collection result into a reflected `Traits::TypeList`.
      * @param[in] result Reflected `InfoList` success value or `MetaError`.
-     * @return Reflected `TypeList`, the input error, `NonInfoListResultTag`, or `NonTypeResultTag`.
+     * @return Reflected `TypeList`, the input error, `NonInfoListResult`, or `NonTypeResult`.
      * @par Example
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::ToTypeList(
@@ -874,7 +874,7 @@ namespace Sora::Meta {
             return result;
         }
         if (!IsInfoList(result)) {
-            return MakeMetaError(^^Error::NonInfoListResultTag, {result});
+            return MakeMetaError(^^Error::NonInfoListResult, {result});
         }
         const auto list = RequireInfoList(result);
         if (const auto error = FirstMetaError(list); error != std::meta::info{}) {
@@ -882,7 +882,7 @@ namespace Sora::Meta {
         }
         for (const auto entity : list) {
             if (!std::meta::is_type(entity)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {entity});
+                return MakeMetaError(^^Error::NonTypeResult, {entity});
             }
         }
         return ToTypeList(list);
@@ -891,8 +891,8 @@ namespace Sora::Meta {
     /**
      * @brief Project the non-static data-member types of a reflected type into a reflected `TypeList`.
      * @param[in] type Reflected class or aggregate type.
-     * @return Reflected member `TypeList`, the input error, `NonTypeResultTag` for a non-type reflection, or
-     * `NonInvocableTag` for a type that has no class-member domain.
+     * @return Reflected member `TypeList`, the input error, `NonTypeResult` for a non-type reflection, or
+     * `NonInvocable` for a type that has no class-member domain.
      * @par Example
      * @code{.cpp}
      * struct Record { int id; double weight; };
@@ -905,10 +905,10 @@ namespace Sora::Meta {
             return type;
         }
         if (!std::meta::is_type(type)) {
-            return MakeMetaError(^^Error::NonTypeResultTag, {type});
+            return MakeMetaError(^^Error::NonTypeResult, {type});
         }
         if (!std::meta::is_class_type(type)) {
-            return MakeMetaError(^^Error::NonInvocableTag, {type});
+            return MakeMetaError(^^Error::NonInvocable, {type});
         }
         const auto members = std::meta::nonstatic_data_members_of(type, std::meta::access_context::unchecked()) |
                              std::views::transform(std::meta::type_of);
@@ -938,7 +938,7 @@ namespace Sora::Meta {
             }
             if (!IsTypeList(list)) {
                 return {.error = MakeMetaError(
-                            ^^Error::InvalidSequenceTag,
+                            ^^Error::InvalidSequence,
                             std::vector<std::meta::info>{context.begin(), context.end()})};
             }
             const auto types = ToInfoList(list);
@@ -952,7 +952,7 @@ namespace Sora::Meta {
         /**
          * @brief Concatenate reflected TypeLists in source order.
          * @param[in] lists Sequence whose elements must each reflect a `Traits::TypeList` specialization.
-         * @return Reflected concatenated `TypeList`, `InvalidSequenceTag`, or the first error in flattened source
+         * @return Reflected concatenated `TypeList`, `InvalidSequence`, or the first error in flattened source
          * order.
          * @par Example
          * @code{.cpp}
@@ -1046,7 +1046,7 @@ namespace Sora::Meta {
         /**
          * @brief Return the number of types in a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Reflected `std::size_t`, or the input `MetaError`/`InvalidSequenceTag`.
+         * @return Reflected `std::size_t`, or the input `MetaError`/`InvalidSequence`.
          * @par Example
          * @code{.cpp}
          * constexpr auto count = Sora::Meta::Types::Length(^^Sora::Traits::TypeList<int, double>);
@@ -1065,7 +1065,7 @@ namespace Sora::Meta {
          * @brief Return the type at @p index in a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] index Zero-based type index.
-         * @return Reflected type, or the input `MetaError`, `InvalidSequenceTag`, or `OutOfRangeTag` when @p index
+         * @return Reflected type, or the input `MetaError`, `InvalidSequence`, or `OutOfRange` when @p index
          * is outside the list.
          * @par Example
          * @code{.cpp}
@@ -1079,7 +1079,7 @@ namespace Sora::Meta {
                 return inspected.error;
             }
             if (index >= inspected.types.size()) {
-                return MakeMetaError(^^Error::OutOfRangeTag, {list});
+                return MakeMetaError(^^Error::OutOfRange, {list});
             }
             return inspected.types[index];
         }
@@ -1087,7 +1087,7 @@ namespace Sora::Meta {
         /**
          * @brief Return the first type in a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Its first reflected type, or the input `MetaError`, `InvalidSequenceTag`, or `OutOfRangeTag`
+         * @return Its first reflected type, or the input `MetaError`, `InvalidSequence`, or `OutOfRange`
          * for an empty list.
          * @par Example
          * @code{.cpp}
@@ -1102,7 +1102,7 @@ namespace Sora::Meta {
         /**
          * @brief Return the final type in a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Its final reflected type, or the input `MetaError`, `InvalidSequenceTag`, or `OutOfRangeTag`
+         * @return Its final reflected type, or the input `MetaError`, `InvalidSequence`, or `OutOfRange`
          * for an empty list.
          * @par Example
          * @code{.cpp}
@@ -1116,7 +1116,7 @@ namespace Sora::Meta {
                 return inspected.error;
             }
             if (inspected.types.empty()) {
-                return MakeMetaError(^^Error::OutOfRangeTag, {list});
+                return MakeMetaError(^^Error::OutOfRange, {list});
             }
             return inspected.types.back();
         }
@@ -1124,7 +1124,7 @@ namespace Sora::Meta {
         /**
          * @brief Return a reflected `TypeList` in reverse order.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Reversed reflected `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested
+         * @return Reversed reflected `TypeList`, or the input `MetaError`, `InvalidSequence`, or nested
          * projection error.
          * @par Example
          * @code{.cpp}
@@ -1144,7 +1144,7 @@ namespace Sora::Meta {
         /**
          * @brief Remove duplicate types from a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Stable first-occurrence `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested
+         * @return Stable first-occurrence `TypeList`, or the input `MetaError`, `InvalidSequence`, or nested
          * projection error.
          * @par Example
          * @code{.cpp}
@@ -1165,7 +1165,7 @@ namespace Sora::Meta {
          * @brief Return the first @p count types of a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] count Number of requested types; values beyond the length are clamped.
-         * @return Reflected prefix `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested projection
+         * @return Reflected prefix `TypeList`, or the input `MetaError`, `InvalidSequence`, or nested projection
          * error. An empty input or a zero @p count produces an empty list.
          * @par Example
          * @code{.cpp}
@@ -1185,7 +1185,7 @@ namespace Sora::Meta {
          * @brief Drop the first @p count types of a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] count Number of types to skip; values beyond the length produce an empty list.
-         * @return Reflected suffix `TypeList`, or the input `MetaError`, `InvalidSequenceTag`, or nested projection
+         * @return Reflected suffix `TypeList`, or the input `MetaError`, `InvalidSequence`, or nested projection
          * error. Dropping at least the list length produces an empty list.
          * @par Example
          * @code{.cpp}
@@ -1206,7 +1206,7 @@ namespace Sora::Meta {
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] offset Zero-based first type.
          * @param[in] count Number of selected types.
-         * @return Reflected slice, or `OutOfRangeTag` when bounds are invalid.
+         * @return Reflected slice, or `OutOfRange` when bounds are invalid.
          * @note Unlike `Take` and `Drop`, @p offset plus @p count must fit exactly in the source list.
          * @par Example
          * @code{.cpp}
@@ -1221,7 +1221,7 @@ namespace Sora::Meta {
                 return inspected.error;
             }
             if (offset > inspected.types.size() || count > inspected.types.size() - offset) {
-                return MakeMetaError(^^Error::OutOfRangeTag, {list});
+                return MakeMetaError(^^Error::OutOfRange, {list});
             }
             return ToTypeList(Sora::Meta::Slice(inspected.types, offset, count));
         }
@@ -1230,7 +1230,7 @@ namespace Sora::Meta {
          * @brief Prepend a reflected type to a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] value Reflected type to insert before the existing sequence.
-         * @return Reflected `TypeList`, the first input error, `InvalidSequenceTag`, or `NonTypeResultTag` when
+         * @return Reflected `TypeList`, the first input error, `InvalidSequence`, or `NonTypeResult` when
          * @p value is not a type.
          * @par Example
          * @code{.cpp}
@@ -1247,7 +1247,7 @@ namespace Sora::Meta {
                 return value;
             }
             if (!std::meta::is_type(value)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {value});
+                return MakeMetaError(^^Error::NonTypeResult, {value});
             }
             return ToTypeList(Sora::Meta::PushFront(inspected.types, value));
         }
@@ -1256,7 +1256,7 @@ namespace Sora::Meta {
          * @brief Append a reflected type to a reflected `TypeList`.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] value Reflected type to append after the existing sequence.
-         * @return Reflected `TypeList`, the first input error, `InvalidSequenceTag`, or `NonTypeResultTag` when
+         * @return Reflected `TypeList`, the first input error, `InvalidSequence`, or `NonTypeResult` when
          * @p value is not a type.
          * @par Example
          * @code{.cpp}
@@ -1273,7 +1273,7 @@ namespace Sora::Meta {
                 return value;
             }
             if (!std::meta::is_type(value)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {value});
+                return MakeMetaError(^^Error::NonTypeResult, {value});
             }
             return ToTypeList(Sora::Meta::PushBack(inspected.types, value));
         }
@@ -1330,7 +1330,7 @@ namespace Sora::Meta {
                 return needle;
             }
             if (!std::meta::is_type(needle)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
+                return MakeMetaError(^^Error::NonTypeResult, {needle});
             }
             return std::meta::reflect_constant(Sora::Meta::Contains(inspected.types, needle));
         }
@@ -1355,7 +1355,7 @@ namespace Sora::Meta {
                 return needle;
             }
             if (!std::meta::is_type(needle)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
+                return MakeMetaError(^^Error::NonTypeResult, {needle});
             }
             return std::meta::reflect_constant(Sora::Meta::IndexOf(inspected.types, needle));
         }
@@ -1380,7 +1380,7 @@ namespace Sora::Meta {
                 return needle;
             }
             if (!std::meta::is_type(needle)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
+                return MakeMetaError(^^Error::NonTypeResult, {needle});
             }
             return std::meta::reflect_constant(Sora::Meta::Count(inspected.types, needle));
         }
@@ -1432,7 +1432,7 @@ namespace Sora::Meta {
          * @brief Apply a reflected template to all types in a reflected TypeList.
          * @param[in] function Reflected variadic template.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Reflected type result, `NonTypeResultTag`, `InvalidSequenceTag`, an invocation error, or the first
+         * @return Reflected type result, `NonTypeResult`, `InvalidSequence`, an invocation error, or the first
          * input error.
          * @par Example
          * @code{.cpp}
@@ -1459,7 +1459,7 @@ namespace Sora::Meta {
          * @brief Map a reflected unary template over a reflected TypeList.
          * @param[in] function Reflected unary template.
          * @param[in] list Reflected `Traits::TypeList` specialization.
-         * @return Reflected `TypeList`; non-type mapped results produce `NonTypeResultTag`.
+         * @return Reflected `TypeList`; non-type mapped results produce `NonTypeResult`.
          * @par Example
          * @code{.cpp}
          * constexpr auto result = Sora::Meta::Types::Map(^^std::add_pointer_t,
@@ -1512,7 +1512,7 @@ namespace Sora::Meta {
                     return mapped;
                 }
                 if (!IsTypeList(mapped)) {
-                    return MakeMetaError(^^Error::InvalidSequenceTag, {function, value, mapped});
+                    return MakeMetaError(^^Error::InvalidSequence, {function, value, mapped});
                 }
                 const auto mappedTypes = ToInfoList(mapped);
                 if (const auto error = FirstMetaError(mappedTypes); error != std::meta::info{}) {
@@ -1573,7 +1573,7 @@ namespace Sora::Meta {
                 return replacement;
             }
             if (!std::meta::is_type(replacement)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {pred, replacement});
+                return MakeMetaError(^^Error::NonTypeResult, {pred, replacement});
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, replacement, list});
             if (!inspected) {
@@ -1664,13 +1664,13 @@ namespace Sora::Meta {
                 return oldType;
             }
             if (!std::meta::is_type(oldType)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {oldType, newType});
+                return MakeMetaError(^^Error::NonTypeResult, {oldType, newType});
             }
             if (IsMetaError(newType)) {
                 return newType;
             }
             if (!std::meta::is_type(newType)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {oldType, newType});
+                return MakeMetaError(^^Error::NonTypeResult, {oldType, newType});
             }
             return ToTypeList(Sora::Meta::Replace(inspected.types, oldType, newType));
         }
@@ -1695,7 +1695,7 @@ namespace Sora::Meta {
                 return needle;
             }
             if (!std::meta::is_type(needle)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {needle});
+                return MakeMetaError(^^Error::NonTypeResult, {needle});
             }
             return ToTypeList(Sora::Meta::Remove(inspected.types, needle));
         }
@@ -1704,7 +1704,7 @@ namespace Sora::Meta {
          * @brief Construct a reflected TypeList containing @p count copies of @p value.
          * @param[in] count Number of elements.
          * @param[in] value Reflected type to repeat.
-         * @return Reflected result `TypeList`, `NonTypeResultTag`, or @p value when it is already an error.
+         * @return Reflected result `TypeList`, `NonTypeResult`, or @p value when it is already an error.
          * @par Example
          * @code{.cpp}
          * constexpr auto result = Sora::Meta::Types::Fill(3, ^^int);
@@ -1716,7 +1716,7 @@ namespace Sora::Meta {
                 return value;
             }
             if (!std::meta::is_type(value)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {value});
+                return MakeMetaError(^^Error::NonTypeResult, {value});
             }
             return ToTypeList(std::vector<std::meta::info>(count, value));
         }
@@ -1761,7 +1761,7 @@ namespace Sora::Meta {
                     return initial;
                 }
                 if (!std::meta::is_type(initial)) {
-                    return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+                    return MakeMetaError(^^Error::NonTypeResult, {function, initial});
                 }
                 return initial;
             }
@@ -1772,13 +1772,13 @@ namespace Sora::Meta {
                 return initial;
             }
             if (!std::meta::is_type(initial)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+                return MakeMetaError(^^Error::NonTypeResult, {function, initial});
             }
             if (IsMetaError(list)) {
                 return list;
             }
             if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {function, initial, list});
+                return MakeMetaError(^^Error::InvalidSequence, {function, initial, list});
             }
             const auto types = ToInfoList(list);
             if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
@@ -1808,7 +1808,7 @@ namespace Sora::Meta {
                     return initial;
                 }
                 if (!std::meta::is_type(initial)) {
-                    return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+                    return MakeMetaError(^^Error::NonTypeResult, {function, initial});
                 }
                 return initial;
             }
@@ -1819,13 +1819,13 @@ namespace Sora::Meta {
                 return initial;
             }
             if (!std::meta::is_type(initial)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {function, initial});
+                return MakeMetaError(^^Error::NonTypeResult, {function, initial});
             }
             if (IsMetaError(list)) {
                 return list;
             }
             if (!IsTypeList(list)) {
-                return MakeMetaError(^^Error::InvalidSequenceTag, {function, initial, list});
+                return MakeMetaError(^^Error::InvalidSequence, {function, initial, list});
             }
             const auto types = ToInfoList(list);
             if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
@@ -1864,7 +1864,7 @@ namespace Sora::Meta {
                 return fallback;
             }
             if (!std::meta::is_type(fallback)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {pred, fallback});
+                return MakeMetaError(^^Error::NonTypeResult, {pred, fallback});
             }
             return RequireTypeResult(Sora::Meta::FindFirst(pred, inspected.types, fallback), {pred, list, fallback});
         }
@@ -1900,7 +1900,7 @@ namespace Sora::Meta {
                 return fallback;
             }
             if (!std::meta::is_type(fallback)) {
-                return MakeMetaError(^^Error::NonTypeResultTag, {pred, fallback});
+                return MakeMetaError(^^Error::NonTypeResult, {pred, fallback});
             }
             return RequireTypeResult(Sora::Meta::FindLast(pred, inspected.types, fallback), {pred, list, fallback});
         }
@@ -2155,7 +2155,7 @@ namespace Sora::Meta {
 
     /**
      * @brief Return a reflected function that always yields @p Result.
-     * @tparam Result Reflected type returned for every invocation; non-types become `NonTypeResultTag`.
+     * @tparam Result Reflected type returned for every invocation; non-types become `NonTypeResult`.
      * @return Reflection of a constant alias-template closure.
      * @par Example
      * @code{.cpp}

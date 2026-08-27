@@ -45,8 +45,8 @@ namespace Sora::Meta {
      * @brief Invoke a reflected predicate with zero or more reflected arguments.
      *
      * @details Meta errors propagate from left to right. A non-function or incompatible arity produces
-     * @c Error::NonInvocableTag; a successful invocation returning a non-bool value produces
-     * @c Error::NonBooleanPredResultTag. The number of supplied arguments must match the reflected function's
+     * @c Error::NonInvocable; a successful invocation returning a non-bool value produces
+     * @c Error::NonBooleanPredResult. The number of supplied arguments must match the reflected function's
      * declared arity; a zero-argument call is valid only for a zero-argument predicate.
      *
      * @param[in] pred Reflected predicate function.
@@ -71,15 +71,15 @@ namespace Sora::Meta {
         std::vector<std::meta::info> context{pred};
         context.append_range(inputs);
         if (!std::meta::is_function(pred)) {
-            return MakeMetaError(^^Error::NonInvocableTag, context);
+            return MakeMetaError(^^Error::NonInvocable, context);
         }
 
         const std::vector<std::meta::info> argumentTypes(inputs.size(), ^^std::meta::info);
         if (!std::meta::is_invocable_type(std::meta::type_of(pred), argumentTypes)) {
-            return MakeMetaError(^^Error::NonInvocableTag, context);
+            return MakeMetaError(^^Error::NonInvocable, context);
         }
         if (std::meta::return_type_of(pred) != ^^bool) {
-            return MakeMetaError(^^Error::NonBooleanPredResultTag, context);
+            return MakeMetaError(^^Error::NonBooleanPredResult, context);
         }
 
         for (const auto input : inputs) {
@@ -96,7 +96,7 @@ namespace Sora::Meta {
         const auto result = std::meta::reflect_invoke(pred, reflectedArguments);
         if (!std::meta::is_value(result) || std::meta::type_of(result) != ^^bool) {
             context.push_back(result);
-            return MakeMetaError(^^Error::NonBooleanPredResultTag, context);
+            return MakeMetaError(^^Error::NonBooleanPredResult, context);
         }
         return result;
     }
