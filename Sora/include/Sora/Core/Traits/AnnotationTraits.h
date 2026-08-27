@@ -165,6 +165,7 @@ namespace Sora {
 
         /** @brief Variant type used when extraction accepts multiple annotation classes. */
         template<typename... As>
+            requires(sizeof...(As) > 0)
         using MultiAnnoVariant = typename std::conditional_t<sizeof...(As) == 1, As...[0], std::variant<As...>>;
 
         /**

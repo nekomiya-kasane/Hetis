@@ -249,7 +249,8 @@ namespace Sora {
                 if (!desc.empty()) {
                     desc += delimiter;
                 }
-                desc += std::meta::identifier_of(type);
+                desc += std::meta::has_identifier(type) ? std::meta::identifier_of(type)
+                                                         : std::meta::display_string_of(type);
             }
             auto ret = std::define_static_array(desc);
             return std::string_view{ret.data(), ret.size()};

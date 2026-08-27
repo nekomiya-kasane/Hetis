@@ -206,7 +206,7 @@ namespace Sora {
         /** @brief Source identifier of @p T's @p I-th member. */
         template<typename T, size_t I>
             requires std::is_class_v<T>
-        inline constexpr std::string_view MemberIdentifier = std::meta::identifier_of(Members<T>[I]);
+        inline constexpr std::string_view MemberIdentifier = IdentifierOrDisplayStringOf(Members<T>[I]);
 
         template<typename T>
             requires std::is_class_v<T>
@@ -234,7 +234,7 @@ namespace Sora {
          */
         template<typename T, size_t I>
             requires std::is_class_v<T>
-        inline constexpr std::string_view DataMemberIdentifier = std::meta::identifier_of(DataMembers<T>[I]);
+        inline constexpr std::string_view DataMemberIdentifier = IdentifierOrDisplayStringOf(DataMembers<T>[I]);
 
         /** @brief Static array containing source identifiers for every non-static data member of @p T. */
         template<typename T>
@@ -273,7 +273,7 @@ namespace Sora {
         template<typename T, size_t I>
             requires std::is_class_v<T>
         inline constexpr std::string_view PublicDataMemberIdentifier =
-            std::meta::identifier_of(PublicDataMembers<T>[I]);
+            IdentifierOrDisplayStringOf(PublicDataMembers<T>[I]);
 
         /**
          * @brief Declared type of @p T's @p I-th non-static data member.

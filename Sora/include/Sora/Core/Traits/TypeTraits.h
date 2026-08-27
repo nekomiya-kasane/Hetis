@@ -381,11 +381,13 @@ namespace Sora {
 
         /** @brief Arithmetic scalar type (either integer-like or floating-point). */
         template<typename T>
-        concept ArithmeticScalar = std::is_arithmetic_v<T> && !std::same_as<std::remove_cv_t<T>, bool>;
+        concept ArithmeticScalar = std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+                                   !std::same_as<std::remove_cvref_t<T>, bool>;
 
         /** @brief Type that can be efficiently vectorized (arithmetic scalar of size <= 8 bytes). */
         template<typename T>
-        concept Vectorizable = std::is_arithmetic_v<T> && !std::same_as<std::remove_cv_t<T>, bool> && sizeof(T) <= 8;
+        concept Vectorizable = std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+                               !std::same_as<std::remove_cvref_t<T>, bool> && sizeof(std::remove_cvref_t<T>) <= 8;
 
         /** @brief Signed integer or enumeration type, classified through the underlying type for enums. */
         template<typename T>
@@ -411,11 +413,11 @@ namespace Sora {
 
         /** @brief Signed arithmetic type. */
         template<typename T>
-        concept SignedArithmetic = ArithmeticScalar<T> && std::is_signed_v<T>;
+        concept SignedArithmetic = ArithmeticScalar<T> && std::is_signed_v<std::remove_cvref_t<T>>;
 
         /** @brief Unsigned arithmetic type. */
         template<typename T>
-        concept UnsignedArithmetic = ArithmeticScalar<T> && std::is_unsigned_v<T>;
+        concept UnsignedArithmetic = ArithmeticScalar<T> && std::is_unsigned_v<std::remove_cvref_t<T>>;
 
         /** @brief One-byte type that can be fed into byte-range hash helpers without reinterpret casts. */
         template<typename T>
@@ -424,7 +426,7 @@ namespace Sora {
 
         /** @brief Floating-point field accepted by the stable wire serializer. */
         template<typename T>
-        concept FloatingLike = std::floating_point<T>;
+        concept FloatingLike = std::floating_point<std::remove_cvref_t<T>>;
 
         /** @brief Type that exposes a stable @c view() convertible to @c std::string_view. */
         template<typename T>

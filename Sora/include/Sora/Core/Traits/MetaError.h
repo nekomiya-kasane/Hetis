@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <meta>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -39,7 +40,9 @@ namespace Sora {
              *     ^^Sora::Meta::Error::MetaError<^^MissingMember, ^^int>>;
              * @endcode
              */
-            template<std::meta::info Tag, std::meta::info... Contexts>
+            template<auto Tag, auto... Contexts>
+                requires(std::same_as<decltype(Tag), std::meta::info> &&
+                         (std::same_as<decltype(Contexts), std::meta::info> && ...))
             struct MetaError {};
 
             /** @brief Category for an invalid template application. */
@@ -117,7 +120,8 @@ namespace Sora {
             return std::meta::is_type(info) && std::meta::is_class_type(info) &&
                    std::meta::has_template_arguments(info) &&
                    !std::meta::template_arguments_of(info).empty() &&
-                   std::meta::template_of(info) == ^^Error::MetaError &&
+                   std::meta::template_of(info) ==
+                       std::meta::template_of(^^Error::MetaError<^^Error::MetaSuccess>) &&
                    std::meta::is_type(std::meta::extract<std::meta::info>(
                        std::meta::template_arguments_of(info).front()));
         }
@@ -267,7 +271,7 @@ namespace Sora {
         /**
          * @brief Return a stable diagnostic description for a reflected error.
          * @param[in] error Reflected `Error::MetaError` to format.
-         * @return Human-readable category and context sequence.
+         * @return Static-storage view containing the human-readable category and context sequence.
          * @pre `IsMetaError(error)` is `true`.
          * @throws A translation-time diagnostic when @p error is not a `MetaError`.
          * @par Example
@@ -277,7 +281,7 @@ namespace Sora {
          * static_assert(!text.empty());
          * @endcode
          */
-        [[nodiscard]] consteval std::string ErrorDescription(std::meta::info error) {
+        [[nodiscard]] consteval std::string_view ErrorDescription(std::meta::info error) {
             if (!IsMetaError(error)) {
                 throw std::define_static_string("Meta::ErrorDescription requires Error::MetaError.");
             }
@@ -293,13 +297,13 @@ namespace Sora {
                 result += std::string{std::meta::display_string_of(context)};
             }
             result += ')';
-            return result;
+            return std::string_view{std::define_static_string(result)};
         }
 
         /**
          * @brief Return the diagnostic description of a type-level meta error.
          * @tparam Error Type-level `MetaError` specialization.
-         * @return Human-readable compile-time description in stable source order.
+         * @return Static-storage view containing the human-readable description in stable source order.
          * @pre `Error` satisfies `Concept::MetaErrorType`.
          * @par Example
          * @code{.cpp}
@@ -310,7 +314,7 @@ namespace Sora {
          * @endcode
          */
         template<typename Error>
-        [[nodiscard]] consteval std::string ErrorDescriptionOf() {
+        [[nodiscard]] consteval std::string_view ErrorDescriptionOf() {
             static_assert(IsMetaError(std::meta::dealias(^^std::remove_cvref_t<Error>)));
             return ErrorDescription(^^std::remove_cvref_t<Error>);
         }
