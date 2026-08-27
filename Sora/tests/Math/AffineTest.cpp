@@ -451,6 +451,68 @@ TEST_CASE("TryInverse closes singular and non-finite failure paths", "[Sora][Mat
                Sora::Math::ToVector(point)));
 }
 
+TEST_CASE("Box transforms round outward and report indeterminate ranges", "[Sora][Math][Affine]") {
+    constexpr float a = 14.6148443F;
+    constexpr float x = 74.3891678F;
+    constexpr float b = 6.14343023F;
+    constexpr float y = 96.3450317F;
+    constexpr float translation = 19.4322968F;
+    const Affine<float, 2> affine{Matrix<float, 2, 2>{a, b, 0.0F, 1.0F},
+                                  Vector<float, 2>{translation, 0.0F}};
+    const Point<float, 2> corner{x, y};
+    const auto transformed = Sora::Math::TryTransform(affine, Sora::Math::Box<float, 2>{corner, corner});
+    REQUIRE(transformed.has_value());
+    const auto transformedCorner = Sora::Math::TransformPoint(affine, corner);
+    CHECK(transformed->Min()[0] <= transformedCorner[0]);
+    CHECK(transformed->Max()[0] >= transformedCorner[0]);
+    CHECK(transformed->Min()[1] <= transformedCorner[1]);
+    CHECK(transformed->Max()[1] >= transformedCorner[1]);
+
+    const float largest = (std::numeric_limits<float>::max)();
+    const Affine<float, 2> overflowing{Matrix<float, 2, 2>{largest, largest, 0.0F, 1.0F}, {}};
+    const Point<float, 2> cancelling{largest, -largest};
+    CheckError(Sora::Math::TryTransform(overflowing, Sora::Math::Box<float, 2>{cancelling, cancelling}),
+               Sora::ErrorCode::OutOfRange);
+
+    const float infinity = std::numeric_limits<float>::infinity();
+    const auto unbounded = Sora::Math::TryTransform(
+        Affine<float, 1>{}, Sora::Math::Box<float, 1>{Point<float, 1>{-infinity}, Point<float, 1>{infinity}});
+    REQUIRE(unbounded.has_value());
+    CHECK(unbounded->Min()[0] == -infinity);
+    CHECK(unbounded->Max()[0] == infinity);
+
+    constexpr int integerLargest = (std::numeric_limits<int>::max)();
+    CheckError(Sora::Math::TryTransform(Affine<int, 1>{Matrix<int, 1, 1>{integerLargest}, {}},
+                                        Sora::Math::Box<int, 1>{2, 2}),
+               Sora::ErrorCode::OutOfRange);
+}
+
+TEST_CASE("Ball transforms preserve conservative containment", "[Sora][Math][Affine]") {
+    constexpr float scale = 0.0078125F;
+    constexpr auto transformed = Sora::Math::Transform(
+        Affine<float, 1>{Matrix<float, 1, 1>{scale}, {}},
+        Sora::Math::Ball<float, 1>{Point<float, 1>{}, 1.0F});
+    STATIC_REQUIRE(transformed.Radius() >= scale);
+
+    const float infinity = std::numeric_limits<float>::infinity();
+    const auto translatedInfinite = Sora::Math::TryTransform(
+        Affine<float, 1>{}, Sora::Math::Ball<float, 1>{Point<float, 1>{infinity}, 1.0F});
+    REQUIRE(translatedInfinite.has_value());
+    CHECK(translatedInfinite->Center()[0] == infinity);
+
+    const auto collapsed = Sora::Math::TryTransform(
+        Affine<float, 1>{Matrix<float, 1, 1>{0.0F}, {}},
+        Sora::Math::Ball<float, 1>{Point<float, 1>{infinity}, infinity});
+    REQUIRE(collapsed.has_value());
+    CHECK(collapsed->Center()[0] == 0.0F);
+    CHECK(collapsed->Radius() == 0.0F);
+
+    const float largest = (std::numeric_limits<float>::max)();
+    CheckError(Sora::Math::TryTransform(Affine<float, 1>{Matrix<float, 1, 1>{largest}, {}},
+                                        Sora::Math::Ball<float, 1>{Point<float, 1>{}, 2.0F}),
+               Sora::ErrorCode::OutOfRange);
+}
+
 TEST_CASE("Integral affine accumulation preserves large cancelling terms", "[Sora][Math][Affine]") {
     constexpr int64_t largest = (std::numeric_limits<int64_t>::max)();
     constexpr auto affine = [=] {

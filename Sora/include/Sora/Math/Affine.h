@@ -16,6 +16,7 @@
 #include <Sora/Math/UnitVector.h>
 
 #include <array>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -486,6 +487,28 @@ namespace Sora::Math {
             }
         }
 
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T RoundDown(T value) noexcept {
+            return value == -(std::numeric_limits<T>::infinity)() || IsNaN(value)
+                       ? value
+                       : std::nextafter(value, -(std::numeric_limits<T>::infinity)());
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T RoundUp(T value) noexcept {
+            return value == (std::numeric_limits<T>::infinity)() || IsNaN(value)
+                       ? value
+                       : std::nextafter(value, (std::numeric_limits<T>::infinity)());
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T AddNonNegativeUp(T left, T right) noexcept {
+            if (right == T{0}) {
+                return left;
+            }
+            return RoundUp(left + right);
+        }
+
         template<std::floating_point T, size_t N, MatrixLayout Layout>
         [[nodiscard]] constexpr T ConservativeRadiusScale(const Affine<T, N, Layout>& affine) noexcept {
             T oneNorm = T{0};
@@ -493,18 +516,21 @@ namespace Sora::Math {
             for (size_t column = 0; column < N; ++column) {
                 T sum = T{0};
                 for (size_t row = 0; row < N; ++row) {
-                    sum += AbsValue(affine.LinearPart()(row, column));
+                    sum = AddNonNegativeUp(sum, AbsValue(affine.LinearPart()(row, column)));
                 }
                 oneNorm = oneNorm > sum ? oneNorm : sum;
             }
             for (size_t row = 0; row < N; ++row) {
                 T sum = T{0};
                 for (size_t column = 0; column < N; ++column) {
-                    sum += AbsValue(affine.LinearPart()(row, column));
+                    sum = AddNonNegativeUp(sum, AbsValue(affine.LinearPart()(row, column)));
                 }
                 infinityNorm = infinityNorm > sum ? infinityNorm : sum;
             }
-            return Math::Sqrt(oneNorm) * Math::Sqrt(infinityNorm);
+            if (oneNorm == T{0} || infinityNorm == T{0}) {
+                return T{0};
+            }
+            return RoundUp(RoundUp(Math::Sqrt(oneNorm)) * RoundUp(Math::Sqrt(infinityNorm)));
         }
 
         template<std::floating_point T, size_t N>
@@ -1190,13 +1216,16 @@ namespace Sora::Math {
         return Ray<T, N>{origin, direction};
     }
 
-    /**
-     * @brief Transform an axis-aligned box by exact coordinate-interval propagation.
-     * @details Runs in `O(N^2)` time and does not enumerate the box's `2^N` corners.
-     * @pre Integral results are representable in @p T.
-     */
+    /** @brief Try to transform a box by outward-rounded coordinate-interval propagation. */
     template<Sora::Concept::ArithmeticScalar T, size_t N, MatrixLayout Layout>
-    [[nodiscard]] constexpr Box<T, N> Transform(const Affine<T, N, Layout>& affine, const Box<T, N>& box) noexcept {
+    [[nodiscard]] constexpr auto TryTransform(const Affine<T, N, Layout>& affine, const Box<T, N>& box) noexcept
+        -> std::expected<Box<T, N>, Sora::ErrorCode> {
+        if constexpr (std::floating_point<T>) {
+            if (!Detail::IsFiniteMatrix(affine.LinearPart()) || !IsFinite(affine.TranslationPart())) {
+                return std::unexpected(Sora::ErrorCode::InvalidArgument);
+            }
+        }
+
         Point<T, N> minimum;
         Point<T, N> maximum;
         for (size_t row = 0; row < N; ++row) {
@@ -1215,8 +1244,16 @@ namespace Sora::Math {
                     lowerTerms[column + 1] = first < second ? first : second;
                     upperTerms[column + 1] = first > second ? first : second;
                 }
-                minimum[row] = CheckedCast<T>(Detail::ExactIntegralSum<T>(lowerTerms));
-                maximum[row] = CheckedCast<T>(Detail::ExactIntegralSum<T>(upperTerms));
+                const auto lower = Detail::TryExactIntegralSum<T>(lowerTerms);
+                const auto upper = Detail::TryExactIntegralSum<T>(upperTerms);
+                if (!lower || !upper || *lower < static_cast<WideInteger<T>>((std::numeric_limits<T>::lowest)()) ||
+                    *lower > static_cast<WideInteger<T>>((std::numeric_limits<T>::max)()) ||
+                    *upper < static_cast<WideInteger<T>>((std::numeric_limits<T>::lowest)()) ||
+                    *upper > static_cast<WideInteger<T>>((std::numeric_limits<T>::max)())) {
+                    return std::unexpected(Sora::ErrorCode::OutOfRange);
+                }
+                minimum[row] = static_cast<T>(*lower);
+                maximum[row] = static_cast<T>(*upper);
             } else {
                 T lower = affine.TranslationPart()[row];
                 T upper = lower;
@@ -1227,8 +1264,14 @@ namespace Sora::Math {
                     }
                     const T first = coefficient * box.Min()[column];
                     const T second = coefficient * box.Max()[column];
-                    lower += first < second ? first : second;
-                    upper += first > second ? first : second;
+                    if (IsNaN(first) || IsNaN(second)) {
+                        return std::unexpected(Sora::ErrorCode::OutOfRange);
+                    }
+                    lower = Detail::RoundDown(lower + Detail::RoundDown(first < second ? first : second));
+                    upper = Detail::RoundUp(upper + Detail::RoundUp(first > second ? first : second));
+                    if (IsNaN(lower) || IsNaN(upper)) {
+                        return std::unexpected(Sora::ErrorCode::OutOfRange);
+                    }
                 }
                 minimum[row] = lower;
                 maximum[row] = upper;
@@ -1237,21 +1280,91 @@ namespace Sora::Math {
         return Box<T, N>{std::move(minimum), std::move(maximum)};
     }
 
+    /**
+     * @brief Transform an axis-aligned box by outward-rounded coordinate-interval propagation.
+     * @details Runs in `O(N^2)` time and does not enumerate the box's `2^N` corners.
+     * @pre The affine coefficients are finite and the result is representable without indeterminate arithmetic.
+     */
+    template<Sora::Concept::ArithmeticScalar T, size_t N, MatrixLayout Layout>
+    [[nodiscard]] constexpr Box<T, N> Transform(const Affine<T, N, Layout>& affine, const Box<T, N>& box) noexcept {
+        auto result = TryTransform(affine, box);
+        SORA_PRE(result.has_value());
+        return std::move(*result);
+    }
+
+    /** @brief Try to transform a base/extent rectangle and return its fitted axis-aligned box. */
+    template<Sora::Concept::ArithmeticScalar T, size_t N, MatrixLayout Layout>
+    [[nodiscard]] constexpr auto TryTransform(const Affine<T, N, Layout>& affine, const Rect<T, N>& rect) noexcept
+        -> std::expected<Box<T, N>, Sora::ErrorCode> {
+        return TryTransform(affine, rect.ToBox());
+    }
+
     /** @brief Transform a base/extent rectangle and return its fitted axis-aligned box. */
     template<Sora::Concept::ArithmeticScalar T, size_t N, MatrixLayout Layout>
     [[nodiscard]] constexpr Box<T, N> Transform(const Affine<T, N, Layout>& affine, const Rect<T, N>& rect) noexcept {
         return Transform(affine, rect.ToBox());
     }
 
-    /** @brief Transform a ball conservatively under arbitrary linear distortion. */
+    /** @brief Try to transform a ball conservatively under arbitrary finite linear distortion. */
     template<std::floating_point T, size_t N, MatrixLayout Layout>
-    [[nodiscard]] constexpr Ball<T, N> Transform(const Affine<T, N, Layout>& affine, const Ball<T, N>& ball) noexcept {
+    [[nodiscard]] constexpr auto TryTransform(const Affine<T, N, Layout>& affine, const Ball<T, N>& ball) noexcept
+        -> std::expected<Ball<T, N>, Sora::ErrorCode> {
+        if (!Detail::IsFiniteMatrix(affine.LinearPart()) || !IsFinite(affine.TranslationPart())) {
+            return std::unexpected(Sora::ErrorCode::InvalidArgument);
+        }
+
+        Point<T, N> center;
+        if (IsFinite(ball.Center())) {
+            center = TransformPoint(affine, ball.Center());
+            if (!IsFinite(center)) {
+                return std::unexpected(Sora::ErrorCode::OutOfRange);
+            }
+        } else {
+            for (size_t row = 0; row < N; ++row) {
+                T coordinate = affine.TranslationPart()[row];
+                for (size_t column = 0; column < N; ++column) {
+                    const T coefficient = affine.LinearPart()(row, column);
+                    if (coefficient == T{0}) {
+                        continue;
+                    }
+                    coordinate += coefficient * ball.Center()[column];
+                    if (IsNaN(coordinate)) {
+                        return std::unexpected(Sora::ErrorCode::OutOfRange);
+                    }
+                }
+                center[row] = coordinate;
+            }
+        }
+
         if (ball.Radius() == T{0}) {
-            return Ball<T, N>{TransformPoint(affine, ball.Center()), T{0}};
+            return Ball<T, N>{std::move(center), T{0}};
         }
         const T scale = Detail::ConservativeRadiusScale(affine);
-        const T radius = scale == T{0} ? T{0} : ball.Radius() * scale;
-        return Ball<T, N>{TransformPoint(affine, ball.Center()), radius};
+        if (IsNaN(scale)) {
+            return std::unexpected(Sora::ErrorCode::OutOfRange);
+        }
+        if (scale == T{0}) {
+            return Ball<T, N>{std::move(center), T{0}};
+        }
+        if (!IsFinite(ball.Radius())) {
+            return Ball<T, N>{std::move(center), (std::numeric_limits<T>::infinity)()};
+        }
+        const T radius = Detail::RoundUp(ball.Radius() * scale);
+        if (!IsFinite(radius)) {
+            return std::unexpected(Sora::ErrorCode::OutOfRange);
+        }
+        return Ball<T, N>{std::move(center), radius};
+    }
+
+    /**
+     * @brief Transform a ball conservatively under arbitrary finite linear distortion.
+     * @pre The result is representable without indeterminate arithmetic.
+     */
+    template<std::floating_point T, size_t N, MatrixLayout Layout>
+    [[nodiscard]] constexpr Ball<T, N> Transform(const Affine<T, N, Layout>& affine, const Ball<T, N>& ball) noexcept {
+        auto result = TryTransform(affine, ball);
+        SORA_PRE(result.has_value());
+        return std::move(*result);
     }
 
     /** @brief Transform a normalized hyperplane through the inverse-transpose covector law. */
