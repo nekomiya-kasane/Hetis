@@ -138,6 +138,28 @@ namespace Sora::Math {
         }
 
         template<Compute::PortableScalar Scalar, size_t ParameterCapacity, size_t InstructionCapacity, size_t Arity,
+                 auto Operation, Detail::StagedExpression First, Detail::StagedExpression Second>
+        [[nodiscard]] constexpr Compute::ValueId
+        Emit(Compute::KernelBuilder<ParameterCapacity, InstructionCapacity>& builder,
+             const Detail::StagedBinary<Operation, First, Second>& expression,
+             const std::array<Compute::ValueId, Arity>& inputs);
+
+        template<Compute::PortableScalar Scalar, size_t ParameterCapacity, size_t InstructionCapacity, size_t Arity,
+                 auto Operation, Detail::StagedExpression First, Detail::StagedExpression Second,
+                 Detail::StagedExpression Third>
+        [[nodiscard]] constexpr Compute::ValueId
+        Emit(Compute::KernelBuilder<ParameterCapacity, InstructionCapacity>& builder,
+             const Detail::StagedTernary<Operation, First, Second, Third>& expression,
+             const std::array<Compute::ValueId, Arity>& inputs);
+
+        template<Compute::PortableScalar Scalar, size_t ParameterCapacity, size_t InstructionCapacity, size_t Arity,
+                 auto Operation, Detail::StagedExpression X, Detail::StagedExpression C>
+        [[nodiscard]] constexpr Compute::ValueId
+        Emit(Compute::KernelBuilder<ParameterCapacity, InstructionCapacity>& builder,
+             const Detail::StagedFusedSquare<Operation, X, C>& expression,
+             const std::array<Compute::ValueId, Arity>& inputs);
+
+        template<Compute::PortableScalar Scalar, size_t ParameterCapacity, size_t InstructionCapacity, size_t Arity,
                  auto Operation, Detail::StagedExpression E>
         [[nodiscard]] constexpr Compute::ValueId
         Emit(Compute::KernelBuilder<ParameterCapacity, InstructionCapacity>& builder,
@@ -197,6 +219,9 @@ namespace Sora::Math {
     /**
      * @brief Compile one Math CPO definition into a direct evaluator and canonical portable Kernel IR.
      * @tparam Policy Numerical transformations permitted by every backend; strict mode disables implicit contraction.
+     * @details A constexpr portable definition can be invoked from another compilation and is transparently inlined
+     * into the outer expression and module. Repeated invocations are emitted independently; this API does not create
+     * a shared call node or preserve an inner numerical-policy boundary.
      */
     template<Compute::PortableScalar Scalar, size_t Arity, Compute::NumericalPolicy Policy = kContractedKernelPolicy,
              typename Function>

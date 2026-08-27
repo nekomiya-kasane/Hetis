@@ -15,7 +15,7 @@
 #include <type_traits>
 #include <utility>
 
-#include <Sora/Core/Functional.h>
+#include <Sora/Core/Functional/Callable.h>
 #include <Sora/Math/Backends.h>
 
 namespace Sora::Math {

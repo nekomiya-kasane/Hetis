@@ -676,7 +676,7 @@ namespace Sora::Math {
 
     } // namespace Hook
 
-    /** @brief Stateless evaluator for one staged mathematical expression. */
+    /** @brief Direct evaluator for one staged mathematical expression. */
     template<Detail::StagedExpression E, size_t Arity>
     class CompiledKernel {
     public:
@@ -698,8 +698,10 @@ namespace Sora::Math {
 
     /**
      * @brief Stage @p function at compile time and return a fused evaluator with @p Arity inputs.
-     * @details The function must express its mathematics through the public Math CPOs. Staging is opt-in and may
-     * replace local multiply-add/subtract patterns with explicitly fused primitives, changing intermediate rounding.
+     * @details The function must express its mathematics through the public Math CPOs. A constexpr compiled kernel
+     * can be invoked from another @c Compile call; its expression is transparently inlined into the outer tree.
+     * Repeated invocations duplicate that subtree. Staging is opt-in and may replace local multiply-add/subtract
+     * patterns with explicitly fused primitives, changing intermediate rounding.
      */
     template<size_t Arity, typename Function>
     [[nodiscard]] consteval auto Compile(Function&& function) {
