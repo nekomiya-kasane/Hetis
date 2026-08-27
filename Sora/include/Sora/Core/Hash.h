@@ -866,6 +866,13 @@ namespace Sora::Hashing {
 
     namespace CPO {
 
+        /**
+         * @brief Function object implementing the @ref Hashing::Hash customization point.
+         * @code{.cpp}
+         * auto input = std::string_view{"hello"};
+         * auto output = Sora::Hashing::Hash(input); // deterministic FNV-1a digest
+         * @endcode
+         */
         struct HashFn {
 
             /**

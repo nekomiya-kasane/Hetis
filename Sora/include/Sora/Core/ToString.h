@@ -638,7 +638,13 @@ namespace Sora {
 
     namespace CPO {
 
-        /** @brief Function object implementing the @ref Sora::ToString customization point. */
+        /**
+         * @brief Function object implementing the @ref Sora::ToString customization point.
+         * @code{.cpp}
+         * auto input = 42;
+         * auto output = Sora::ToString(input); // "42"
+         * @endcode
+         */
         struct ToStringFn {
             template<typename T>
             [[nodiscard]] constexpr std::string operator()(T&& value) const {
@@ -646,7 +652,13 @@ namespace Sora {
             }
         };
 
-        /** @brief Function object implementing the @ref Sora::ToStringView customization point. */
+        /**
+         * @brief Function object implementing the @ref Sora::ToStringView customization point.
+         * @code{.cpp}
+         * std::string input = "hello";
+         * auto output = Sora::ToStringView(input); // view == "hello"
+         * @endcode
+         */
         struct ToStringViewFn {
             template<Concept::StringViewable T>
             [[nodiscard]] constexpr std::string_view operator()(T&& value) const {
@@ -654,7 +666,13 @@ namespace Sora {
             }
         };
 
-        /** @brief Function object implementing the @ref Sora::FromString customization point. */
+        /**
+         * @brief Function object implementing the @ref Sora::FromString customization point.
+         * @code{.cpp}
+         * auto input = std::string_view{"42"};
+         * auto output = Sora::FromString(std::in_place_type<int>, input); // expected value 42
+         * @endcode
+         */
         struct FromStringFn {
             template<Concept::StringDeserializable T>
             [[nodiscard]] constexpr Result<T> operator()(std::in_place_type_t<T>, std::string_view text) const {

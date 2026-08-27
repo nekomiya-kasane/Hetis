@@ -8,7 +8,9 @@
 #include <Sora/Platform.h>
 
 #include <concepts>
+#include <cstddef>
 #include <functional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -149,6 +151,36 @@ namespace Sora {
         template<typename Outer, typename Inner>
         Composition(Outer, Inner) -> Composition<Outer, Inner>;
 
+        template<typename Self, size_t... Indices, typename... Arguments>
+            requires(std::invocable<
+                         decltype(std::get<Indices>(std::forward<Self>(std::declval<Self>()).functions)),
+                         Arguments&...> && ...)
+        [[nodiscard]] constexpr auto InvokeFanout(Self&& self, std::index_sequence<Indices...>,
+                                                  Arguments&... arguments) noexcept(
+            (std::is_nothrow_invocable_v<
+                 decltype(std::get<Indices>(std::forward<Self>(self).functions)), Arguments&...> && ...)) {
+            using Results = std::tuple<std::decay_t<std::invoke_result_t<
+                decltype(std::get<Indices>(std::forward<Self>(self).functions)), Arguments&...>>...>;
+            return Results{
+                std::invoke(std::get<Indices>(std::forward<Self>(self).functions), arguments...)...};
+        }
+
+        template<typename... Functions>
+        struct FanoutFunction {
+            SORA_NO_UNIQUE_ADDRESS std::tuple<Functions...> functions;
+
+            template<typename Self, typename... Arguments>
+                requires requires(Self&& self, Arguments&&... arguments) {
+                    InvokeFanout(std::forward<Self>(self), std::index_sequence_for<Functions...>{}, arguments...);
+                }
+            [[nodiscard]] constexpr auto operator()(this Self&& self, Arguments&&... arguments) noexcept(
+                noexcept(InvokeFanout(
+                    std::forward<Self>(self), std::index_sequence_for<Functions...>{}, arguments...))) {
+                return InvokeFanout(
+                    std::forward<Self>(self), std::index_sequence_for<Functions...>{}, arguments...);
+            }
+        };
+
     } // namespace Detail
 
     /**
@@ -268,6 +300,32 @@ namespace Sora {
     template<typename F, typename G, typename... Rest>
     [[nodiscard]] constexpr auto Then(F&& first, G&& second, Rest&&... rest) {
         return Compose(Then(std::forward<G>(second), std::forward<Rest>(rest)...), std::forward<F>(first));
+    }
+
+    /**
+     * @brief Invoke several callables with the same arguments and collect their results in a value tuple.
+     * @details The returned closure owns decayed copies of all callables. Invocation exposes every named argument as
+     * the same lvalue to each branch, so an rvalue is never moved from repeatedly. A branch that needs ownership must
+     * copy explicitly. Results are decayed by @c std::make_tuple. No allocation, type erasure, or runtime dispatch is
+     * introduced.
+     * @tparam Functions Callable types before decay.
+     * @param[in] functions Callables invoked from left to right in tuple element order.
+     * @return An owning pipeable closure producing one tuple element per callable.
+     * @code{.cpp}
+     * constexpr auto measures = Sora::Fanout(
+     *     [](int value) { return value + 1; },
+     *     [](int value) { return value * 2; });
+     * constexpr int input = 4;
+     * constexpr auto output = measures(input);
+     * static_assert(output == std::tuple{5, 8});
+     * @endcode
+     */
+    template<typename... Functions>
+        requires(sizeof...(Functions) > 0) &&
+                (std::constructible_from<std::decay_t<Functions>, Functions> && ...)
+    [[nodiscard]] constexpr auto Fanout(Functions&&... functions) {
+        return Fn(Detail::FanoutFunction<std::decay_t<Functions>...>{
+            std::tuple<std::decay_t<Functions>...>{std::forward<Functions>(functions)...}});
     }
 
     /**

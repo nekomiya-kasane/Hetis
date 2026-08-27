@@ -385,7 +385,22 @@ namespace Sora {
             return output;
         }
 
-        /** @brief Compile-time source-operation adaptor inferred from generated SoA arguments. */
+        /**
+         * @brief Compile-time source-operation adaptor inferred from generated SoA arguments.
+         * @details The non-type template operation is lifted from source aggregate values to their generated SoA
+         * representation; @ref Scalar and @ref Simd select the loop-vectorization policy explicitly.
+         * @code{.cpp}
+         * struct Sample { float value; };
+         * consteval { Sora::SoA::Define<Sample, 2>(); }
+         * using Batch = Sora::SoA::SoAType<Sample, 2>;
+         * constexpr auto add = Sora::SoA::Adapt<[](Sample a, Sample b) {
+         *     return Sample{a.value + b.value};
+         * }>;
+         * Batch left{}; left.value = {1.0F, 2.0F};
+         * Batch right{}; right.value = {10.0F, 20.0F};
+         * auto output = add(left, right); // output.value == [11.0F, 22.0F]
+         * @endcode
+         */
         template<auto Operation>
         struct AdaptedOperation {
             template<Concept::OperationLiftable T, size_t N, typename... Rest>
@@ -431,7 +446,19 @@ namespace Sora {
             }
         };
 
-        /** @brief Adapt a compile-time function, function object, lambda, or member pointer to generated SoA values. */
+        /**
+         * @brief Adapt a compile-time function, function object, lambda, or member pointer to generated SoA values.
+         * @code{.cpp}
+         * struct Sample { float value; };
+         * consteval { Sora::SoA::Define<Sample, 2>(); }
+         * using Batch = Sora::SoA::SoAType<Sample, 2>;
+         * constexpr auto negate = Sora::SoA::Adapt<[](Sample value) {
+         *     return Sample{-value.value};
+         * }>;
+         * Batch input{}; input.value = {1.0F, 2.0F};
+         * auto output = negate(input); // output.value == [-1.0F, -2.0F]
+         * @endcode
+         */
         template<auto Operation>
         inline constexpr AdaptedOperation<Operation> Adapt{};
 

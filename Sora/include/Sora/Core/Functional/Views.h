@@ -479,6 +479,7 @@ namespace Sora {
          */
         template<std::ranges::view V, typename F, typename Acc>
             requires std::ranges::input_range<V> && std::is_object_v<F> && std::is_object_v<Acc> &&
+                     std::copy_constructible<Acc> &&
                      std::invocable<F&, Acc&&, std::ranges::range_reference_t<V>> &&
                      std::constructible_from<
                          Acc, std::invoke_result_t<F&, Acc&&, std::ranges::range_reference_t<V>>>
@@ -533,8 +534,8 @@ namespace Sora {
                 constexpr Iterator(ScanView& parent, std::ranges::iterator_t<V> current, std::ranges::sentinel_t<V> end)
                     : parent_(std::addressof(parent)), current_(std::move(current)), end_(std::move(end)) {
                     if (current_ != end_) {
-                        accumulator_.emplace(
-                            std::invoke(parent_->function_, std::move(parent_->initial_), *current_));
+                        Acc initial(parent_->initial_);
+                        accumulator_.emplace(std::invoke(parent_->function_, std::move(initial), *current_));
                     }
                 }
 
@@ -864,11 +865,12 @@ namespace Sora {
          * @brief Lazily compute a seeded prefix accumulation.
          * @details For input @c [x0, x1, ...], the output is @c [f(init,x0), f(previous,x1), ...]. Construction
          * performs no source traversal; each increment computes at most the next prefix. The accumulator is owned by
-         * the view and must be constructible from the callable result.
+         * the view, copied into each iterator, and must be constructible from the callable result. A forward-range
+         * source can therefore be traversed repeatedly without consuming the stored seed.
          * @tparam F Binary accumulation callable.
          * @tparam Initial Initial accumulator type.
          * @param[in] function Callable receiving accumulator and current element.
-         * @param[in] initial Seed value copied or moved into the view.
+         * @param[in] initial Copyable seed value copied or moved into the view.
          * @return A lazy input view with one result per source element; an empty source yields an empty view.
          * @code{.cpp}
          * auto values = std::array{1, 2, 3};

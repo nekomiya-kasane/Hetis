@@ -492,7 +492,13 @@ namespace Sora {
 
     namespace CPO {
 
-        /** @brief Function object implementing the @ref Sora::ToStyledString customization point. */
+        /**
+         * @brief Function object implementing the @ref Sora::ToStyledString customization point.
+         * @code{.cpp}
+         * auto input = 42;
+         * auto output = Sora::ToStyledString(input, {.color = false}); // "42"
+         * @endcode
+         */
         struct ToStyledStringFn {
             /** @brief Convert @p value to a styled string with default options. */
             template<typename T>

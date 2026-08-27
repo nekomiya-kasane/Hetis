@@ -654,7 +654,13 @@ namespace Sora {
 
     namespace CPO {
 
-        /** @brief Function object implementing the @ref Sora::ToJson customization point. */
+        /**
+         * @brief Function object implementing the @ref Sora::ToJson customization point.
+         * @code{.cpp}
+         * auto input = std::array{1, 2, 3};
+         * auto output = Sora::ToJson(input); // JSON array [1, 2, 3]
+         * @endcode
+         */
         struct ToJsonFn {
             template<typename T>
             [[nodiscard]] Json operator()(T&& value) const {
@@ -662,7 +668,13 @@ namespace Sora {
             }
         };
 
-        /** @brief Function object implementing the @ref Sora::FromJson customization point. */
+        /**
+         * @brief Function object implementing the @ref Sora::FromJson customization point.
+         * @code{.cpp}
+         * auto input = Sora::Json{42};
+         * auto output = Sora::FromJson(std::in_place_type<int>, input); // 42
+         * @endcode
+         */
         struct FromJsonFn {
             template<std::default_initializable T>
             [[nodiscard]] T operator()(std::in_place_type_t<T>, const Json& input) const {
