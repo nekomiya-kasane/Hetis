@@ -105,12 +105,12 @@ namespace Sora::Meta {
      * @par Example
      * @code{.cpp}
      * constexpr auto reflected = Sora::Meta::Reflect(Sora::Meta::InfoList{^^int});
-     * static_assert(Sora::Meta::RequireInfoList(reflected).front() == ^^int);
+     * static_assert(Sora::Meta::ExtractInfoList(reflected).front() == ^^int);
      * @endcode
      */
-    [[nodiscard]] consteval InfoList RequireInfoList(std::meta::info result) {
+    [[nodiscard]] consteval InfoList ExtractInfoList(std::meta::info result) {
         if (!IsInfoList(result)) {
-            throw std::define_static_string("Meta::RequireInfoList requires a reflected InfoList value.");
+            throw std::define_static_string("Meta::ExtractInfoList requires a reflected InfoList value.");
         }
         return std::meta::extract<InfoList>(result);
     }
@@ -123,14 +123,14 @@ namespace Sora::Meta {
      * @par Example
      * @code{.cpp}
      * constexpr auto reflected = std::meta::reflect_constant(std::size_t{3});
-     * static_assert(Sora::Meta::RequireSizeResult(reflected) == 3);
+     * static_assert(Sora::Meta::ExtractSizeType(reflected) == 3);
      * @endcode
      */
-    [[nodiscard]] consteval std::size_t RequireSizeResult(std::meta::info result) {
+    [[nodiscard]] consteval std::size_t ExtractSizeType(std::meta::info result) {
         if (IsMetaError(result) || !std::meta::is_value(result) ||
             std::meta::dealias(std::meta::remove_cvref(std::meta::type_of(result))) !=
                 std::meta::dealias(^^std::size_t)) {
-            throw std::define_static_string("Meta::RequireSizeResult requires a reflected size_t result.");
+            throw std::define_static_string("Meta::ExtractSizeType requires a reflected size_t result.");
         }
         return std::meta::extract<const std::size_t>(result);
     }
@@ -143,11 +143,11 @@ namespace Sora::Meta {
      * @par Example
      * @code{.cpp}
      * constexpr auto value = std::meta::reflect_constant(42);
-     * constexpr auto result = Sora::Meta::RequireTypeResult(value, {^^int});
+     * constexpr auto result = Sora::Meta::VerifyTypeResult(value, {^^int, ^^double, ^^float});
      * static_assert(Sora::Meta::IsMetaError(result));
      * @endcode
      */
-    [[nodiscard]] consteval std::meta::info RequireTypeResult(std::meta::info result, const InfoList& context = {}) {
+    [[nodiscard]] consteval std::meta::info VerifyTypeResult(std::meta::info result, const InfoList& context = {}) {
         if (IsMetaError(result) || std::meta::is_type(result)) {
             return result;
         }
@@ -221,20 +221,40 @@ namespace Sora::Meta {
     [[nodiscard]] consteval std::meta::info Apply(std::meta::info function, const InfoList& arguments) {
         return Detail::Apply(function, {arguments.begin(), arguments.size()});
     }
+    static_assert(Apply(^^std::pair, Sora::Meta::InfoList{^^int, ^^double}) == ^^std::pair<int, double>);
+
+    /**
+     * @brief Invoke a reflected template with a dynamically assembled argument list.
+     * @param[in] function Reflected template to substitute.
+     * @param[in] arguments Reflected template arguments in source order.
+     * @return Substitution result, the first input error, or `NonInvocable` with invocation provenance.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Apply(^^std::pair, {^^int, ^^double});
+     * static_assert(result == ^^std::pair<int, double>);
+     * @endcode
+     */
+    [[nodiscard]] consteval std::meta::info Apply(std::meta::info function,
+                                                  std::initializer_list<std::meta::info> arguments) {
+        return Detail::Apply(function, {arguments.begin(), arguments.size()});
+    }
+    static_assert(Apply(^^std::pair, {^^int, ^^double}) == ^^std::pair<int, double>);
 
     namespace Detail {
 
         /** @brief Validate that a reflection denotes a template entity. */
-        [[nodiscard]] consteval std::meta::info ValidateTemplate(std::meta::info function) {
+        [[nodiscard]] consteval std::meta::info VerifyTemplate(std::meta::info function) {
             if (IsMetaError(function)) {
                 return function;
             }
             return std::meta::is_template(function) ? std::meta::info{}
                                                     : MakeMetaError(^^Error::NonInvocable, {function});
         }
+        static_assert(VerifyTemplate(^^std::pair) == std::meta::info{});
+        static_assert(VerifyTemplate(^^int) == MakeMetaError(^^Error::NonInvocable, {^^int}));
 
         /** @brief Validate the unary boolean predicate protocol used by collection algorithms. */
-        [[nodiscard]] consteval std::meta::info ValidateUnaryPred(std::meta::info pred) {
+        [[nodiscard]] consteval std::meta::info VerifyUnaryPred(std::meta::info pred) {
             if (IsMetaError(pred)) {
                 return pred;
             }
@@ -263,7 +283,7 @@ namespace Sora::Meta {
                 return MakeMetaError(^^Error::NonInvocable);
             }
             for (const auto function : functions) {
-                if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
+                if (const auto error = VerifyTemplate(function); error != std::meta::info{}) {
                     return error;
                 }
             }
@@ -272,12 +292,12 @@ namespace Sora::Meta {
             }
             auto result = Apply(functions.back(), arguments);
             if (functions.size() > 1 && !IsMetaError(result)) {
-                result = RequireTypeResult(result, InfoList{functions.back()});
+                result = VerifyTypeResult(result, InfoList{functions.back()});
             }
             for (std::size_t index = functions.size() - 1; index > 0 && !IsMetaError(result); --index) {
                 result = Apply(functions[index - 1], InfoList{result});
                 if (index > 1 && !IsMetaError(result)) {
-                    result = RequireTypeResult(result, InfoList{functions[index - 1]});
+                    result = VerifyTypeResult(result, InfoList{functions[index - 1]});
                 }
             }
             return result;
@@ -298,10 +318,10 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info TransformInvoke(std::meta::info function, std::meta::info continuation,
                                                                 const InfoList& arguments) {
-            if (const auto error = ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
-            if (const auto error = ValidateTemplate(continuation); error != std::meta::info{}) {
+            if (const auto error = VerifyTemplate(continuation); error != std::meta::info{}) {
                 return error;
             }
             if (const auto error = FirstMetaError(arguments); error != std::meta::info{}) {
@@ -315,7 +335,7 @@ namespace Sora::Meta {
                 if (IsMetaError(result)) {
                     return result;
                 }
-                result = RequireTypeResult(result, InfoList{function, argument});
+                result = VerifyTypeResult(result, InfoList{function, argument});
                 if (IsMetaError(result)) {
                     return result;
                 }
@@ -359,7 +379,7 @@ namespace Sora::Meta {
                 if (!IsInfoList(mapped)) {
                     return MakeMetaError(^^Error::NonInfoListResult, {function, value, mapped});
                 }
-                const auto mappedList = RequireInfoList(mapped);
+                const auto mappedList = ExtractInfoList(mapped);
                 if (const auto error = FirstMetaError(mappedList); error != std::meta::info{}) {
                     return error;
                 }
@@ -388,7 +408,7 @@ namespace Sora::Meta {
         if (IsMetaError(function)) {
             return function;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -425,7 +445,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -484,7 +504,7 @@ namespace Sora::Meta {
      */
     [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
                                                       const InfoList& input) {
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (IsMetaError(replacement)) {
@@ -522,7 +542,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -560,7 +580,7 @@ namespace Sora::Meta {
         if (IsMetaError(function)) {
             return function;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(left); error != std::meta::info{}) {
@@ -571,7 +591,7 @@ namespace Sora::Meta {
         }
         if (left.size() != right.size()) {
             return MakeMetaError(^^Error::LengthMismatch, {function, std::meta::reflect_constant(left.size()),
-                                                              std::meta::reflect_constant(right.size())});
+                                                           std::meta::reflect_constant(right.size())});
         }
         std::vector<std::meta::info> output;
         output.reserve(left.size());
@@ -604,7 +624,7 @@ namespace Sora::Meta {
         if (input.empty()) {
             return initial;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
             return error;
         }
         if (IsMetaError(initial)) {
@@ -642,7 +662,7 @@ namespace Sora::Meta {
         if (input.empty()) {
             return initial;
         }
-        if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
             return error;
         }
         if (IsMetaError(initial)) {
@@ -679,7 +699,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -718,7 +738,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -756,7 +776,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -790,7 +810,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -841,7 +861,7 @@ namespace Sora::Meta {
         if (IsMetaError(pred)) {
             return pred;
         }
-        if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
             return error;
         }
         if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -876,7 +896,7 @@ namespace Sora::Meta {
         if (!IsInfoList(result)) {
             return MakeMetaError(^^Error::NonInfoListResult, {result});
         }
-        const auto list = RequireInfoList(result);
+        const auto list = ExtractInfoList(result);
         if (const auto error = FirstMetaError(list); error != std::meta::info{}) {
             return error;
         }
@@ -937,9 +957,8 @@ namespace Sora::Meta {
                 return {.error = list};
             }
             if (!IsTypeList(list)) {
-                return {.error = MakeMetaError(
-                            ^^Error::InvalidSequence,
-                            std::vector<std::meta::info>{context.begin(), context.end()})};
+                return {.error = MakeMetaError(^^Error::InvalidSequence,
+                                               std::vector<std::meta::info>{context.begin(), context.end()})};
             }
             const auto types = ToInfoList(list);
             return {.types = types, .error = FirstMetaError(types)};
@@ -1445,14 +1464,14 @@ namespace Sora::Meta {
             if (IsMetaError(function)) {
                 return function;
             }
-            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
             if (!inspected) {
                 return inspected.error;
             }
-            return RequireTypeResult(Sora::Meta::Apply(function, inspected.types), {function, list});
+            return VerifyTypeResult(Sora::Meta::Apply(function, inspected.types), {function, list});
         }
 
         /**
@@ -1471,7 +1490,7 @@ namespace Sora::Meta {
             if (IsMetaError(function)) {
                 return function;
             }
-            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
@@ -1497,7 +1516,7 @@ namespace Sora::Meta {
             if (IsMetaError(function)) {
                 return function;
             }
-            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
@@ -1540,7 +1559,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
@@ -1566,7 +1585,7 @@ namespace Sora::Meta {
          */
         [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
                                                           std::meta::info list) {
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             if (IsMetaError(replacement)) {
@@ -1599,7 +1618,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
@@ -1627,7 +1646,7 @@ namespace Sora::Meta {
             if (IsMetaError(function)) {
                 return function;
             }
-            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             const InfoList context{function, left, right};
@@ -1765,7 +1784,7 @@ namespace Sora::Meta {
                 }
                 return initial;
             }
-            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             if (IsMetaError(initial)) {
@@ -1784,7 +1803,7 @@ namespace Sora::Meta {
             if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
                 return error;
             }
-            return RequireTypeResult(Sora::Meta::FoldLeft(function, initial, types), {function, initial, list});
+            return VerifyTypeResult(Sora::Meta::FoldLeft(function, initial, types), {function, initial, list});
         }
 
         /**
@@ -1812,7 +1831,7 @@ namespace Sora::Meta {
                 }
                 return initial;
             }
-            if (const auto error = Detail::ValidateTemplate(function); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
                 return error;
             }
             if (IsMetaError(initial)) {
@@ -1831,7 +1850,7 @@ namespace Sora::Meta {
             if (const auto error = FirstMetaError(types); error != std::meta::info{}) {
                 return error;
             }
-            return RequireTypeResult(Sora::Meta::FoldRight(function, initial, types), {function, initial, list});
+            return VerifyTypeResult(Sora::Meta::FoldRight(function, initial, types), {function, initial, list});
         }
 
         /**
@@ -1853,7 +1872,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list, fallback});
@@ -1866,7 +1885,7 @@ namespace Sora::Meta {
             if (!std::meta::is_type(fallback)) {
                 return MakeMetaError(^^Error::NonTypeResult, {pred, fallback});
             }
-            return RequireTypeResult(Sora::Meta::FindFirst(pred, inspected.types, fallback), {pred, list, fallback});
+            return VerifyTypeResult(Sora::Meta::FindFirst(pred, inspected.types, fallback), {pred, list, fallback});
         }
 
         /**
@@ -1889,7 +1908,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list, fallback});
@@ -1902,7 +1921,7 @@ namespace Sora::Meta {
             if (!std::meta::is_type(fallback)) {
                 return MakeMetaError(^^Error::NonTypeResult, {pred, fallback});
             }
-            return RequireTypeResult(Sora::Meta::FindLast(pred, inspected.types, fallback), {pred, list, fallback});
+            return VerifyTypeResult(Sora::Meta::FindLast(pred, inspected.types, fallback), {pred, list, fallback});
         }
 
         /**
@@ -1921,7 +1940,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
@@ -1953,7 +1972,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
@@ -2003,7 +2022,7 @@ namespace Sora::Meta {
             if (IsMetaError(pred)) {
                 return pred;
             }
-            if (const auto error = Detail::ValidateUnaryPred(pred); error != std::meta::info{}) {
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
                 return error;
             }
             const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
@@ -2035,7 +2054,7 @@ namespace Sora::Meta {
         template<std::meta::info... Functions>
         struct ComposeClosure {
             template<typename... Arguments>
-            using Apply = InfoType<RequireTypeResult(
+            using Apply = InfoType<VerifyTypeResult(
                 Detail::ComposeInvoke(InfoList{Functions...}, InfoList{^^Arguments...}), InfoList{Functions...})>;
         };
 
@@ -2044,22 +2063,22 @@ namespace Sora::Meta {
         struct TransformClosure {
             template<typename... Arguments>
             using Apply =
-                InfoType<RequireTypeResult(Detail::TransformInvoke(Function, Continuation, InfoList{^^Arguments...}),
-                                           InfoList{Function, Continuation})>;
+                InfoType<VerifyTypeResult(Detail::TransformInvoke(Function, Continuation, InfoList{^^Arguments...}),
+                                          InfoList{Function, Continuation})>;
         };
 
         /** @brief Alias-template closure that always yields one reflected result. */
         template<std::meta::info Result>
         struct ConstantClosure {
             template<typename...>
-            using Apply = InfoType<RequireTypeResult(Result, InfoList{Result})>;
+            using Apply = InfoType<VerifyTypeResult(Result, InfoList{Result})>;
         };
 
         /** @brief Alias-template closure that expands one reflected TypeList argument. */
         template<std::meta::info Function>
         struct UncurryClosure {
             template<typename List>
-            using Apply = InfoType<RequireTypeResult(Types::Apply(Function, ^^List), InfoList{Function, ^^List})>;
+            using Apply = InfoType<VerifyTypeResult(Types::Apply(Function, ^^List), InfoList{Function, ^^List})>;
         };
 
     } // namespace Detail
@@ -2198,7 +2217,7 @@ namespace Sora::Traits {
      */
     template<typename List>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t Length = Meta::RequireSizeResult(Meta::Types::Length(^^List));
+    inline constexpr std::size_t Length = Meta::ExtractSizeType(Meta::Types::Length(^^List));
 
     /**
      * @brief Return the @p Index-th type of @p List.
@@ -2501,7 +2520,7 @@ namespace Sora::Traits {
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t IndexOf = Meta::RequireSizeResult(Meta::Types::IndexOf(^^List, ^^Type));
+    inline constexpr std::size_t IndexOf = Meta::ExtractSizeType(Meta::Types::IndexOf(^^List, ^^Type));
 
     /**
      * @brief Whether @p List contains @p Type.
@@ -2529,7 +2548,7 @@ namespace Sora::Traits {
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t Count = Meta::RequireSizeResult(Meta::Types::Count(^^List, ^^Type));
+    inline constexpr std::size_t Count = Meta::ExtractSizeType(Meta::Types::Count(^^List, ^^Type));
 
     /**
      * @brief Compare two `TypeList` sequences element by element.
@@ -2803,7 +2822,7 @@ namespace Sora::Traits {
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
-    inline constexpr std::size_t CountIf = Meta::RequireSizeResult(Meta::Types::CountIf(Pred, ^^List));
+    inline constexpr std::size_t CountIf = Meta::ExtractSizeType(Meta::Types::CountIf(Pred, ^^List));
 
     /**
      * @brief Project non-static data-member types of @p Type into a `TypeList`.
