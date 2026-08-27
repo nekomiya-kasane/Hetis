@@ -25,6 +25,10 @@
 
 namespace Sora::Math {
 
+    template<TensorElement Control, size_t... Degrees>
+        requires(sizeof...(Degrees) > 0)
+    class BezierPatch;
+
     namespace Detail {
 
         template<typename Left, typename Right>
@@ -200,13 +204,43 @@ namespace Sora::Math {
             }
         }
 
-        template<typename Control, size_t UCount, size_t VCount, typename UParameter, typename VParameter>
-        inline constexpr bool kNothrowEvaluateBezierSurface = [] {
-            using VValue = std::remove_cvref_t<decltype(EvaluateBezierControls(
-                std::declval<const std::array<Control, VCount>&>(), std::declval<const VParameter&>()))>;
-            return kNothrowEvaluateBezierControls<Control, VCount, VParameter> &&
-                   kNothrowEvaluateBezierControls<VValue, UCount, UParameter>;
-        }();
+        template<TensorElement Control, size_t... Counts>
+        [[nodiscard]] consteval auto BezierPatchType(std::type_identity<Tensor<Control, Counts...>>)
+            -> std::type_identity<BezierPatch<Control, (Counts - 1)...>>;
+
+        template<typename TensorType>
+        using BezierPatchFor = typename decltype(
+            BezierPatchType(std::type_identity<std::remove_cvref_t<TensorType>>{}))::type;
+
+        struct BezierAxisContraction {
+            template<size_t Axis, typename Control, size_t Count, typename Parameter>
+            [[nodiscard]] constexpr auto operator()(std::integral_constant<size_t, Axis>,
+                                                    const std::array<Control, Count>& controls,
+                                                    const Parameter& parameter) const noexcept(
+                kNothrowEvaluateBezierControls<Control, Count, Parameter>) {
+                return EvaluateBezierControls(controls, parameter);
+            }
+        };
+
+        template<typename Control, size_t Count, typename Parameter>
+        [[nodiscard]] constexpr auto SubdivideBezierControls(const std::array<Control, Count>& controls,
+                                                              const Parameter& parameter) {
+            static_assert(Count > 0);
+            using Result = std::remove_cvref_t<decltype(BezierBlend(controls[0], controls[0], parameter))>;
+            auto level = GenerateArray<Result, Count>(
+                [&](auto index) { return BezierBlend(controls[index], controls[index], parameter); });
+            auto left = GenerateArray<Result, Count>([&](auto) { return level[0]; });
+            auto right = GenerateArray<Result, Count>([&](auto) { return level[Count - 1]; });
+            for (size_t remaining = Count - 1; remaining > 0; --remaining) {
+                for (size_t index = 0; index < remaining; ++index) {
+                    level[index] = BezierBlend(level[index], level[index + 1], parameter);
+                }
+                const size_t depth = Count - remaining;
+                left[depth] = level[0];
+                right[Count - 1 - depth] = level[remaining - 1];
+            }
+            return std::pair{std::move(left), std::move(right)};
+        }
 
         template<typename Control>
         [[nodiscard]] consteval auto BezierScalarType() {
@@ -234,15 +268,6 @@ namespace Sora::Math {
             Tensor<Direction, 3> coefficients;
         };
 
-        template<TensorElement Control>
-        struct BicubicPowerData {
-            using Direction = typename CubicPowerData<Control>::Direction;
-
-            Control origin;
-            Tensor<Direction, 3> vCoefficients;
-            Tensor<Direction, 3, 4> uCoefficients;
-        };
-
         template<TensorElement Value>
         [[nodiscard]] constexpr auto CubicPower(const std::array<Value, 4>& controls) {
             const auto first = BezierDifference(controls[1], controls[0]);
@@ -254,40 +279,6 @@ namespace Sora::Math {
                 Tensor<typename Data::Direction, 3>{
                     BezierScale(first, 3), BezierScale(BezierDifference(second, first), 3),
                     BezierDifference(BezierDifference(third, second), BezierDifference(second, first))}};
-        }
-
-        template<TensorElement Control>
-        [[nodiscard]] constexpr auto BicubicPower(const Tensor<Control, 4, 4>& controls) {
-            using Data = BicubicPowerData<Control>;
-            using Direction = typename Data::Direction;
-            using DirectionPower = CubicPowerData<Direction>;
-
-            const auto vPower = GenerateArray<CubicPowerData<Control>, 4>([&](auto u) {
-                const auto row = GenerateArray<Control, 4>([&](auto v) { return controls(u, v); });
-                return CubicPower(row);
-            });
-            const auto origins = GenerateArray<Control, 4>([&](auto u) { return vPower[u].origin; });
-            const auto uPower = CubicPower(origins);
-            const auto crossPower = GenerateArray<DirectionPower, 3>([&](auto v) {
-                const auto column = GenerateArray<Direction, 4>([&](auto u) {
-                    return vPower[u].coefficients[v];
-                });
-                return CubicPower(column);
-            });
-            auto vCoefficients = GenerateArray<Direction, 3>([&](auto v) {
-                return crossPower[v].origin;
-            });
-            auto uCoefficients = GenerateArray<Direction, 12>([&](auto index) {
-                constexpr size_t uPowerIndex = decltype(index)::value / 4;
-                constexpr size_t vPowerIndex = decltype(index)::value % 4;
-                if constexpr (vPowerIndex == 0) {
-                    return uPower.coefficients[uPowerIndex];
-                } else {
-                    return crossPower[vPowerIndex - 1].coefficients[uPowerIndex];
-                }
-            });
-            return Data{uPower.origin, Tensor<Direction, 3>{std::move(vCoefficients)},
-                        Tensor<Direction, 3, 4>{std::move(uCoefficients)}};
         }
 
         template<typename Origin, typename Direction, typename Parameter>
@@ -302,57 +293,174 @@ namespace Sora::Math {
             return BezierMultiplyAdd(direction, parameter, origin);
         }
 
-        template<typename Control, typename Direction, typename UParameter, typename VParameter>
-        inline constexpr bool kNothrowEvaluateBicubicHorner = [] {
-            using VValue = std::remove_cvref_t<decltype(EvaluateCubicHorner(
-                std::declval<const Control&>(), std::declval<const Direction&>(),
-                std::declval<const Direction&>(), std::declval<const Direction&>(),
-                std::declval<const VParameter&>()))>;
-            using VDirection = std::remove_cvref_t<decltype(EvaluateCubicHorner(
-                std::declval<const Direction&>(), std::declval<const Direction&>(),
-                std::declval<const Direction&>(), std::declval<const Direction&>(),
-                std::declval<const VParameter&>()))>;
-            return noexcept(EvaluateCubicHorner(
-                       std::declval<const Control&>(), std::declval<const Direction&>(),
-                       std::declval<const Direction&>(), std::declval<const Direction&>(),
-                       std::declval<const VParameter&>())) &&
-                   noexcept(EvaluateCubicHorner(
-                       std::declval<const Direction&>(), std::declval<const Direction&>(),
-                       std::declval<const Direction&>(), std::declval<const Direction&>(),
-                       std::declval<const VParameter&>())) &&
-                   noexcept(EvaluateCubicHorner(
-                       std::declval<const VValue&>(), std::declval<const VDirection&>(),
-                       std::declval<const VDirection&>(), std::declval<const VDirection&>(),
-                       std::declval<const UParameter&>()));
-        }();
+        [[nodiscard]] consteval size_t StaticPower(size_t base, size_t exponent) noexcept {
+            size_t result = 1;
+            for (size_t index = 0; index < exponent; ++index) {
+                result *= base;
+            }
+            return result;
+        }
+
+        template<TensorElement Control, size_t Rank>
+            requires(Rank > 0)
+        struct CubicPatchPowerData {
+            using Direction = typename CubicPowerData<Control>::Direction;
+            static constexpr size_t kCoefficientCount = StaticPower(4, Rank);
+
+            Control origin;
+            std::array<Direction, kCoefficientCount - 1> coefficients;
+        };
+
+        template<size_t Axis, TensorElement Direction, size_t... Extents>
+        [[nodiscard]] constexpr auto CubicTensorPower(const Tensor<Direction, Extents...>& coefficients) {
+            if constexpr (Axis == sizeof...(Extents)) {
+                return coefficients;
+            } else {
+                auto transformed = TransformTensorAxis<Axis, 4>(
+                    coefficients, [](const std::array<Direction, 4>& fiber) {
+                        const auto power = CubicPower(fiber);
+                        return std::array{power.origin, power.coefficients[0], power.coefficients[1],
+                                          power.coefficients[2]};
+                    });
+                return CubicTensorPower<Axis + 1>(transformed);
+            }
+        }
+
+        template<TensorElement Control, size_t... Extents>
+            requires(((Extents == 4) && ...))
+        [[nodiscard]] constexpr auto CubicPatchPower(const Tensor<Control, Extents...>& controls) {
+            constexpr size_t rank = sizeof...(Extents);
+            using Data = CubicPatchPowerData<Control, rank>;
+            using Direction = typename Data::Direction;
+            auto directions = Transform(controls, [&](const Control& control) {
+                return BezierDifference(control, controls[0]);
+            });
+            const auto coefficients = CubicTensorPower<0>(directions);
+            return Data{controls[0], GenerateArray<Direction, Data::kCoefficientCount - 1>(
+                                         [&](auto index) { return coefficients[index + 1]; })};
+        }
+
+        template<size_t Axis, size_t Base, size_t Rank, typename Control, typename Direction, typename Parameters>
+        [[nodiscard]] consteval auto CubicPowerBlockType() {
+            using Parameter = std::tuple_element_t<Axis, Parameters>;
+            constexpr size_t stride = StaticPower(4, Rank - Axis - 1);
+            if constexpr (Axis + 1 == Rank) {
+                if constexpr (Base == 0) {
+                    return std::type_identity<std::remove_cvref_t<decltype(EvaluateCubicHorner(
+                        std::declval<const Control&>(), std::declval<const Direction&>(),
+                        std::declval<const Direction&>(), std::declval<const Direction&>(),
+                        std::declval<const Parameter&>()))>>{};
+                } else {
+                    return std::type_identity<std::remove_cvref_t<decltype(EvaluateCubicHorner(
+                        std::declval<const Direction&>(), std::declval<const Direction&>(),
+                        std::declval<const Direction&>(), std::declval<const Direction&>(),
+                        std::declval<const Parameter&>()))>>{};
+                }
+            } else {
+                using Constant = typename decltype(
+                    CubicPowerBlockType<Axis + 1, Base, Rank, Control, Direction, Parameters>())::type;
+                using Coefficient = typename decltype(
+                    CubicPowerBlockType<Axis + 1, Base + stride, Rank, Control, Direction, Parameters>())::type;
+                return std::type_identity<std::remove_cvref_t<decltype(EvaluateCubicHorner(
+                    std::declval<const Constant&>(), std::declval<const Coefficient&>(),
+                    std::declval<const Coefficient&>(), std::declval<const Coefficient&>(),
+                    std::declval<const Parameter&>()))>>{};
+            }
+        }
+
+        template<size_t Axis, size_t Base, size_t Rank, typename Control, typename Direction, typename Parameters>
+        [[nodiscard]] consteval bool NothrowEvaluateCubicPowerBlock() {
+            using Parameter = std::tuple_element_t<Axis, Parameters>;
+            constexpr size_t stride = StaticPower(4, Rank - Axis - 1);
+            if constexpr (Axis + 1 == Rank) {
+                if constexpr (Base == 0) {
+                    return noexcept(EvaluateCubicHorner(
+                        std::declval<const Control&>(), std::declval<const Direction&>(),
+                        std::declval<const Direction&>(), std::declval<const Direction&>(),
+                        std::declval<const Parameter&>()));
+                } else {
+                    return noexcept(EvaluateCubicHorner(
+                        std::declval<const Direction&>(), std::declval<const Direction&>(),
+                        std::declval<const Direction&>(), std::declval<const Direction&>(),
+                        std::declval<const Parameter&>()));
+                }
+            } else {
+                using Constant = typename decltype(
+                    CubicPowerBlockType<Axis + 1, Base, Rank, Control, Direction, Parameters>())::type;
+                using Coefficient = typename decltype(
+                    CubicPowerBlockType<Axis + 1, Base + stride, Rank, Control, Direction, Parameters>())::type;
+                return NothrowEvaluateCubicPowerBlock<Axis + 1, Base, Rank, Control, Direction, Parameters>() &&
+                       NothrowEvaluateCubicPowerBlock<Axis + 1, Base + stride, Rank, Control, Direction,
+                                                      Parameters>() &&
+                       NothrowEvaluateCubicPowerBlock<Axis + 1, Base + 2 * stride, Rank, Control, Direction,
+                                                      Parameters>() &&
+                       NothrowEvaluateCubicPowerBlock<Axis + 1, Base + 3 * stride, Rank, Control, Direction,
+                                                      Parameters>() &&
+                       noexcept(EvaluateCubicHorner(
+                           std::declval<const Constant&>(), std::declval<const Coefficient&>(),
+                           std::declval<const Coefficient&>(), std::declval<const Coefficient&>(),
+                           std::declval<const Parameter&>()));
+            }
+        }
+
+        template<size_t Axis, size_t Base, size_t Rank, TensorElement Control, typename Parameters>
+        [[nodiscard, gnu::always_inline]] constexpr auto EvaluateCubicPowerBlock(
+            const CubicPatchPowerData<Control, Rank>& power, const Parameters& parameters) noexcept(
+            NothrowEvaluateCubicPowerBlock<Axis, Base, Rank, Control,
+                                            typename CubicPatchPowerData<Control, Rank>::Direction, Parameters>()) {
+            using Direction = typename CubicPatchPowerData<Control, Rank>::Direction;
+            constexpr size_t stride = StaticPower(4, Rank - Axis - 1);
+            if constexpr (Axis + 1 == Rank) {
+                if constexpr (Base == 0) {
+                    return EvaluateCubicHorner(power.origin, power.coefficients[stride - 1],
+                                               power.coefficients[2 * stride - 1],
+                                               power.coefficients[3 * stride - 1], std::get<Axis>(parameters));
+                } else {
+                    return EvaluateCubicHorner(power.coefficients[Base - 1],
+                                               power.coefficients[Base + stride - 1],
+                                               power.coefficients[Base + 2 * stride - 1],
+                                               power.coefficients[Base + 3 * stride - 1],
+                                               std::get<Axis>(parameters));
+                }
+            } else {
+                const auto constant = EvaluateCubicPowerBlock<Axis + 1, Base>(power, parameters);
+                const auto linear = EvaluateCubicPowerBlock<Axis + 1, Base + stride>(power, parameters);
+                const auto quadratic = EvaluateCubicPowerBlock<Axis + 1, Base + 2 * stride>(power, parameters);
+                const auto cubic = EvaluateCubicPowerBlock<Axis + 1, Base + 3 * stride>(power, parameters);
+                return EvaluateCubicHorner(constant, linear, quadratic, cubic, std::get<Axis>(parameters));
+            }
+        }
 
     } // namespace Detail
 
     /**
-     * @brief Polynomial Bezier curve of compile-time degree over an affine or linear control value.
-     * @details A SIMD parameter evaluates several samples of one curve. SIMD control carriers evaluate several
-     * curves, and combining both evaluates lane-wise curve/sample pairs without changing this type or algorithm.
+     * @brief Rank-generic tensor-product Bernstein patch over an affine or linear control value.
+     * @details Rank one is a curve and rank two is a surface. Evaluation contracts the contiguous last axis first,
+     * then proceeds toward axis zero. SIMD and automatic-differentiation carriers use the same expression graph.
      */
-    template<TensorElement Control, size_t Degree>
-    class BezierCurve {
+    template<TensorElement Control, size_t... Degrees>
+        requires(sizeof...(Degrees) > 0)
+    class BezierPatch {
     public:
         using ControlType = Control;
-        using ControlTensor = Tensor<Control, Degree + 1>;
-        static constexpr size_t kDegree = Degree;
-        static constexpr size_t kControlCount = Degree + 1;
+        using ControlTensor = Tensor<Control, (Degrees + 1)...>;
+        static constexpr size_t kRank = sizeof...(Degrees);
+        static constexpr size_t kControlCount = ((Degrees + 1) * ...);
+        static constexpr std::array<size_t, kRank> kDegrees{Degrees...};
 
-        /** @brief Construct a zero/value-initialized control polygon. */
-        constexpr BezierCurve() noexcept(std::is_nothrow_default_constructible_v<Control>)
+        /** @brief Construct a value-initialized control tensor when the control type supports it. */
+        constexpr BezierPatch() noexcept(std::is_nothrow_default_constructible_v<Control>)
             requires std::default_initializable<Control>
         = default;
 
         /** @brief Construct from the exact control tensor. */
-        constexpr explicit BezierCurve(ControlTensor controls) noexcept : controls_(std::move(controls)) {}
+        constexpr explicit BezierPatch(ControlTensor controls) noexcept : controls_(std::move(controls)) {}
 
-        /** @brief Construct from exactly @c Degree+1 control values. */
+        /** @brief Construct from exactly @c kControlCount row-major control values. */
         template<typename... U>
             requires(sizeof...(U) == kControlCount && (std::constructible_from<Control, U&&> && ...))
-        constexpr explicit BezierCurve(U&&... controls) noexcept((std::is_nothrow_constructible_v<Control, U&&> && ...))
+        constexpr explicit BezierPatch(U&&... controls) noexcept(
+            (std::is_nothrow_constructible_v<Control, U&&> && ...))
             : controls_(Control(std::forward<U>(controls))...) {}
 
         /** @brief Access one control value while preserving cv-ref qualification. */
@@ -368,94 +476,234 @@ namespace Sora::Math {
         }
 
         /**
-         * @brief Evaluate by statically shaped de Casteljau reduction.
-         * @details The parameter is not clamped; values outside `[0,1]` extrapolate the polynomial.
-         * @complexity Quadratic in @c Degree with no allocation.
+         * @brief Evaluate by one statically shaped de Casteljau contraction per parameter axis.
+         * @details Parameters are not clamped; values outside `[0,1]` extrapolate the polynomial patch.
          */
-        template<typename Parameter>
-        [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const Parameter& parameter) const noexcept(
-            Detail::kNothrowEvaluateBezierControls<Control, kControlCount, Parameter>) {
-            return Detail::EvaluateBezierControls(controls_.Values(), parameter);
+        template<typename... Parameters>
+            requires(sizeof...(Parameters) == kRank)
+        [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const Parameters&... parameters) const noexcept(
+            noexcept(ContractTensorAxes(controls_, Detail::BezierAxisContraction{}, parameters...))) {
+            return ContractTensorAxes(controls_, Detail::BezierAxisContraction{}, parameters...);
         }
 
-        /** @brief Return the exact @p Order derivative curve. */
-        template<size_t Order = 1>
-            requires(Order <= Degree)
-        [[nodiscard]] constexpr auto Derivative() const {
+        /**
+         * @brief Return the exact @p Order partial derivative along @p Axis.
+         * @details Orders above the axis degree produce its canonical degree-zero zero field.
+         */
+        template<size_t Axis, size_t Order = 1>
+            requires(Axis < kRank)
+        [[nodiscard]] constexpr auto PartialDerivative() const {
             if constexpr (Order == 0) {
                 return *this;
             } else {
-                using Difference = decltype(Detail::BezierDifference(controls_[1], controls_[0]));
-                using DerivativeControl =
-                    std::remove_cvref_t<decltype(Detail::BezierScale(std::declval<Difference>(), Degree))>;
-                auto derivativeControls = Detail::GenerateArray<DerivativeControl, Degree>([&](auto index) {
-                    return Detail::BezierScale(
-                        Detail::BezierDifference(controls_[index + 1], controls_[index]), Degree);
-                });
-                BezierCurve<DerivativeControl, Degree - 1> derivative{
-                    Tensor<DerivativeControl, Degree>{std::move(derivativeControls)}};
-                return derivative.template Derivative<Order - 1>();
-            }
-        }
-
-        /** @brief Evaluate one exact derivative without constructing runtime state. */
-        template<size_t Order, typename Parameter>
-            requires(Order <= Degree)
-        [[nodiscard, gnu::always_inline]] constexpr auto EvaluateDerivative(const Parameter& parameter) const {
-            if constexpr (Order == 0) {
-                return Evaluate(parameter);
-            } else {
-                return Derivative<Order>().Evaluate(parameter);
-            }
-        }
-
-        /** @brief Split at @p parameter into two curves whose concatenation equals this curve. */
-        template<typename Parameter>
-        [[nodiscard]] constexpr auto Subdivide(const Parameter& parameter) const {
-            using ResultControl =
-                std::remove_cvref_t<decltype(Detail::BezierBlend(controls_[0], controls_[0], parameter))>;
-            auto level = Detail::GenerateArray<ResultControl, kControlCount>(
-                [&](auto index) { return Detail::BezierBlend(controls_[index], controls_[index], parameter); });
-            auto left = Detail::GenerateArray<ResultControl, kControlCount>([&](auto) { return level[0]; });
-            auto right = Detail::GenerateArray<ResultControl, kControlCount>([&](auto) { return level[Degree]; });
-            for (size_t remaining = Degree; remaining > 0; --remaining) {
-                for (size_t index = 0; index < remaining; ++index) {
-                    level[index] = Detail::BezierBlend(level[index], level[index + 1], parameter);
-                }
-                const size_t depth = Degree - remaining + 1;
-                left[depth] = level[0];
-                right[Degree - depth] = level[remaining - 1];
-            }
-            using Result = BezierCurve<ResultControl, Degree>;
-            return std::pair{Result{Tensor<ResultControl, kControlCount>{std::move(left)}},
-                             Result{Tensor<ResultControl, kControlCount>{std::move(right)}}};
-        }
-
-        /** @brief Elevate the degree once without changing the represented curve. */
-        [[nodiscard]] constexpr auto Elevated() const {
-            using Scalar = Detail::BezierScalar<Control>;
-            const Scalar endpointWeight = Scalar{1} / static_cast<Scalar>(Degree + 1);
-            using ElevatedControl = std::remove_cvref_t<decltype(Detail::BezierBlend(
-                controls_[0], controls_[0], endpointWeight))>;
-            auto elevated = Detail::GenerateArray<ElevatedControl, Degree + 2>([&](auto index) {
-                if constexpr (decltype(index)::value == 0) {
-                    return Detail::BezierBlend(controls_[0], controls_[0], endpointWeight);
-                } else if constexpr (decltype(index)::value == Degree + 1) {
-                    return Detail::BezierBlend(controls_[Degree], controls_[Degree], endpointWeight);
+                constexpr size_t degree = Degrees...[Axis];
+                constexpr size_t extent = degree + 1;
+                if constexpr (degree == 0) {
+                    using DerivativeControl = std::remove_cvref_t<decltype(Detail::BezierDifference(
+                        std::declval<const Control&>(), std::declval<const Control&>()))>;
+                    auto derivativeControls = TransformTensorAxis<Axis, 1>(
+                        controls_, [](const std::array<Control, 1>& fiber) {
+                            return std::array<DerivativeControl, 1>{
+                                Detail::BezierDifference(fiber[0], fiber[0])};
+                        });
+                    using Result = Detail::BezierPatchFor<decltype(derivativeControls)>;
+                    return Result{std::move(derivativeControls)};
                 } else {
-                    const Scalar weight = static_cast<Scalar>(index) / static_cast<Scalar>(Degree + 1);
-                    return Detail::BezierBlend(controls_[index], controls_[index - 1], weight);
+                    using Difference = decltype(Detail::BezierDifference(
+                        std::declval<const Control&>(), std::declval<const Control&>()));
+                    using DerivativeControl =
+                        std::remove_cvref_t<decltype(Detail::BezierScale(std::declval<Difference>(), degree))>;
+                    auto derivativeControls = TransformTensorAxis<Axis, degree>(
+                        controls_, [&](const std::array<Control, extent>& fiber) {
+                            return Detail::GenerateArray<DerivativeControl, degree>([&](auto index) {
+                                return Detail::BezierScale(
+                                    Detail::BezierDifference(fiber[index + 1], fiber[index]), degree);
+                            });
+                        });
+                    using Result = Detail::BezierPatchFor<decltype(derivativeControls)>;
+                    return Result{std::move(derivativeControls)}.template PartialDerivative<Axis, Order - 1>();
                 }
+            }
+        }
+
+        /** @brief Return the exact @p Order derivative of a rank-one patch. */
+        template<size_t Order = 1>
+            requires(kRank == 1)
+        [[nodiscard]] constexpr auto Derivative() const {
+            return PartialDerivative<0, Order>();
+        }
+
+        /** @brief Evaluate one exact derivative of a rank-one patch without persistent runtime state. */
+        template<size_t Order, typename Parameter>
+            requires(kRank == 1)
+        [[nodiscard, gnu::always_inline]] constexpr auto EvaluateDerivative(const Parameter& parameter) const {
+            return Derivative<Order>().Evaluate(parameter);
+        }
+
+        /** @brief Return the exact @p Order derivative in the first direction of a rank-two patch. */
+        template<size_t Order = 1>
+            requires(kRank == 2)
+        [[nodiscard]] constexpr auto DerivativeU() const {
+            return PartialDerivative<0, Order>();
+        }
+
+        /** @brief Return the exact @p Order derivative in the second direction of a rank-two patch. */
+        template<size_t Order = 1>
+            requires(kRank == 2)
+        [[nodiscard]] constexpr auto DerivativeV() const {
+            return PartialDerivative<1, Order>();
+        }
+
+        /** @brief Evaluate one mixed partial, with one compile-time derivative order per parameter axis. */
+        template<size_t... Orders, typename... Parameters>
+            requires(sizeof...(Orders) == kRank && sizeof...(Parameters) == kRank)
+        [[nodiscard, gnu::always_inline]] constexpr auto EvaluatePartial(const Parameters&... parameters) const {
+            return DifferentiateAxes<0, Orders...>(*this).Evaluate(parameters...);
+        }
+
+        /** @brief Restrict @p Axis to one parameter, reducing the patch rank by one. */
+        template<size_t Axis, typename Parameter>
+            requires(Axis < kRank)
+        [[nodiscard]] constexpr auto Restrict(const Parameter& parameter) const {
+            constexpr size_t extent = Degrees...[Axis] + 1;
+            auto restricted = ContractTensorAxis<Axis>(
+                controls_, [&](const std::array<Control, extent>& fiber) {
+                    return Detail::EvaluateBezierControls(fiber, parameter);
+                });
+            if constexpr (kRank == 1) {
+                return restricted;
+            } else {
+                using Result = Detail::BezierPatchFor<decltype(restricted)>;
+                return Result{std::move(restricted)};
+            }
+        }
+
+        /** @brief Return the second-direction isoparametric curve at fixed @p u. */
+        template<typename UParameter>
+            requires(kRank == 2)
+        [[nodiscard]] constexpr auto IsoU(const UParameter& u) const {
+            return Restrict<0>(u);
+        }
+
+        /** @brief Return the first-direction isoparametric curve at fixed @p v. */
+        template<typename VParameter>
+            requires(kRank == 2)
+        [[nodiscard]] constexpr auto IsoV(const VParameter& v) const {
+            return Restrict<1>(v);
+        }
+
+        /** @brief Split along @p Axis into two patches whose concatenation equals this patch. */
+        template<size_t Axis, typename Parameter>
+            requires(Axis < kRank)
+        [[nodiscard]] constexpr auto Subdivide(const Parameter& parameter) const {
+            constexpr size_t extent = Degrees...[Axis] + 1;
+            constexpr size_t innerStride = Detail::TensorInnerStride<Axis, (Degrees + 1)...>();
+            constexpr size_t fiberCount = kControlCount / extent;
+            using Fiber = std::array<Control, extent>;
+            using Split = decltype(Detail::SubdivideBezierControls(std::declval<const Fiber&>(), parameter));
+            using ResultControl = typename Split::first_type::value_type;
+            const auto splits = Detail::GenerateArray<Split, fiberCount>([&](auto fiberIndex) {
+                constexpr size_t outer = decltype(fiberIndex)::value / innerStride;
+                constexpr size_t inner = decltype(fiberIndex)::value % innerStride;
+                const auto fiber = Detail::GenerateArray<Control, extent>([&](auto axisIndex) {
+                    constexpr size_t inputIndex = outer * extent * innerStride +
+                                                  decltype(axisIndex)::value * innerStride + inner;
+                    return controls_[inputIndex];
+                });
+                return Detail::SubdivideBezierControls(fiber, parameter);
             });
-            return BezierCurve<ElevatedControl, Degree + 1>{Tensor<ElevatedControl, Degree + 2>{std::move(elevated)}};
+            const auto values = [&]<size_t Side>() {
+                return Detail::GenerateArray<ResultControl, kControlCount>([&](auto outputIndex) {
+                    constexpr size_t outer = decltype(outputIndex)::value / (extent * innerStride);
+                    constexpr size_t remainder = decltype(outputIndex)::value % (extent * innerStride);
+                    constexpr size_t axisIndex = remainder / innerStride;
+                    constexpr size_t inner = remainder % innerStride;
+                    constexpr size_t fiberIndex = outer * innerStride + inner;
+                    return std::get<Side>(splits[fiberIndex])[axisIndex];
+                });
+            };
+            using Result = BezierPatch<ResultControl, Degrees...>;
+            return std::pair{Result{typename Result::ControlTensor{values.template operator()<0>()}},
+                             Result{typename Result::ControlTensor{values.template operator()<1>()}}};
+        }
+
+        /** @brief Split a rank-one patch at @p parameter. */
+        template<typename Parameter>
+            requires(kRank == 1)
+        [[nodiscard]] constexpr auto Subdivide(const Parameter& parameter) const {
+            return Subdivide<0>(parameter);
+        }
+
+        /** @brief Elevate one axis degree without changing the represented patch. */
+        template<size_t Axis>
+            requires(Axis < kRank)
+        [[nodiscard]] constexpr auto ElevatedAxis() const {
+            constexpr size_t degree = Degrees...[Axis];
+            constexpr size_t extent = degree + 1;
+            using Scalar = Detail::BezierScalar<Control>;
+            const Scalar endpointWeight = Scalar{1} / static_cast<Scalar>(degree + 1);
+            using ElevatedControl = std::remove_cvref_t<decltype(Detail::BezierBlend(
+                std::declval<const Control&>(), std::declval<const Control&>(), endpointWeight))>;
+            auto elevated = TransformTensorAxis<Axis, degree + 2>(
+                controls_, [&](const std::array<Control, extent>& fiber) {
+                return Detail::GenerateArray<ElevatedControl, degree + 2>([&](auto index) {
+                    if constexpr (decltype(index)::value == 0) {
+                        return Detail::BezierBlend(fiber[0], fiber[0], endpointWeight);
+                    } else if constexpr (decltype(index)::value == degree + 1) {
+                        return Detail::BezierBlend(fiber[degree], fiber[degree], endpointWeight);
+                    } else {
+                        const Scalar weight = static_cast<Scalar>(index) / static_cast<Scalar>(degree + 1);
+                        return Detail::BezierBlend(fiber[index], fiber[index - 1], weight);
+                    }
+                });
+            });
+            using Result = Detail::BezierPatchFor<decltype(elevated)>;
+            return Result{std::move(elevated)};
+        }
+
+        /** @brief Elevate the degree of a rank-one patch once. */
+        [[nodiscard]] constexpr auto Elevated() const
+            requires(kRank == 1)
+        {
+            return ElevatedAxis<0>();
         }
 
     private:
+        template<size_t Axis, size_t... Orders, typename Patch>
+        [[nodiscard]] static constexpr auto DifferentiateAxes(Patch&& patch) {
+            if constexpr (Axis == kRank) {
+                return std::forward<Patch>(patch);
+            } else {
+                return DifferentiateAxes<Axis + 1, Orders...>(
+                    std::forward<Patch>(patch).template PartialDerivative<Axis, Orders...[Axis]>());
+            }
+        }
+
         ControlTensor controls_;
     };
 
-    template<TensorElement Control, size_t Count>
-    BezierCurve(Tensor<Control, Count>) -> BezierCurve<Control, Count - 1>;
+    template<TensorElement Control, size_t... Counts>
+    BezierPatch(Tensor<Control, Counts...>) -> BezierPatch<Control, (Counts - 1)...>;
+
+    /** @brief Polynomial Bezier curve with compile-time degree. */
+    template<TensorElement Control, size_t Degree>
+    using BezierCurve = BezierPatch<Control, Degree>;
+
+    /** @brief Tensor-product Bezier surface with compile-time U/V degrees. */
+    template<TensorElement Control, size_t UDegree, size_t VDegree>
+    using BezierSurface = BezierPatch<Control, UDegree, VDegree>;
+
+    /** @brief Two-dimensional polynomial Bezier curve. */
+    template<ValueCarrier T, size_t Degree>
+    using BezierCurve2D = BezierCurve<Point<T, 2>, Degree>;
+
+    /** @brief Three-dimensional polynomial Bezier curve. */
+    template<ValueCarrier T, size_t Degree>
+    using BezierCurve3D = BezierCurve<Point<T, 3>, Degree>;
+
+    /** @brief Three-dimensional tensor-product polynomial Bezier surface. */
+    template<ValueCarrier T, size_t UDegree, size_t VDegree>
+    using BezierSurface3D = BezierSurface<Point<T, 3>, UDegree, VDegree>;
 
     /** @brief Value and the first @p Order exact curve derivatives at one parameter. */
     template<TensorElement Value, TensorElement Derivative, size_t Order>
@@ -467,7 +715,7 @@ namespace Sora::Math {
 
     /** @brief Evaluate position and all derivatives through @p Order. */
     template<size_t Order, TensorElement Control, size_t Degree, typename Parameter>
-        requires(Order > 0 && Order <= Degree)
+        requires(Order > 0)
     [[nodiscard]] constexpr auto EvaluateJet(const BezierCurve<Control, Degree>& curve,
                                              const Parameter& parameter) {
         using Value = std::remove_cvref_t<decltype(curve.Evaluate(parameter))>;
@@ -480,308 +728,111 @@ namespace Sora::Math {
     }
 
     /**
-     * @brief Precomputed cubic power-basis kernel for repeated evaluation of one curve.
-     * @details Construction performs the control-point differences once. Evaluation uses a three-stage Horner chain;
-     * SIMD and automatic-differentiation parameters flow through the same carrier operations.
+     * @brief Precomputed power-basis kernel for a tensor product of cubic Bernstein axes.
+     * @details Storage is exactly one affine origin and `4^Rank-1` direction coefficients. Evaluation is a statically
+     * nested Horner DAG; rank one and rank two therefore retain the minimal 1+3 and 1+15 coefficient layouts.
      */
-    template<TensorElement Control>
-    class CubicBezierPolynomial {
+    template<TensorElement Control, size_t Rank>
+        requires(Rank > 0)
+    class CubicBezierPatch {
     public:
-        using Direction = std::remove_cvref_t<decltype(Detail::BezierDifference(
-            std::declval<const Control&>(), std::declval<const Control&>()))>;
+        using Direction = typename Detail::CubicPatchPowerData<Control, Rank>::Direction;
+        static constexpr size_t kRank = Rank;
 
-        constexpr explicit CubicBezierPolynomial(const BezierCurve<Control, 3>& curve)
-            : power_(Detail::CubicPower(curve.Controls().Values())) {}
+        template<size_t... Degrees>
+            requires(sizeof...(Degrees) == Rank && ((Degrees == 3) && ...))
+        constexpr explicit CubicBezierPatch(const BezierPatch<Control, Degrees...>& patch)
+            : power_(Detail::CubicPatchPower(patch.Controls())) {}
 
-        template<typename Parameter>
-        [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const Parameter& parameter) const noexcept(
-            noexcept(Detail::EvaluateCubicHorner(power_.origin, power_.coefficients[0], power_.coefficients[1],
-                                                  power_.coefficients[2], parameter))) {
-            return Detail::EvaluateCubicHorner(power_.origin, power_.coefficients[0], power_.coefficients[1],
-                                               power_.coefficients[2], parameter);
+        template<typename... Parameters>
+            requires(sizeof...(Parameters) == Rank)
+        [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const Parameters&... parameters) const noexcept(
+            Detail::NothrowEvaluateCubicPowerBlock<0, 0, Rank, Control, Direction,
+                                                   std::tuple<const Parameters&...>>()) {
+            const auto parameterTuple = std::forward_as_tuple(parameters...);
+            return Detail::EvaluateCubicPowerBlock<0, 0>(power_, parameterTuple);
         }
 
     private:
-        Detail::CubicPowerData<Control> power_;
+        Detail::CubicPatchPowerData<Control, Rank> power_;
     };
 
-    /** @brief Prepare a cubic curve for repeated Horner evaluation. */
+    /** @brief Precomputed cubic curve kernel. */
     template<TensorElement Control>
-    [[nodiscard]] constexpr auto Prepare(const BezierCurve<Control, 3>& curve) {
-        return CubicBezierPolynomial<Control>{curve};
+    using CubicBezierPolynomial = CubicBezierPatch<Control, 1>;
+
+    /** @brief Precomputed bicubic surface kernel. */
+    template<TensorElement Control>
+    using BicubicBezierPolynomial = CubicBezierPatch<Control, 2>;
+
+    /** @brief Prepare an arbitrary-rank all-cubic patch for repeated nested Horner evaluation. */
+    template<TensorElement Control, size_t... Degrees>
+        requires(((Degrees == 3) && ...))
+    [[nodiscard]] constexpr auto Prepare(const BezierPatch<Control, Degrees...>& patch) {
+        return CubicBezierPatch<Control, sizeof...(Degrees)>{patch};
     }
 
-    /**
-     * @brief Tensor-product polynomial Bezier surface with compile-time degrees in both parameter directions.
-     * @details The control tensor has shape `(UDegree+1, VDegree+1)` and row-major storage. Evaluation contracts the
-     * contiguous V direction first and then U.
-     */
-    template<TensorElement Control, size_t UDegree, size_t VDegree>
-    class BezierSurface {
-    public:
-        using ControlType = Control;
-        using ControlTensor = Tensor<Control, UDegree + 1, VDegree + 1>;
-        static constexpr size_t kUDegree = UDegree;
-        static constexpr size_t kVDegree = VDegree;
-
-        /** @brief Construct a zero/value-initialized control net when the control type supports it. */
-        constexpr BezierSurface() noexcept(std::is_nothrow_default_constructible_v<Control>)
-            requires std::default_initializable<Control>
-        = default;
-
-        /** @brief Construct from the exact row-major control tensor. */
-        constexpr explicit BezierSurface(ControlTensor controls) noexcept : controls_(std::move(controls)) {}
-
-        /** @brief Return the control tensor while preserving cv-ref qualification. */
-        template<typename Self>
-        [[nodiscard]] constexpr decltype(auto) Controls(this Self&& self) noexcept {
-            return std::forward_like<Self>(self.controls_);
-        }
-
-        /** @brief Evaluate by statically contracting the contiguous V direction and then the U direction. */
-        template<typename UParameter, typename VParameter>
-        [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const UParameter& u,
-                                                                  const VParameter& v) const noexcept(
-            Detail::kNothrowEvaluateBezierSurface<Control, UDegree + 1, VDegree + 1, UParameter, VParameter>) {
-            using VValue = std::remove_cvref_t<decltype(Detail::EvaluateBezierControls(
-                std::declval<std::array<Control, VDegree + 1>>(), v))>;
-            const auto vContracted = Detail::GenerateArray<VValue, UDegree + 1>(
-                [&](auto uIndex) noexcept(
-                    Detail::kNothrowEvaluateBezierControls<Control, VDegree + 1, VParameter>) {
-                const auto vControls = Detail::GenerateArray<Control, VDegree + 1>(
-                    [&](auto vIndex) { return controls_(uIndex, vIndex); });
-                return Detail::EvaluateBezierControls(vControls, v);
-            });
-            return Detail::EvaluateBezierControls(vContracted, u);
-        }
-
-        /** @brief Return the exact @p Order derivative surface in the U direction. */
-        template<size_t Order = 1>
-            requires(Order <= UDegree)
-        [[nodiscard]] constexpr auto DerivativeU() const {
-            if constexpr (Order == 0) {
-                return *this;
-            } else {
-                using Difference = decltype(Detail::BezierDifference(controls_(1, 0), controls_(0, 0)));
-                using DerivativeControl =
-                    std::remove_cvref_t<decltype(Detail::BezierScale(std::declval<Difference>(), UDegree))>;
-                auto derivative = Detail::GenerateArray<DerivativeControl, UDegree * (VDegree + 1)>(
-                    [&](auto index) {
-                        constexpr size_t uIndex = decltype(index)::value / (VDegree + 1);
-                        constexpr size_t vIndex = decltype(index)::value % (VDegree + 1);
-                        return Detail::BezierScale(
-                            Detail::BezierDifference(controls_(uIndex + 1, vIndex), controls_(uIndex, vIndex)),
-                            UDegree);
-                    });
-                BezierSurface<DerivativeControl, UDegree - 1, VDegree> result{
-                    Tensor<DerivativeControl, UDegree, VDegree + 1>{std::move(derivative)}};
-                return result.template DerivativeU<Order - 1>();
-            }
-        }
-
-        /** @brief Return the exact @p Order derivative surface in the V direction. */
-        template<size_t Order = 1>
-            requires(Order <= VDegree)
-        [[nodiscard]] constexpr auto DerivativeV() const {
-            if constexpr (Order == 0) {
-                return *this;
-            } else {
-                using Difference = decltype(Detail::BezierDifference(controls_(0, 1), controls_(0, 0)));
-                using DerivativeControl =
-                    std::remove_cvref_t<decltype(Detail::BezierScale(std::declval<Difference>(), VDegree))>;
-                auto derivative = Detail::GenerateArray<DerivativeControl, (UDegree + 1) * VDegree>(
-                    [&](auto index) {
-                        constexpr size_t uIndex = decltype(index)::value / VDegree;
-                        constexpr size_t vIndex = decltype(index)::value % VDegree;
-                        return Detail::BezierScale(
-                            Detail::BezierDifference(controls_(uIndex, vIndex + 1), controls_(uIndex, vIndex)),
-                            VDegree);
-                    });
-                BezierSurface<DerivativeControl, UDegree, VDegree - 1> result{
-                    Tensor<DerivativeControl, UDegree + 1, VDegree>{std::move(derivative)}};
-                return result.template DerivativeV<Order - 1>();
-            }
-        }
-
-        /** @brief Evaluate the exact mixed partial derivative `d^(DU+DV)/(du^DU dv^DV)`. */
-        template<size_t DU, size_t DV, typename UParameter, typename VParameter>
-            requires(DU <= UDegree && DV <= VDegree)
-        [[nodiscard]] constexpr auto EvaluatePartial(const UParameter& u, const VParameter& v) const {
-            if constexpr (DU == 0 && DV == 0) {
-                return Evaluate(u, v);
-            } else {
-                return DerivativeU<DU>().template DerivativeV<DV>().Evaluate(u, v);
-            }
-        }
-
-        /** @brief Return the V-direction isoparametric curve at @p u. */
-        template<typename UParameter>
-        [[nodiscard]] constexpr auto IsoU(const UParameter& u) const {
-            using Value = std::remove_cvref_t<decltype(Detail::EvaluateBezierControls(
-                std::declval<const std::array<Control, UDegree + 1>&>(), u))>;
-            auto controls = Detail::GenerateArray<Value, VDegree + 1>([&](auto vIndex) {
-                const auto uControls = Detail::GenerateArray<Control, UDegree + 1>(
-                    [&](auto uIndex) { return controls_(uIndex, vIndex); });
-                return Detail::EvaluateBezierControls(uControls, u);
-            });
-            return BezierCurve<Value, VDegree>{Tensor<Value, VDegree + 1>{std::move(controls)}};
-        }
-
-        /** @brief Return the U-direction isoparametric curve at @p v. */
-        template<typename VParameter>
-        [[nodiscard]] constexpr auto IsoV(const VParameter& v) const {
-            using Value = std::remove_cvref_t<decltype(Detail::EvaluateBezierControls(
-                std::declval<const std::array<Control, VDegree + 1>&>(), v))>;
-            auto controls = Detail::GenerateArray<Value, UDegree + 1>([&](auto uIndex) {
-                const auto vControls = Detail::GenerateArray<Control, VDegree + 1>(
-                    [&](auto vIndex) { return controls_(uIndex, vIndex); });
-                return Detail::EvaluateBezierControls(vControls, v);
-            });
-            return BezierCurve<Value, UDegree>{Tensor<Value, UDegree + 1>{std::move(controls)}};
-        }
-
-    private:
-        ControlTensor controls_;
-    };
-
-    template<TensorElement Control, size_t UCount, size_t VCount>
-    BezierSurface(Tensor<Control, UCount, VCount>) -> BezierSurface<Control, UCount - 1, VCount - 1>;
-
-    /**
-     * @brief Precomputed bicubic power-basis kernel for repeated surface evaluation.
-     * @details The constructor performs both Bernstein-to-power transforms once. Evaluation uses nested Horner chains
-     * over fifteen direction coefficients and one affine origin, with no temporary control polygons.
-     */
-    template<TensorElement Control>
-    class BicubicBezierPolynomial {
-    public:
-        using Direction = std::remove_cvref_t<decltype(Detail::BezierDifference(
-            std::declval<const Control&>(), std::declval<const Control&>()))>;
-
-        constexpr explicit BicubicBezierPolynomial(const BezierSurface<Control, 3, 3>& surface)
-            : power_(Detail::BicubicPower(surface.Controls())) {}
-
-        template<typename UParameter, typename VParameter>
-        [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const UParameter& u,
-                                                                   const VParameter& v) const noexcept(
-            Detail::kNothrowEvaluateBicubicHorner<Control, Direction, UParameter, VParameter>) {
-            auto result = Detail::EvaluateCubicHorner(power_.origin, power_.vCoefficients[0],
-                                                      power_.vCoefficients[1], power_.vCoefficients[2], v);
-
-            using EvaluatedDirection = std::remove_cvref_t<decltype(
-                Detail::EvaluateCubicHorner(power_.uCoefficients(0, 0), power_.uCoefficients(0, 1),
-                                            power_.uCoefficients(0, 2), power_.uCoefficients(0, 3), v))>;
-            const auto uCoefficients = Detail::GenerateArray<EvaluatedDirection, 3>(
-                [&](auto index) noexcept(noexcept(Detail::EvaluateCubicHorner(
-                    power_.uCoefficients(0, 0), power_.uCoefficients(0, 1), power_.uCoefficients(0, 2),
-                    power_.uCoefficients(0, 3), v))) {
-                constexpr size_t uPower = decltype(index)::value;
-                return Detail::EvaluateCubicHorner(
-                    power_.uCoefficients(uPower, 0), power_.uCoefficients(uPower, 1),
-                    power_.uCoefficients(uPower, 2), power_.uCoefficients(uPower, 3), v);
-            });
-            return Detail::EvaluateCubicHorner(result, uCoefficients[0], uCoefficients[1], uCoefficients[2], u);
-        }
-
-    private:
-        Detail::BicubicPowerData<Control> power_;
-    };
-
-    /** @brief Prepare a bicubic surface for repeated nested Horner evaluation. */
-    template<TensorElement Control>
-    [[nodiscard]] constexpr auto Prepare(const BezierSurface<Control, 3, 3>& surface) {
-        return BicubicBezierPolynomial<Control>{surface};
-    }
-
-    /** @brief Form a tensor-product Bezier surface from two coefficient curves and a control-value product. */
-    template<TensorElement UControl, size_t UDegree, TensorElement VControl, size_t VDegree, typename Product>
-    [[nodiscard]] constexpr auto TensorProduct(const BezierCurve<UControl, UDegree>& uCurve,
-                                               const BezierCurve<VControl, VDegree>& vCurve,
+    /** @brief Form the tensor product of two Bernstein patches and concatenate their parameter axes. */
+    template<TensorElement LeftControl, size_t... LeftDegrees, TensorElement RightControl, size_t... RightDegrees,
+             typename Product>
+    [[nodiscard]] constexpr auto TensorProduct(const BezierPatch<LeftControl, LeftDegrees...>& left,
+                                               const BezierPatch<RightControl, RightDegrees...>& right,
                                                Product&& product) {
-        auto controls = Sora::Math::TensorProduct(uCurve.Controls(), vCurve.Controls(), std::forward<Product>(product));
-        return BezierSurface{std::move(controls)};
+        auto controls = Sora::Math::TensorProduct(left.Controls(), right.Controls(), std::forward<Product>(product));
+        return BezierPatch{std::move(controls)};
     }
 
-    /** @brief Evaluate one curve at one scalar, automatic-differentiation, or SIMD parameter. */
-    template<TensorElement Control, size_t Degree, typename Parameter>
-    [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const BezierCurve<Control, Degree>& curve,
-                                                              const Parameter& parameter) {
-        return curve.Evaluate(parameter);
+    /** @brief Form the multiplicative tensor product of two Bernstein patches. */
+    template<TensorElement LeftControl, size_t... LeftDegrees, TensorElement RightControl, size_t... RightDegrees>
+        requires requires(LeftControl left, RightControl right) { Sora::Math::Mul(left, right); }
+    [[nodiscard]] constexpr auto TensorProduct(const BezierPatch<LeftControl, LeftDegrees...>& left,
+                                               const BezierPatch<RightControl, RightDegrees...>& right) {
+        return TensorProduct(left, right, [](const LeftControl& a, const RightControl& b) noexcept(
+            noexcept(Sora::Math::Mul(a, b))) { return Sora::Math::Mul(a, b); });
     }
 
-    /** @brief Evaluate one prepared cubic at one scalar, automatic-differentiation, or SIMD parameter. */
-    template<TensorElement Control, typename Parameter>
-    [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const CubicBezierPolynomial<Control>& curve,
-                                                              const Parameter& parameter) {
-        return curve.Evaluate(parameter);
+    /** @brief Evaluate one Bernstein patch at one parameter per axis. */
+    template<TensorElement Control, size_t... Degrees, typename... Parameters>
+        requires(sizeof...(Parameters) == sizeof...(Degrees))
+    [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const BezierPatch<Control, Degrees...>& patch,
+                                                              const Parameters&... parameters) {
+        return patch.Evaluate(parameters...);
     }
 
-    /** @brief Evaluate one surface at scalar, automatic-differentiation, or SIMD parameters. */
-    template<TensorElement Control, size_t UDegree, size_t VDegree, typename UParameter, typename VParameter>
-    [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const BezierSurface<Control, UDegree, VDegree>& surface,
-                                                              const UParameter& u, const VParameter& v) {
-        return surface.Evaluate(u, v);
+    /** @brief Evaluate one prepared all-cubic patch at one parameter per axis. */
+    template<TensorElement Control, size_t Rank, typename... Parameters>
+        requires(sizeof...(Parameters) == Rank)
+    [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const CubicBezierPatch<Control, Rank>& patch,
+                                                              const Parameters&... parameters) {
+        return patch.Evaluate(parameters...);
     }
 
-    /** @brief Evaluate one prepared bicubic surface at scalar, automatic-differentiation, or SIMD parameters. */
-    template<TensorElement Control, typename UParameter, typename VParameter>
-    [[nodiscard, gnu::always_inline]] constexpr auto Evaluate(const BicubicBezierPolynomial<Control>& surface,
-                                                              const UParameter& u, const VParameter& v) {
-        return surface.Evaluate(u, v);
-    }
-
-    /** @brief Evaluate one curve over a dynamic parameter batch with automatic SIMD carrier selection. */
-    template<HomogeneousBatch Output, TensorElement Control, size_t Degree, HomogeneousBatch Parameters>
-        requires(std::remove_cvref_t<Parameters>::kDimension == 1)
-    constexpr void Evaluate(Output output, const BezierCurve<Control, Degree>& curve, Parameters parameters) {
+    /** @brief Evaluate one Bernstein patch over one dynamic parameter batch per axis with automatic SIMD. */
+    template<HomogeneousBatch Output, TensorElement Control, size_t... Degrees, HomogeneousBatch... Parameters>
+        requires(sizeof...(Parameters) == sizeof...(Degrees) &&
+                 ((std::remove_cvref_t<Parameters>::kDimension == 1) && ...))
+    constexpr void Evaluate(Output output, const BezierPatch<Control, Degrees...>& patch,
+                            Parameters... parameters) {
         TransformBatch(
             output,
-            [&curve](const auto& parameter) noexcept(noexcept(curve.Evaluate(parameter[0]))) {
-                return curve.Evaluate(parameter[0]);
+            [&patch](const auto&... parameter) noexcept(noexcept(patch.Evaluate(parameter[0]...))) {
+                return patch.Evaluate(parameter[0]...);
             },
-            parameters);
+            parameters...);
     }
 
-    /** @brief Evaluate one prepared cubic over a dynamic parameter batch with automatic SIMD carrier selection. */
-    template<HomogeneousBatch Output, TensorElement Control, HomogeneousBatch Parameters>
-        requires(std::remove_cvref_t<Parameters>::kDimension == 1)
-    constexpr void Evaluate(Output output, const CubicBezierPolynomial<Control>& curve, Parameters parameters) {
-        TransformBatch(
+    /** @brief Evaluate one prepared all-cubic patch over one dynamic parameter batch per axis. */
+    template<HomogeneousBatch Output, TensorElement Control, size_t Rank, HomogeneousBatch... Parameters>
+        requires(sizeof...(Parameters) == Rank &&
+                 ((std::remove_cvref_t<Parameters>::kDimension == 1) && ...))
+    constexpr void Evaluate(Output output, const CubicBezierPatch<Control, Rank>& patch,
+                            Parameters... parameters) {
+        TransformBatch<4>(
             output,
-            [&curve](const auto& parameter) noexcept(noexcept(curve.Evaluate(parameter[0]))) {
-                return curve.Evaluate(parameter[0]);
+            [prepared = patch](const auto&... parameter) noexcept(noexcept(prepared.Evaluate(parameter[0]...))) {
+                return prepared.Evaluate(parameter[0]...);
             },
-            parameters);
-    }
-
-    /** @brief Evaluate one surface over dynamic U/V parameter batches with automatic SIMD carrier selection. */
-    template<HomogeneousBatch Output, TensorElement Control, size_t UDegree, size_t VDegree,
-             HomogeneousBatch UParameters, HomogeneousBatch VParameters>
-        requires(std::remove_cvref_t<UParameters>::kDimension == 1 &&
-                 std::remove_cvref_t<VParameters>::kDimension == 1)
-    constexpr void Evaluate(Output output, const BezierSurface<Control, UDegree, VDegree>& surface,
-                            UParameters uParameters, VParameters vParameters) {
-        TransformBatch(
-            output,
-            [&surface](const auto& u, const auto& v) noexcept(noexcept(surface.Evaluate(u[0], v[0]))) {
-                return surface.Evaluate(u[0], v[0]);
-            },
-            uParameters, vParameters);
-    }
-
-    /** @brief Evaluate one prepared bicubic surface over dynamic U/V parameter batches with automatic SIMD. */
-    template<HomogeneousBatch Output, TensorElement Control, HomogeneousBatch UParameters,
-             HomogeneousBatch VParameters>
-        requires(std::remove_cvref_t<UParameters>::kDimension == 1 &&
-                 std::remove_cvref_t<VParameters>::kDimension == 1)
-    constexpr void Evaluate(Output output, const BicubicBezierPolynomial<Control>& surface, UParameters uParameters,
-                            VParameters vParameters) {
-        TransformBatch(
-            output,
-            [&surface](const auto& u, const auto& v) noexcept(noexcept(surface.Evaluate(u[0], v[0]))) {
-                return surface.Evaluate(u[0], v[0]);
-            },
-            uParameters, vParameters);
+            parameters...);
     }
 
     /**
@@ -826,48 +877,53 @@ namespace Sora::Math {
             controls);
     }
 
-    /** @brief Evaluate one tensor-product surface per lane/sample from control and U/V parameter batches. */
-    template<HomogeneousBatch Output, HomogeneousBatch ControlBatch, size_t UCount, size_t VCount,
-             HomogeneousBatch UParameters, HomogeneousBatch VParameters>
-        requires(std::remove_cvref_t<UParameters>::kDimension == 1 &&
-                 std::remove_cvref_t<VParameters>::kDimension == 1)
-    constexpr void Evaluate(Output output, const Tensor<ControlBatch, UCount, VCount>& controls,
-                            UParameters uParameters, VParameters vParameters) {
+    /** @brief Evaluate one arbitrary-rank Bernstein patch per lane from control and parameter batches. */
+    template<HomogeneousBatch Output, HomogeneousBatch ControlBatch, size_t... Counts,
+             HomogeneousBatch... Parameters>
+        requires(sizeof...(Parameters) == sizeof...(Counts) &&
+                 ((std::remove_cvref_t<Parameters>::kDimension == 1) && ...))
+    constexpr void Evaluate(Output output, const Tensor<ControlBatch, Counts...>& controls,
+                            Parameters... parameters) {
+        constexpr size_t rank = sizeof...(Counts);
+        constexpr size_t controlCount = (Counts * ...);
         std::apply(
             [&](const auto&... controlBatches) {
                 TransformBatch(
                     output,
-                    [](const auto& u, const auto& v, const auto&... controlValues) noexcept(noexcept(
-                        BezierSurface{Tensor<std::common_type_t<std::remove_cvref_t<decltype(controlValues)>...>,
-                                             UCount, VCount>{controlValues...}}
-                            .Evaluate(u[0], v[0]))) {
-                        using Value = std::common_type_t<std::remove_cvref_t<decltype(controlValues)>...>;
-                        auto surface = BezierSurface{Tensor<Value, UCount, VCount>{controlValues...}};
-                        return surface.Evaluate(u[0], v[0]);
+                    [](const auto&... values) {
+                        const auto arguments = std::forward_as_tuple(values...);
+                        return [&]<size_t... ParameterIndices, size_t... ControlIndices>(
+                                   std::index_sequence<ParameterIndices...>,
+                                   std::index_sequence<ControlIndices...>) {
+                            using Value = std::common_type_t<std::remove_cvref_t<decltype(
+                                std::get<rank + ControlIndices>(arguments))>...>;
+                            auto patch = BezierPatch{
+                                Tensor<Value, Counts...>{std::get<rank + ControlIndices>(arguments)...}};
+                            return patch.Evaluate(std::get<ParameterIndices>(arguments)[0]...);
+                        }(std::make_index_sequence<rank>{}, std::make_index_sequence<controlCount>{});
                     },
-                    uParameters, vParameters, controlBatches...);
+                    parameters..., controlBatches...);
             },
             controls.Values());
     }
 
-    /** @brief Evaluate one tensor-product surface per sample at common scalar U/V parameters. */
-    template<HomogeneousBatch Output, HomogeneousBatch ControlBatch, size_t UCount, size_t VCount,
-             typename UParameter, typename VParameter>
-        requires(!HomogeneousBatch<std::remove_cvref_t<UParameter>> &&
-                 !HomogeneousBatch<std::remove_cvref_t<VParameter>>)
-    constexpr void Evaluate(Output output, const Tensor<ControlBatch, UCount, VCount>& controls,
-                            const UParameter& u, const VParameter& v) {
+    /** @brief Evaluate one arbitrary-rank Bernstein patch per sample at common scalar parameters. */
+    template<HomogeneousBatch Output, HomogeneousBatch ControlBatch, size_t... Counts, typename... Parameters>
+        requires(sizeof...(Parameters) == sizeof...(Counts) &&
+                 (!HomogeneousBatch<std::remove_cvref_t<Parameters>> && ...))
+    constexpr void Evaluate(Output output, const Tensor<ControlBatch, Counts...>& controls,
+                            const Parameters&... parameters) {
+        const auto parameterTuple = std::forward_as_tuple(parameters...);
         std::apply(
             [&](const auto&... controlBatches) {
                 TransformBatch(
                     output,
-                    [&u, &v](const auto&... controlValues) noexcept(noexcept(
-                        BezierSurface{Tensor<std::common_type_t<std::remove_cvref_t<decltype(controlValues)>...>,
-                                             UCount, VCount>{controlValues...}}
-                            .Evaluate(u, v))) {
+                    [&parameterTuple](const auto&... controlValues) {
                         using Value = std::common_type_t<std::remove_cvref_t<decltype(controlValues)>...>;
-                        auto surface = BezierSurface{Tensor<Value, UCount, VCount>{controlValues...}};
-                        return surface.Evaluate(u, v);
+                        auto patch = BezierPatch{Tensor<Value, Counts...>{controlValues...}};
+                        return std::apply(
+                            [&patch](const auto&... parameter) { return patch.Evaluate(parameter...); },
+                            parameterTuple);
                     },
                     controlBatches...);
             },
