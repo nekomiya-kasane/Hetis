@@ -181,7 +181,14 @@ namespace Sora {
 
     namespace Detail::EventProbeCPOFn {
 
-        /** @brief Customisation-point object for non-invasive event instrumentation. */
+        /**
+         * @brief Customisation-point object for non-invasive event instrumentation.
+         * @code{.cpp}
+         * Sora::EventProbeContext input{};
+         * int source = 0;
+         * Sora::EventProbe(input, source); // output: ADL ProbeEvent hook runs, or no-op
+         * @endcode
+         */
         struct EventProbeCPO {
             /** @brief Invoke an ADL probe hook in @p anchor's namespace when one exists; otherwise compile to no-op. */
             template<typename Context, typename Anchor>
@@ -200,6 +207,13 @@ namespace Sora {
 
     } // namespace Detail::EventProbeCPOFn
 
+    /**
+     * @brief Customisation-point object for optional event instrumentation.
+     * @code{.cpp}
+     * Sora::EventProbeContext input{};
+     * Sora::EventProbe(input); // no-op when no ADL ProbeEvent hook exists
+     * @endcode
+     */
     inline constexpr Detail::EventProbeCPOFn::EventProbeCPO EventProbe;
 
     /** @brief Return whether event payload @p Event has an ADL probe hook. */
@@ -515,7 +529,13 @@ namespace Sora {
 
     namespace Detail {
 
-        /** @brief CPO functor that implements @c Events(object) -> @ref EventPort. */
+        /**
+         * @brief CPO functor that implements @c EventPortOf(object) -> @ref EventPort.
+         * @code{.cpp}
+         * struct Source { Sora::EventPort events; } input;
+         * auto& output = Sora::EventPortOf(input); // references input.events
+         * @endcode
+         */
         struct EventPortOfFn {
             template<typename T>
             [[nodiscard]] EventPort& operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
@@ -541,7 +561,13 @@ namespace Sora {
             }
         };
 
-        /** @brief CPO functor that implements @c EventLifetimeOf(object). */
+        /**
+         * @brief CPO functor that implements @c EventLifetimeOf(object).
+         * @code{.cpp}
+         * struct Source { Sora::EventPort events; } input;
+         * auto output = Sora::EventLifetimeOf(input); // port-bound lifetime token
+         * @endcode
+         */
         struct EventLifetimeOfFn {
             template<typename T>
             [[nodiscard]] EventObjectLifetime operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
@@ -567,7 +593,13 @@ namespace Sora {
             }
         };
 
-        /** @brief CPO functor that implements @c EventRef(object) -> @ref EventObjectRef. */
+        /**
+         * @brief CPO functor that implements @c EventRef(object) -> @ref EventObjectRef.
+         * @code{.cpp}
+         * struct Source { Sora::EventPort events; } input;
+         * auto output = Sora::EventRefOf(input); // stable event object reference
+         * @endcode
+         */
         struct EventRefOfFn {
             template<typename T>
             [[nodiscard]] EventObjectRef operator()(T& object) const noexcept(noexcept(Dispatch(object))) {
@@ -587,13 +619,31 @@ namespace Sora {
 
     } // namespace Detail
 
-    /** @brief Customisation-point object returning an object's event port. */
+    /**
+     * @brief Customisation-point object returning an object's event port.
+     * @code{.cpp}
+     * struct Source { Sora::EventPort events; } input;
+     * auto& output = Sora::EventPortOf(input); // input.events
+     * @endcode
+     */
     inline constexpr Detail::EventPortOfFn EventPortOf{};
 
-    /** @brief Customisation-point object returning an object's weak event lifetime model. */
+    /**
+     * @brief Customisation-point object returning an object's weak event lifetime model.
+     * @code{.cpp}
+     * struct Source { Sora::EventPort events; } input;
+     * auto output = Sora::EventLifetimeOf(input); // port-bound lifetime token
+     * @endcode
+     */
     inline constexpr Detail::EventLifetimeOfFn EventLifetimeOf{};
 
-    /** @brief Customisation-point object returning an object's event reference. */
+    /**
+     * @brief Customisation-point object returning an object's event reference.
+     * @code{.cpp}
+     * struct Source { Sora::EventPort events; } input;
+     * auto output = Sora::EventRefOf(input); // stable object reference
+     * @endcode
+     */
     inline constexpr Detail::EventRefOfFn EventRefOf{};
 
     namespace Concept {

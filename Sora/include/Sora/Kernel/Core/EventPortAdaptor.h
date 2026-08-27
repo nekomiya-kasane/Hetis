@@ -88,7 +88,14 @@ namespace Sora::Kernel {
 
     } // namespace Detail
 
-    /** @brief ADL adaptor that gives BaseUnknown objects an event port through DataExtension QI. */
+    /**
+     * @brief ADL adaptor that gives BaseUnknown objects an event port through DataExtension QI.
+     * @code{.cpp}
+     * void Example(Sora::Kernel::BaseUnknown& input) {
+     *     Sora::EventPort& output = Sora::Kernel::EventPortOf(input); // materialized extension port
+     * }
+     * @endcode
+     */
     [[nodiscard]] inline Sora::EventPort& EventPortOf(BaseUnknown& object) {
         Sora::Detail::EnsureBaseUnknownEventPortExtensionRegistered();
         auto* extension = QueryInterface<Sora::Kernel::ComAdaptor<Sora::EventPort>>(object);
@@ -99,6 +106,11 @@ namespace Sora::Kernel {
     /**
      * @brief Return the already materialized event port of @p object without creating its DataExtension.
      * @return The existing event port, or null when @p object has not used the event protocol.
+     * @code{.cpp}
+     * void Example(Sora::Kernel::BaseUnknown& input) {
+     *     Sora::EventPort* output = Sora::Kernel::TryEventPortOf(input); // nullptr until first use
+     * }
+     * @endcode
      */
     [[nodiscard]] inline Sora::EventPort* TryEventPortOf(BaseUnknown& object) noexcept {
         using Adaptor = Sora::Kernel::ComAdaptor<Sora::EventPort>;
@@ -107,7 +119,14 @@ namespace Sora::Kernel {
         return extension ? std::addressof(static_cast<Adaptor*>(extension)->Object()) : nullptr;
     }
 
-    /** @brief ADL adaptor that models a BaseUnknown nucleus lifetime without extending it at connection time. */
+    /**
+     * @brief ADL adaptor that models a BaseUnknown nucleus lifetime without extending it at connection time.
+     * @code{.cpp}
+     * void Example(Sora::Kernel::BaseUnknown& input) {
+     *     auto output = Sora::Kernel::MakeEventLifetime(input); // weak lifetime observation
+     * }
+     * @endcode
+     */
     [[nodiscard]] inline Sora::EventObjectLifetime MakeEventLifetime(BaseUnknown& object) {
         BaseUnknown* nucleus = object.Nucleus();
         assert(nucleus != nullptr);

@@ -1181,47 +1181,54 @@ namespace Sora::Math::Simd {
                 bytes)) { // If n is known via constant propagation use a single memcpy call. Since this is still
             // a fixed-size memcpy to the compiler, this leaves more room for optimization.
             __builtin_memcpy(dst, src, bytes);
-        } else if (bytes > 32 && Max > 32) {
-            __builtin_memcpy(dst, src, 32);
-            bytes -= 32;
-            __builtin_memcpy(dst + bytes, src + bytes, 32);
-        } else if (bytes > 16 && Max > 16) {
-            __builtin_memcpy(dst, src, 16);
-            if constexpr (Chunk == 8) {
-                bytes -= 8;
-                __builtin_memcpy(dst + bytes, src + bytes, 8);
-            } else {
-                bytes -= 16;
-                __builtin_memcpy(dst + bytes, src + bytes, 16);
+            return;
+        }
+        if constexpr (Max >= 32) {
+            if (bytes >= 32) {
+                __builtin_memcpy(dst, src, 32);
+                if (bytes > 32) {
+                    __builtin_memcpy(dst + bytes - 32, src + bytes - 32, 32);
+                }
+                return;
             }
-        } else if (bytes > 8 && Max > 8) {
-            __builtin_memcpy(dst, src, 8);
-            if constexpr (Chunk == 4) {
-                bytes -= 4;
-                __builtin_memcpy(dst + bytes, src + bytes, 4);
-            } else if constexpr (Chunk < 4) {
-                bytes -= 8;
-                __builtin_memcpy(dst + bytes, src + bytes, 8);
+        }
+        if constexpr (Max >= 16) {
+            if (bytes >= 16) {
+                __builtin_memcpy(dst, src, 16);
+                if (bytes > 16) {
+                    __builtin_memcpy(dst + bytes - 16, src + bytes - 16, 16);
+                }
+                return;
             }
-        } else if (bytes > 4 && Max > 4) {
-            __builtin_memcpy(dst, src, 4);
-            if constexpr (Chunk == 2) {
-                bytes -= 2;
-                __builtin_memcpy(dst + bytes, src + bytes, 2);
-            } else if constexpr (Chunk == 1) {
-                bytes -= 4;
-                __builtin_memcpy(dst + bytes, src + bytes, 4);
+        }
+        if constexpr (Max >= 8) {
+            if (bytes >= 8) {
+                __builtin_memcpy(dst, src, 8);
+                if (bytes > 8) {
+                    __builtin_memcpy(dst + bytes - 8, src + bytes - 8, 8);
+                }
+                return;
             }
-        } else if (bytes >= 2) {
-            __builtin_memcpy(dst, src, 2);
-            if constexpr (Chunk == 2) {
-                bytes -= 2;
-                __builtin_memcpy(dst + bytes, src + bytes, 2);
-            } else if constexpr (Chunk == 1) {
-                bytes -= 1;
-                __builtin_memcpy(dst + bytes, src + bytes, 1);
+        }
+        if constexpr (Max >= 4) {
+            if (bytes >= 4) {
+                __builtin_memcpy(dst, src, 4);
+                if (bytes > 4) {
+                    __builtin_memcpy(dst + bytes - 4, src + bytes - 4, 4);
+                }
+                return;
             }
-        } else if (bytes == 1) {
+        }
+        if constexpr (Max >= 2) {
+            if (bytes >= 2) {
+                __builtin_memcpy(dst, src, 2);
+                if (bytes > 2) {
+                    __builtin_memcpy(dst + bytes - 2, src + bytes - 2, 2);
+                }
+                return;
+            }
+        }
+        if (bytes == 1) {
             __builtin_memcpy(dst, src, 1);
         }
     }

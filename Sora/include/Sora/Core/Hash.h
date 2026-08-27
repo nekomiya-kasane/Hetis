@@ -954,7 +954,12 @@ namespace Sora::Hashing {
     } // namespace CPO
 
     /**
-     * @brief Customisation-point object for hashing any Hashable value.
+     * @brief Customization-point object for hashing any Hashable value.
+     * @details The result is deterministic for the selected hashing algorithm and value representation.
+     * @code{.cpp}
+     * auto input = std::string_view{"hello"};
+     * auto output = Sora::Hashing::Hash(input); // deterministic digest
+     * @endcode
      */
     inline constexpr CPO::HashFn Hash;
 

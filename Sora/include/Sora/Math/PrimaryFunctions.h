@@ -63,7 +63,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched addition.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Add(2.0F, 3.0F); // 5.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Add(input, 3.0F); // 5.0F
          * @endcode
          */
         struct AddFn {
@@ -81,7 +82,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched subtraction.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Sub(5.0F, 2.0F); // 3.0F
+         * constexpr auto input = 5.0F;
+         * constexpr auto output = Sora::Math::Sub(input, 2.0F); // 3.0F
          * @endcode
          */
         struct SubFn {
@@ -99,7 +101,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched multiplication.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Mul(2.0F, 3.0F); // 6.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Mul(input, 3.0F); // 6.0F
          * @endcode
          */
         struct MulFn {
@@ -117,7 +120,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched division.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Div(6.0F, 2.0F); // 3.0F
+         * constexpr auto input = 6.0F;
+         * constexpr auto output = Sora::Math::Div(input, 2.0F); // 3.0F
          * @endcode
          */
         struct DivFn {
@@ -135,7 +139,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched negation.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Neg(2.0F); // -2.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Neg(input); // -2.0F
          * @endcode
          */
         struct NegFn {
@@ -150,7 +155,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched multiplicative inversion.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Inv(4.0F); // 0.25F
+         * constexpr auto input = 4.0F;
+         * constexpr auto output = Sora::Math::Inv(input); // 0.25F
          * @endcode
          */
         struct InvFn {
@@ -165,7 +171,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched squaring.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Square(3.0F); // 9.0F
+         * constexpr auto input = 3.0F;
+         * constexpr auto output = Sora::Math::Square(input); // 9.0F
          * @endcode
          */
         struct SquareFn {
@@ -180,7 +187,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched absolute value.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Abs(-3.0F); // 3.0F
+         * constexpr auto input = -3.0F;
+         * constexpr auto output = Sora::Math::Abs(input); // 3.0F
          * @endcode
          */
         struct AbsFn {
@@ -195,7 +203,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched sine.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Sin(0.0F); // 0.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Sin(input); // 0.0F
          * @endcode
          */
         struct SinFn {
@@ -210,7 +219,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched cosine.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Cos(0.0F); // 1.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Cos(input); // 1.0F
          * @endcode
          */
         struct CosFn {
@@ -225,7 +235,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched tangent.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Tan(0.0F); // 0.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Tan(input); // 0.0F
          * @endcode
          */
         struct TanFn {
@@ -240,7 +251,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched arcsine.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Asin(0.0F); // 0.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Asin(input); // 0.0F
          * @endcode
          */
         struct AsinFn {
@@ -255,7 +267,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched arccosine.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Acos(1.0F); // 0.0F
+         * constexpr auto input = 1.0F;
+         * constexpr auto output = Sora::Math::Acos(input); // 0.0F
          * @endcode
          */
         struct AcosFn {
@@ -270,7 +283,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched arctangent.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Atan(0.0F); // 0.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Atan(input); // 0.0F
          * @endcode
          */
         struct AtanFn {
@@ -285,7 +299,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched four-quadrant arctangent.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Atan2(0.0F, 1.0F); // 0.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Atan2(input, 1.0F); // 0.0F
          * @endcode
          */
         struct Atan2Fn {
@@ -303,7 +318,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched natural exponential.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Exp(0.0F); // 1.0F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Exp(input); // 1.0F
          * @endcode
          */
         struct ExpFn {
@@ -318,7 +334,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched natural logarithm.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Log(1.0F); // 0.0F
+         * constexpr auto input = 1.0F;
+         * constexpr auto output = Sora::Math::Log(input); // 0.0F
          * @endcode
          */
         struct LogFn {
@@ -333,7 +350,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched square root.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Sqrt(9.0F); // 3.0F
+         * constexpr auto input = 9.0F;
+         * constexpr auto output = Sora::Math::Sqrt(input); // 3.0F
          * @endcode
          */
         struct SqrtFn {
@@ -348,7 +366,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched exponentiation.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Pow(2.0F, 3.0F); // 8.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Pow(input, 3.0F); // 8.0F
          * @endcode
          */
         struct PowFn {
@@ -366,7 +385,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched @c a*b+c.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Fma(2.0F, 3.0F, 1.0F); // 7.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Fma(input, 3.0F, 1.0F); // 7.0F
          * @endcode
          */
         struct FmaFn {
@@ -388,7 +408,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched @c a*b-c.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Mfs(2.0F, 3.0F, 1.0F); // 5.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Mfs(input, 3.0F, 1.0F); // 5.0F
          * @endcode
          */
         struct MfsFn {
@@ -410,7 +431,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched @c -a*b-c.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Nms(2.0F, 3.0F, 1.0F); // -7.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Nms(input, 3.0F, 1.0F); // -7.0F
          * @endcode
          */
         struct NmsFn {
@@ -432,7 +454,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched @c -a*b+c.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Nma(2.0F, 3.0F, 1.0F); // -5.0F
+         * constexpr auto input = 2.0F;
+         * constexpr auto output = Sora::Math::Nma(input, 3.0F, 1.0F); // -5.0F
          * @endcode
          */
         struct NmaFn {
@@ -454,7 +477,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched linear interpolation.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Lerp(0.0F, 10.0F, 0.25F); // 2.5F
+         * constexpr auto input = 0.0F;
+         * constexpr auto output = Sora::Math::Lerp(input, 10.0F, 0.25F); // 2.5F
          * @endcode
          */
         struct LerpFn {
@@ -476,7 +500,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched clamping.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Clamp(12.0F, 0.0F, 10.0F); // 10.0F
+         * constexpr auto input = 12.0F;
+         * constexpr auto output = Sora::Math::Clamp(input, 0.0F, 10.0F); // 10.0F
          * @endcode
          */
         struct ClampFn {
@@ -498,7 +523,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched lane selection.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Select(true, 7.0F, 3.0F); // 7.0F
+         * constexpr auto input = true;
+         * constexpr auto output = Sora::Math::Select(input, 7.0F, 3.0F); // 7.0F
          * @endcode
          */
         struct SelectFn {
@@ -519,7 +545,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched unit-interval clamping.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Saturate(1.25F); // 1.0F
+         * constexpr auto input = 1.25F;
+         * constexpr auto output = Sora::Math::Saturate(input); // 1.0F
          * @endcode
          */
         struct SaturateFn {
@@ -534,7 +561,8 @@ namespace Sora::Math {
         /**
          * @brief CPO implementing backend-dispatched sign extraction.
          * @code{.cpp}
-         * constexpr auto output = Sora::Math::Sign(-4.0F); // -1.0F
+         * constexpr auto input = -4.0F;
+         * constexpr auto output = Sora::Math::Sign(input); // -1.0F
          * @endcode
          */
         struct SignFn {
@@ -548,88 +576,229 @@ namespace Sora::Math {
 
     } // namespace CPO
 
-    /** @brief Add one or more values using the compile-time join of all operand backends. */
+    /**
+     * @brief Add one or more values using the compile-time join of all operand backends.
+     * @code{.cpp}
+     * auto input = std::pair{2.0F, 3.0F};
+     * auto output = Sora::Math::Add(input.first, input.second); // 5.0F
+     * @endcode
+     */
     inline constexpr CPO::AddFn Add{};
 
-    /** @brief Subtract the second operand from the first. */
+    /**
+     * @brief Subtract the second operand from the first.
+     * @code{.cpp}
+     * auto output = Sora::Math::Sub(5.0F, 2.0F); // 3.0F
+     * @endcode
+     */
     inline constexpr CPO::SubFn Sub{};
 
-    /** @brief Multiply one or more values. */
+    /**
+     * @brief Multiply one or more values.
+     * @code{.cpp}
+     * auto output = Sora::Math::Mul(2.0F, 3.0F); // 6.0F
+     * @endcode
+     */
     inline constexpr CPO::MulFn Mul{};
 
-    /** @brief Divide the first operand by the second. */
+    /**
+     * @brief Divide the first operand by the second.
+     * @code{.cpp}
+     * auto output = Sora::Math::Div(6.0F, 2.0F); // 3.0F
+     * @endcode
+     */
     inline constexpr CPO::DivFn Div{};
 
-    /** @brief Negate a value. */
+    /**
+     * @brief Negate a value.
+     * @code{.cpp}
+     * auto output = Sora::Math::Neg(2.0F); // -2.0F
+     * @endcode
+     */
     inline constexpr CPO::NegFn Neg{};
 
-    /** @brief Compute the multiplicative inverse of a value. */
+    /**
+     * @brief Compute the multiplicative inverse of a value.
+     * @code{.cpp}
+     * auto output = Sora::Math::Inv(4.0F); // 0.25F
+     * @endcode
+     */
     inline constexpr CPO::InvFn Inv{};
 
-    /** @brief Square a value. */
+    /**
+     * @brief Square a value.
+     * @code{.cpp}
+     * auto output = Sora::Math::Square(3.0F); // 9.0F
+     * @endcode
+     */
     inline constexpr CPO::SquareFn Square{};
 
-    /** @brief Compute the absolute value. */
+    /**
+     * @brief Compute the absolute value.
+     * @code{.cpp}
+     * auto output = Sora::Math::Abs(-3.0F); // 3.0F
+     * @endcode
+     */
     inline constexpr CPO::AbsFn Abs{};
 
-    /** @brief Compute the sine. */
+    /**
+     * @brief Compute the sine.
+     * @code{.cpp}
+     * auto output = Sora::Math::Sin(0.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::SinFn Sin{};
 
-    /** @brief Compute the cosine. */
+    /**
+     * @brief Compute the cosine.
+     * @code{.cpp}
+     * auto output = Sora::Math::Cos(0.0F); // 1.0F
+     * @endcode
+     */
     inline constexpr CPO::CosFn Cos{};
 
-    /** @brief Compute the tangent. */
+    /**
+     * @brief Compute the tangent.
+     * @code{.cpp}
+     * auto output = Sora::Math::Tan(0.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::TanFn Tan{};
 
-    /** @brief Compute the arcsine. */
+    /**
+     * @brief Compute the arcsine.
+     * @code{.cpp}
+     * auto output = Sora::Math::Asin(0.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::AsinFn Asin{};
 
-    /** @brief Compute the arccosine. */
+    /**
+     * @brief Compute the arccosine.
+     * @code{.cpp}
+     * auto output = Sora::Math::Acos(1.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::AcosFn Acos{};
 
-    /** @brief Compute the arctangent. */
+    /**
+     * @brief Compute the arctangent.
+     * @code{.cpp}
+     * auto output = Sora::Math::Atan(0.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::AtanFn Atan{};
 
-    /** @brief Compute the four-quadrant arctangent of @c y and @c x. */
+    /**
+     * @brief Compute the four-quadrant arctangent of @c y and @c x.
+     * @code{.cpp}
+     * auto output = Sora::Math::Atan2(0.0F, 1.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::Atan2Fn Atan2{};
 
-    /** @brief Compute the natural exponential. */
+    /**
+     * @brief Compute the natural exponential.
+     * @code{.cpp}
+     * auto output = Sora::Math::Exp(0.0F); // 1.0F
+     * @endcode
+     */
     inline constexpr CPO::ExpFn Exp{};
 
-    /** @brief Compute the natural logarithm. */
+    /**
+     * @brief Compute the natural logarithm.
+     * @code{.cpp}
+     * auto output = Sora::Math::Log(1.0F); // 0.0F
+     * @endcode
+     */
     inline constexpr CPO::LogFn Log{};
 
-    /** @brief Compute the square root. */
+    /**
+     * @brief Compute the square root.
+     * @code{.cpp}
+     * auto output = Sora::Math::Sqrt(9.0F); // 3.0F
+     * @endcode
+     */
     inline constexpr CPO::SqrtFn Sqrt{};
 
-    /** @brief Raise the first operand to the power of the second. */
+    /**
+     * @brief Raise the first operand to the power of the second.
+     * @code{.cpp}
+     * auto output = Sora::Math::Pow(2.0F, 3.0F); // 8.0F
+     * @endcode
+     */
     inline constexpr CPO::PowFn Pow{};
 
-    /** @brief Compute @c a*b+c, using a fused operation when supported. */
+    /**
+     * @brief Compute @c a*b+c, using a fused operation when supported.
+     * @code{.cpp}
+     * auto output = Sora::Math::Fma(2.0F, 3.0F, 1.0F); // 7.0F
+     * @endcode
+     */
     inline constexpr CPO::FmaFn Fma{};
 
-    /** @brief Compute @c a*b-c, using a fused operation when supported. */
+    /**
+     * @brief Compute @c a*b-c, using a fused operation when supported.
+     * @code{.cpp}
+     * auto output = Sora::Math::Mfs(2.0F, 3.0F, 1.0F); // 5.0F
+     * @endcode
+     */
     inline constexpr CPO::MfsFn Mfs{};
 
-    /** @brief Compute @c -a*b-c, using a fused operation when supported. */
+    /**
+     * @brief Compute @c -a*b-c, using a fused operation when supported.
+     * @code{.cpp}
+     * auto output = Sora::Math::Nms(2.0F, 3.0F, 1.0F); // -7.0F
+     * @endcode
+     */
     inline constexpr CPO::NmsFn Nms{};
 
-    /** @brief Compute @c -a*b+c, using a fused operation when supported. */
+    /**
+     * @brief Compute @c -a*b+c, using a fused operation when supported.
+     * @code{.cpp}
+     * auto output = Sora::Math::Nma(2.0F, 3.0F, 1.0F); // -5.0F
+     * @endcode
+     */
     inline constexpr CPO::NmaFn Nma{};
 
-    /** @brief Linearly interpolate from the first operand to the second. */
+    /**
+     * @brief Linearly interpolate from the first operand to the second.
+     * @code{.cpp}
+     * auto output = Sora::Math::Lerp(0.0F, 10.0F, 0.25F); // 2.5F
+     * @endcode
+     */
     inline constexpr CPO::LerpFn Lerp{};
 
-    /** @brief Clamp a value to an inclusive lower and upper bound. */
+    /**
+     * @brief Clamp a value to an inclusive lower and upper bound.
+     * @code{.cpp}
+     * auto output = Sora::Math::Clamp(12.0F, 0.0F, 10.0F); // 10.0F
+     * @endcode
+     */
     inline constexpr CPO::ClampFn Clamp{};
 
-    /** @brief Clamp a value to the inclusive unit interval. */
+    /**
+     * @brief Clamp a value to the inclusive unit interval.
+     * @code{.cpp}
+     * auto output = Sora::Math::Saturate(1.25F); // 1.0F
+     * @endcode
+     */
     inline constexpr CPO::SaturateFn Saturate{};
 
-    /** @brief Select @p yes where @p condition is true and @p no elsewhere, lane-wise for SIMD carriers. */
+    /**
+     * @brief Select @p yes where @p condition is true and @p no elsewhere, lane-wise for SIMD carriers.
+     * @code{.cpp}
+     * auto output = Sora::Math::Select(true, 7.0F, 3.0F); // 7.0F
+     * @endcode
+     */
     inline constexpr CPO::SelectFn Select{};
 
-    /** @brief Return the signed unit value corresponding to the operand's sign. */
+    /**
+     * @brief Return the signed unit value corresponding to the operand's sign.
+     * @code{.cpp}
+     * auto output = Sora::Math::Sign(-4.0F); // -1.0F
+     * @endcode
+     */
     inline constexpr CPO::SignFn Sign{};
 
 } // namespace Sora::Math
