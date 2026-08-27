@@ -70,6 +70,11 @@ namespace Sora::Meta {
      * @brief Reflect an InfoList as the success value of a collection algorithm.
      * @param[in] list Static reflection sequence to wrap.
      * @return Reflection of the structural @p list value.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto reflected = Sora::Meta::Reflect(Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(Sora::Meta::IsInfoList(reflected));
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info Reflect(const InfoList& list) {
         return std::meta::reflect_constant(list);
@@ -79,6 +84,11 @@ namespace Sora::Meta {
      * @brief Return whether @p result is a reflected InfoList value.
      * @param[in] result Reflection to inspect.
      * @return `true` only for an object or value whose unqualified type is `InfoList`.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto reflected = Sora::Meta::Reflect(Sora::Meta::InfoList{^^int});
+     * static_assert(Sora::Meta::IsInfoList(reflected));
+     * @endcode
      */
     [[nodiscard]] consteval bool IsInfoList(std::meta::info result) noexcept {
         if (!std::meta::is_object(result) && !std::meta::is_value(result)) {
@@ -92,6 +102,11 @@ namespace Sora::Meta {
      * @param[in] result Reflected `InfoList` object returned by a collection algorithm.
      * @return Extracted static sequence view.
      * @throws A translation-time diagnostic when @p result is not a reflected `InfoList`.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto reflected = Sora::Meta::Reflect(Sora::Meta::InfoList{^^int});
+     * static_assert(Sora::Meta::RequireInfoList(reflected).front() == ^^int);
+     * @endcode
      */
     [[nodiscard]] consteval InfoList RequireInfoList(std::meta::info result) {
         if (!IsInfoList(result)) {
@@ -105,6 +120,11 @@ namespace Sora::Meta {
      * @param[in] result Reflected value returned by a counting algorithm.
      * @return Extracted count.
      * @throws A translation-time diagnostic for errors or values of another type.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto reflected = std::meta::reflect_constant(std::size_t{3});
+     * static_assert(Sora::Meta::RequireSizeResult(reflected) == 3);
+     * @endcode
      */
     [[nodiscard]] consteval std::size_t RequireSizeResult(std::meta::info result) {
         if (IsMetaError(result) || !std::meta::is_value(result) ||
@@ -141,6 +161,11 @@ namespace Sora::Meta {
      * @param[in] values Sequence inspected from front to back.
      * @return First error unchanged, or `std::meta::info{}` when every entity is error-free.
      * @par Complexity Linear in the inspected prefix.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::NonInvocableTag);
+     * static_assert(Sora::Meta::FirstMetaError(Sora::Meta::InfoList{^^int, error}) == error);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info FirstMetaError(const InfoList& values) noexcept {
         for (const auto value : values) {
@@ -187,6 +212,11 @@ namespace Sora::Meta {
      * @param[in] function Reflected template to substitute.
      * @param[in] arguments Reflected template arguments in source order.
      * @return Substitution result, the first input error, or `NonInvocableTag` with invocation provenance.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Apply(^^std::pair, Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result == ^^std::pair<int, double>);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info Apply(std::meta::info function, const InfoList& arguments) {
         return Detail::Apply(function, {arguments.begin(), arguments.size()});
@@ -221,6 +251,12 @@ namespace Sora::Meta {
          * @param[in] functions Non-empty function sequence.
          * @param[in] arguments Initial invocation arguments.
          * @return Final type reflection or the first recoverable error. Every intermediate result must be a type.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Detail::ComposeInvoke(
+         *     Sora::Meta::InfoList{^^std::add_pointer_t, ^^std::decay_t}, Sora::Meta::InfoList{^^const int&});
+         * static_assert(result == ^^int*);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info ComposeInvoke(const InfoList& functions, const InfoList& arguments) {
             if (functions.empty()) {
@@ -253,6 +289,12 @@ namespace Sora::Meta {
          * @param[in] continuation Reflected template receiving transformed arguments.
          * @param[in] arguments Invocation arguments.
          * @return Continuation result or the first recoverable error. Pointwise results must be types.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Detail::TransformInvoke(
+         *     ^^std::decay_t, ^^Sora::Traits::TypeList, Sora::Meta::InfoList{^^const int&, ^^double});
+         * static_assert(result == ^^Sora::Traits::TypeList<int, double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info TransformInvoke(std::meta::info function, std::meta::info continuation,
                                                                 const InfoList& arguments) {
@@ -333,6 +375,13 @@ namespace Sora::Meta {
      * @param[in] function Reflected template accepting one reflected entity.
      * @param[in] input Source sequence; entities need not be types.
      * @return Reflected `InfoList` of dealiased results, or the first `MetaError`.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Map(^^std::add_pointer_t,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(Sora::Meta::Equal(Sora::Meta::RequireInfoList(result),
+     *                                  Sora::Meta::InfoList{^^int*, ^^double*}));
+     * @endcode
      * @par Complexity Linear in @p input, excluding template substitution cost.
      */
     [[nodiscard]] consteval std::meta::info Map(std::meta::info function, const InfoList& input) {
@@ -363,6 +412,13 @@ namespace Sora::Meta {
      * @param[in] pred Reflected function satisfying the unary meta-predicate protocol.
      * @param[in] input Source sequence.
      * @return Reflected stable subsequence, `NonInvocableTag`, `NonBooleanPredResultTag`, or the first input error.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+     * constexpr auto result = Sora::Meta::Filter(^^IsIntegral,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(Sora::Meta::RequireInfoList(result).front() == ^^int);
+     * @endcode
      * @par Complexity Linear in @p input.
      */
     [[nodiscard]] consteval std::meta::info Filter(std::meta::info pred, const InfoList& input) {
@@ -492,6 +548,12 @@ namespace Sora::Meta {
      * @param[in] left First source sequence.
      * @param[in] right Second source sequence.
      * @return Reflected `InfoList`, `LengthMismatchTag`, an invocation error, or the first input error.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Zip(^^std::pair,
+     *     Sora::Meta::InfoList{^^int}, Sora::Meta::InfoList{^^double});
+     * static_assert(Sora::Meta::RequireInfoList(result).front() == ^^std::pair<int, double>);
+     * @endcode
      * @par Complexity Linear in the common input length.
      */
     [[nodiscard]] consteval std::meta::info Zip(std::meta::info function, const InfoList& left, const InfoList& right) {
@@ -530,6 +592,12 @@ namespace Sora::Meta {
      * @param[in] initial Initial accumulator entity; it need not be a type.
      * @param[in] input Entities visited from front to back.
      * @return Final accumulator, or the first error encountered.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::FoldLeft(^^std::pair, ^^void,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result == ^^std::pair<std::pair<void, int>, double>);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info FoldLeft(std::meta::info function, std::meta::info initial,
                                                      const InfoList& input) {
@@ -562,6 +630,12 @@ namespace Sora::Meta {
      * @param[in] initial Initial accumulator entity; it need not be a type.
      * @param[in] input Entities visited from back to front.
      * @return Final accumulator, or the first error in validation and source order.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::FoldRight(^^std::pair, ^^void,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result == ^^std::pair<int, std::pair<double, void>>);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info FoldRight(std::meta::info function, std::meta::info initial,
                                                       const InfoList& input) {
@@ -594,6 +668,11 @@ namespace Sora::Meta {
      * @param[in] input Source sequence inspected from front to back.
      * @param[in] fallback Entity returned when no element is accepted.
      * @return Matching entity, @p fallback, or the first predicate/input error.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+     * static_assert(Sora::Meta::FindFirst(^^IsDouble, Sora::Meta::InfoList{^^int, ^^double}) == ^^double);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info FindFirst(std::meta::info pred, const InfoList& input,
                                                       std::meta::info fallback = ^^void) {
@@ -627,6 +706,12 @@ namespace Sora::Meta {
      * @param[in] input Source sequence inspected in source order.
      * @param[in] fallback Entity returned when no element is accepted.
      * @return Last matching entity, @p fallback, or the first predicate/input error.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+     * constexpr auto result = Sora::Meta::FindLast(^^IsIntegral, Sora::Meta::InfoList{^^int, ^^long});
+     * static_assert(result == ^^long);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info FindLast(std::meta::info pred, const InfoList& input,
                                                      std::meta::info fallback = ^^void) {
@@ -660,6 +745,12 @@ namespace Sora::Meta {
      * @param[in] pred Reflected unary meta predicate.
      * @param[in] input Source sequence.
      * @return Reflected bool, or the first predicate/input error. Empty input yields `true` after validating @p pred.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsType(std::meta::info value) { return std::meta::is_type(value); }
+     * static_assert(Sora::Meta::RequirePredResult(
+     *     Sora::Meta::AllOf(^^IsType, Sora::Meta::InfoList{^^int, ^^double})));
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info AllOf(std::meta::info pred, const InfoList& input) {
         if (IsMetaError(pred)) {
@@ -688,6 +779,12 @@ namespace Sora::Meta {
      * @param[in] pred Reflected unary meta predicate.
      * @param[in] input Source sequence.
      * @return Reflected bool, or the first predicate/input error. Empty input yields `false` after validating @p pred.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info value) { return value == ^^double; }
+     * static_assert(Sora::Meta::RequirePredResult(
+     *     Sora::Meta::AnyOf(^^IsDouble, Sora::Meta::InfoList{^^int, ^^double})));
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info AnyOf(std::meta::info pred, const InfoList& input) {
         if (IsMetaError(pred)) {
@@ -716,6 +813,12 @@ namespace Sora::Meta {
      * @param[in] pred Reflected unary meta predicate.
      * @param[in] input Source sequence.
      * @return Negated result of @ref AnyOf, preserving errors unchanged.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info value) { return value == ^^double; }
+     * static_assert(Sora::Meta::RequirePredResult(
+     *     Sora::Meta::NoneOf(^^IsDouble, Sora::Meta::InfoList{^^int, ^^char})));
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info NoneOf(std::meta::info pred, const InfoList& input) {
         const auto result = AnyOf(pred, input);
@@ -727,6 +830,12 @@ namespace Sora::Meta {
      * @param[in] pred Reflected unary meta predicate.
      * @param[in] input Source sequence.
      * @return Reflected `std::size_t`, or the first predicate/input error.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsIntegral(std::meta::info value) { return std::meta::is_integral_type(value); }
+     * static_assert(Sora::Meta::RequireSizeResult(
+     *     Sora::Meta::CountIf(^^IsIntegral, Sora::Meta::InfoList{^^int, ^^double, ^^long}) == 2);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info CountIf(std::meta::info pred, const InfoList& input) {
         if (IsMetaError(pred)) {
@@ -753,6 +862,12 @@ namespace Sora::Meta {
      * @brief Project a collection result into a reflected `Traits::TypeList`.
      * @param[in] result Reflected `InfoList` success value or `MetaError`.
      * @return Reflected `TypeList`, the input error, `NonInfoListResultTag`, or `NonTypeResultTag`.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::ToTypeList(
+     *     Sora::Meta::Reflect(Sora::Meta::InfoList{^^int, ^^double}));
+     * static_assert(result == ^^Sora::Traits::TypeList<int, double>);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info ToTypeList(std::meta::info result) {
         if (IsMetaError(result)) {
@@ -778,6 +893,12 @@ namespace Sora::Meta {
      * @param[in] type Reflected class or aggregate type.
      * @return Reflected member `TypeList`, the input error, `NonTypeResultTag` for a non-type reflection, or
      * `NonInvocableTag` for a type that has no class-member domain.
+     * @par Example
+     * @code{.cpp}
+     * struct Record { int id; double weight; };
+     * constexpr auto result = Sora::Meta::DataMemberTypes(^^Record);
+     * static_assert(result == ^^Sora::Traits::TypeList<int, double>);
+     * @endcode
      */
     [[nodiscard]] consteval std::meta::info DataMemberTypes(std::meta::info type) {
         if (IsMetaError(type)) {
@@ -833,6 +954,12 @@ namespace Sora::Meta {
          * @param[in] lists Sequence whose elements must each reflect a `Traits::TypeList` specialization.
          * @return Reflected concatenated `TypeList`, `InvalidSequenceTag`, or the first error in flattened source
          * order.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Concat(
+         *     Sora::Meta::InfoList{^^Sora::Traits::TypeList<int>, ^^Sora::Traits::TypeList<double>});
+         * static_assert(result == ^^Sora::Traits::TypeList<int, double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Concat(const InfoList& lists) {
             std::vector<std::meta::info> output;
@@ -1307,6 +1434,12 @@ namespace Sora::Meta {
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected type result, `NonTypeResultTag`, `InvalidSequenceTag`, an invocation error, or the first
          * input error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Apply(^^std::pair,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^std::pair<int, double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Apply(std::meta::info function, std::meta::info list) {
             if (IsMetaError(function)) {
@@ -1327,6 +1460,12 @@ namespace Sora::Meta {
          * @param[in] function Reflected unary template.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected `TypeList`; non-type mapped results produce `NonTypeResultTag`.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Map(^^std::add_pointer_t,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<int*, double*>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Map(std::meta::info function, std::meta::info list) {
             if (IsMetaError(function)) {
@@ -1347,6 +1486,12 @@ namespace Sora::Meta {
          * @param[in] function Reflected unary alias template returning a `Traits::TypeList` specialization.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Concatenated `TypeList`, or the first mapper/projection error.
+         * @par Example
+         * @code{.cpp}
+         * template<typename T> using Expand = Sora::Traits::TypeList<T, const T>;
+         * constexpr auto result = Sora::Meta::Types::FlatMap(^^Expand, ^^Sora::Traits::TypeList<int>);
+         * static_assert(result == ^^Sora::Traits::TypeList<int, const int>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info FlatMap(std::meta::info function, std::meta::info list) {
             if (IsMetaError(function)) {
@@ -1383,6 +1528,13 @@ namespace Sora::Meta {
          * @param[in] pred Reflected unary meta predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected filtered `TypeList`, predicate error, sequence error, or the first input error.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+         * constexpr auto result = Sora::Meta::Types::Filter(^^IsIntegral,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<int>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Filter(std::meta::info pred, std::meta::info list) {
             if (IsMetaError(pred)) {
@@ -1404,6 +1556,13 @@ namespace Sora::Meta {
          * @param[in] replacement Reflected replacement type.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected `TypeList`, or the first predicate/projection error.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+         * constexpr auto result = Sora::Meta::Types::ReplaceIf(^^IsIntegral, ^^bool,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<bool, double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info ReplaceIf(std::meta::info pred, std::meta::info replacement,
                                                           std::meta::info list) {
@@ -1428,6 +1587,13 @@ namespace Sora::Meta {
          * @param[in] pred Reflected unary meta predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected filtered `TypeList`, or the first predicate/projection error.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+         * constexpr auto result = Sora::Meta::Types::RemoveIf(^^IsIntegral,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info RemoveIf(std::meta::info pred, std::meta::info list) {
             if (IsMetaError(pred)) {
@@ -1449,6 +1615,12 @@ namespace Sora::Meta {
          * @param[in] left First reflected `Traits::TypeList`.
          * @param[in] right Second reflected `Traits::TypeList`.
          * @return Reflected result `TypeList`, length/invocation/type error, or the first input error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Zip(^^std::pair,
+         *     ^^Sora::Traits::TypeList<int>, ^^Sora::Traits::TypeList<double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<std::pair<int, double>>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Zip(std::meta::info function, std::meta::info left,
                                                     std::meta::info right) {
@@ -1476,6 +1648,11 @@ namespace Sora::Meta {
          * @param[in] oldType Reflected type to replace.
          * @param[in] newType Reflected replacement type.
          * @return Reflected result `TypeList`, validation error, or the first input error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Replace(^^Sora::Traits::TypeList<int, double>, ^^int, ^^char);
+         * static_assert(result == ^^Sora::Traits::TypeList<char, double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Replace(std::meta::info list, std::meta::info oldType,
                                                         std::meta::info newType) {
@@ -1503,6 +1680,11 @@ namespace Sora::Meta {
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @param[in] needle Reflected type to remove.
          * @return Reflected result `TypeList`, validation error, or the first input error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Remove(^^Sora::Traits::TypeList<int, double>, ^^int);
+         * static_assert(result == ^^Sora::Traits::TypeList<double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Remove(std::meta::info list, std::meta::info needle) {
             const auto inspected = Detail::InspectTypeList(list, InfoList{list, needle});
@@ -1523,6 +1705,11 @@ namespace Sora::Meta {
          * @param[in] count Number of elements.
          * @param[in] value Reflected type to repeat.
          * @return Reflected result `TypeList`, `NonTypeResultTag`, or @p value when it is already an error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Fill(3, ^^int);
+         * static_assert(result == ^^Sora::Traits::TypeList<int, int, int>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Fill(std::size_t count, std::meta::info value) {
             if (IsMetaError(value)) {
@@ -1539,6 +1726,11 @@ namespace Sora::Meta {
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Empty reflected `TypeList`, or the first input/sequence error.
          * @note Nested `MetaError` elements are propagated before clearing so the first-error law is preserved.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Clear(^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info Clear(std::meta::info list) {
             const auto inspected = Detail::InspectTypeList(list, InfoList{list});
@@ -1555,6 +1747,12 @@ namespace Sora::Meta {
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Final reflected type, or the first validation, nested, invocation, or non-type result error.
          * @par Complexity Linear in the list length, excluding substitution cost.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::FoldLeft(^^std::pair, ^^void,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^std::pair<std::pair<void, int>, double>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info FoldLeft(std::meta::info function, std::meta::info initial,
                                                          std::meta::info list) {
@@ -1596,6 +1794,12 @@ namespace Sora::Meta {
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Final reflected type, or the first validation, nested, invocation, or non-type result error.
          * @par Complexity Linear in the list length, excluding substitution cost.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::FoldRight(^^std::pair, ^^void,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^std::pair<int, std::pair<double, void>>);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info FoldRight(std::meta::info function, std::meta::info initial,
                                                           std::meta::info list) {
@@ -1672,6 +1876,13 @@ namespace Sora::Meta {
          * @param[in] fallback Reflected type returned when no element matches.
          * @return Matching type, @p fallback, or the first validation/error result.
          * @see FindFirst
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+         * constexpr auto result = Sora::Meta::Types::FindLast(^^IsDouble,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^double);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info FindLast(std::meta::info pred, std::meta::info list,
                                                          std::meta::info fallback = ^^void) {
@@ -1699,6 +1910,12 @@ namespace Sora::Meta {
          * @param[in] pred Reflected unary boolean predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected bool; empty lists yield `true` after predicate validation.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsType(std::meta::info type) { return std::meta::is_type(type); }
+         * constexpr auto result = Sora::Meta::Types::AllOf(^^IsType, ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info AllOf(std::meta::info pred, std::meta::info list) {
             if (IsMetaError(pred)) {
@@ -1719,6 +1936,12 @@ namespace Sora::Meta {
          * @param[in] pred Reflected unary boolean predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected `bool`; empty lists yield `false`, while validation errors are propagated unchanged.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+         * constexpr auto result = Sora::Meta::Types::AnyOf(^^IsDouble, ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
          * @par Example
          * @code{.cpp}
          * constexpr auto result = Sora::Meta::Types::AnyOf(
@@ -1747,6 +1970,12 @@ namespace Sora::Meta {
          * @return Reflected `bool`; empty lists yield `true`, while validation errors are propagated unchanged.
          * @par Example
          * @code{.cpp}
+         * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+         * constexpr auto result = Sora::Meta::Types::NoneOf(^^IsDouble, ^^Sora::Traits::TypeList<int, char>);
+         * static_assert(std::meta::extract<bool>(result));
+         * @endcode
+         * @par Example
+         * @code{.cpp}
          * constexpr auto result = Sora::Meta::Types::NoneOf(
          *     ^^IsIntegral, ^^Sora::Traits::TypeList<double, float>);
          * static_assert(std::meta::extract<bool>(result));
@@ -1762,6 +1991,13 @@ namespace Sora::Meta {
          * @param[in] pred Reflected unary boolean predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
          * @return Reflected `std::size_t`, or the first validation/error result.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+         * constexpr auto result = Sora::Meta::Types::CountIf(^^IsIntegral,
+         *     ^^Sora::Traits::TypeList<int, double, long>);
+         * static_assert(std::meta::extract<std::size_t>(result) == 2);
+         * @endcode
          */
         [[nodiscard]] consteval std::meta::info CountIf(std::meta::info pred, std::meta::info list) {
             if (IsMetaError(pred)) {
@@ -1833,6 +2069,11 @@ namespace Sora::Meta {
      * @tparam Condition Compile-time branch condition.
      * @tparam Then Type selected for `true`.
      * @tparam Else Type selected for `false`.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Meta::If<true, int, double>;
+     * static_assert(std::same_as<Result, int>);
+     * @endcode
      */
     template<bool Condition, typename Then, typename Else>
     using If = std::conditional_t<Condition, Then, Else>;
@@ -1842,6 +2083,11 @@ namespace Sora::Meta {
      * @tparam Condition Compile-time branch condition.
      * @tparam Then Type selected for `false`.
      * @tparam Else Type selected for `true`.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Meta::IfNot<true, int, double>;
+     * static_assert(std::same_as<Result, double>);
+     * @endcode
      */
     template<bool Condition, typename Then, typename Else>
     using IfNot = std::conditional_t<Condition, Else, Then>;
@@ -1851,6 +2097,12 @@ namespace Sora::Meta {
      * @tparam Function Reflected template invoked by the closure.
      * @tparam Front Reflections inserted before call-site type arguments.
      * @return Reflection of an alias-template closure preserving recoverable invocation errors.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto prepend = Sora::Meta::BindFront<^^std::pair, ^^int>;
+     * using Result = Sora::Meta::InvokeResult<prepend, double>;
+     * static_assert(std::same_as<Result, std::pair<int, double>>);
+     * @endcode
      */
     template<std::meta::info Function, std::meta::info... Front>
     inline constexpr std::meta::info BindFront = ^^Detail::BindFrontClosure<Function, Front...>::template Apply;
@@ -1860,6 +2112,12 @@ namespace Sora::Meta {
      * @tparam Function Reflected template invoked by the closure.
      * @tparam Back Reflections inserted after call-site type arguments.
      * @return Reflection of an alias-template closure preserving recoverable invocation errors.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto append = Sora::Meta::BindBack<^^std::tuple, ^^double>;
+     * using Result = Sora::Meta::InvokeResult<append, int>;
+     * static_assert(std::same_as<Result, std::tuple<int, double>>);
+     * @endcode
      */
     template<std::meta::info Function, std::meta::info... Back>
     inline constexpr std::meta::info BindBack = ^^Detail::BindBackClosure<Function, Back...>::template Apply;
@@ -1869,6 +2127,12 @@ namespace Sora::Meta {
      * @tparam Functions Non-empty sequence `F, G, ...` producing `F(G(...(arguments)))`.
      * @return Reflection of the composed alias-template closure.
      * @details Every intermediate result must be a type because the closure is exposed as an alias template.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto pipeline = Sora::Meta::Compose<^^std::add_pointer_t, ^^std::decay_t>;
+     * using Result = Sora::Meta::InvokeResult<pipeline, const int&>;
+     * static_assert(std::same_as<Result, int*>);
+     * @endcode
      */
     template<std::meta::info... Functions>
         requires(sizeof...(Functions) > 0)
@@ -1879,6 +2143,12 @@ namespace Sora::Meta {
      * @tparam Function Reflected unary template applied pointwise.
      * @tparam Continuation Reflected variadic template receiving transformed results.
      * @return Reflection of the transform-then-continue alias-template closure.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto normalize = Sora::Meta::Transform<^^std::decay_t>;
+     * using Result = Sora::Meta::InvokeResult<normalize, const int&, const double&>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<std::meta::info Function, std::meta::info Continuation = ^^Traits::TypeList>
     inline constexpr std::meta::info Transform = ^^Detail::TransformClosure<Function, Continuation>::template Apply;
@@ -1887,6 +2157,12 @@ namespace Sora::Meta {
      * @brief Return a reflected function that always yields @p Result.
      * @tparam Result Reflected type returned for every invocation; non-types become `NonTypeResultTag`.
      * @return Reflection of a constant alias-template closure.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto alwaysInt = Sora::Meta::Constant<^^int>;
+     * using Result = Sora::Meta::InvokeResult<alwaysInt, double>;
+     * static_assert(std::same_as<Result, int>);
+     * @endcode
      */
     template<std::meta::info Result>
     inline constexpr std::meta::info Constant = ^^Detail::ConstantClosure<Result>::template Apply;
@@ -1895,6 +2171,12 @@ namespace Sora::Meta {
      * @brief Return a reflected function that applies @p Function to one TypeList argument.
      * @tparam Function Reflected variadic template receiving the list's types.
      * @return Reflection of an alias-template closure accepting one `TypeList` type.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto uncurry = Sora::Meta::Uncurry<^^std::pair>;
+     * using Result = Sora::Meta::InvokeResult<uncurry, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, std::pair<int, double>>);
+     * @endcode
      */
     template<std::meta::info Function>
     inline constexpr std::meta::info Uncurry = ^^Detail::UncurryClosure<Function>::template Apply;
@@ -1909,6 +2191,10 @@ namespace Sora::Traits {
      * @return Element count after reflected sequence validation.
      * @pre @p List contains no type-level `MetaError`; unlike `Meta::Types::Length`, this value interface cannot carry
      * a reflected error and therefore issues a translation-time diagnostic when validation fails.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Traits::Length<Sora::Traits::TypeList<int, double>> == 2);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -1919,6 +2205,11 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Index Zero-based type index.
      * @return Selected type or the first nested `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::At<Sora::Traits::TypeList<int, double>, 1>;
+     * static_assert(std::same_as<Result, double>);
+     * @endcode
      */
     template<typename List, std::size_t Index>
         requires Concept::TypeList<List>
@@ -1928,6 +2219,11 @@ namespace Sora::Traits {
      * @brief First type of a non-empty @p List.
      * @tparam List Non-empty `TypeList` specialization.
      * @return First type or the first nested `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Front<Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, int>);
+     * @endcode
      */
     template<typename List>
         requires(Concept::TypeList<List> && std::remove_cvref_t<List>::size > 0)
@@ -1937,6 +2233,11 @@ namespace Sora::Traits {
      * @brief Final type of a non-empty @p List.
      * @tparam List Non-empty `TypeList` specialization.
      * @return Final type or the first nested `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Back<Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, double>);
+     * @endcode
      */
     template<typename List>
         requires(Concept::TypeList<List> && std::remove_cvref_t<List>::size > 0)
@@ -1946,6 +2247,11 @@ namespace Sora::Traits {
      * @brief All but the first type of @p List.
      * @tparam List `TypeList` specialization to transform.
      * @return Resulting `TypeList`; an empty input remains empty.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::PopFront<Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<double>>);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -1956,6 +2262,11 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to transform.
      * @tparam Count Maximum number of types to retain.
      * @return Resulting prefix `TypeList`; @p Count is clamped to the input length.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Take<Sora::Traits::TypeList<int, double>, 1>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int>>);
+     * @endcode
      */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
@@ -1966,6 +2277,11 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to transform.
      * @tparam Count Number of leading types to discard.
      * @return Resulting suffix `TypeList`; @p Count is clamped to the input length.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Drop<Sora::Traits::TypeList<int, double>, 1>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<double>>);
+     * @endcode
      */
     template<typename List, std::size_t Count>
         requires Concept::TypeList<List>
@@ -1977,6 +2293,11 @@ namespace Sora::Traits {
      * @tparam Offset Zero-based first type.
      * @tparam Count Number of types to copy.
      * @return Resulting bounded `TypeList`; invalid bounds are rejected by the constraint.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Slice<Sora::Traits::TypeList<int, double, char>, 1, 2>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<double, char>>);
+     * @endcode
      */
     template<typename List, std::size_t Offset, std::size_t Count>
         requires(Concept::TypeList<List> && Offset <= Length<List> && Count <= Length<List> - Offset)
@@ -1986,6 +2307,11 @@ namespace Sora::Traits {
      * @brief Empty type list with no dependency on @p List's elements.
      * @tparam List `TypeList` specialization whose element types are discarded.
      * @return `TypeList<>`.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Clear<Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<>>);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -1998,6 +2324,11 @@ namespace Sora::Traits {
      * @return `TypeList` with @p Count copies, or a `MetaError` type for a non-type result.
      * @details The result is a `MetaError` type only when the reflected value is not a type; invalid @p Type itself
      * is diagnosed by the type system before this alias can be formed.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Fill<3, int>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int, int, int>>);
+     * @endcode
      */
     template<std::size_t Count, typename Type>
     using Fill = Meta::InfoType<Meta::Types::Fill(Count, ^^Type)>;
@@ -2006,6 +2337,11 @@ namespace Sora::Traits {
      * @brief Concatenate type lists in source order.
      * @tparam Lists `TypeList` specializations to concatenate.
      * @return A `TypeList` type; malformed intermediate reflection becomes a `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Concat<Sora::Traits::TypeList<int>, Sora::Traits::TypeList<double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<typename... Lists>
         requires(Concept::TypeList<Lists> && ...)
@@ -2031,6 +2367,11 @@ namespace Sora::Traits {
      * @tparam Function Reflected unary template.
      * @tparam List `TypeList` specialization to transform.
      * @return Resulting `TypeList` or a `MetaError` type when substitution fails or yields a non-type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Map<^^std::add_pointer_t, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int*, double*>>);
+     * @endcode
      */
     template<std::meta::info Function, typename List>
         requires Concept::TypeList<List>
@@ -2057,6 +2398,12 @@ namespace Sora::Traits {
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to filter.
      * @return Resulting `TypeList` or a `MetaError` type. Predicate protocol violations are represented in that type.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+     * using Result = Sora::Traits::Filter<^^IsIntegral, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int>>);
+     * @endcode
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -2100,6 +2447,11 @@ namespace Sora::Traits {
      * @tparam Function Reflected variadic template.
      * @tparam List `TypeList` specialization supplying invocation arguments.
      * @return The substituted type or a `MetaError` type; no exception is used for recoverable meta failure.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Apply<^^std::pair, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, std::pair<int, double>>);
+     * @endcode
      */
     template<std::meta::info Function, typename List>
         requires Concept::TypeList<List>
@@ -2111,6 +2463,11 @@ namespace Sora::Traits {
      * @tparam Initial Initial accumulator type.
      * @tparam List `TypeList` specialization to fold.
      * @return Final type or a `MetaError` type from the first failed invocation.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::FoldLeft<^^std::pair, void, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, std::pair<std::pair<void, int>, double>>);
+     * @endcode
      */
     template<std::meta::info Function, typename Initial, typename List>
         requires Concept::TypeList<List>
@@ -2122,6 +2479,11 @@ namespace Sora::Traits {
      * @tparam Initial Initial accumulator type.
      * @tparam List `TypeList` specialization to fold.
      * @return Final type or a `MetaError` type from the first failed invocation.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::FoldRight<^^std::pair, void, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, std::pair<int, std::pair<double, void>>>);
+     * @endcode
      */
     template<std::meta::info Function, typename Initial, typename List>
         requires Concept::TypeList<List>
@@ -2132,6 +2494,10 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to find.
      * @return Zero-based first matching index, or @ref Meta::InfoList::npos.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Traits::IndexOf<Sora::Traits::TypeList<int, double>, double> == 1);
+     * @endcode
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -2142,6 +2508,10 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to find.
      * @return `true` when @p Type occurs in @p List.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Traits::Contains<Sora::Traits::TypeList<int, double>, double>);
+     * @endcode
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -2152,6 +2522,10 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to count.
      * @return Number of occurrences; zero for an empty list.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Traits::Count<Sora::Traits::TypeList<int, int>, int> == 2);
+     * @endcode
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -2211,6 +2585,11 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to transform.
      * @tparam Type Type to insert.
      * @return Resulting `TypeList` or a `MetaError` type if projection fails.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::PushFront<Sora::Traits::TypeList<double>, int>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -2221,6 +2600,11 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to transform.
      * @tparam Type Type to insert.
      * @return Resulting `TypeList` or a `MetaError` type if projection fails.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::PushBack<Sora::Traits::TypeList<int>, double>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<typename List, typename Type>
         requires Concept::TypeList<List>
@@ -2230,6 +2614,11 @@ namespace Sora::Traits {
      * @brief All but the final type of @p List.
      * @tparam List `TypeList` specialization to transform.
      * @return Resulting `TypeList`; an empty input remains empty.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::PopBack<Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int>>);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -2239,6 +2628,11 @@ namespace Sora::Traits {
      * @brief Types of @p List in reverse order.
      * @tparam List `TypeList` specialization to transform.
      * @return Resulting `TypeList` or a `MetaError` type if the projection fails.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Reverse<Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<double, int>>);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -2248,6 +2642,11 @@ namespace Sora::Traits {
      * @brief Remove duplicate types while retaining first occurrences.
      * @tparam List `TypeList` specialization to transform.
      * @return Stable unique `TypeList` or a `MetaError` type if the projection fails.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Unique<Sora::Traits::TypeList<int, int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -2257,6 +2656,10 @@ namespace Sora::Traits {
      * @brief Whether every type in @p List occurs exactly once.
      * @tparam List `TypeList` specialization to inspect.
      * @return `true` for an empty or duplicate-free list.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(!Sora::Traits::IsUnique<Sora::Traits::TypeList<int, int>>);
+     * @endcode
      */
     template<typename List>
         requires Concept::TypeList<List>
@@ -2268,6 +2671,11 @@ namespace Sora::Traits {
      * @tparam Old Type to replace.
      * @tparam New Replacement type.
      * @return Resulting `TypeList` or a `MetaError` type for invalid reflected type arguments.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Replace<Sora::Traits::TypeList<int, double>, int, char>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<char, double>>);
+     * @endcode
      */
     template<typename List, typename Old, typename New>
         requires Concept::TypeList<List>
@@ -2278,6 +2686,11 @@ namespace Sora::Traits {
      * @tparam List `TypeList` specialization to transform.
      * @tparam Needle Type to remove.
      * @return Resulting `TypeList` or a `MetaError` type for invalid reflected type arguments.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Remove<Sora::Traits::TypeList<int, double>, int>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<double>>);
+     * @endcode
      */
     template<typename List, typename Needle>
         requires Concept::TypeList<List>
@@ -2289,6 +2702,11 @@ namespace Sora::Traits {
      * @tparam Left First `TypeList` specialization.
      * @tparam Right Second `TypeList` specialization.
      * @return Resulting `TypeList`; unequal lengths and failed substitutions become `MetaError` types.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Zip<^^std::pair, Sora::Traits::TypeList<int>, Sora::Traits::TypeList<double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<std::pair<int, double>>>);
+     * @endcode
      */
     template<std::meta::info Function, typename Left, typename Right>
         requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
@@ -2303,6 +2721,7 @@ namespace Sora::Traits {
      * @code{.cpp}
      * using Result = Sora::Traits::SetIntersection<Sora::Traits::TypeList<int, double>,
      *                                             Sora::Traits::TypeList<double, char>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<double>>);
      * @endcode
      */
     template<typename Left, typename Right>
@@ -2318,6 +2737,7 @@ namespace Sora::Traits {
      * @code{.cpp}
      * using Result = Sora::Traits::SetDifference<Sora::Traits::TypeList<int, double>,
      *                                           Sora::Traits::TypeList<double, char>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<int>>);
      * @endcode
      */
     template<typename Left, typename Right>
@@ -2329,6 +2749,11 @@ namespace Sora::Traits {
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
      * @return `true` for an empty list or when every type is accepted.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsType(std::meta::info type) { return std::meta::is_type(type); }
+     * static_assert(Sora::Traits::AllOf<^^IsType, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -2339,6 +2764,11 @@ namespace Sora::Traits {
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
      * @return `true` when at least one type is accepted; `false` for an empty list.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+     * static_assert(Sora::Traits::AnyOf<^^IsDouble, Sora::Traits::TypeList<int, double>>);
+     * @endcode
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -2349,6 +2779,11 @@ namespace Sora::Traits {
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
      * @return `true` when no type is accepted; `true` for an empty list.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+     * static_assert(Sora::Traits::NoneOf<^^IsDouble, Sora::Traits::TypeList<int, char>>);
+     * @endcode
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>
@@ -2359,6 +2794,12 @@ namespace Sora::Traits {
      * @tparam Pred Reflected unary meta predicate.
      * @tparam List `TypeList` specialization to inspect.
      * @return Number of accepted types; zero for an empty list.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
+     * static_assert(Sora::Traits::CountIf<^^IsIntegral,
+     *                                    Sora::Traits::TypeList<int, double, long>> == 2);
+     * @endcode
      */
     template<std::meta::info Pred, typename List>
         requires Concept::TypeList<List>

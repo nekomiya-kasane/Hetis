@@ -108,6 +108,11 @@ namespace Sora::Meta {
      * @tparam Arguments Reflected argument value types; each must be `std::meta::info`.
      * @return The extracted bool value.
      * @throws A translation-time diagnostic when the predicate contract is violated.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool Same(std::meta::info left, std::meta::info right) noexcept { return left == right; }
+     * static_assert(Sora::Meta::EvaluatePred(^^Same, ^^int, ^^int));
+     * @endcode
      */
     template<typename... Arguments>
         requires(std::same_as<std::remove_cvref_t<Arguments>, std::meta::info> && ...)
@@ -125,6 +130,11 @@ namespace Sora::Meta {
      * @return Extracted bool value.
      * @pre @p result is a reflected bool value and not a @c MetaError.
      * @throws A translation-time diagnostic when @p result is invalid.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = std::meta::reflect_constant(true);
+     * static_assert(Sora::Meta::RequirePredResult(result));
+     * @endcode
      */
     [[nodiscard]] consteval bool RequirePredResult(std::meta::info result) {
         if (IsMetaError(result) || !std::meta::is_value(result) || std::meta::type_of(result) != ^^bool) {
@@ -159,6 +169,11 @@ namespace Sora::Concept {
      * @brief True when @p Pred reflects an arbitrary-arity meta predicate.
      * @tparam Pred Reflected function to inspect.
      * @return `true` when the predicate protocol is satisfied.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool Same(std::meta::info left, std::meta::info right) { return left == right; }
+     * static_assert(Sora::Concept::MetaPred<^^Same>);
+     * @endcode
      */
     template<std::meta::info Pred>
     concept MetaPred = Sora::Meta::IsMetaPred(Pred);
@@ -168,6 +183,11 @@ namespace Sora::Concept {
      * @tparam Pred Reflected predicate function.
      * @tparam Arguments Reflected arguments used for the invocation check.
      * @return `true` when invocation succeeds without a reflected meta error.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool Same(std::meta::info left, std::meta::info right) { return left == right; }
+     * static_assert(Sora::Concept::PredFor<^^Same, ^^int, ^^int>);
+     * @endcode
      */
     template<std::meta::info Pred, std::meta::info... Arguments>
     concept PredFor = !Sora::Meta::IsMetaError(Sora::Meta::InvokePred(Pred, Arguments...));

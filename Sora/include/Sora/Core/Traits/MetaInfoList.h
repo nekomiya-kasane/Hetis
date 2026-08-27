@@ -57,13 +57,26 @@ namespace Sora::Meta {
         const value_type* first{}; /**< First entity in static storage, or null for empty. */
         std::size_t count{};       /**< Number of entities in @p first. */
 
-        /** @brief Construct an empty reflection sequence. */
+        /**
+         * @brief Construct an empty reflection sequence.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList empty{};
+         * static_assert(empty.empty());
+         * @endcode
+         */
         consteval InfoList() noexcept = default;
 
         /**
          * @brief Adopt an existing static array of reflected entities.
          * @tparam N Number of entities in @p items.
          * @param[in] items Static-storage array whose lifetime covers every use of this view.
+         * @par Example
+         * @code{.cpp}
+         * constexpr std::meta::info items[] = {^^int, ^^double};
+         * constexpr Sora::Meta::InfoList list{items};
+         * static_assert(list.size() == 2);
+         * @endcode
          */
         template<std::size_t N>
         consteval InfoList(const value_type (&items)[N]) noexcept : first{items}, count{N} {}
@@ -73,27 +86,65 @@ namespace Sora::Meta {
          * @param[in] items First entity, or null only when @p length is zero.
          * @param[in] length Number of accessible entities.
          * @pre `length == 0 || items != nullptr`.
+         * @par Example
+         * @code{.cpp}
+         * constexpr std::meta::info items[] = {^^int, ^^double};
+         * constexpr Sora::Meta::InfoList list{items, 2};
+         * static_assert(list.back() == ^^double);
+         * @endcode
          */
         consteval InfoList(const value_type* items, std::size_t length) noexcept : first{items}, count{length} {}
 
         /**
          * @brief Promote an inline reflection list into static storage.
          * @param[in] items Entities copied into storage created by `std::define_static_array`.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list.size() == 2);
+         * @endcode
          */
         consteval InfoList(std::initializer_list<value_type> items)
             : first{std::define_static_array(std::vector<value_type>(items.begin(), items.end())).data()},
               count{items.size()} {}
 
-        /** @brief Return the first iterator. */
+        /**
+         * @brief Return the first iterator.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int};
+         * static_assert(*list.begin() == ^^int);
+         * @endcode
+         */
         [[nodiscard]] consteval const_iterator begin() const noexcept { return first; }
 
-        /** @brief Return the one-past-end iterator without null-pointer arithmetic. */
+        /**
+         * @brief Return the one-past-end iterator without null-pointer arithmetic.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list.end() - list.begin() == 2);
+         * @endcode
+         */
         [[nodiscard]] consteval const_iterator end() const noexcept { return count == 0 ? first : first + count; }
 
-        /** @brief Return the number of entities. */
+        /**
+         * @brief Return the number of entities.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list.size() == 2);
+         * @endcode
+         */
         [[nodiscard]] consteval std::size_t size() const noexcept { return count; }
 
-        /** @brief Return whether the sequence is empty. */
+        /**
+         * @brief Return whether the sequence is empty.
+         * @par Example
+         * @code{.cpp}
+         * static_assert(Sora::Meta::InfoList{}.empty());
+         * @endcode
+         */
         [[nodiscard]] consteval bool empty() const noexcept { return count == 0; }
 
         /**
@@ -101,6 +152,11 @@ namespace Sora::Meta {
          * @param[in] index Zero-based entity index.
          * @return Reference to the entity in static storage.
          * @pre `index < size()`.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list[1] == ^^double);
+         * @endcode
          */
         [[nodiscard]] consteval const value_type& operator[](std::size_t index) const noexcept { return first[index]; }
 
@@ -109,6 +165,11 @@ namespace Sora::Meta {
          * @param[in] index Zero-based entity index.
          * @return Reference into static storage.
          * @throws std::out_of_range During translation when @p index is outside the list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list.at(0) == ^^int);
+         * @endcode
          */
         [[nodiscard]] consteval const value_type& at(std::size_t index) const {
             if (index >= count) {
@@ -121,6 +182,11 @@ namespace Sora::Meta {
          * @brief Return the first entity.
          * @pre `!empty()`.
          * @throws std::out_of_range During translation when the list is empty.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list.front() == ^^int);
+         * @endcode
          */
         [[nodiscard]] consteval const value_type& front() const { return at(0); }
 
@@ -128,6 +194,11 @@ namespace Sora::Meta {
          * @brief Return the final entity.
          * @pre `!empty()`.
          * @throws std::out_of_range During translation when the list is empty.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double};
+         * static_assert(list.back() == ^^double);
+         * @endcode
          */
         [[nodiscard]] consteval const value_type& back() const { return at(count - 1); }
 
@@ -137,6 +208,11 @@ namespace Sora::Meta {
          * @param[in] length Number of entities in the view.
          * @return View into the same static storage.
          * @throws std::out_of_range During translation when the requested interval is outside this list.
+         * @par Example
+         * @code{.cpp}
+         * constexpr Sora::Meta::InfoList list{^^int, ^^double, ^^char};
+         * static_assert(list.subspan(1, 2).front() == ^^double);
+         * @endcode
          */
         [[nodiscard]] consteval InfoList subspan(std::size_t offset, std::size_t length) const {
             if (offset > count || length > count - offset) {
@@ -152,6 +228,11 @@ namespace Sora::Meta {
      * @return Static view preserving source order; empty input returns the canonical empty view.
      * @details The returned view refers to storage owned by the constant-evaluation environment. It is safe to copy
      * the view, but callers must not construct it from a temporary range whose elements do not have static lifetime.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto list = Sora::Meta::Promote(Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(list.size() == 2);
+     * @endcode
      */
     consteval InfoList Promote(auto&& items)
         requires std::ranges::sized_range<decltype(items)> &&
@@ -169,6 +250,12 @@ namespace Sora::Meta {
      * @tparam Lists One or more `InfoList` types; the zero-pack produces an empty list.
      * @param[in] lists Sequences to concatenate.
      * @return Newly promoted sequence containing every input entity in order.
+     * @par Example
+     * @code{.cpp}
+     * constexpr Sora::Meta::InfoList left{^^int};
+     * constexpr Sora::Meta::InfoList right{^^double};
+     * static_assert(Sora::Meta::Concat(left, right).size() == 2);
+     * @endcode
      * @par Complexity Linear in the total number of input entities.
      */
     template<typename... Lists>
@@ -190,6 +277,12 @@ namespace Sora::Meta {
      * @brief Return a sequence with duplicate entities removed, retaining first occurrences.
      * @param[in] list Source sequence.
      * @return Stable unique sequence.
+     * @par Example
+     * @code{.cpp}
+     * constexpr Sora::Meta::InfoList input{^^int, ^^double, ^^int};
+     * constexpr auto result = Sora::Meta::Unique(input);
+     * static_assert(result.size() == 2 && result.front() == ^^int);
+     * @endcode
      * @par Complexity Quadratic comparisons; reflection lists are expected to remain small.
      */
     consteval InfoList Unique(const InfoList& list) {
@@ -274,6 +367,11 @@ namespace Sora::Meta {
      * @brief Return a sequence in reverse order.
      * @param[in] list Source sequence.
      * @return Newly promoted sequence with reversed order; empty input remains empty.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Reverse(Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result.front() == ^^double);
+     * @endcode
      * @par Complexity Linear in the sequence length.
      */
     consteval InfoList Reverse(const InfoList& list) {
@@ -292,6 +390,11 @@ namespace Sora::Meta {
      * @param[in] length Number of entities selected.
      * @return Non-owning view of the selected interval.
      * @throws std::out_of_range During translation when the interval is outside @p list.
+     * @par Example
+     * @code{.cpp}
+     * constexpr Sora::Meta::InfoList input{^^int, ^^double, ^^char};
+     * static_assert(Sora::Meta::Slice(input, 1, 2).front() == ^^double);
+     * @endcode
      * @par Complexity Constant.
      */
     consteval InfoList Slice(const InfoList& list, std::size_t offset, std::size_t length) {
@@ -303,6 +406,11 @@ namespace Sora::Meta {
      * @param[in] list Source sequence.
      * @param[in] count Maximum number of entities to retain.
      * @return Non-owning prefix view.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Take(Sora::Meta::InfoList{^^int, ^^double}, 1);
+     * static_assert(result.size() == 1 && result.front() == ^^int);
+     * @endcode
      */
     consteval InfoList Take(const InfoList& list, std::size_t count) {
         return Slice(list, 0, std::min(count, list.size()));
@@ -313,6 +421,11 @@ namespace Sora::Meta {
      * @param[in] list Source sequence.
      * @param[in] count Number of leading entities to discard.
      * @return Non-owning suffix view.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Drop(Sora::Meta::InfoList{^^int, ^^double}, 1);
+     * static_assert(result.size() == 1 && result.front() == ^^double);
+     * @endcode
      */
     consteval InfoList Drop(const InfoList& list, std::size_t count) {
         const auto offset = std::min(count, list.size());
@@ -324,6 +437,11 @@ namespace Sora::Meta {
      * @param[in] list Source sequence.
      * @param[in] value Entity inserted at the front.
      * @return Newly promoted sequence.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::PushFront(Sora::Meta::InfoList{^^double}, ^^int);
+     * static_assert(result.front() == ^^int);
+     * @endcode
      */
     consteval InfoList PushFront(const InfoList& list, std::meta::info value) {
         return Concat(InfoList{value}, list);
@@ -334,6 +452,11 @@ namespace Sora::Meta {
      * @param[in] list Source sequence.
      * @param[in] value Entity inserted at the back.
      * @return Newly promoted sequence.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::PushBack(Sora::Meta::InfoList{^^int}, ^^double);
+     * static_assert(result.back() == ^^double);
+     * @endcode
      */
     consteval InfoList PushBack(const InfoList& list, std::meta::info value) {
         return Concat(list, InfoList{value});
@@ -343,6 +466,11 @@ namespace Sora::Meta {
      * @brief Remove the first entity, returning empty when @p list is empty.
      * @param[in] list Source sequence.
      * @return Promoted sequence without its first entity.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::PopFront(Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result.front() == ^^double);
+     * @endcode
      */
     consteval InfoList PopFront(const InfoList& list) {
         return Drop(list, 1);
@@ -352,6 +480,11 @@ namespace Sora::Meta {
      * @brief Remove the final entity, returning empty when @p list is empty.
      * @param[in] list Source sequence.
      * @return Promoted sequence without its final entity.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::PopBack(Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result.front() == ^^int && result.size() == 1);
+     * @endcode
      */
     consteval InfoList PopBack(const InfoList& list) {
         return Take(list, list.empty() ? 0 : list.size() - 1);
@@ -363,6 +496,11 @@ namespace Sora::Meta {
      * @param[in] oldValue Entity to replace.
      * @param[in] newValue Replacement entity.
      * @return Newly promoted sequence.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Replace(Sora::Meta::InfoList{^^int, ^^double}, ^^int, ^^char);
+     * static_assert(result.front() == ^^char);
+     * @endcode
      * @par Complexity Linear in list length.
      */
     consteval InfoList Replace(const InfoList& list, std::meta::info oldValue, std::meta::info newValue) {
@@ -379,6 +517,11 @@ namespace Sora::Meta {
      * @param[in] list Source sequence.
      * @param[in] value Entity to remove.
      * @return Newly promoted sequence.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Remove(Sora::Meta::InfoList{^^int, ^^double}, ^^int);
+     * static_assert(result.size() == 1 && result.front() == ^^double);
+     * @endcode
      * @par Complexity Linear in list length.
      */
     consteval InfoList Remove(const InfoList& list, std::meta::info value) {
@@ -395,6 +538,10 @@ namespace Sora::Meta {
      * @param[in] list Sequence to inspect.
      * @param[in] needle Entity to find.
      * @return `true` when at least one equal entity is present.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Meta::Contains(Sora::Meta::InfoList{^^int, ^^double}, ^^double));
+     * @endcode
      * @par Complexity Linear in the inspected prefix.
      */
     consteval bool Contains(const InfoList& list, std::meta::info needle) {
@@ -406,6 +553,11 @@ namespace Sora::Meta {
      * @param[in] list Sequence to inspect.
      * @param[in] needle Entity to find.
      * @return Zero-based index, or @ref InfoList::npos when absent.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto index = Sora::Meta::IndexOf(Sora::Meta::InfoList{^^int, ^^double}, ^^double);
+     * static_assert(index == 1);
+     * @endcode
      */
     consteval std::size_t IndexOf(const InfoList& list, std::meta::info needle) {
         std::size_t index = 0;
@@ -423,6 +575,10 @@ namespace Sora::Meta {
      * @param[in] list Sequence to inspect.
      * @param[in] needle Entity to count.
      * @return Number of equal entities.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Meta::Count(Sora::Meta::InfoList{^^int, ^^int}, ^^int) == 2);
+     * @endcode
      * @par Complexity Linear in list length.
      */
     consteval std::size_t Count(const InfoList& list, std::meta::info needle) {
@@ -433,6 +589,10 @@ namespace Sora::Meta {
      * @brief Return whether every entity occurs exactly once.
      * @param[in] list Sequence to inspect.
      * @return `true` when @p list contains no duplicate entity.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(!Sora::Meta::IsUnique(Sora::Meta::InfoList{^^int, ^^int}));
+     * @endcode
      * @par Complexity Quadratic comparisons.
      */
     consteval bool IsUnique(const InfoList& list) {
@@ -444,6 +604,10 @@ namespace Sora::Meta {
      * @param[in] left First sequence.
      * @param[in] right Second sequence.
      * @return `true` when both sequences have equal length and element identity.
+     * @par Example
+     * @code{.cpp}
+     * static_assert(Sora::Meta::Equal(Sora::Meta::InfoList{^^int}, Sora::Meta::InfoList{^^int}));
+     * @endcode
      * @par Complexity Linear in sequence length.
      */
     consteval bool Equal(const InfoList& left, const InfoList& right) {

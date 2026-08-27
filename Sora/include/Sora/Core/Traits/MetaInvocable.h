@@ -108,6 +108,11 @@ namespace Sora {
          * @tparam Function Reflected template to inspect.
          * @tparam Arguments Reflected application arguments.
          * @return `true` when direct substitution is well-formed; input `MetaError` values are not propagated.
+         * @par Example
+         * @code{.cpp}
+         * static_assert(Sora::Meta::DirectlyInvocable<^^std::pair, ^^int, ^^double>);
+         * static_assert(!Sora::Meta::DirectlyInvocable<^^std::pair, ^^int>);
+         * @endcode
          */
         template<std::meta::info Function, std::meta::info... Arguments>
         concept DirectlyInvocable =
