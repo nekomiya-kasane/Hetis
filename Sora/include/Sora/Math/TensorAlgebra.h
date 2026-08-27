@@ -133,6 +133,9 @@ namespace Sora::Math {
             return product;
         }
 
+        template<Sora::Concept::TensorValue First, Sora::Concept::TensorValue... Rest>
+        inline constexpr bool kSameShape = ((First::kExtents == Rest::kExtents) && ...);
+
         inline constexpr size_t kStaticExpansionWorkBudget = 1024;
 
         template<typename R, size_t Count, typename Function>
@@ -159,17 +162,19 @@ namespace Sora::Math {
      * @brief Apply @p operation to one or more equally shaped tensor operands.
      * @details Operands are read through logical linear indexing; physical dense layout is never observable.
      */
-    template<typename Operation, TensorElement FirstElement, size_t... Extents, TensorElement... RestElements>
-        requires(std::invocable<Operation&, const FirstElement&, const RestElements&...>)
-    [[nodiscard]] constexpr auto Elementwise(Operation&& operation, const Tensor<FirstElement, Extents...>& first,
-                                             const Tensor<RestElements, Extents...>&... rest) {
-        using Result =
-            std::remove_cvref_t<std::invoke_result_t<Operation&, const FirstElement&, const RestElements&...>>;
+    template<typename Operation, Sora::Concept::DenseTensor First, Sora::Concept::DenseTensor... Rest>
+        requires TensorAlgebraDetail::kSameShape<First, Rest...> &&
+                 std::invocable<Operation&, const typename First::ElementType&, const typename Rest::ElementType&...>
+    [[nodiscard]] constexpr auto Elementwise(Operation&& operation, const First& first, const Rest&... rest) {
+        using Result = std::remove_cvref_t<std::invoke_result_t<Operation&, const typename First::ElementType&,
+                                                               const typename Rest::ElementType&...>>;
         static_assert(TensorElement<Result>);
-        return Tensor<Result, Extents...>{TensorAlgebraDetail::GenerateValues<
-            Result, Tensor<FirstElement, Extents...>::kSize>([&](size_t index) {
+        using Output = typename First::template RebindElement<Result>;
+        using OutputStorage = typename Output::StorageType;
+        return Output{OutputStorage{LogicalValues, TensorAlgebraDetail::GenerateValues<Result, First::kElementCount>(
+            [&](size_t index) {
             return std::invoke(operation, first[index], rest[index]...);
-        })};
+        })}};
     }
 
     /** @brief Materialize an explicit scalar broadcast over a fixed tensor shape. */
@@ -181,16 +186,19 @@ namespace Sora::Math {
     }
 
     /** @brief Apply an elementwise operation to a tensor and an explicitly broadcast scalar. */
-    template<typename Operation, TensorElement FirstElement, size_t... Extents, TensorElement Scalar>
-        requires(std::is_arithmetic_v<Scalar> && std::invocable<Operation&, const FirstElement&, const Scalar&>)
-    [[nodiscard]] constexpr auto Elementwise(Operation&& operation, const Tensor<FirstElement, Extents...>& first,
-                                             const Scalar& scalar) {
-        using Result = std::remove_cvref_t<std::invoke_result_t<Operation&, const FirstElement&, const Scalar&>>;
+    template<typename Operation, Sora::Concept::DenseTensor First, TensorElement Scalar>
+        requires(std::is_arithmetic_v<Scalar> &&
+                 std::invocable<Operation&, const typename First::ElementType&, const Scalar&>)
+    [[nodiscard]] constexpr auto Elementwise(Operation&& operation, const First& first, const Scalar& scalar) {
+        using Result =
+            std::remove_cvref_t<std::invoke_result_t<Operation&, const typename First::ElementType&, const Scalar&>>;
         static_assert(TensorElement<Result>);
-        return Tensor<Result, Extents...>{TensorAlgebraDetail::GenerateValues<
-            Result, Tensor<FirstElement, Extents...>::kSize>([&](size_t index) {
+        using Output = typename First::template RebindElement<Result>;
+        using OutputStorage = typename Output::StorageType;
+        return Output{OutputStorage{LogicalValues, TensorAlgebraDetail::GenerateValues<Result, First::kElementCount>(
+            [&](size_t index) {
             return std::invoke(operation, first[index], scalar);
-        })};
+        })}};
     }
 
     /**
@@ -206,7 +214,8 @@ namespace Sora::Math {
         static_assert(((Axes < sizeof...(Extents)) && ...), "PermuteAxes axis is out of range");
         constexpr std::array axes{Axes...};
         constexpr std::array extents{Extents...};
-        constexpr auto outputExtents = TensorAlgebraDetail::PermutedExtents(std::array{Axes...}, std::array{Extents...});
+        constexpr auto outputExtents =
+            TensorAlgebraDetail::PermutedExtents(std::array{Axes...}, std::array{Extents...});
         using Output = Sora::Meta::InfoType<Detail::TensorTypeInfo<T>(outputExtents)>;
         return Output{TensorAlgebraDetail::GenerateValues<T, Output::kSize>([&](size_t outputIndex) {
             const auto outputCoordinates = TensorAlgebraDetail::Coordinates(outputIndex, outputExtents);

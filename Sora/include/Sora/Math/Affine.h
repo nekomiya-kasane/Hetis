@@ -16,7 +16,7 @@
 #include <Sora/Math/UnitVector.h>
 
 #include <array>
-#include <cmath>
+#include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -488,25 +488,143 @@ namespace Sora::Math {
         }
 
         template<std::floating_point T>
+        [[nodiscard]] constexpr T NextAfter(T value, T direction) noexcept {
+            static_assert(std::numeric_limits<T>::is_iec559 && (sizeof(T) == 4 || sizeof(T) == 8));
+            if (IsNaN(value) || value == direction) {
+                return value;
+            }
+            if (value == T{0}) {
+                const T adjacent = (std::numeric_limits<T>::denorm_min)();
+                return direction < T{0} ? -adjacent : adjacent;
+            }
+            using Bits = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
+            Bits bits = std::bit_cast<Bits>(value);
+            bits += ((value > T{0}) == (direction > value)) ? Bits{1} : Bits(-1);
+            return std::bit_cast<T>(bits);
+        }
+
+        template<std::floating_point T>
         [[nodiscard]] constexpr T RoundDown(T value) noexcept {
-            return value == -(std::numeric_limits<T>::infinity)() || IsNaN(value)
+            return !IsFinite(value) || IsNaN(value)
                        ? value
-                       : std::nextafter(value, -(std::numeric_limits<T>::infinity)());
+                       : NextAfter(value, -(std::numeric_limits<T>::infinity)());
         }
 
         template<std::floating_point T>
         [[nodiscard]] constexpr T RoundUp(T value) noexcept {
-            return value == (std::numeric_limits<T>::infinity)() || IsNaN(value)
+            return !IsFinite(value) || IsNaN(value)
                        ? value
-                       : std::nextafter(value, (std::numeric_limits<T>::infinity)());
+                       : NextAfter(value, (std::numeric_limits<T>::infinity)());
         }
 
         template<std::floating_point T>
-        [[nodiscard]] constexpr T AddNonNegativeUp(T left, T right) noexcept {
-            if (right == T{0}) {
-                return left;
+        [[nodiscard]] constexpr T AddRoundoff(T left, T right, T sum) noexcept {
+            const T rightVirtual = sum - left;
+            return (left - (sum - rightVirtual)) + (right - rightVirtual);
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T AddDown(T left, T right) noexcept {
+            const T sum = left + right;
+            if (IsNaN(sum) || !IsFinite(left) || !IsFinite(right) || left == T{0} || right == T{0}) {
+                return sum;
             }
-            return RoundUp(left + right);
+            if (sum == (std::numeric_limits<T>::infinity)()) {
+                return (std::numeric_limits<T>::max)();
+            }
+            if (sum == -(std::numeric_limits<T>::infinity)()) {
+                return sum;
+            }
+            const T roundoff = AddRoundoff(left, right, sum);
+            return roundoff < T{0} ? RoundDown(sum) : sum;
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T AddUp(T left, T right) noexcept {
+            const T sum = left + right;
+            if (IsNaN(sum) || !IsFinite(left) || !IsFinite(right) || left == T{0} || right == T{0}) {
+                return sum;
+            }
+            if (sum == -(std::numeric_limits<T>::infinity)()) {
+                return (std::numeric_limits<T>::lowest)();
+            }
+            if (sum == (std::numeric_limits<T>::infinity)()) {
+                return sum;
+            }
+            const T roundoff = AddRoundoff(left, right, sum);
+            return roundoff > T{0} ? RoundUp(sum) : sum;
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T MultiplyDown(T left, T right) noexcept {
+            const T product = left * right;
+            if (IsNaN(product) || !IsFinite(left) || !IsFinite(right) || left == T{0} || right == T{0} ||
+                AbsValue(left) == T{1} ||
+                AbsValue(right) == T{1}) {
+                return product;
+            }
+            if (product == (std::numeric_limits<T>::infinity)()) {
+                return (std::numeric_limits<T>::max)();
+            }
+            if (product == -(std::numeric_limits<T>::infinity)()) {
+                return product;
+            }
+            if (product == T{0}) {
+                const bool negative = (left < T{0}) != (right < T{0});
+                return negative ? -(std::numeric_limits<T>::denorm_min)() : T{0};
+            }
+            if (AbsValue(product) < (std::numeric_limits<T>::min)()) {
+                return RoundDown(product);
+            }
+            if consteval {
+                return RoundDown(product);
+            } else {
+                return Sora::Math::Fma(left, right, -product) < T{0} ? RoundDown(product) : product;
+            }
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T MultiplyUp(T left, T right) noexcept {
+            const T product = left * right;
+            if (IsNaN(product) || !IsFinite(left) || !IsFinite(right) || left == T{0} || right == T{0} ||
+                AbsValue(left) == T{1} ||
+                AbsValue(right) == T{1}) {
+                return product;
+            }
+            if (product == -(std::numeric_limits<T>::infinity)()) {
+                return (std::numeric_limits<T>::lowest)();
+            }
+            if (product == (std::numeric_limits<T>::infinity)()) {
+                return product;
+            }
+            if (product == T{0}) {
+                const bool negative = (left < T{0}) != (right < T{0});
+                return negative ? T{0} : (std::numeric_limits<T>::denorm_min)();
+            }
+            if (AbsValue(product) < (std::numeric_limits<T>::min)()) {
+                return RoundUp(product);
+            }
+            if consteval {
+                return RoundUp(product);
+            } else {
+                return Sora::Math::Fma(left, right, -product) > T{0} ? RoundUp(product) : product;
+            }
+        }
+
+        template<std::floating_point T>
+        [[nodiscard]] constexpr T SqrtUp(T value) noexcept {
+            const T root = Math::Sqrt(value);
+            if (!IsFinite(root) || root == T{0} || root == T{1}) {
+                return root;
+            }
+            if (value < (std::numeric_limits<T>::min)()) {
+                return RoundUp(root);
+            }
+            if consteval {
+                return root * root < value ? RoundUp(root) : root;
+            } else {
+                return Sora::Math::Fma(root, root, -value) < T{0} ? RoundUp(root) : root;
+            }
         }
 
         template<std::floating_point T, size_t N, MatrixLayout Layout>
@@ -516,21 +634,21 @@ namespace Sora::Math {
             for (size_t column = 0; column < N; ++column) {
                 T sum = T{0};
                 for (size_t row = 0; row < N; ++row) {
-                    sum = AddNonNegativeUp(sum, AbsValue(affine.LinearPart()(row, column)));
+                    sum = AddUp(sum, AbsValue(affine.LinearPart()(row, column)));
                 }
                 oneNorm = oneNorm > sum ? oneNorm : sum;
             }
             for (size_t row = 0; row < N; ++row) {
                 T sum = T{0};
                 for (size_t column = 0; column < N; ++column) {
-                    sum = AddNonNegativeUp(sum, AbsValue(affine.LinearPart()(row, column)));
+                    sum = AddUp(sum, AbsValue(affine.LinearPart()(row, column)));
                 }
                 infinityNorm = infinityNorm > sum ? infinityNorm : sum;
             }
             if (oneNorm == T{0} || infinityNorm == T{0}) {
                 return T{0};
             }
-            return RoundUp(RoundUp(Math::Sqrt(oneNorm)) * RoundUp(Math::Sqrt(infinityNorm)));
+            return MultiplyUp(SqrtUp(oneNorm), SqrtUp(infinityNorm));
         }
 
         template<std::floating_point T, size_t N>
@@ -1161,7 +1279,8 @@ namespace Sora::Math {
                 std::swap(augmented[pivot], augmented[column]);
             }
 
-            const T inversePivot = T{1} / augmented[column][column];
+            const T pivotValue = augmented[column][column];
+            const T inversePivot = T{1} / pivotValue;
             if (!IsFinite(inversePivot)) {
                 return std::unexpected(Sora::ErrorCode::OutOfRange);
             }
@@ -1177,7 +1296,7 @@ namespace Sora::Math {
                 }
                 const T factor = augmented[row][column];
                 for (std::size_t value = 0; value < 2 * N; ++value) {
-                    augmented[row][value] -= factor * augmented[column][value];
+                    augmented[row][value] = Sora::Math::Fma(-factor, augmented[column][value], augmented[row][value]);
                     if (!IsFinite(augmented[row][value])) {
                         return std::unexpected(Sora::ErrorCode::OutOfRange);
                     }
@@ -1262,13 +1381,15 @@ namespace Sora::Math {
                     if (coefficient == T{0}) {
                         continue;
                     }
-                    const T first = coefficient * box.Min()[column];
-                    const T second = coefficient * box.Max()[column];
-                    if (IsNaN(first) || IsNaN(second)) {
+                    const T lowerProduct = coefficient > T{0} ? Detail::MultiplyDown(coefficient, box.Min()[column])
+                                                              : Detail::MultiplyDown(coefficient, box.Max()[column]);
+                    const T upperProduct = coefficient > T{0} ? Detail::MultiplyUp(coefficient, box.Max()[column])
+                                                              : Detail::MultiplyUp(coefficient, box.Min()[column]);
+                    if (IsNaN(lowerProduct) || IsNaN(upperProduct)) {
                         return std::unexpected(Sora::ErrorCode::OutOfRange);
                     }
-                    lower = Detail::RoundDown(lower + Detail::RoundDown(first < second ? first : second));
-                    upper = Detail::RoundUp(upper + Detail::RoundUp(first > second ? first : second));
+                    lower = Detail::AddDown(lower, lowerProduct);
+                    upper = Detail::AddUp(upper, upperProduct);
                     if (IsNaN(lower) || IsNaN(upper)) {
                         return std::unexpected(Sora::ErrorCode::OutOfRange);
                     }
@@ -1316,7 +1437,7 @@ namespace Sora::Math {
         Point<T, N> center;
         if (IsFinite(ball.Center())) {
             center = TransformPoint(affine, ball.Center());
-            if (!IsFinite(center)) {
+            if (IsNaN(center)) {
                 return std::unexpected(Sora::ErrorCode::OutOfRange);
             }
         } else {
@@ -1349,8 +1470,8 @@ namespace Sora::Math {
         if (!IsFinite(ball.Radius())) {
             return Ball<T, N>{std::move(center), (std::numeric_limits<T>::infinity)()};
         }
-        const T radius = Detail::RoundUp(ball.Radius() * scale);
-        if (!IsFinite(radius)) {
+        const T radius = Detail::MultiplyUp(ball.Radius(), scale);
+        if (IsNaN(radius)) {
             return std::unexpected(Sora::ErrorCode::OutOfRange);
         }
         return Ball<T, N>{std::move(center), radius};
