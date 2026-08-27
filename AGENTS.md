@@ -1,5 +1,18 @@
 # AGENTS.md — C++23/26 前沿工程范式 (Cutting-Edge C++23/26 Engineering Paradigms)
 
+<!-- SORA_CPP_STYLE_START -->
+## Sora C++ Style
+This project opts into Sora C++ style. Load and apply `$sora-cpp-style` to all C++ implementation, refactoring,
+review, testing, and documentation work until the user explicitly revokes this preference.
+<!-- SORA_CPP_STYLE_END -->
+
+<!-- SORA_REFLECTION_META_START -->
+## Sora Reflection Meta
+When developing in the Sora subtree, automatically load and apply `$sora-reflection-meta` alongside
+`$sora-cpp-style` for C++ implementation, refactoring, review, testing, and documentation work. Treat the current
+`include/Sora/Core/Traits` implementation and its focused tests as authoritative when the skill and source diverge.
+<!-- SORA_REFLECTION_META_END -->
+
 本文是一份独立于任何具体项目的 C++23/26 编码知识库，面向 2026 年的工程标准。它约束 AI Agent 在生成、重构、审查 C++ 代码时的范式选择，核心诉求有三条，按优先级降序排列：
 
 1. 编译期优先。能在 translation 阶段确定的计算、类型派发、代码生成，一律前移到编译期，运行时只承担真正依赖运行时数据的工作。

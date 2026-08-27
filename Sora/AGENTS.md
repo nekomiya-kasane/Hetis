@@ -11,6 +11,13 @@ This project opts into Sora C++ style. Load and apply `$sora-cpp-style` to all C
 review, testing, and documentation work until the user explicitly revokes this preference.
 <!-- SORA_CPP_STYLE_END -->
 
+<!-- SORA_REFLECTION_META_START -->
+## Sora Reflection Meta
+When developing in the Sora subtree, automatically load and apply `$sora-reflection-meta` alongside
+`$sora-cpp-style` for C++ implementation, refactoring, review, testing, and documentation work. Treat the current
+`include/Sora/Core/Traits` implementation and its focused tests as authoritative when the skill and source diverge.
+<!-- SORA_REFLECTION_META_END -->
+
 Before introducing a facility, search the live index and the source tree:
 
 ```powershell

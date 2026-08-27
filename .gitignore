@@ -38,3 +38,6 @@ CMakeFiles/
 /thirdparty/*/
 results
 __pycache__
+
+latex
+html
