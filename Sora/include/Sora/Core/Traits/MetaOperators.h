@@ -84,7 +84,7 @@ namespace Sora::Meta {
         if (!std::meta::is_object(result) && !std::meta::is_value(result)) {
             return false;
         }
-        return std::meta::remove_cvref(std::meta::type_of(result)) == ^^InfoList;
+        return std::meta::dealias(std::meta::remove_cvref(std::meta::type_of(result))) == ^^InfoList;
     }
 
     /**
@@ -220,7 +220,7 @@ namespace Sora::Meta {
          * @brief Compose reflected templates from right to left for one invocation.
          * @param[in] functions Non-empty function sequence.
          * @param[in] arguments Initial invocation arguments.
-         * @return Final reflection or the first recoverable error.
+         * @return Final type reflection or the first recoverable error. Every intermediate result must be a type.
          */
         [[nodiscard]] consteval std::meta::info ComposeInvoke(const InfoList& functions, const InfoList& arguments) {
             if (functions.empty()) {
@@ -235,8 +235,14 @@ namespace Sora::Meta {
                 return error;
             }
             auto result = Apply(functions.back(), arguments);
+            if (functions.size() > 1 && !IsMetaError(result)) {
+                result = RequireTypeResult(result, InfoList{functions.back()});
+            }
             for (std::size_t index = functions.size() - 1; index > 0 && !IsMetaError(result); --index) {
                 result = Apply(functions[index - 1], InfoList{result});
+                if (index > 1 && !IsMetaError(result)) {
+                    result = RequireTypeResult(result, InfoList{functions[index - 1]});
+                }
             }
             return result;
         }
@@ -246,7 +252,7 @@ namespace Sora::Meta {
          * @param[in] function Pointwise reflected template.
          * @param[in] continuation Reflected template receiving transformed arguments.
          * @param[in] arguments Invocation arguments.
-         * @return Continuation result or the first recoverable error.
+         * @return Continuation result or the first recoverable error. Pointwise results must be types.
          */
         [[nodiscard]] consteval std::meta::info TransformInvoke(std::meta::info function, std::meta::info continuation,
                                                                 const InfoList& arguments) {
@@ -263,7 +269,11 @@ namespace Sora::Meta {
             transformed.reserve(arguments.size());
             for (const auto argument : arguments) {
                 const std::array invocationArguments{argument};
-                const auto result = Apply(function, invocationArguments);
+                auto result = Apply(function, invocationArguments);
+                if (IsMetaError(result)) {
+                    return result;
+                }
+                result = RequireTypeResult(result, InfoList{function, argument});
                 if (IsMetaError(result)) {
                     return result;
                 }
@@ -290,7 +300,7 @@ namespace Sora::Meta {
                 !std::meta::is_invocable_type(std::meta::type_of(function), {^^std::meta::info})) {
                 return MakeMetaError(^^Error::NonInvocableTag, {function});
             }
-            if (std::meta::return_type_of(function) != ^^InfoList) {
+            if (std::meta::dealias(std::meta::remove_cvref(std::meta::return_type_of(function))) != ^^InfoList) {
                 return MakeMetaError(^^Error::NonInfoListResultTag, {function});
             }
             if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
@@ -1911,7 +1921,7 @@ namespace Sora::Traits {
      * @return Selected type or the first nested `MetaError` type.
      */
     template<typename List, std::size_t Index>
-        requires(Concept::TypeList<List> && Index < std::remove_cvref_t<List>::size)
+        requires Concept::TypeList<List>
     using At = Meta::InfoType<Meta::Types::At(^^List, Index)>;
 
     /**
