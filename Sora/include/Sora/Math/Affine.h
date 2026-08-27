@@ -105,8 +105,8 @@ namespace Sora::Math {
         using TranslationType = Vector<T, N>;
 
         /** @brief Construct the identity affine map. */
-        constexpr Affine() noexcept(Detail::kNothrowZeroCarrier<T> && Detail::kNothrowOneCarrier<T>)
-            requires(Detail::ZeroInitializable<T> && Detail::OneInitializable<T>)
+        constexpr Affine() noexcept(kNothrowZeroValue<T> && kNothrowOneValue<T>)
+            requires(ZeroInitializable<T> && OneInitializable<T>)
             : linear_(LinearType::Identity()), translation_{} {}
 
         /** @brief Construct an affine map from its linear and translation parts. */
@@ -115,9 +115,9 @@ namespace Sora::Math {
             : linear_(std::move(linear)), translation_(std::move(translation)) {}
 
         /** @brief Return the identity map. */
-        [[nodiscard]] static constexpr Affine Identity() noexcept(Detail::kNothrowZeroCarrier<T> &&
-                                                                  Detail::kNothrowOneCarrier<T>)
-            requires(Detail::ZeroInitializable<T> && Detail::OneInitializable<T>)
+        [[nodiscard]] static constexpr Affine Identity() noexcept(kNothrowZeroValue<T> &&
+                                                                  kNothrowOneValue<T>)
+            requires(ZeroInitializable<T> && OneInitializable<T>)
         {
             return {};
         }
@@ -163,7 +163,7 @@ namespace Sora::Math {
         template<size_t Index, ValueCarrier T, size_t N, MatrixLayout Layout>
             requires(ZeroInitializable<T> && OneInitializable<T>)
         [[nodiscard]] constexpr T HomogeneousMatrixValue(const Affine<T, N, Layout>& affine) noexcept(
-            std::is_nothrow_copy_constructible_v<T> && kNothrowZeroCarrier<T> && kNothrowOneCarrier<T>) {
+            std::is_nothrow_copy_constructible_v<T> && kNothrowZeroValue<T> && kNothrowOneValue<T>) {
             constexpr size_t dimension = N + 1;
             constexpr size_t row = Index / dimension;
             constexpr size_t column = Index % dimension;
@@ -172,9 +172,9 @@ namespace Sora::Math {
             } else if constexpr (row < N) {
                 return affine.TranslationPart()[row];
             } else if constexpr (column < N) {
-                return ZeroCarrier<T>();
+                return ZeroValue<T>();
             } else {
-                return OneCarrier<T>();
+                return OneValue<T>();
             }
         }
 
@@ -192,10 +192,10 @@ namespace Sora::Math {
 
     /** @brief Materialize an affine map as a homogeneous square matrix. */
     template<ValueCarrier T, size_t N, MatrixLayout Layout>
-        requires(Detail::ZeroInitializable<T> && Detail::OneInitializable<T>)
+        requires(ZeroInitializable<T> && OneInitializable<T>)
     [[nodiscard]] constexpr Matrix<T, N + 1, N + 1, Layout> ToMatrix(const Affine<T, N, Layout>& affine) noexcept(
         std::is_nothrow_copy_constructible_v<T> && std::is_nothrow_move_constructible_v<T> &&
-        Detail::kNothrowZeroCarrier<T> && Detail::kNothrowOneCarrier<T>) {
+        kNothrowZeroValue<T> && kNothrowOneValue<T>) {
         return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
             return Matrix<T, N + 1, N + 1, Layout>{Detail::HomogeneousMatrixValue<Indices>(affine)...};
         }(std::make_index_sequence<(N + 1) * (N + 1)>{});
@@ -217,16 +217,16 @@ namespace Sora::Math {
 
     /** @brief Materialize a compact affine matrix as a homogeneous square matrix. */
     template<ValueCarrier T, size_t N, MatrixLayout Layout>
-        requires(Detail::ZeroInitializable<T> && Detail::OneInitializable<T>)
+        requires(ZeroInitializable<T> && OneInitializable<T>)
     [[nodiscard]] constexpr Matrix<T, N + 1, N + 1, Layout> ToMatrix(const AffineMatrix<T, N, Layout>& matrix) noexcept(
         std::is_nothrow_copy_constructible_v<T> && std::is_nothrow_move_constructible_v<T> &&
-        Detail::kNothrowZeroCarrier<T> && Detail::kNothrowOneCarrier<T>) {
+        kNothrowZeroValue<T> && kNothrowOneValue<T>) {
         return ToMatrix(ToAffine(matrix));
     }
 
     /** @brief Return whether a homogeneous square matrix encodes an affine map. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::ZeroInitializable<T> && Detail::OneInitializable<T> &&
+        requires(Dimension > 1 && ZeroInitializable<T> && OneInitializable<T> &&
                  requires(T left, T right) {
                      { left == right } -> std::convertible_to<bool>;
                  })
@@ -234,16 +234,16 @@ namespace Sora::Math {
         noexcept(matrix(0, 0) == matrix(0, 0))) {
         constexpr size_t last = Dimension - 1;
         for (size_t column = 0; column < last; ++column) {
-            if (!(matrix(last, column) == Detail::ZeroCarrier<T>())) {
+            if (!(matrix(last, column) == ZeroValue<T>())) {
                 return false;
             }
         }
-        return matrix(last, last) == Detail::OneCarrier<T>();
+        return matrix(last, last) == OneValue<T>();
     }
 
     /** @brief Decode a full homogeneous affine encoding, rejecting projective matrices. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::ZeroInitializable<T> && Detail::OneInitializable<T> &&
+        requires(Dimension > 1 && ZeroInitializable<T> && OneInitializable<T> &&
                  requires(const Matrix<T, Dimension, Dimension, Layout>& matrix) {
                      { IsAffineEncoding(matrix) } -> std::same_as<bool>;
                  })
@@ -263,7 +263,7 @@ namespace Sora::Math {
 
     /** @brief Decode a full homogeneous affine encoding; the affine bottom-row invariant is a precondition. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::ZeroInitializable<T> && Detail::OneInitializable<T> &&
+        requires(Dimension > 1 && ZeroInitializable<T> && OneInitializable<T> &&
                  requires(const Matrix<T, Dimension, Dimension, Layout>& matrix) {
                      { IsAffineEncoding(matrix) } -> std::same_as<bool>;
                  })
@@ -398,7 +398,8 @@ namespace Sora::Math {
         }
 
         template<typename T>
-        concept AffineLinearCombinable = ValueCarrier<T> && LinearCombinable<T, T> && std::same_as<MulResult<T, T>, T>;
+        concept AffineLinearCombinable = ValueCarrier<T> && LinearCombinable<T, T> &&
+                                         std::same_as<Traits::MulResult<T, T>, T>;
 
         template<AffineLinearCombinable T, size_t N, typename Values, typename Coefficient>
         [[nodiscard]] constexpr T
@@ -537,7 +538,7 @@ namespace Sora::Math {
     template<AffineRepresentation Representation = AffineRepresentation::Affine, ValueCarrier T, size_t N,
              MatrixLayout Layout>
         requires(Representation != AffineRepresentation::Matrix ||
-                 (Detail::ZeroInitializable<T> && Detail::OneInitializable<T>))
+                 (ZeroInitializable<T> && OneInitializable<T>))
     [[nodiscard]] constexpr Traits::AffineResult<Representation, T, N, Layout>
     MakeAffine(Matrix<T, N, N, Layout> linear, Vector<T, N> translation) noexcept(
         std::is_nothrow_move_constructible_v<Affine<T, N, Layout>> &&
@@ -548,7 +549,7 @@ namespace Sora::Math {
     /** @brief Construct a pure translation in any positive dimension. */
     template<AffineRepresentation Representation = AffineRepresentation::Affine,
              MatrixLayout Layout = MatrixLayout::ColumnMajor, ValueCarrier T, size_t N>
-        requires(Detail::ZeroInitializable<T> && Detail::OneInitializable<T>)
+        requires(ZeroInitializable<T> && OneInitializable<T>)
     [[nodiscard]] constexpr Traits::AffineResult<Representation, T, N, Layout>
     Translate(Vector<T, N> translation) noexcept(
         noexcept(MakeAffine<Representation>(Matrix<T, N, N, Layout>::Identity(), std::move(translation)))) {
@@ -558,17 +559,17 @@ namespace Sora::Math {
     /** @brief Construct a coordinate-wise scale in any positive dimension; zero and negative factors are valid. */
     template<AffineRepresentation Representation = AffineRepresentation::Affine,
              MatrixLayout Layout = MatrixLayout::ColumnMajor, ValueCarrier T, size_t N>
-        requires(Detail::ZeroInitializable<T> &&
-                 (Representation != AffineRepresentation::Matrix || Detail::OneInitializable<T>))
+        requires(ZeroInitializable<T> &&
+                 (Representation != AffineRepresentation::Matrix || OneInitializable<T>))
     [[nodiscard]] constexpr Traits::AffineResult<Representation, T, N, Layout>
     Scale(const Vector<T, N>& scale) noexcept(
-        Detail::kNothrowZeroCarrier<T> && std::is_nothrow_copy_constructible_v<T> &&
+        kNothrowZeroValue<T> && std::is_nothrow_copy_constructible_v<T> &&
         std::is_nothrow_move_constructible_v<T> &&
         noexcept(MakeAffine<Representation>(std::declval<Matrix<T, N, N, Layout>>(), std::declval<Vector<T, N>>()))) {
         auto linear = Detail::GenerateMatrix<T, N, N, Layout>([&](size_t index) -> T {
             const size_t row = index / N;
             const size_t column = index % N;
-            return row == column ? scale[row] : Detail::ZeroCarrier<T>();
+            return row == column ? scale[row] : ZeroValue<T>();
         });
         return MakeAffine<Representation>(std::move(linear), Vector<T, N>{});
     }
@@ -576,8 +577,8 @@ namespace Sora::Math {
     /** @brief Construct a uniform scale in dimension @p N. */
     template<size_t N, AffineRepresentation Representation = AffineRepresentation::Affine,
              MatrixLayout Layout = MatrixLayout::ColumnMajor, ValueCarrier T>
-        requires(N > 0 && Detail::ZeroInitializable<T> &&
-                 (Representation != AffineRepresentation::Matrix || Detail::OneInitializable<T>))
+        requires(N > 0 && ZeroInitializable<T> &&
+                 (Representation != AffineRepresentation::Matrix || OneInitializable<T>))
     [[nodiscard]] constexpr Traits::AffineResult<Representation, T, N, Layout>
     UniformScale(T scale) noexcept(std::is_nothrow_copy_constructible_v<T> && std::is_nothrow_move_constructible_v<T> &&
                                    noexcept(Scale<Representation, Layout>(std::declval<Vector<T, N>>()))) {
@@ -589,8 +590,8 @@ namespace Sora::Math {
     template<size_t TargetAxis, size_t SourceAxis, size_t N,
              AffineRepresentation Representation = AffineRepresentation::Affine,
              MatrixLayout Layout = MatrixLayout::ColumnMajor, ValueCarrier T>
-        requires(TargetAxis < N && SourceAxis < N && TargetAxis != SourceAxis && Detail::ZeroInitializable<T> &&
-                 Detail::OneInitializable<T>)
+        requires(TargetAxis < N && SourceAxis < N && TargetAxis != SourceAxis && ZeroInitializable<T> &&
+                 OneInitializable<T>)
     [[nodiscard]] constexpr Traits::AffineResult<Representation, T, N, Layout> Shear(T factor) noexcept(
         std::is_nothrow_move_constructible_v<T> &&
         noexcept(MakeAffine<Representation>(std::declval<Matrix<T, N, N, Layout>>(), std::declval<Vector<T, N>>()))) {
@@ -881,8 +882,8 @@ namespace Sora::Math {
 
     /** @brief Apply an affine full homogeneous matrix to a point after checking its bottom row. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && Detail::ZeroInitializable<T> &&
-                 Detail::OneInitializable<T>)
+        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && ZeroInitializable<T> &&
+                 OneInitializable<T>)
     [[nodiscard]] constexpr auto TryTransformPoint(
         const Matrix<T, Dimension, Dimension, Layout>& matrix,
         const Point<T, Dimension - 1>&
@@ -898,8 +899,8 @@ namespace Sora::Math {
 
     /** @brief Apply an affine full homogeneous matrix to a vector after checking its bottom row. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && Detail::ZeroInitializable<T> &&
-                 Detail::OneInitializable<T>)
+        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && ZeroInitializable<T> &&
+                 OneInitializable<T>)
     [[nodiscard]] constexpr auto TryTransformVector(
         const Matrix<T, Dimension, Dimension, Layout>& matrix,
         const Vector<T, Dimension - 1>&
@@ -915,8 +916,8 @@ namespace Sora::Math {
 
     /** @brief Apply a full homogeneous affine encoding to a point. @pre @p matrix passes IsAffineEncoding. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && Detail::ZeroInitializable<T> &&
-                 Detail::OneInitializable<T>)
+        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && ZeroInitializable<T> &&
+                 OneInitializable<T>)
     [[nodiscard]] constexpr Point<T, Dimension - 1>
     TransformPoint(const Matrix<T, Dimension, Dimension, Layout>& matrix,
                    const Point<T, Dimension - 1>& point) noexcept(noexcept(TransformPoint(ToAffine(matrix), point))) {
@@ -925,8 +926,8 @@ namespace Sora::Math {
 
     /** @brief Apply a full homogeneous affine encoding to a vector. @pre @p matrix passes IsAffineEncoding. */
     template<ValueCarrier T, size_t Dimension, MatrixLayout Layout>
-        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && Detail::ZeroInitializable<T> &&
-                 Detail::OneInitializable<T>)
+        requires(Dimension > 1 && Detail::AffineLinearCombinable<T> && ZeroInitializable<T> &&
+                 OneInitializable<T>)
     [[nodiscard]] constexpr Vector<T, Dimension - 1> TransformVector(
         const Matrix<T, Dimension, Dimension, Layout>& matrix,
         const Vector<T, Dimension - 1>& vector) noexcept(noexcept(TransformVector(ToAffine(matrix), vector))) {

@@ -128,7 +128,7 @@ namespace Sora::Math {
         if (!Detail::AllLanes<T>(finite)) {
             return std::unexpected(NormalizationError::NonFinite);
         }
-        if (!Detail::AllLanes<T>(scale > Detail::ZeroCarrier<T>())) {
+        if (!Detail::AllLanes<T>(scale > ZeroValue<T>())) {
             return std::unexpected(NormalizationError::ZeroLength);
         }
 

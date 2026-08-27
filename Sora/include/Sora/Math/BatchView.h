@@ -1,146 +1,202 @@
 /**
  * @file BatchView.h
- * @brief Non-owning mdspan views for homogeneous point and vector batches.
+ * @brief Non-owning static-value batch views over dense sample storage.
  * @ingroup Math
  */
 #pragma once
 
+#include <Sora/Core/Contracts.h>
 #include <Sora/Math/Point.h>
+#include <Sora/Math/TensorCore.h>
 
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mdspan>
-#include <meta>
-#include <ranges>
 #include <span>
 #include <type_traits>
+#include <utility>
 
 namespace Sora::Math {
 
-    /** @brief Physical order of a homogeneous coordinate batch. */
+    /** @brief Physical order of a dense batch whose logical axes end in the sample axis. */
     enum class BatchLayout : uint8_t {
-        PointMajor,     /**< Coordinates of each sample are contiguous. */
-        CoordinateMajor /**< One coordinate across all samples is contiguous, enabling unit-stride SIMD. */
+        PointMajor,
+        CoordinateMajor
     };
 
-    namespace Detail {
+    namespace Traits {
 
         template<BatchLayout Layout>
-        [[nodiscard]] consteval auto MdspanLayoutType() {
-            if constexpr (Layout == BatchLayout::CoordinateMajor) {
-                return std::type_identity<std::layout_right>{};
-            } else {
-                return std::type_identity<std::layout_left>{};
-            }
-        }
+        using BatchMapping = std::conditional_t<Layout == BatchLayout::CoordinateMajor, std::layout_right,
+                                                std::layout_left>;
 
-        template<BatchLayout Layout>
-        using MdspanLayout = typename decltype(MdspanLayoutType<Layout>())::type;
-
-    } // namespace Detail
+    } // namespace Traits
 
     /**
-     * @brief Non-owning two-dimensional view of homogeneous fixed-size values.
-     * @tparam ValueTemplate Mathematical value template, such as @ref Vector or @ref Point.
-     * @tparam T Possibly-const scalar element type stored in external memory.
-     * @tparam N Compile-time coordinate dimension.
-     * @tparam Layout Physical order of coordinates and samples.
-     * @details The logical mdspan shape is always @c [coordinate,sample]. Layout changes physical strides only.
+     * @brief Non-owning batch view for one concrete static value type.
+     * @tparam Value Mathematical value with @c CarrierType, @c RebindElement, and @c kElementCount.
+     * @tparam T External scalar element type, optionally const-qualified.
+     * @tparam Layout Dense physical order of value elements and samples.
+     * @details The logical storage shape is @c [value-element,sample]. A coordinate-major view has unit sample stride;
+     * a point-major view has unit value-element stride. SIMD execution is selected only for the former.
      */
-    template<template<typename, size_t> typename ValueTemplate, typename T, size_t N,
-             BatchLayout Layout = BatchLayout::CoordinateMajor>
-        requires(N > 0 && std::is_object_v<T> && ValueCarrier<std::remove_const_t<T>>)
-    class HomogeneousBatchView {
+    template<Sora::Concept::TensorValue Value, typename T, BatchLayout Layout = BatchLayout::CoordinateMajor>
+        requires Sora::Concept::TensorElement<std::remove_const_t<T>> &&
+                 std::same_as<typename Value::CarrierType, std::remove_const_t<T>>
+    class StaticValueBatchView {
     public:
-        using ElementType = T;                     /**< Possibly-const external scalar element type. */
-        using ScalarType = std::remove_const_t<T>; /**< Unqualified scalar element type. */
-        using Extents = std::extents<size_t, N, std::dynamic_extent>;
-        using LayoutPolicy = Detail::MdspanLayout<Layout>;
+        using ValueType = Value;
+        using ElementType = T;
+        using ScalarType = std::remove_const_t<T>;
+        using Extents = std::extents<size_t, Value::kElementCount, std::dynamic_extent>;
+        using LayoutPolicy = typename Traits::BatchMapping<Layout>;
         using ViewType = std::mdspan<T, Extents, LayoutPolicy>;
-        static constexpr size_t kDimension = N;
+        static constexpr size_t kElementCount = Value::kElementCount;
+        static constexpr size_t kDimension = Value::kDimension;
         static constexpr BatchLayout kLayout = Layout;
 
-        /** @brief Rebind the mathematical value to another carrier without changing its affine semantics. */
-        template<typename Carrier>
-        using Rebind = ValueTemplate<Carrier, N>;
+        template<Sora::Concept::TensorElement Carrier>
+        using RebindElement = typename Value::template RebindElement<Carrier>;
 
-        /** @brief Construct a view over @p sampleCount values. @pre @p data addresses @c N*sampleCount items. */
-        constexpr HomogeneousBatchView(T* data, size_t sampleCount) noexcept : view_(data, sampleCount) {}
+        template<Sora::Concept::TensorElement Carrier>
+        using Rebind = RebindElement<Carrier>;
+
+        /** @brief Construct a view over @p sampleCount values in external storage. */
+        constexpr StaticValueBatchView(T* data, size_t sampleCount) noexcept : view_(MakeView(data, sampleCount)) {}
 
         /** @brief Construct from an mdspan with the exact logical shape and layout. */
-        constexpr explicit HomogeneousBatchView(ViewType view) noexcept : view_(view) {}
+        constexpr explicit StaticValueBatchView(ViewType view) noexcept : view_(view) {
+            SORA_PRE(ValidView(view_.data_handle(), view_.extent(1)));
+        }
 
-        /** @brief Return the number of logical point or vector samples. */
+        /** @brief Return the number of samples in the batch. */
         [[nodiscard]] constexpr size_t Size() const noexcept { return view_.extent(1); }
 
-        /** @brief Return the underlying logical @c [coordinate,sample] mdspan. */
+        /** @brief Return the underlying logical @c [element,sample] mdspan. */
         [[nodiscard]] constexpr ViewType View() const noexcept { return view_; }
 
         /** @brief Return the first address of the external physical storage. */
         [[nodiscard]] constexpr T* Data() const noexcept { return view_.data_handle(); }
 
-        /** @brief Access one external scalar element. */
-        [[nodiscard]] constexpr T& operator[](size_t coordinate, size_t sample) const noexcept {
-            return view_[coordinate, sample];
+        /** @brief Access one external value element by logical coordinates. */
+        [[nodiscard]] constexpr T& operator[](size_t element, size_t sample) const noexcept {
+            return view_[element, sample];
         }
 
-        /** @brief Gather one logical scalar value. */
-        [[nodiscard]] constexpr Rebind<ScalarType> Load(size_t sample) const noexcept {
-            Rebind<ScalarType> result;
-            template for (constexpr size_t coordinate : std::define_static_array(std::views::iota(size_t{0}, N))) {
-                result[coordinate] = view_[coordinate, sample];
-            }
-            return result;
+        /** @brief Access one element-major logical scalar index. @pre @p logicalIndex is within the batch. */
+        [[nodiscard]] constexpr T& operator[](size_t logicalIndex) const noexcept {
+            const size_t sampleCount = Size();
+            SORA_PRE(logicalIndex < kElementCount * sampleCount);
+            return view_[logicalIndex / sampleCount, logicalIndex % sampleCount];
         }
 
-        /** @brief Scatter one logical scalar value. */
-        constexpr void Store(size_t sample, const Rebind<ScalarType>& value) const noexcept
+        /** @brief Gather one complete mathematical value from a sample. */
+        [[nodiscard]] constexpr Value Load(size_t sample) const noexcept(kNothrowLoad) {
+            SORA_PRE(sample < Size());
+            return Load(sample, std::make_index_sequence<kElementCount>{});
+        }
+
+        /** @brief Scatter one complete mathematical value into a sample. */
+        constexpr void Store(size_t sample, const Value& value) const noexcept(kNothrowStore)
             requires(!std::is_const_v<T>)
         {
-            template for (constexpr size_t coordinate : std::define_static_array(std::views::iota(size_t{0}, N))) {
-                view_[coordinate, sample] = value[coordinate];
+            SORA_PRE(sample < Size());
+            for (size_t element = 0; element < kElementCount; ++element) {
+                view_[element, sample] = value[element];
             }
         }
 
-        /** @brief Return one unit-stride coordinate channel. */
-        [[nodiscard]] constexpr std::span<T> Coordinate(size_t coordinate) const noexcept
+        /** @brief Return one unit-stride value-element channel for coordinate-major storage. */
+        [[nodiscard]] constexpr std::span<T> ElementChannel(size_t element) const noexcept
             requires(Layout == BatchLayout::CoordinateMajor)
         {
-            return {view_.data_handle() + coordinate * Size(), Size()};
+            SORA_PRE(element < kElementCount);
+            if (Size() == 0) {
+                return {view_.data_handle(), size_t{0}};
+            }
+            return {view_.data_handle() + element * Size(), Size()};
+        }
+
+        [[nodiscard]] constexpr std::span<T> Coordinate(size_t coordinate) const noexcept
+            requires(Layout == BatchLayout::CoordinateMajor && kDimension > 0 && kElementCount == kDimension)
+        {
+            return ElementChannel(coordinate);
         }
 
     private:
+        [[nodiscard]] static constexpr bool ValidView(const T* data, size_t sampleCount) noexcept {
+            return sampleCount <= (std::numeric_limits<size_t>::max)() / kElementCount &&
+                   (sampleCount == 0 || data != nullptr);
+        }
+
+        [[nodiscard]] static constexpr ViewType MakeView(T* data, size_t sampleCount) noexcept {
+            SORA_PRE(ValidView(data, sampleCount));
+            return ViewType{data, sampleCount};
+        }
+
+        template<size_t... Elements>
+        [[nodiscard]] static consteval bool NothrowLoad(std::index_sequence<Elements...>) {
+            return noexcept(Value{(static_cast<void>(Elements), std::declval<T&>())...});
+        }
+
+        inline static constexpr bool kNothrowLoad = NothrowLoad(std::make_index_sequence<kElementCount>{});
+        inline static constexpr bool kNothrowStore =
+            noexcept(std::declval<T&>() = std::declval<const typename Value::CarrierType&>());
+
+        template<size_t... Elements>
+        [[nodiscard]] constexpr Value Load(size_t sample,
+                                           std::index_sequence<Elements...>) const noexcept(kNothrowLoad) {
+            return Value{view_[Elements, sample]...};
+        }
+
         ViewType view_;
     };
 
-    /** @brief Homogeneous free-vector batch view. */
+    /** @brief Concrete-value alias retained for call sites that use homogeneous terminology. */
+    template<Sora::Concept::TensorValue Value, typename T, BatchLayout Layout = BatchLayout::CoordinateMajor>
+    using ValueBatchView = StaticValueBatchView<Value, T, Layout>;
+
+    /** @brief Batch view of a concrete fixed-shape tensor value. */
+    template<Sora::Concept::TensorValue Value, typename T, BatchLayout Layout = BatchLayout::CoordinateMajor>
+    using TensorBatchView = StaticValueBatchView<Value, T, Layout>;
+
+    /** @brief Compatibility view retaining the historical value-template spelling. */
+    template<template<typename, size_t> typename ValueTemplate, typename T, size_t N,
+             BatchLayout Layout = BatchLayout::CoordinateMajor>
+        requires(N > 0 && Sora::Concept::TensorElement<std::remove_const_t<T>>)
+    using HomogeneousBatchView = StaticValueBatchView<ValueTemplate<std::remove_const_t<T>, N>, T, Layout>;
+
+    /** @brief Batch view of fixed-size free vectors. */
     template<typename T, size_t N, BatchLayout Layout = BatchLayout::CoordinateMajor>
     using VectorBatchView = HomogeneousBatchView<Vector, T, N, Layout>;
 
-    /** @brief Homogeneous affine-point batch view. */
+    /** @brief Batch view of fixed-size affine points. */
     template<typename T, size_t N, BatchLayout Layout = BatchLayout::CoordinateMajor>
     using PointBatchView = HomogeneousBatchView<Point, T, N, Layout>;
 
-    /** @brief Type satisfying the non-owning homogeneous batch interface. */
+    /** @brief Static value batch protocol accepted by value execution kernels. */
     template<typename T>
     concept HomogeneousBatch = requires(T batch, size_t sample) {
-        typename T::ElementType;
-        typename T::ScalarType;
-        typename T::template Rebind<typename T::ScalarType>;
-        { T::kDimension } -> std::convertible_to<size_t>;
-        { T::kLayout } -> std::convertible_to<BatchLayout>;
+        typename std::remove_cvref_t<T>::ValueType;
+        typename std::remove_cvref_t<T>::ElementType;
+        typename std::remove_cvref_t<T>::ScalarType;
+        typename std::remove_cvref_t<T>::template RebindElement<typename std::remove_cvref_t<T>::ScalarType>;
+        { std::remove_cvref_t<T>::kElementCount } -> std::convertible_to<size_t>;
+        { std::remove_cvref_t<T>::kLayout } -> std::convertible_to<BatchLayout>;
         { batch.Size() } -> std::same_as<size_t>;
         batch.Load(sample);
     };
 
-    /** @brief Homogeneous batch exposing unit-stride coordinate channels for SIMD loads and stores. */
+    /** @brief Batch exposing unit-stride element channels for explicit SIMD execution. */
     template<typename T>
-    concept CoordinateMajorBatch =
-        HomogeneousBatch<T> && (std::remove_cvref_t<T>::kLayout == BatchLayout::CoordinateMajor) &&
-        requires(T batch, size_t coordinate) {
-            { batch.Coordinate(coordinate) } -> std::same_as<std::span<typename std::remove_cvref_t<T>::ElementType>>;
-            { batch.Data() } -> std::same_as<typename std::remove_cvref_t<T>::ElementType*>;
-        };
+    concept CoordinateMajorBatch = HomogeneousBatch<T> &&
+                                   (std::remove_cvref_t<T>::kLayout == BatchLayout::CoordinateMajor) &&
+                                   requires(T batch, size_t element) {
+                                       { batch.ElementChannel(element) } -> std::same_as<
+                                           std::span<typename std::remove_cvref_t<T>::ElementType>>;
+                                       { batch.Data() } -> std::same_as<typename std::remove_cvref_t<T>::ElementType*>;
+                                   };
 
 } // namespace Sora::Math

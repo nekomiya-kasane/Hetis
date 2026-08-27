@@ -10,6 +10,9 @@
 
 namespace {
 
+    enum class SignedEnum : int { Value = -1 };
+    enum class UnsignedEnum : unsigned { Value = 1 };
+
     using List = Sora::Traits::TypeList<int, double, char>;
     using Empty = Sora::Traits::TypeList<>;
 
@@ -97,7 +100,7 @@ TEST_CASE("TypeList core queries", "[Sora][Core][TypeTraits]") {
     STATIC_REQUIRE(std::same_as<Sora::Traits::At<List, 1>, double>);
     using OutOfRange = Sora::Traits::At<List, 99>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<OutOfRange>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^OutOfRange) == ^^Sora::Meta::Error::OutOfRangeTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^OutOfRange) == ^^Sora::Meta::Error::OutOfRange);
     STATIC_REQUIRE(std::same_as<Sora::Traits::Front<List>, int>);
     STATIC_REQUIRE(std::same_as<Sora::Traits::Back<List>, char>);
     STATIC_REQUIRE(Sora::Traits::IndexOf<List, int> == 0);
@@ -190,9 +193,9 @@ TEST_CASE("InfoList set and higher-order operations", "[Sora][Core][MetaInfoList
     STATIC_REQUIRE(Sora::Meta::IsInfoList(zeroFlat));
     STATIC_REQUIRE(Sora::Meta::RequireInfoList(zeroFlat).empty());
     constexpr auto invalidFlat = Sora::Meta::FlatMap(^^NonListExpansion, Sora::Meta::InfoList{^^int});
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFlat) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFlat) == ^^Sora::Meta::Error::NonInvocable);
     constexpr auto wrongCodomain = Sora::Meta::FlatMap(^^PairWithConst, Sora::Meta::InfoList{^^int});
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(wrongCodomain) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(wrongCodomain) == ^^Sora::Meta::Error::NonInvocable);
 
     constexpr auto replaced =
         Sora::Meta::ReplaceIf(^^IsIntegral, ^^bool, Sora::Meta::InfoList{^^int, ^^double, ^^char});
@@ -254,9 +257,9 @@ TEST_CASE("Reflected TypeList adapters cover structural operations", "[Sora][Cor
     STATIC_REQUIRE(std::meta::extract<bool>(Sora::Meta::Types::IsUnique(^^Sora::Traits::TypeList<int, double>)));
 
     constexpr auto invalid = Sora::Meta::Types::At(list, 4);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalid) == ^^Sora::Meta::Error::OutOfRangeTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalid) == ^^Sora::Meta::Error::OutOfRange);
     constexpr auto malformed = Sora::Meta::Types::Slice(list, 3, 2);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(malformed) == ^^Sora::Meta::Error::OutOfRangeTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(malformed) == ^^Sora::Meta::Error::OutOfRange);
 
     struct Category {};
     constexpr auto error = Sora::Meta::MakeMetaError(^^Category, {^^int});
@@ -273,10 +276,30 @@ TEST_CASE("Reflection-native meta errors preserve provenance", "[Sora][Core][Met
     struct Category {};
     constexpr auto error = Sora::Meta::MakeMetaError(^^Category, {^^int, ^^double});
     STATIC_REQUIRE(Sora::Meta::IsMetaError(error));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(error) == ^^Category);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(error) == ^^Category);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(error) == ^^Category);
+    STATIC_REQUIRE(Sora::Meta::HasErrorCategory<^^Category>(error));
     STATIC_REQUIRE(Sora::Meta::ErrorContextCount(error) == 2);
     STATIC_REQUIRE(Sora::Meta::ErrorContexts(error)[0] == ^^int);
     STATIC_REQUIRE(Sora::Meta::ErrorContexts(error)[1] == ^^double);
+    constexpr auto extended = Sora::Meta::AppendContext(error, {^^char});
+    STATIC_REQUIRE(Sora::Meta::ErrorContextCount(extended) == 3);
+    STATIC_REQUIRE(Sora::Meta::ErrorContexts(extended)[2] == ^^char);
+    constexpr auto description = Sora::Meta::ErrorDescription(error);
+    STATIC_REQUIRE(!description.empty());
+    using ErrorType = Sora::Meta::InfoType<error>;
+    constexpr auto typeDescription = Sora::Meta::ErrorDescriptionOf<ErrorType>();
+    STATIC_REQUIRE(typeDescription == description);
+}
+
+TEST_CASE("Scalar concepts canonicalize cvref and enum representations", "[Sora][Core][TypeTraits]") {
+    STATIC_REQUIRE(Sora::Concept::ArithmeticScalar<const int&>);
+    STATIC_REQUIRE(Sora::Concept::Vectorizable<const double&>);
+    STATIC_REQUIRE(Sora::Concept::FloatingLike<const float&>);
+    STATIC_REQUIRE(Sora::Concept::SignedArithmetic<const int&>);
+    STATIC_REQUIRE(Sora::Concept::UnsignedArithmetic<const unsigned&>);
+    STATIC_REQUIRE(Sora::Concept::SignedIntegerLike<SignedEnum>);
+    STATIC_REQUIRE(Sora::Concept::UnsignedIntegerLike<UnsignedEnum>);
 }
 
 TEST_CASE("Reflection-native predicates compose with TypeList", "[Sora][Core][MetaPred]") {
@@ -292,7 +315,7 @@ TEST_CASE("Reflection-native predicates compose with TypeList", "[Sora][Core][Me
 
     constexpr auto invalid = Sora::Meta::Types::Filter(^^NotBoolean, ^^Input);
     STATIC_REQUIRE(Sora::Meta::IsMetaError(invalid));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalid) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalid) == ^^Sora::Meta::Error::NonBooleanPredResult);
 }
 
 TEST_CASE("Reflected TypeList adapters cover folds, search, and predicates", "[Sora][Core][MetaOperators]") {
@@ -337,8 +360,8 @@ TEST_CASE("Reflected TypeList adapters cover folds, search, and predicates", "[S
     constexpr auto value = std::meta::reflect_constant(42);
     constexpr auto invalidFold = Sora::Meta::Types::FoldLeft(^^PairSize, ^^int, ^^Sora::Traits::TypeList<double>);
     constexpr auto invalidFallback = Sora::Meta::Types::FindFirst(^^IsIntegral, empty, value);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFold) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFallback) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFold) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFallback) == ^^Sora::Meta::Error::NonTypeResult);
 }
 
 TEST_CASE("MetaOperators share one InfoList kernel", "[Sora][Core][MetaOperators]") {
@@ -358,7 +381,7 @@ TEST_CASE("MetaOperators share one InfoList kernel", "[Sora][Core][MetaOperators
     constexpr auto mismatch =
         Sora::Meta::Types::Zip(^^std::pair, ^^Sora::Traits::TypeList<int>, ^^Sora::Traits::TypeList<double, long>);
     STATIC_REQUIRE(Sora::Meta::IsMetaError(mismatch));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(mismatch) == ^^Sora::Meta::Error::LengthMismatchTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(mismatch) == ^^Sora::Meta::Error::LengthMismatch);
 
     constexpr auto mapped = Sora::Meta::Map(^^std::add_pointer_t, Sora::Meta::InfoList{^^int, ^^double});
     constexpr auto bracedMapped = Sora::Meta::Map(^^std::add_pointer_t, {^^int});
@@ -368,7 +391,7 @@ TEST_CASE("MetaOperators share one InfoList kernel", "[Sora][Core][MetaOperators
 
     constexpr auto invalidMap = Sora::Meta::Map(^^std::pair, Sora::Meta::InfoList{^^int, ^^double});
     STATIC_REQUIRE(Sora::Meta::IsMetaError(invalidMap));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidMap) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidMap) == ^^Sora::Meta::Error::NonInvocable);
 }
 
 TEST_CASE("MetaOperators compose reflected functions and folds", "[Sora][Core][MetaOperators]") {
@@ -395,8 +418,8 @@ TEST_CASE("MetaOperators compose reflected functions and folds", "[Sora][Core][M
     using ValueComposeResult = Sora::Meta::InvokeResult<valueCompose, int>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<ValueTransformResult>);
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<ValueComposeResult>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^ValueTransformResult) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^ValueComposeResult) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^ValueTransformResult) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^ValueComposeResult) == ^^Sora::Meta::Error::NonTypeResult);
 
     using FoldInput = Sora::Traits::TypeList<double, char>;
     STATIC_REQUIRE(std::same_as<Sora::Traits::FoldLeft<^^Pair, int, FoldInput>, Pair<Pair<int, double>, char>>);
@@ -431,16 +454,16 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     STATIC_REQUIRE(Sora::Meta::Types::RemoveIf(^^IsIntegral, ^^NestedErrorList) == error);
 
     constexpr auto invalidProject = Sora::Meta::ToTypeList(^^int);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidProject) == ^^Sora::Meta::Error::NonInfoListResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidProject) == ^^Sora::Meta::Error::NonInfoListResult);
 
     constexpr auto invalidLength = Sora::Meta::Types::Length(^^int);
     constexpr auto invalidPush = Sora::Meta::Types::PushBack(^^int, ^^bool);
     constexpr auto invalidMapInput = Sora::Meta::Types::Map(^^std::decay_t, ^^int);
     constexpr auto invalidEqualInput = Sora::Meta::Types::Equal(^^int, ^^List);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidLength) == ^^Sora::Meta::Error::InvalidSequenceTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidPush) == ^^Sora::Meta::Error::InvalidSequenceTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidMapInput) == ^^Sora::Meta::Error::InvalidSequenceTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidEqualInput) == ^^Sora::Meta::Error::InvalidSequenceTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidLength) == ^^Sora::Meta::Error::InvalidSequence);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidPush) == ^^Sora::Meta::Error::InvalidSequence);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidMapInput) == ^^Sora::Meta::Error::InvalidSequence);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidEqualInput) == ^^Sora::Meta::Error::InvalidSequence);
 
     constexpr auto value = std::meta::reflect_constant(42);
     constexpr auto invalidFill = Sora::Meta::Types::Fill(2, value);
@@ -456,25 +479,25 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     constexpr auto valueApply = Sora::Meta::Types::Apply(^^TypeSize, ^^Sora::Traits::TypeList<int>);
     constexpr auto valueZip = Sora::Meta::Types::Zip(^^PairSize, ^^Sora::Traits::TypeList<int>,
                                                      ^^Sora::Traits::TypeList<double>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFill) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidReplace) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidReplaceIf) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidPushFront) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidPushBack) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidContains) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidIndex) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidCount) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidRemove) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(valueMap) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(valueApply) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(valueZip) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFill) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidReplace) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidReplaceIf) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidPushFront) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidPushBack) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidContains) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidIndex) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidCount) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidRemove) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(valueMap) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(valueApply) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(valueZip) == ^^Sora::Meta::Error::NonTypeResult);
     using ValueApplyType = Sora::Traits::Apply<^^TypeSize, Sora::Traits::TypeList<int>>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<ValueApplyType>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^ValueApplyType) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^ValueApplyType) == ^^Sora::Meta::Error::NonTypeResult);
 
     using ValueFold = Sora::Traits::FoldLeft<^^PairSize, int, Sora::Traits::TypeList<double>>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<ValueFold>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^ValueFold) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^ValueFold) == ^^Sora::Meta::Error::NonTypeResult);
 
     using Union = Sora::Traits::SetUnion<Sora::Traits::TypeList<int, double>, Sora::Traits::TypeList<double, char>>;
     using Intersection =
@@ -498,9 +521,9 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     constexpr auto invalidEmptyFilter = Sora::Meta::Filter(^^NotBoolean, Sora::Meta::InfoList{});
     constexpr auto emptyFold = Sora::Meta::FoldLeft(^^std::decay_t, ^^void, {});
     constexpr auto emptyZip = Sora::Meta::Zip(^^std::decay_t, {}, {});
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidEmptyMap) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidEmptyMap) == ^^Sora::Meta::Error::NonInvocable);
     STATIC_REQUIRE(Sora::Meta::RequireInfoList(emptyMap).empty());
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidEmptyFilter) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidEmptyFilter) == ^^Sora::Meta::Error::NonBooleanPredResult);
     STATIC_REQUIRE(emptyFold == ^^void);
     STATIC_REQUIRE(Sora::Meta::RequireInfoList(emptyZip).empty());
 
@@ -509,23 +532,23 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     STATIC_REQUIRE(Sora::Meta::Types::FoldLeft(^^std::decay_t, ^^bool, empty) == ^^bool);
     STATIC_REQUIRE(Sora::Meta::Types::FoldRight(^^std::decay_t, ^^bool, empty) == ^^bool);
     constexpr auto emptyValueFold = Sora::Meta::Types::FoldLeft(^^int, std::meta::reflect_constant(42), empty);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(emptyValueFold) == ^^Sora::Meta::Error::NonTypeResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::FindFirst(^^NotBoolean, {})) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::AllOf(^^NotBoolean, {})) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::AnyOf(^^NotBoolean, {})) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::NoneOf(^^NotBoolean, {})) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::CountIf(^^NotBoolean, {})) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::Types::Filter(^^NotBoolean, empty)) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::Types::FindFirst(^^NotBoolean, empty)) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(Sora::Meta::Types::AllOf(^^NotBoolean, empty)) ==
-                   ^^Sora::Meta::Error::NonBooleanPredResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(emptyValueFold) == ^^Sora::Meta::Error::NonTypeResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::FindFirst(^^NotBoolean, {})) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::AllOf(^^NotBoolean, {})) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::AnyOf(^^NotBoolean, {})) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::NoneOf(^^NotBoolean, {})) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::CountIf(^^NotBoolean, {})) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::Types::Filter(^^NotBoolean, empty)) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::Types::FindFirst(^^NotBoolean, empty)) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(Sora::Meta::Types::AllOf(^^NotBoolean, empty)) ==
+                   ^^Sora::Meta::Error::NonBooleanPredResult);
 
     constexpr auto constrainedMap = Sora::Meta::Map(^^IntegralIdentity, Sora::Meta::InfoList{^^int, ^^long});
     constexpr auto reflectedThree = std::meta::reflect_constant(3);
@@ -538,26 +561,26 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     constexpr auto invalidWithInputError = Sora::Meta::Map(^^int, Sora::Meta::InfoList{error});
     STATIC_REQUIRE(hiddenAllError == error);
     STATIC_REQUIRE(hiddenAnyError == error);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidWithInputError) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidWithInputError) == ^^Sora::Meta::Error::NonInvocable);
 
     constexpr auto boundValueTemplate = Sora::Meta::BindFront<^^SameType, ^^int>;
     using BoundResult = Sora::Meta::InvokeResult<boundValueTemplate, int>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<BoundResult>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^BoundResult) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^BoundResult) == ^^Sora::Meta::Error::NonTypeResult);
 
     constexpr auto constantValue = Sora::Meta::Constant<value>;
     using ConstantResult = Sora::Meta::InvokeResult<constantValue>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<ConstantResult>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^ConstantResult) == ^^Sora::Meta::Error::NonTypeResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^ConstantResult) == ^^Sora::Meta::Error::NonTypeResult);
 
     constexpr auto invalidTransform = Sora::Meta::Transform<^^int>;
     using TransformResult = Sora::Meta::InvokeResult<invalidTransform>;
     STATIC_REQUIRE(Sora::Concept::MetaErrorType<TransformResult>);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(^^TransformResult) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(^^TransformResult) == ^^Sora::Meta::Error::NonInvocable);
 
     constexpr auto invalidDataMemberTypes = Sora::Meta::DataMemberTypes(^^int);
     STATIC_REQUIRE(Sora::Meta::IsMetaError(invalidDataMemberTypes));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidDataMemberTypes) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidDataMemberTypes) == ^^Sora::Meta::Error::NonInvocable);
 }
 
 TEST_CASE("MetaOperators preserve first-error ordering", "[Sora][Core][MetaOperators][MetaError]") {
@@ -605,17 +628,17 @@ TEST_CASE("MetaOperators preserve first-error ordering", "[Sora][Core][MetaOpera
     constexpr auto invalidFoldFunction = Sora::Meta::Types::FoldLeft(^^int, ^^bool, ^^NestedErrorInput);
     constexpr auto invalidApplyOrder = Sora::Meta::Apply(^^int, Sora::Meta::InfoList{inputError});
     constexpr auto invalidFoldSequenceOrder = Sora::Meta::Types::FoldLeft(^^int, ^^bool, ^^int);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidPred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFindPred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidLastPred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidAllPred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidAnyPred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidNonePred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidCountPred) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFunction) == ^^Sora::Meta::Error::NonInvocableTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFoldFunction) == ^^Sora::Meta::Error::NonInvocableTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidApplyOrder) == ^^Sora::Meta::Error::NonInvocableTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidFoldSequenceOrder) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidPred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFindPred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidLastPred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidAllPred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidAnyPred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidNonePred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidCountPred) == ^^Sora::Meta::Error::NonBooleanPredResult);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFunction) == ^^Sora::Meta::Error::NonInvocable);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFoldFunction) == ^^Sora::Meta::Error::NonInvocable);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidApplyOrder) == ^^Sora::Meta::Error::NonInvocable);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFoldSequenceOrder) == ^^Sora::Meta::Error::NonInvocable);
     STATIC_REQUIRE(Sora::Meta::Types::FoldLeft(functionError, initialError, ^^NestedErrorInput) == functionError);
     STATIC_REQUIRE(Sora::Meta::Types::FoldRight(functionError, initialError, ^^NestedErrorInput) == functionError);
     STATIC_REQUIRE(Sora::Meta::Types::Map(functionError, fallbackError) == functionError);
@@ -623,8 +646,8 @@ TEST_CASE("MetaOperators preserve first-error ordering", "[Sora][Core][MetaOpera
 
     constexpr auto invalidInvoke = Sora::Meta::Invoke<^^int, inputError>;
     constexpr auto invalidPredicate = Sora::Meta::InvokePred(^^NotBoolean, inputError);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidInvoke) == ^^Sora::Meta::Error::NonInvocableTag);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidPredicate) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidInvoke) == ^^Sora::Meta::Error::NonInvocable);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidPredicate) == ^^Sora::Meta::Error::NonBooleanPredResult);
 
     STATIC_REQUIRE(Sora::Meta::Types::PushFront(^^NestedErrorInput, fallbackError) == nestedError);
     STATIC_REQUIRE(Sora::Meta::Types::PushBack(^^NestedErrorInput, fallbackError) == nestedError);
@@ -637,7 +660,7 @@ TEST_CASE("MetaOperators preserve first-error ordering", "[Sora][Core][MetaOpera
     STATIC_REQUIRE(Sora::Meta::Types::Zip(^^Pair, ^^NestedErrorInput, fallbackError) == nestedError);
 
     constexpr auto invalidLeft = Sora::Meta::Types::SetIntersection(^^int, fallbackError);
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(invalidLeft) == ^^Sora::Meta::Error::InvalidSequenceTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidLeft) == ^^Sora::Meta::Error::InvalidSequence);
 
     using NestedErrorType = Sora::Meta::InfoType<nestedError>;
     STATIC_REQUIRE(std::same_as<Sora::Traits::At<NestedErrorInput, 0>, NestedErrorType>);
@@ -675,9 +698,9 @@ TEST_CASE("MetaPred uniformly supports arbitrary arity", "[Sora][Core][MetaPred]
 
     constexpr auto wrongArity = Sora::Meta::InvokePred(^^Same, ^^int);
     STATIC_REQUIRE(Sora::Meta::IsMetaError(wrongArity));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(wrongArity) == ^^Sora::Meta::Error::NonInvocableTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(wrongArity) == ^^Sora::Meta::Error::NonInvocable);
 
     constexpr auto nonBoolean = Sora::Meta::InvokePred(^^NotBoolean2, ^^int, ^^double);
     STATIC_REQUIRE(Sora::Meta::IsMetaError(nonBoolean));
-    STATIC_REQUIRE(Sora::Meta::ErrorTag(nonBoolean) == ^^Sora::Meta::Error::NonBooleanPredResultTag);
+    STATIC_REQUIRE(Sora::Meta::ErrorCategory(nonBoolean) == ^^Sora::Meta::Error::NonBooleanPredResult);
 }

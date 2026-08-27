@@ -9,6 +9,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <type_traits>
@@ -88,7 +89,7 @@ TEST_CASE("Box queries preserve affine point/vector semantics", "[Sora][Math][Ge
 
 TEST_CASE("Discrete boxes support ordered queries and checked affine transforms", "[Sora][Math][Geom]") {
     constexpr Sora::Math::Box2i box{Sora::Math::Point2i{-2, -3}, Sora::Math::Point2i{4, 8}};
-    constexpr auto translation = Sora::Math::Affine<int, 2>::Translation(Sora::Math::Vec2i{10, 20});
+    constexpr auto translation = Sora::Math::Translate(Sora::Math::Vec2i{10, 20});
     constexpr auto transformed = Sora::Math::Transform(translation, box);
     constexpr Sora::Math::Rect2i rectangle{Sora::Math::Point2i{-2, -3}, Sora::Math::Vec2i{6, 11}};
     constexpr auto transformedRectangle = Sora::Math::Transform(translation, rectangle);
@@ -99,6 +100,33 @@ TEST_CASE("Discrete boxes support ordered queries and checked affine transforms"
     STATIC_REQUIRE(Sora::Math::LargestAxis(box) == 1);
     STATIC_REQUIRE(transformed.Min() == Sora::Math::Point2i{8, 17});
     STATIC_REQUIRE(transformedRectangle.Max() == Sora::Math::Point2i{14, 28});
+}
+
+TEST_CASE("Affine boxes use exact quadratic interval propagation", "[Sora][Math][Geom]") {
+    constexpr Sora::Math::Box2i box{Sora::Math::Point2i{-2, -3}, Sora::Math::Point2i{4, 8}};
+    constexpr Sora::Math::Rect2i rect{Sora::Math::Point2i{-2, -3}, Sora::Math::Vec2i{6, 11}};
+    constexpr Affine<int, 2> affine{Sora::Math::Matrix<int, 2, 2>{0, -1, 2, 0}, Sora::Math::Vec2i{10, -3}};
+    constexpr auto transformedBox = Sora::Math::Transform(affine, box);
+    constexpr auto transformedRect = Sora::Math::Transform(affine, rect);
+    STATIC_REQUIRE(transformedBox.Min() == Sora::Math::Point2i{2, -7});
+    STATIC_REQUIRE(transformedBox.Max() == Sora::Math::Point2i{13, 5});
+    STATIC_REQUIRE(transformedRect.Min() == transformedBox.Min());
+    STATIC_REQUIRE(transformedRect.Max() == transformedBox.Max());
+}
+
+TEST_CASE("Affine box propagation skips zero times unbounded coordinates", "[Sora][Math][Geom]") {
+    const float infinity = std::numeric_limits<float>::infinity();
+    const Sora::Math::Box3f unbounded{Point3{-infinity, -2.0F, -3.0F}, Point3{infinity, 4.0F, 5.0F}};
+    const auto transformed = Sora::Math::Transform(Affine<float, 3>::Identity(), unbounded);
+
+    CHECK(transformed.Min()[0] == -infinity);
+    CHECK(transformed.Max()[0] == infinity);
+    CHECK(transformed.Min()[1] == -2.0F);
+    CHECK(transformed.Max()[1] == 4.0F);
+    CHECK(transformed.Min()[2] == -3.0F);
+    CHECK(transformed.Max()[2] == 5.0F);
+    CHECK(Sora::Math::IsNotNaN(transformed.Min()));
+    CHECK(Sora::Math::IsNotNaN(transformed.Max()));
 }
 
 TEST_CASE("Disjoint intersections are represented as empty optionals", "[Sora][Math][Geom]") {
@@ -120,11 +148,123 @@ TEST_CASE("Ray-box intersection exposes a non-negative parameter interval", "[So
 
 TEST_CASE("Affine maps preserve point/vector and plane transformation laws", "[Sora][Math][Geom]") {
     constexpr Sora::Math::Plane3f plane{Vector3{1.0F, 0.0F, 0.0F}, 0.0F};
-    constexpr auto translation = Affine<float, 3>::Translation(Vector3{2.0F, 0.0F, 0.0F});
-    const Sora::Math::Plane3f transformed = Sora::Math::Transform(translation, plane);
-    CHECK(Sora::Math::SignedDistance(transformed, Point3{2.0F, 0.0F, 0.0F}) == Catch::Approx(0.0F));
+    constexpr auto translation = Sora::Math::Translate(Vector3{2.0F, 0.0F, 0.0F});
+    const auto transformed = Sora::Math::TryTransform(translation, plane);
+    REQUIRE(transformed.has_value());
+    CHECK(Sora::Math::SignedDistance(*transformed, Point3{2.0F, 0.0F, 0.0F}) == Catch::Approx(0.0F));
     CHECK(Sora::Math::TransformPoint(translation, Point3{}) == Point3{2.0F, 0.0F, 0.0F});
     CHECK(Sora::Math::TransformVector(translation, Vector3{1.0F, 0.0F, 0.0F}) == Vector3{1.0F, 0.0F, 0.0F});
+}
+
+TEST_CASE("Fallible affine geometry transforms preserve primitive invariants", "[Sora][Math][Geom]") {
+    const Affine<float, 3> affine{Sora::Math::Matrix<float, 3, 3>{2.0F, 0.0F, 0.0F, 0.0F, 3.0F, 0.0F, 0.0F, 0.0F, 0.5F},
+                                  Vector3{5.0F, -2.0F, 1.0F}};
+    const Sora::Math::Ray3f ray{Point3{1.0F, 2.0F, 3.0F}, Vector3{1.0F, 1.0F, 0.0F}};
+    const auto transformedRay = Sora::Math::TryTransform(affine, ray);
+    REQUIRE(transformedRay.has_value());
+    CHECK(transformedRay->Origin() == Point3{7.0F, 4.0F, 2.5F});
+    CHECK(transformedRay->Direction() == Vector3{2.0F, 3.0F, 0.0F});
+
+    const Sora::Math::Sphere3f sphere{Point3{}, 2.0F};
+    const auto transformedSphere = Sora::Math::Transform(affine, sphere);
+    CHECK(transformedSphere.Center() == Point3{5.0F, -2.0F, 1.0F});
+    CHECK(transformedSphere.Radius() == Catch::Approx(6.0F));
+
+    const auto zeroScale = Sora::Math::UniformScale<3>(0.0F);
+    const Sora::Math::Sphere3f unboundedSphere{Point3{}, std::numeric_limits<float>::infinity()};
+    CHECK(Sora::Math::Transform(zeroScale, unboundedSphere).Radius() == 0.0F);
+
+    const Affine<float, 3> singular{
+        Sora::Math::Matrix<float, 3, 3>{1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, Vector3{}};
+    const Sora::Math::Ray3f collapsed{Point3{}, Vector3{0.0F, 1.0F, 0.0F}};
+    const auto collapsedResult = Sora::Math::TryTransform(singular, collapsed);
+    REQUIRE_FALSE(collapsedResult.has_value());
+    CHECK(collapsedResult.error() == Sora::Math::RayTransformError::CollapsedDirection);
+
+    const float infinity = std::numeric_limits<float>::infinity();
+    const Affine<float, 3> indeterminate{
+        Sora::Math::Matrix<float, 3, 3>{infinity, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F}, Vector3{}};
+    const Sora::Math::Ray3f indeterminateOrigin{Point3{}, Vector3{1.0F, 0.0F, 0.0F}};
+    const auto originResult = Sora::Math::TryTransform(indeterminate, indeterminateOrigin);
+    REQUIRE_FALSE(originResult.has_value());
+    CHECK(originResult.error() == Sora::Math::RayTransformError::IndeterminateOrigin);
+
+    const Sora::Math::Ray3f indeterminateDirection{Point3{1.0F, 0.0F, 0.0F}, Vector3{0.0F, 1.0F, 0.0F}};
+    const auto directionResult = Sora::Math::TryTransform(indeterminate, indeterminateDirection);
+    REQUIRE_FALSE(directionResult.has_value());
+    CHECK(directionResult.error() == Sora::Math::RayTransformError::IndeterminateDirection);
+
+    const auto singularPlane = Sora::Math::TryTransform(singular, Sora::Math::Plane3f{Vector3{1, 0, 0}, 0});
+    REQUIRE_FALSE(singularPlane.has_value());
+    CHECK(singularPlane.error() == Sora::ErrorCode::SingularMatrix);
+
+    const auto singularFrustum = Sora::Math::TryTransform(singular, Sora::Math::Frustum<float>{});
+    REQUIRE_FALSE(singularFrustum.has_value());
+    CHECK(singularFrustum.error() == Sora::ErrorCode::SingularMatrix);
+}
+
+TEST_CASE("Hyperplanes and frusta follow the affine covector law", "[Sora][Math][Geom]") {
+    const Affine<float, 3> affine{Sora::Math::Matrix<float, 3, 3>{1.0F, 2.0F, 0.0F, 0.0F, 1.0F, 3.0F, 0.0F, 0.0F, 1.0F},
+                                  Vector3{5.0F, -2.0F, 1.0F}};
+    const Sora::Math::Plane3f plane{Vector3{1.0F, 2.0F, -1.0F}, -3.0F};
+    const auto transformedPlane = Sora::Math::TryTransform(affine, plane);
+    REQUIRE(transformedPlane.has_value());
+    for (const Point3 point : {Point3{3.0F, 0.0F, 0.0F}, Point3{1.0F, 1.0F, 0.0F}, Point3{0.0F, 2.0F, 1.0F}}) {
+        const Point3 mapped = Sora::Math::TransformPoint(affine, point);
+        CHECK(Sora::Math::SignedDistance(*transformedPlane, mapped) == Catch::Approx(0.0F).margin(1.0e-5F));
+    }
+
+    Sora::Math::Frustum<float> frustum{};
+    frustum.planes = {{{Vector3{1.0F, 0.0F, 0.0F}, -1.0F},
+                       {Vector3{-1.0F, 0.0F, 0.0F}, -2.0F},
+                       {Vector3{0.0F, 1.0F, 0.0F}, -3.0F},
+                       {Vector3{0.0F, -1.0F, 0.0F}, -4.0F},
+                       {Vector3{0.0F, 0.0F, 1.0F}, -5.0F},
+                       {Vector3{1.0F, 2.0F, 3.0F}, -6.0F}}};
+    const auto transformedFrustum = Sora::Math::TryTransform(affine, frustum);
+    REQUIRE(transformedFrustum.has_value());
+    const Point3 point{0.25F, -0.5F, 1.5F};
+    const Point3 mapped = Sora::Math::TransformPoint(affine, point);
+    for (size_t index = 0; index < frustum.planes.size(); ++index) {
+        const float before =
+            Sora::Math::Dot(frustum.planes[index].normal, Sora::Math::ToVector(point)) + frustum.planes[index].offset;
+        const float after = Sora::Math::Dot(transformedFrustum->planes[index].normal, Sora::Math::ToVector(mapped)) +
+                            transformedFrustum->planes[index].offset;
+        CHECK(after == Catch::Approx(before).margin(1.0e-5F));
+    }
+}
+
+TEST_CASE("Ball transforms preserve exact rotations and conservatively contain sheared boundaries",
+          "[Sora][Math][Geom]") {
+    const Sora::Math::Sphere3f sphere{Point3{1.0F, -2.0F, 0.5F}, 2.0F};
+    const Affine<float, 3> rotation{
+        Sora::Math::Matrix<float, 3, 3>{0.0F, -1.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F},
+        Vector3{3.0F, 4.0F, -1.0F}};
+    const auto rotated = Sora::Math::Transform(rotation, sphere);
+    CHECK(rotated.Radius() == sphere.Radius());
+
+    const Affine<float, 3> shear{Sora::Math::Matrix<float, 3, 3>{1.0F, 2.0F, 0.0F, 0.0F, 1.0F, 3.0F, 0.0F, 0.0F, 1.0F},
+                                 Vector3{5.0F, -2.0F, 1.0F}};
+    const auto sheared = Sora::Math::Transform(shear, sphere);
+    const auto diagonal = Sora::Math::TryNormalize(Vector3{1.0F, 2.0F, 3.0F});
+    REQUIRE(diagonal.has_value());
+    const std::array directions{Vector3{1.0F, 0.0F, 0.0F},  Vector3{-1.0F, 0.0F, 0.0F}, Vector3{0.0F, 1.0F, 0.0F},
+                                Vector3{0.0F, -1.0F, 0.0F}, Vector3{0.0F, 0.0F, 1.0F},  Vector3{0.0F, 0.0F, -1.0F},
+                                diagonal->Value(),          -diagonal->Value()};
+    const float squaredRadius = sheared.Radius() * sheared.Radius();
+    for (const Vector3& direction : directions) {
+        const Point3 boundary = sphere.Center() + sphere.Radius() * direction;
+        const Point3 mapped = Sora::Math::TransformPoint(shear, boundary);
+        CHECK(Sora::Math::SquaredNorm(mapped - sheared.Center()) <= squaredRadius * (1.0F + 1.0e-6F));
+    }
+
+    const float largest = (std::numeric_limits<float>::max)();
+    const Affine<float, 3> hugeLinear{
+        Sora::Math::Matrix<float, 3, 3>{largest, 0.0F, 0.0F, 0.0F, largest, 0.0F, 0.0F, 0.0F, largest}, Vector3{}};
+    const Sora::Math::Sphere3f pointSphere{Point3{}, 0.0F};
+    const auto transformedPointSphere = Sora::Math::Transform(hugeLinear, pointSphere);
+    CHECK(transformedPointSphere.Radius() == 0.0F);
+    CHECK_FALSE(std::isnan(transformedPointSphere.Radius()));
 }
 
 TEST_CASE("Padded vector storage preserves explicit alignment", "[Sora][Math][Geom]") {

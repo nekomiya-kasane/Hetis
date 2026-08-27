@@ -17,110 +17,59 @@
 
 namespace Sora::Math {
 
-    /**
-     * @brief Point in an @p N-dimensional affine space over carrier @p T.
-     * @details Point addition is intentionally absent. Subtracting points yields a free vector; translating a point
-     * by a vector yields a point. The distinct type makes these affine rules compile-time properties.
-     */
+    /** @brief Affine point backed by rank-one dense storage but excluded from general tensor algebra. */
     template<ValueCarrier T, size_t N>
         requires(N > 0)
-    class Point {
-    public:
-        using CarrierType = T;                  /**< Coordinate carrier. */
-        static constexpr size_t kDimension = N; /**< Number of point coordinates. */
-
-        /** @brief Construct the affine origin. */
-        constexpr Point() noexcept(Detail::kNothrowZeroCarrier<T>)
-            requires Detail::ZeroInitializable<T>
-            : Point(std::make_index_sequence<N>{}) {}
-
-        /** @brief Construct from the exact coordinate array. */
-        constexpr explicit Point(std::array<T, N> values) noexcept(std::is_nothrow_move_constructible_v<T>)
-            : values_(std::move(values)) {}
-
-        /** @brief Construct from exactly @p N coordinate values. */
-        template<typename... U>
-            requires(sizeof...(U) == N && (std::constructible_from<T, U &&> && ...))
-        constexpr explicit(!(std::convertible_to<U&&, T> && ...))
-            Point(U&&... values) noexcept((std::is_nothrow_constructible_v<T, U&&> && ...))
-            : values_{T(std::forward<U>(values))...} {}
-
-        /** @brief Access one coordinate while preserving cv-ref qualification. @pre @p index is less than @c N. */
-        template<typename Self>
-        [[nodiscard]] constexpr decltype(auto) operator[](this Self&& self, size_t index) noexcept {
-            return std::forward_like<Self>(self.values_[index]);
-        }
-
-        /** @brief Return the contiguous coordinate array while preserving cv-ref qualification. */
-        template<typename Self>
-        [[nodiscard]] constexpr decltype(auto) Coordinates(this Self&& self) noexcept {
-            return std::forward_like<Self>(self.values_);
-        }
-
-        /** @brief Return the first coordinate address from an lvalue object. */
-        template<typename Self>
-            requires std::is_lvalue_reference_v<Self&&>
-        [[nodiscard]] constexpr auto Data(this Self&& self) noexcept {
-            return self.values_.data();
-        }
-
-    private:
-        template<size_t... Indices>
-        constexpr explicit Point(std::index_sequence<Indices...>) noexcept(Detail::kNothrowZeroCarrier<T>)
-            requires Detail::ZeroInitializable<T>
-            : values_{((void)Indices, Detail::ZeroCarrier<T>())...} {}
-
-        std::array<T, N> values_;
-    };
+    using Point = BasicTensor<StaticDenseStorage<T, StaticShape<N>, RightMapping>, Algebra::AffinePoint>;
 
     /** @brief Subtract two points to obtain their displacement vector. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
-        requires requires(T left, U right) { Sora::Math::Sub(left, right); } && ValueCarrier<Detail::SubResult<T, U>>
+        requires requires(T left, U right) { Sora::Math::Sub(left, right); } && ValueCarrier<Traits::SubResult<T, U>>
     [[nodiscard]] constexpr auto operator-(const Point<T, N>& left, const Point<U, N>& right) noexcept(
         noexcept(Sora::Math::Sub(left[0], right[0])) &&
-        std::is_nothrow_constructible_v<Detail::SubResult<T, U>, decltype(Sora::Math::Sub(left[0], right[0]))>)
-        -> Vector<Detail::SubResult<T, U>, N> {
+        std::is_nothrow_constructible_v<Traits::SubResult<T, U>, decltype(Sora::Math::Sub(left[0], right[0]))>)
+        -> Vector<Traits::SubResult<T, U>, N> {
         return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
-            return Vector<Detail::SubResult<T, U>, N>{Sora::Math::Sub(left[Indices], right[Indices])...};
+            return Vector<Traits::SubResult<T, U>, N>{Sora::Math::Sub(left[Indices], right[Indices])...};
         }(std::make_index_sequence<N>{});
     }
 
     /** @brief Translate a point by a vector. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
         requires requires(T point, U vector) { Sora::Math::Add(point, vector); } &&
-                 ValueCarrier<Detail::AddResult<T, U>>
+                 ValueCarrier<Traits::AddResult<T, U>>
     [[nodiscard]] constexpr auto operator+(const Point<T, N>& point, const Vector<U, N>& vector) noexcept(
         noexcept(Sora::Math::Add(point[0], vector[0])) &&
-        std::is_nothrow_constructible_v<Detail::AddResult<T, U>, decltype(Sora::Math::Add(point[0], vector[0]))>)
-        -> Point<Detail::AddResult<T, U>, N> {
+        std::is_nothrow_constructible_v<Traits::AddResult<T, U>, decltype(Sora::Math::Add(point[0], vector[0]))>)
+        -> Point<Traits::AddResult<T, U>, N> {
         return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
-            return Point<Detail::AddResult<T, U>, N>{Sora::Math::Add(point[Indices], vector[Indices])...};
+            return Point<Traits::AddResult<T, U>, N>{Sora::Math::Add(point[Indices], vector[Indices])...};
         }(std::make_index_sequence<N>{});
     }
 
     /** @brief Translate a point by a vector. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
         requires requires(T vector, U point) { Sora::Math::Add(vector, point); } &&
-                 ValueCarrier<Detail::AddResult<T, U>>
+                 ValueCarrier<Traits::AddResult<T, U>>
     [[nodiscard]] constexpr auto operator+(const Vector<T, N>& vector, const Point<U, N>& point) noexcept(
         noexcept(Sora::Math::Add(vector[0], point[0])) &&
-        std::is_nothrow_constructible_v<Detail::AddResult<T, U>, decltype(Sora::Math::Add(vector[0], point[0]))>)
-        -> Point<Detail::AddResult<T, U>, N> {
+        std::is_nothrow_constructible_v<Traits::AddResult<T, U>, decltype(Sora::Math::Add(vector[0], point[0]))>)
+        -> Point<Traits::AddResult<T, U>, N> {
         return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
-            return Point<Detail::AddResult<T, U>, N>{Sora::Math::Add(vector[Indices], point[Indices])...};
+            return Point<Traits::AddResult<T, U>, N>{Sora::Math::Add(vector[Indices], point[Indices])...};
         }(std::make_index_sequence<N>{});
     }
 
     /** @brief Translate a point by the negation of a vector. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
         requires requires(T point, U vector) { Sora::Math::Sub(point, vector); } &&
-                 ValueCarrier<Detail::SubResult<T, U>>
+                 ValueCarrier<Traits::SubResult<T, U>>
     [[nodiscard]] constexpr auto operator-(const Point<T, N>& point, const Vector<U, N>& vector) noexcept(
         noexcept(Sora::Math::Sub(point[0], vector[0])) &&
-        std::is_nothrow_constructible_v<Detail::SubResult<T, U>, decltype(Sora::Math::Sub(point[0], vector[0]))>)
-        -> Point<Detail::SubResult<T, U>, N> {
+        std::is_nothrow_constructible_v<Traits::SubResult<T, U>, decltype(Sora::Math::Sub(point[0], vector[0]))>)
+        -> Point<Traits::SubResult<T, U>, N> {
         return [&]<size_t... Indices>(std::index_sequence<Indices...>) {
-            return Point<Detail::SubResult<T, U>, N>{Sora::Math::Sub(point[Indices], vector[Indices])...};
+            return Point<Traits::SubResult<T, U>, N>{Sora::Math::Sub(point[Indices], vector[Indices])...};
         }(std::make_index_sequence<N>{});
     }
 

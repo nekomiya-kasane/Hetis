@@ -51,7 +51,7 @@ namespace Sora::Math {
                                                 const Parameter& parameter) {
             using R = std::remove_cvref_t<decltype(Sora::Math::Fma(
                 Sora::Math::Sub(right[0], left[0]), parameter, left[0]))>;
-            return Vector<R, N>{GenerateArray<R, N>([&](auto coordinate) {
+            return Vector<R, N>{GenerateStaticArray<R, N>([&](auto coordinate) {
                 return Sora::Math::Fma(Sora::Math::Sub(right[coordinate], left[coordinate]), parameter,
                                        left[coordinate]);
             })};
@@ -62,7 +62,7 @@ namespace Sora::Math {
         [[nodiscard]] constexpr auto ProjectHomogeneous(const Vector<T, Count>& homogeneous) {
             constexpr size_t dimension = Count - 1;
             using R = std::remove_cvref_t<decltype(Sora::Math::Div(homogeneous[0], homogeneous[dimension]))>;
-            return Point<R, dimension>{GenerateArray<R, dimension>([&](auto coordinate) {
+            return Point<R, dimension>{GenerateStaticArray<R, dimension>([&](auto coordinate) {
                 return Sora::Math::Div(homogeneous[coordinate], homogeneous[dimension]);
             })};
         }
@@ -180,7 +180,7 @@ namespace Sora::Math {
             } else {
                 using Result = std::remove_cvref_t<decltype(
                     Detail::NurbsBlend(controls[0], controls[1], parameter))>;
-                auto level = Detail::GenerateArray<Result, Degree>([&](auto index) {
+                auto level = GenerateStaticArray<Result, Degree>([&](auto index) {
                     constexpr size_t offset = decltype(index)::value + 1;
                     const size_t knot = span - Degree + offset;
                     const T denominator = knots_[knot + Degree] - knots_[knot];
@@ -241,9 +241,9 @@ namespace Sora::Math {
                     return std::unexpected(NurbsError::ZeroWeight);
                 }
             }
-            auto homogeneousValues = Detail::GenerateArray<HomogeneousControl, kControlCount>([&](auto index) {
+            auto homogeneousValues = GenerateStaticArray<HomogeneousControl, kControlCount>([&](auto index) {
                 const T weight = weights[index];
-                return HomogeneousControl{Detail::GenerateArray<T, Dimension + 1>([&](auto coordinate) {
+                return HomogeneousControl{GenerateStaticArray<T, Dimension + 1>([&](auto coordinate) {
                     if constexpr (decltype(coordinate)::value == Dimension) {
                         return weight;
                     } else {
@@ -258,7 +258,7 @@ namespace Sora::Math {
         /** @brief Construct a unit-weight non-rational B-spline patch. */
         [[nodiscard]] static constexpr auto Create(EuclideanControlTensor controls, Axes... axes) noexcept
             -> std::expected<NurbsPatch, NurbsError> {
-            auto weights = WeightTensor{Detail::GenerateArray<T, kControlCount>([](auto) { return T{1}; })};
+            auto weights = WeightTensor{GenerateStaticArray<T, kControlCount>([](auto) { return T{1}; })};
             return Create(std::move(controls), std::move(weights), std::move(axes)...);
         }
 

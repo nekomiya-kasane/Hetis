@@ -6,6 +6,7 @@
 #pragma once
 
 #include <Sora/Math/PrimaryFunctions.h>
+#include <Sora/Math/TensorCore.h>
 
 #include <array>
 #include <concepts>
@@ -17,102 +18,7 @@
 
 namespace Sora::Math {
 
-    namespace Detail {
-
-        template<typename T>
-        concept ZeroInitializable = std::constructible_from<T, int> || requires { T(typename T::ValueType{0}); };
-
-        template<typename T>
-            requires ZeroInitializable<T>
-        inline constexpr bool kNothrowZeroCarrier = [] {
-            if constexpr (std::constructible_from<T, int>) {
-                return std::is_nothrow_constructible_v<T, int>;
-            } else {
-                return noexcept(T(typename T::ValueType{0}));
-            }
-        }();
-
-        template<typename T>
-            requires ZeroInitializable<T>
-        [[nodiscard]] constexpr T ZeroCarrier() noexcept(kNothrowZeroCarrier<T>) {
-            if constexpr (std::constructible_from<T, int>) {
-                return T{0};
-            } else {
-                return T(typename T::ValueType{0});
-            }
-        }
-
-    } // namespace Detail
-
-    /** @brief Trivially copyable carrier suitable for inline fixed-size mathematical values. */
-    template<typename T>
-    concept ValueCarrier = std::is_object_v<T> && std::same_as<T, std::remove_cv_t<T>> && std::copyable<T> &&
-                           std::is_trivially_copyable_v<T>;
-
-    /**
-     * @brief Fixed-size free vector in an @p N-dimensional module over carrier @p T.
-     * @tparam T Scalar, SIMD pack, or user carrier supported by the mathematical CPO backend.
-     * @tparam N Positive compile-time dimension.
-     * @details Storage is exactly one @c std::array<T,N>. A SIMD carrier therefore represents the same operation over
-     * several independent vectors in coordinate-major form; no runtime backend or layout tag enters the value type.
-     */
-    template<ValueCarrier T, size_t N>
-        requires(N > 0)
-    class Vector {
-    public:
-        using CarrierType = T;                  /**< Mathematical component carrier. */
-        static constexpr size_t kDimension = N; /**< Number of vector components. */
-
-        /** @brief Construct the additive identity. */
-        constexpr Vector() noexcept(Detail::kNothrowZeroCarrier<T>)
-            requires Detail::ZeroInitializable<T>
-            : Vector(std::make_index_sequence<N>{}) {}
-
-        /** @brief Construct from the exact component array. */
-        constexpr explicit Vector(std::array<T, N> values) noexcept(std::is_nothrow_move_constructible_v<T>)
-            : values_(std::move(values)) {}
-
-        /** @brief Construct from exactly @p N component values. */
-        template<typename... U>
-            requires(sizeof...(U) == N && (std::constructible_from<T, U &&> && ...))
-        constexpr explicit(!(std::convertible_to<U&&, T> && ...))
-            Vector(U&&... values) noexcept((std::is_nothrow_constructible_v<T, U&&> && ...))
-            : values_{T(std::forward<U>(values))...} {}
-
-        /** @brief Access one component while preserving cv-ref qualification. @pre @p index is less than @c N. */
-        template<typename Self>
-        [[nodiscard]] constexpr decltype(auto) operator[](this Self&& self, size_t index) noexcept {
-            return std::forward_like<Self>(self.values_[index]);
-        }
-
-        /** @brief Return the contiguous component array while preserving cv-ref qualification. */
-        template<typename Self>
-        [[nodiscard]] constexpr decltype(auto) Components(this Self&& self) noexcept {
-            return std::forward_like<Self>(self.values_);
-        }
-
-        /** @brief Return the first component address from an lvalue object. */
-        template<typename Self>
-            requires std::is_lvalue_reference_v<Self&&>
-        [[nodiscard]] constexpr auto Data(this Self&& self) noexcept {
-            return self.values_.data();
-        }
-
-    private:
-        template<size_t... Indices>
-        constexpr explicit Vector(std::index_sequence<Indices...>) noexcept(Detail::kNothrowZeroCarrier<T>)
-            requires Detail::ZeroInitializable<T>
-            : values_{((void)Indices, Detail::ZeroCarrier<T>())...} {}
-
-        std::array<T, N> values_;
-    };
-
-    /** @brief Canonical short name for a fixed-size free vector. */
-    template<ValueCarrier T, size_t N>
-        requires(N > 0)
-    using Vec = Vector<T, N>;
-
-    namespace Detail {
+    namespace Traits {
 
         template<typename T, typename U>
         using AddResult = std::remove_cvref_t<decltype(Sora::Math::Add(std::declval<T>(), std::declval<U>()))>;
@@ -125,6 +31,20 @@ namespace Sora::Math {
 
         template<typename T, typename U>
         using DivResult = std::remove_cvref_t<decltype(Sora::Math::Div(std::declval<T>(), std::declval<U>()))>;
+
+    } // namespace Traits
+
+    /** @brief Fixed-size free vector backed by the canonical rank-one dense tensor representation. */
+    template<ValueCarrier T, size_t N>
+        requires(N > 0)
+    using Vector = BasicTensor<StaticDenseStorage<T, StaticShape<N>, RightMapping>, Algebra::FreeVector>;
+
+    /** @brief Canonical short name for a fixed-size free vector. */
+    template<ValueCarrier T, size_t N>
+        requires(N > 0)
+    using Vec = Vector<T, N>;
+
+    namespace Detail {
 
         template<ValueCarrier T, size_t N, typename Generator, size_t... Indices>
             requires requires(Generator& generator) { Vector<T, N>{generator(Indices)...}; }
@@ -145,12 +65,12 @@ namespace Sora::Math {
 
     /** @brief Add two vectors componentwise. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
-        requires requires(T left, U right) { Sora::Math::Add(left, right); } && ValueCarrier<Detail::AddResult<T, U>>
+        requires requires(T left, U right) { Sora::Math::Add(left, right); } && ValueCarrier<Traits::AddResult<T, U>>
     [[nodiscard]] constexpr auto operator+(const Vector<T, N>& left, const Vector<U, N>& right) noexcept(
         noexcept(Sora::Math::Add(left[0], right[0])) &&
-        std::is_nothrow_constructible_v<Detail::AddResult<T, U>, decltype(Sora::Math::Add(left[0], right[0]))>)
-        -> Vector<Detail::AddResult<T, U>, N> {
-        return Detail::GenerateVector<Detail::AddResult<T, U>, N>(
+        std::is_nothrow_constructible_v<Traits::AddResult<T, U>, decltype(Sora::Math::Add(left[0], right[0]))>)
+        -> Vector<Traits::AddResult<T, U>, N> {
+        return Detail::GenerateVector<Traits::AddResult<T, U>, N>(
             [&](size_t index) noexcept(noexcept(Sora::Math::Add(left[0], right[0]))) {
                 return Sora::Math::Add(left[index], right[index]);
             });
@@ -158,12 +78,12 @@ namespace Sora::Math {
 
     /** @brief Subtract two vectors componentwise. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
-        requires requires(T left, U right) { Sora::Math::Sub(left, right); } && ValueCarrier<Detail::SubResult<T, U>>
+        requires requires(T left, U right) { Sora::Math::Sub(left, right); } && ValueCarrier<Traits::SubResult<T, U>>
     [[nodiscard]] constexpr auto operator-(const Vector<T, N>& left, const Vector<U, N>& right) noexcept(
         noexcept(Sora::Math::Sub(left[0], right[0])) &&
-        std::is_nothrow_constructible_v<Detail::SubResult<T, U>, decltype(Sora::Math::Sub(left[0], right[0]))>)
-        -> Vector<Detail::SubResult<T, U>, N> {
-        return Detail::GenerateVector<Detail::SubResult<T, U>, N>(
+        std::is_nothrow_constructible_v<Traits::SubResult<T, U>, decltype(Sora::Math::Sub(left[0], right[0]))>)
+        -> Vector<Traits::SubResult<T, U>, N> {
+        return Detail::GenerateVector<Traits::SubResult<T, U>, N>(
             [&](size_t index) noexcept(noexcept(Sora::Math::Sub(left[0], right[0]))) {
                 return Sora::Math::Sub(left[index], right[index]);
             });
@@ -185,12 +105,12 @@ namespace Sora::Math {
 
     /** @brief Multiply a vector by a scalar or broadcast-compatible carrier. */
     template<ValueCarrier T, typename S, size_t N>
-        requires requires(T value, S scale) { Sora::Math::Mul(value, scale); } && ValueCarrier<Detail::MulResult<T, S>>
+        requires requires(T value, S scale) { Sora::Math::Mul(value, scale); } && ValueCarrier<Traits::MulResult<T, S>>
     [[nodiscard]] constexpr auto operator*(const Vector<T, N>& value, const S& scale) noexcept(
         noexcept(Sora::Math::Mul(value[0], scale)) &&
-        std::is_nothrow_constructible_v<Detail::MulResult<T, S>, decltype(Sora::Math::Mul(value[0], scale))>)
-        -> Vector<Detail::MulResult<T, S>, N> {
-        return Detail::GenerateVector<Detail::MulResult<T, S>, N>(
+        std::is_nothrow_constructible_v<Traits::MulResult<T, S>, decltype(Sora::Math::Mul(value[0], scale))>)
+        -> Vector<Traits::MulResult<T, S>, N> {
+        return Detail::GenerateVector<Traits::MulResult<T, S>, N>(
             [&](size_t index) noexcept(noexcept(Sora::Math::Mul(value[0], scale))) {
                 return Sora::Math::Mul(value[index], scale);
             });
@@ -198,12 +118,12 @@ namespace Sora::Math {
 
     /** @brief Multiply a vector by a scalar or broadcast-compatible carrier. */
     template<typename S, ValueCarrier T, size_t N>
-        requires requires(S scale, T value) { Sora::Math::Mul(scale, value); } && ValueCarrier<Detail::MulResult<S, T>>
+        requires requires(S scale, T value) { Sora::Math::Mul(scale, value); } && ValueCarrier<Traits::MulResult<S, T>>
     [[nodiscard]] constexpr auto operator*(const S& scale, const Vector<T, N>& value) noexcept(
         noexcept(Sora::Math::Mul(scale, value[0])) &&
-        std::is_nothrow_constructible_v<Detail::MulResult<S, T>, decltype(Sora::Math::Mul(scale, value[0]))>)
-        -> Vector<Detail::MulResult<S, T>, N> {
-        return Detail::GenerateVector<Detail::MulResult<S, T>, N>(
+        std::is_nothrow_constructible_v<Traits::MulResult<S, T>, decltype(Sora::Math::Mul(scale, value[0]))>)
+        -> Vector<Traits::MulResult<S, T>, N> {
+        return Detail::GenerateVector<Traits::MulResult<S, T>, N>(
             [&](size_t index) noexcept(noexcept(Sora::Math::Mul(scale, value[0]))) {
                 return Sora::Math::Mul(scale, value[index]);
             });
@@ -211,12 +131,12 @@ namespace Sora::Math {
 
     /** @brief Divide a vector by a scalar or broadcast-compatible carrier. */
     template<ValueCarrier T, typename S, size_t N>
-        requires requires(T value, S scale) { Sora::Math::Div(value, scale); } && ValueCarrier<Detail::DivResult<T, S>>
+        requires requires(T value, S scale) { Sora::Math::Div(value, scale); } && ValueCarrier<Traits::DivResult<T, S>>
     [[nodiscard]] constexpr auto operator/(const Vector<T, N>& value, const S& scale) noexcept(
         noexcept(Sora::Math::Div(value[0], scale)) &&
-        std::is_nothrow_constructible_v<Detail::DivResult<T, S>, decltype(Sora::Math::Div(value[0], scale))>)
-        -> Vector<Detail::DivResult<T, S>, N> {
-        return Detail::GenerateVector<Detail::DivResult<T, S>, N>(
+        std::is_nothrow_constructible_v<Traits::DivResult<T, S>, decltype(Sora::Math::Div(value[0], scale))>)
+        -> Vector<Traits::DivResult<T, S>, N> {
+        return Detail::GenerateVector<Traits::DivResult<T, S>, N>(
             [&](size_t index) noexcept(noexcept(Sora::Math::Div(value[0], scale))) {
                 return Sora::Math::Div(value[index], scale);
             });

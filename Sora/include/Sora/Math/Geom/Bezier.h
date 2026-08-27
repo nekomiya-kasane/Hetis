@@ -121,7 +121,7 @@ namespace Sora::Math {
                                                        const Vector<U, N>& addend) noexcept(
             noexcept(Sora::Math::Fma(value[0], scale, addend[0]))) {
             using R = std::remove_cvref_t<decltype(Sora::Math::Fma(value[0], scale, addend[0]))>;
-            return Vector<R, N>{Detail::GenerateArray<R, N>(
+            return Vector<R, N>{GenerateStaticArray<R, N>(
                 [&](auto index) noexcept(noexcept(Sora::Math::Fma(value[0], scale, addend[0]))) {
                     return Sora::Math::Fma(value[index], scale, addend[index]);
                 })};
@@ -135,7 +135,7 @@ namespace Sora::Math {
                                                        const Point<U, N>& addend) noexcept(
             noexcept(Sora::Math::Fma(value[0], scale, addend[0]))) {
             using R = std::remove_cvref_t<decltype(Sora::Math::Fma(value[0], scale, addend[0]))>;
-            return Point<R, N>{Detail::GenerateArray<R, N>(
+            return Point<R, N>{GenerateStaticArray<R, N>(
                 [&](auto index) noexcept(noexcept(Sora::Math::Fma(value[0], scale, addend[0]))) {
                     return Sora::Math::Fma(value[index], scale, addend[index]);
                 })};
@@ -191,7 +191,7 @@ namespace Sora::Math {
                 return BezierBlend(controls[0], controls[0], parameter);
             } else {
                 using Result = std::remove_cvref_t<decltype(BezierBlend(controls[0], controls[1], parameter))>;
-                auto level = Detail::GenerateArray<Result, Count - 1>(
+                auto level = GenerateStaticArray<Result, Count - 1>(
                     [&](auto index) noexcept(kNothrowBezierBlend<Control, Control, Parameter>) {
                         return BezierBlend(controls[index], controls[index + 1], parameter);
                     });
@@ -227,10 +227,10 @@ namespace Sora::Math {
                                                               const Parameter& parameter) {
             static_assert(Count > 0);
             using Result = std::remove_cvref_t<decltype(BezierBlend(controls[0], controls[0], parameter))>;
-            auto level = GenerateArray<Result, Count>(
+            auto level = GenerateStaticArray<Result, Count>(
                 [&](auto index) { return BezierBlend(controls[index], controls[index], parameter); });
-            auto left = GenerateArray<Result, Count>([&](auto) { return level[0]; });
-            auto right = GenerateArray<Result, Count>([&](auto) { return level[Count - 1]; });
+            auto left = GenerateStaticArray<Result, Count>([&](auto) { return level[0]; });
+            auto right = GenerateStaticArray<Result, Count>([&](auto) { return level[Count - 1]; });
             for (size_t remaining = Count - 1; remaining > 0; --remaining) {
                 for (size_t index = 0; index < remaining; ++index) {
                     level[index] = BezierBlend(level[index], level[index + 1], parameter);
@@ -336,7 +336,7 @@ namespace Sora::Math {
                 return BezierDifference(control, controls[0]);
             });
             const auto coefficients = CubicTensorPower<0>(directions);
-            return Data{controls[0], GenerateArray<Direction, Data::kCoefficientCount - 1>(
+            return Data{controls[0], GenerateStaticArray<Direction, Data::kCoefficientCount - 1>(
                                          [&](auto index) { return coefficients[index + 1]; })};
         }
 
@@ -515,7 +515,7 @@ namespace Sora::Math {
                         std::remove_cvref_t<decltype(Detail::BezierScale(std::declval<Difference>(), degree))>;
                     auto derivativeControls = TransformTensorAxis<Axis, degree>(
                         controls_, [&](const std::array<Control, extent>& fiber) {
-                            return Detail::GenerateArray<DerivativeControl, degree>([&](auto index) {
+                            return GenerateStaticArray<DerivativeControl, degree>([&](auto index) {
                                 return Detail::BezierScale(
                                     Detail::BezierDifference(fiber[index + 1], fiber[index]), degree);
                             });
@@ -602,10 +602,10 @@ namespace Sora::Math {
             using Fiber = std::array<Control, extent>;
             using Split = decltype(Detail::SubdivideBezierControls(std::declval<const Fiber&>(), parameter));
             using ResultControl = typename Split::first_type::value_type;
-            const auto splits = Detail::GenerateArray<Split, fiberCount>([&](auto fiberIndex) {
+            const auto splits = GenerateStaticArray<Split, fiberCount>([&](auto fiberIndex) {
                 constexpr size_t outer = decltype(fiberIndex)::value / innerStride;
                 constexpr size_t inner = decltype(fiberIndex)::value % innerStride;
-                const auto fiber = Detail::GenerateArray<Control, extent>([&](auto axisIndex) {
+                const auto fiber = GenerateStaticArray<Control, extent>([&](auto axisIndex) {
                     constexpr size_t inputIndex = outer * extent * innerStride +
                                                   decltype(axisIndex)::value * innerStride + inner;
                     return controls_[inputIndex];
@@ -613,7 +613,7 @@ namespace Sora::Math {
                 return Detail::SubdivideBezierControls(fiber, parameter);
             });
             const auto values = [&]<size_t Side>() {
-                return Detail::GenerateArray<ResultControl, kControlCount>([&](auto outputIndex) {
+                return GenerateStaticArray<ResultControl, kControlCount>([&](auto outputIndex) {
                     constexpr size_t outer = decltype(outputIndex)::value / (extent * innerStride);
                     constexpr size_t remainder = decltype(outputIndex)::value % (extent * innerStride);
                     constexpr size_t axisIndex = remainder / innerStride;
@@ -646,7 +646,7 @@ namespace Sora::Math {
                 std::declval<const Control&>(), std::declval<const Control&>(), endpointWeight))>;
             auto elevated = TransformTensorAxis<Axis, degree + 2>(
                 controls_, [&](const std::array<Control, extent>& fiber) {
-                return Detail::GenerateArray<ElevatedControl, degree + 2>([&](auto index) {
+                return GenerateStaticArray<ElevatedControl, degree + 2>([&](auto index) {
                     if constexpr (decltype(index)::value == 0) {
                         return Detail::BezierBlend(fiber[0], fiber[0], endpointWeight);
                     } else if constexpr (decltype(index)::value == degree + 1) {
@@ -720,7 +720,7 @@ namespace Sora::Math {
                                              const Parameter& parameter) {
         using Value = std::remove_cvref_t<decltype(curve.Evaluate(parameter))>;
         using Derivative = std::remove_cvref_t<decltype(curve.template EvaluateDerivative<1>(parameter))>;
-        auto derivatives = Detail::GenerateArray<Derivative, Order>([&](auto derivative) {
+        auto derivatives = GenerateStaticArray<Derivative, Order>([&](auto derivative) {
             return curve.template EvaluateDerivative<decltype(derivative)::value + 1>(parameter);
         });
         return BezierCurveJet<Value, Derivative, Order>{
