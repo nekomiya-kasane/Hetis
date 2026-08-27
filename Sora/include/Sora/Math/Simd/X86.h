@@ -754,7 +754,8 @@ namespace Sora::Math::Simd {
     constexpr auto DuplicateEachBit(const TrivialPair<U0, U1>& x) {
         static_assert(InputBits != -1 || std::is_unsigned_v<U1>);
         constexpr int inputBits = InputBits == -1 ? (sizeof(U0) + sizeof(U1)) * __CHAR_BIT__ : InputBits;
-        constexpr int in0 = Min(int(sizeof(U0)) * __CHAR_BIT__, inputBits);
+        constexpr int firstBits = int(sizeof(U0)) * __CHAR_BIT__;
+        constexpr int in0 = inputBits < firstBits ? inputBits : firstBits;
         constexpr int in1 = inputBits - in0;
         if constexpr (in1 == 0) {
             return DuplicateEachBit<in0>(x.first);

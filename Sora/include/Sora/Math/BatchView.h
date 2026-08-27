@@ -77,6 +77,9 @@ namespace Sora::Math {
         /** @brief Return the underlying logical @c [coordinate,sample] mdspan. */
         [[nodiscard]] constexpr ViewType View() const noexcept { return view_; }
 
+        /** @brief Return the first address of the external physical storage. */
+        [[nodiscard]] constexpr T* Data() const noexcept { return view_.data_handle(); }
+
         /** @brief Access one external scalar element. */
         [[nodiscard]] constexpr T& operator[](size_t coordinate, size_t sample) const noexcept {
             return view_[coordinate, sample];
@@ -137,6 +140,7 @@ namespace Sora::Math {
         HomogeneousBatch<T> && (std::remove_cvref_t<T>::kLayout == BatchLayout::CoordinateMajor) &&
         requires(T batch, size_t coordinate) {
             { batch.Coordinate(coordinate) } -> std::same_as<std::span<typename std::remove_cvref_t<T>::ElementType>>;
+            { batch.Data() } -> std::same_as<typename std::remove_cvref_t<T>::ElementType*>;
         };
 
 } // namespace Sora::Math

@@ -13,10 +13,6 @@
 #include <limits>
 #include <string_view>
 
-#if defined(__APPLE__)
-#    include <TargetConditionals.h>
-#endif
-
 #if defined(_WIN32) || defined(__CYGWIN__)
 #    ifndef PLATFORM_EXPORT
 #        define PLATFORM_EXPORT __declspec(dllexport)
@@ -216,18 +212,20 @@ namespace Sora {
         inline constexpr KernelFamily kKernelFamily = KernelFamily::Linux;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Headless;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::ELF;
-#elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-#    define PLATFORM_IOS 1
+#elif defined(__APPLE__)
+#    if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__) || defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
+#        define PLATFORM_IOS 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::iOS;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::XNU;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::UIKit;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::MachO;
-#elif defined(__APPLE__)
-#    define PLATFORM_MACOS 1
+#    else
+#        define PLATFORM_MACOS 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::macOS;
         inline constexpr KernelFamily kKernelFamily = KernelFamily::XNU;
         inline constexpr WindowSystem kDefaultWindowSystem = WindowSystem::Cocoa;
         inline constexpr BinaryFormat kBinaryFormat = BinaryFormat::MachO;
+#    endif
 #elif defined(__FreeBSD__)
 #    define PLATFORM_FREEBSD 1
         inline constexpr OperatingSystem kOperatingSystem = OperatingSystem::FreeBSD;

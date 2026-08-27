@@ -66,9 +66,7 @@ namespace Sora::Math {
         /** @brief Construct the additive identity. */
         constexpr Vector() noexcept(Detail::kNothrowZeroCarrier<T>)
             requires Detail::ZeroInitializable<T>
-        {
-            values_.fill(Detail::ZeroCarrier<T>());
-        }
+            : Vector(std::make_index_sequence<N>{}) {}
 
         /** @brief Construct from the exact component array. */
         constexpr explicit Vector(std::array<T, N> values) noexcept(std::is_nothrow_move_constructible_v<T>)
@@ -101,6 +99,11 @@ namespace Sora::Math {
         }
 
     private:
+        template<size_t... Indices>
+        constexpr explicit Vector(std::index_sequence<Indices...>) noexcept(Detail::kNothrowZeroCarrier<T>)
+            requires Detail::ZeroInitializable<T>
+            : values_{((void)Indices, Detail::ZeroCarrier<T>())...} {}
+
         std::array<T, N> values_;
     };
 
@@ -123,83 +126,100 @@ namespace Sora::Math {
         template<typename T, typename U>
         using DivResult = std::remove_cvref_t<decltype(Sora::Math::Div(std::declval<T>(), std::declval<U>()))>;
 
+        template<ValueCarrier T, size_t N, typename Generator, size_t... Indices>
+            requires requires(Generator& generator) { Vector<T, N>{generator(Indices)...}; }
+        [[nodiscard]] constexpr Vector<T, N>
+        GenerateVector(Generator& generator,
+                       std::index_sequence<Indices...>) noexcept(noexcept(Vector<T, N>{generator(Indices)...})) {
+            return Vector<T, N>{generator(Indices)...};
+        }
+
+        template<ValueCarrier T, size_t N, typename Generator>
+            requires requires(Generator& generator) { GenerateVector<T, N>(generator, std::make_index_sequence<N>{}); }
+        [[nodiscard]] constexpr Vector<T, N> GenerateVector(Generator&& generator) noexcept(
+            noexcept(GenerateVector<T, N>(generator, std::make_index_sequence<N>{}))) {
+            return GenerateVector<T, N>(generator, std::make_index_sequence<N>{});
+        }
+
     } // namespace Detail
 
     /** @brief Add two vectors componentwise. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
         requires requires(T left, U right) { Sora::Math::Add(left, right); } && ValueCarrier<Detail::AddResult<T, U>>
     [[nodiscard]] constexpr auto operator+(const Vector<T, N>& left, const Vector<U, N>& right) noexcept(
-        noexcept(Sora::Math::Add(left[0], right[0]))) -> Vector<Detail::AddResult<T, U>, N> {
-        Vector<Detail::AddResult<T, U>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Add(left[i], right[i]);
-        }
-        return result;
+        noexcept(Sora::Math::Add(left[0], right[0])) &&
+        std::is_nothrow_constructible_v<Detail::AddResult<T, U>, decltype(Sora::Math::Add(left[0], right[0]))>)
+        -> Vector<Detail::AddResult<T, U>, N> {
+        return Detail::GenerateVector<Detail::AddResult<T, U>, N>(
+            [&](size_t index) noexcept(noexcept(Sora::Math::Add(left[0], right[0]))) {
+                return Sora::Math::Add(left[index], right[index]);
+            });
     }
 
     /** @brief Subtract two vectors componentwise. */
     template<ValueCarrier T, ValueCarrier U, size_t N>
         requires requires(T left, U right) { Sora::Math::Sub(left, right); } && ValueCarrier<Detail::SubResult<T, U>>
     [[nodiscard]] constexpr auto operator-(const Vector<T, N>& left, const Vector<U, N>& right) noexcept(
-        noexcept(Sora::Math::Sub(left[0], right[0]))) -> Vector<Detail::SubResult<T, U>, N> {
-        Vector<Detail::SubResult<T, U>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Sub(left[i], right[i]);
-        }
-        return result;
+        noexcept(Sora::Math::Sub(left[0], right[0])) &&
+        std::is_nothrow_constructible_v<Detail::SubResult<T, U>, decltype(Sora::Math::Sub(left[0], right[0]))>)
+        -> Vector<Detail::SubResult<T, U>, N> {
+        return Detail::GenerateVector<Detail::SubResult<T, U>, N>(
+            [&](size_t index) noexcept(noexcept(Sora::Math::Sub(left[0], right[0]))) {
+                return Sora::Math::Sub(left[index], right[index]);
+            });
     }
 
     /** @brief Negate every vector component. */
     template<ValueCarrier T, size_t N>
         requires requires(T value) { Sora::Math::Neg(value); } &&
                  ValueCarrier<std::remove_cvref_t<decltype(Sora::Math::Neg(std::declval<T>()))>>
-    [[nodiscard]] constexpr auto operator-(const Vector<T, N>& value) noexcept(noexcept(Sora::Math::Neg(value[0])))
+    [[nodiscard]] constexpr auto operator-(const Vector<T, N>& value) noexcept(
+        noexcept(Sora::Math::Neg(value[0])) &&
+        std::is_nothrow_constructible_v<std::remove_cvref_t<decltype(Sora::Math::Neg(std::declval<T>()))>,
+                                        decltype(Sora::Math::Neg(value[0]))>)
         -> Vector<std::remove_cvref_t<decltype(Sora::Math::Neg(std::declval<T>()))>, N> {
         using R = std::remove_cvref_t<decltype(Sora::Math::Neg(std::declval<T>()))>;
-        Vector<R, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Neg(value[i]);
-        }
-        return result;
+        return Detail::GenerateVector<R, N>(
+            [&](size_t index) noexcept(noexcept(Sora::Math::Neg(value[0]))) { return Sora::Math::Neg(value[index]); });
     }
 
     /** @brief Multiply a vector by a scalar or broadcast-compatible carrier. */
     template<ValueCarrier T, typename S, size_t N>
         requires requires(T value, S scale) { Sora::Math::Mul(value, scale); } && ValueCarrier<Detail::MulResult<T, S>>
-    [[nodiscard]] constexpr auto operator*(const Vector<T, N>& value,
-                                           const S& scale) noexcept(noexcept(Sora::Math::Mul(value[0], scale)))
+    [[nodiscard]] constexpr auto operator*(const Vector<T, N>& value, const S& scale) noexcept(
+        noexcept(Sora::Math::Mul(value[0], scale)) &&
+        std::is_nothrow_constructible_v<Detail::MulResult<T, S>, decltype(Sora::Math::Mul(value[0], scale))>)
         -> Vector<Detail::MulResult<T, S>, N> {
-        Vector<Detail::MulResult<T, S>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Mul(value[i], scale);
-        }
-        return result;
+        return Detail::GenerateVector<Detail::MulResult<T, S>, N>(
+            [&](size_t index) noexcept(noexcept(Sora::Math::Mul(value[0], scale))) {
+                return Sora::Math::Mul(value[index], scale);
+            });
     }
 
     /** @brief Multiply a vector by a scalar or broadcast-compatible carrier. */
     template<typename S, ValueCarrier T, size_t N>
         requires requires(S scale, T value) { Sora::Math::Mul(scale, value); } && ValueCarrier<Detail::MulResult<S, T>>
-    [[nodiscard]] constexpr auto
-    operator*(const S& scale, const Vector<T, N>& value) noexcept(noexcept(Sora::Math::Mul(scale, value[0])))
+    [[nodiscard]] constexpr auto operator*(const S& scale, const Vector<T, N>& value) noexcept(
+        noexcept(Sora::Math::Mul(scale, value[0])) &&
+        std::is_nothrow_constructible_v<Detail::MulResult<S, T>, decltype(Sora::Math::Mul(scale, value[0]))>)
         -> Vector<Detail::MulResult<S, T>, N> {
-        Vector<Detail::MulResult<S, T>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Mul(scale, value[i]);
-        }
-        return result;
+        return Detail::GenerateVector<Detail::MulResult<S, T>, N>(
+            [&](size_t index) noexcept(noexcept(Sora::Math::Mul(scale, value[0]))) {
+                return Sora::Math::Mul(scale, value[index]);
+            });
     }
 
     /** @brief Divide a vector by a scalar or broadcast-compatible carrier. */
     template<ValueCarrier T, typename S, size_t N>
         requires requires(T value, S scale) { Sora::Math::Div(value, scale); } && ValueCarrier<Detail::DivResult<T, S>>
-    [[nodiscard]] constexpr auto operator/(const Vector<T, N>& value,
-                                           const S& scale) noexcept(noexcept(Sora::Math::Div(value[0], scale)))
+    [[nodiscard]] constexpr auto operator/(const Vector<T, N>& value, const S& scale) noexcept(
+        noexcept(Sora::Math::Div(value[0], scale)) &&
+        std::is_nothrow_constructible_v<Detail::DivResult<T, S>, decltype(Sora::Math::Div(value[0], scale))>)
         -> Vector<Detail::DivResult<T, S>, N> {
-        Vector<Detail::DivResult<T, S>, N> result;
-        template for (constexpr size_t i : std::define_static_array(std::views::iota(size_t{0}, N))) {
-            result[i] = Sora::Math::Div(value[i], scale);
-        }
-        return result;
+        return Detail::GenerateVector<Detail::DivResult<T, S>, N>(
+            [&](size_t index) noexcept(noexcept(Sora::Math::Div(value[0], scale))) {
+                return Sora::Math::Div(value[index], scale);
+            });
     }
 
     /** @brief Return the lane-wise conjunction of component equalities. */

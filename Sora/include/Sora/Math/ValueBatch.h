@@ -41,8 +41,7 @@ namespace Sora::Math {
             Value result;
             template for (constexpr size_t coordinate :
                           std::define_static_array(std::views::iota(size_t{0}, dimension))) {
-                const auto channel = batch.Coordinate(coordinate).subspan(offset, V::kSize.value);
-                result[coordinate] = Simd::UncheckedLoad<V>(channel);
+                result[coordinate] = V(Simd::LoadCtorTag{}, batch.Data() + coordinate * batch.Size() + offset);
             }
             return result;
         }
@@ -53,8 +52,7 @@ namespace Sora::Math {
             constexpr size_t dimension = std::remove_cvref_t<Batch>::kDimension;
             template for (constexpr size_t coordinate :
                           std::define_static_array(std::views::iota(size_t{0}, dimension))) {
-                auto channel = batch.Coordinate(coordinate).subspan(offset, V::kSize.value);
-                Simd::UncheckedStore(value[coordinate], channel);
+                value[coordinate].Store(batch.Data() + coordinate * batch.Size() + offset);
             }
         }
 
