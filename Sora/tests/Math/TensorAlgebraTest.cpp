@@ -41,6 +41,17 @@ namespace {
     constexpr auto kMapped = Elementwise([](double value) { return value * 2.0; }, kInput);
     static_assert(kMapped[4] == 10.0);
 
+    constexpr Sora::Math::Vector<int, 3> kVector{1, 2, 3};
+    constexpr auto kMappedVector = Elementwise([](int value) { return value + 1; }, kVector);
+    static_assert(std::same_as<std::remove_cv_t<decltype(kMappedVector)>, Sora::Math::Vector<int, 3>>);
+    static_assert(kMappedVector[2] == 4);
+
+    constexpr Matrix<int, 2, 2, MatrixLayout::RowMajor> kRowMajorMatrix{std::array{1, 2, 3, 4}};
+    constexpr auto kMappedMatrix = Elementwise([](int value, int scale) { return value * scale; }, kRowMajorMatrix, 2);
+    static_assert(std::same_as<std::remove_cv_t<decltype(kMappedMatrix)>,
+                               Matrix<int, 2, 2, MatrixLayout::RowMajor>>);
+    static_assert(kMappedMatrix(1, 0) == 6);
+
     constexpr Tensor<double, 2> kLeft{1.0, 2.0};
     constexpr Tensor<double, 2> kRight{3.0, 5.0};
     constexpr auto kContracted = Contract<AxisPair{0, 0}>(kLeft, kRight);

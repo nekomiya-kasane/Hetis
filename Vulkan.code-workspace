@@ -3,6 +3,10 @@
     {
       "name": "Vulkan",
       "path": "."
+    },
+    {
+      "name": "stdexec (ref)",
+      "path": "../stdexec"
     }
   ],
   "settings": {
@@ -19,6 +23,7 @@
     "clangd.checkUpdates": false,
     "clangd.detectExtensionConflicts": true,
     "clangd.arguments": [
+      "--compile-commands-dir=G:/Teaching/Vulkan/build/x64-asan",
       "--background-index",
       "--clang-tidy",
       "--completion-style=detailed",
@@ -27,7 +32,7 @@
       "--pch-storage=memory",
       "--function-arg-placeholders=true",
       "--limit-results=200",
-      "-j=8",
+      "-j=16",
       "--query-driver=T:/toolchains/coca-toolchain-p2996/bin/clang*.exe"
     ],
 

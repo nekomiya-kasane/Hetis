@@ -187,11 +187,11 @@ TEST_CASE("InfoList set and higher-order operations", "[Sora][Core][MetaInfoList
 
     constexpr auto flat = Sora::Meta::FlatMap(^^PairInfos, Sora::Meta::InfoList{^^int, ^^double});
     STATIC_REQUIRE(Sora::Meta::IsInfoList(flat));
-    STATIC_REQUIRE(Sora::Meta::Equal(Sora::Meta::RequireInfoList(flat),
+    STATIC_REQUIRE(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(flat),
                                      Sora::Meta::InfoList{^^int, ^^const int, ^^double, ^^const double}));
     constexpr auto zeroFlat = Sora::Meta::FlatMap(^^EmptyInfos, Sora::Meta::InfoList{^^int, ^^double});
     STATIC_REQUIRE(Sora::Meta::IsInfoList(zeroFlat));
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(zeroFlat).empty());
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(zeroFlat).empty());
     constexpr auto invalidFlat = Sora::Meta::FlatMap(^^NonListExpansion, Sora::Meta::InfoList{^^int});
     STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidFlat) == ^^Sora::Meta::Error::NonInvocable);
     constexpr auto wrongCodomain = Sora::Meta::FlatMap(^^PairWithConst, Sora::Meta::InfoList{^^int});
@@ -200,9 +200,9 @@ TEST_CASE("InfoList set and higher-order operations", "[Sora][Core][MetaInfoList
     constexpr auto replaced =
         Sora::Meta::ReplaceIf(^^IsIntegral, ^^bool, Sora::Meta::InfoList{^^int, ^^double, ^^char});
     STATIC_REQUIRE(
-        Sora::Meta::Equal(Sora::Meta::RequireInfoList(replaced), Sora::Meta::InfoList{^^bool, ^^double, ^^bool}));
+        Sora::Meta::Equal(Sora::Meta::ExtractInfoList(replaced), Sora::Meta::InfoList{^^bool, ^^double, ^^bool}));
     constexpr auto removed = Sora::Meta::RemoveIf(^^IsIntegral, Sora::Meta::InfoList{^^int, ^^double, ^^char});
-    STATIC_REQUIRE(Sora::Meta::Equal(Sora::Meta::RequireInfoList(removed), Sora::Meta::InfoList{^^double}));
+    STATIC_REQUIRE(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(removed), Sora::Meta::InfoList{^^double}));
 }
 
 TEST_CASE("Reflection-native meta invocation", "[Sora][Core][MetaInvocable]") {
@@ -386,8 +386,8 @@ TEST_CASE("MetaOperators share one InfoList kernel", "[Sora][Core][MetaOperators
     constexpr auto mapped = Sora::Meta::Map(^^std::add_pointer_t, Sora::Meta::InfoList{^^int, ^^double});
     constexpr auto bracedMapped = Sora::Meta::Map(^^std::add_pointer_t, {^^int});
     STATIC_REQUIRE(Sora::Meta::IsInfoList(mapped));
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(mapped)[1] == ^^double*);
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(bracedMapped).front() == ^^int*);
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(mapped)[1] == ^^double*);
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(bracedMapped).front() == ^^int*);
 
     constexpr auto invalidMap = Sora::Meta::Map(^^std::pair, Sora::Meta::InfoList{^^int, ^^double});
     STATIC_REQUIRE(Sora::Meta::IsMetaError(invalidMap));
@@ -522,10 +522,10 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     constexpr auto emptyFold = Sora::Meta::FoldLeft(^^std::decay_t, ^^void, {});
     constexpr auto emptyZip = Sora::Meta::Zip(^^std::decay_t, {}, {});
     STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidEmptyMap) == ^^Sora::Meta::Error::NonInvocable);
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(emptyMap).empty());
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(emptyMap).empty());
     STATIC_REQUIRE(Sora::Meta::ErrorCategory(invalidEmptyFilter) == ^^Sora::Meta::Error::NonBooleanPredResult);
     STATIC_REQUIRE(emptyFold == ^^void);
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(emptyZip).empty());
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(emptyZip).empty());
 
     constexpr auto empty = ^^Sora::Traits::TypeList<>;
     STATIC_REQUIRE(Sora::Meta::FoldRight(^^std::decay_t, ^^void, {}) == ^^void);
@@ -553,8 +553,8 @@ TEST_CASE("MetaOperators preserve errors and reject invalid projections", "[Sora
     constexpr auto constrainedMap = Sora::Meta::Map(^^IntegralIdentity, Sora::Meta::InfoList{^^int, ^^long});
     constexpr auto reflectedThree = std::meta::reflect_constant(3);
     constexpr auto constantMap = Sora::Meta::Map(^^ConstantType, Sora::Meta::InfoList{reflectedThree});
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(constrainedMap)[1] == ^^long);
-    STATIC_REQUIRE(Sora::Meta::RequireInfoList(constantMap).front() == ^^std::integral_constant<int, 3>);
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(constrainedMap)[1] == ^^long);
+    STATIC_REQUIRE(Sora::Meta::ExtractInfoList(constantMap).front() == ^^std::integral_constant<int, 3>);
 
     constexpr auto hiddenAllError = Sora::Meta::AllOf(^^IsIntegral, Sora::Meta::InfoList{^^double, error});
     constexpr auto hiddenAnyError = Sora::Meta::AnyOf(^^IsIntegral, Sora::Meta::InfoList{^^int, error});

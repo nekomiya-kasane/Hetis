@@ -105,6 +105,10 @@ namespace {
     static_assert(Traits::Poolable<Wide16>);
     static_assert(Traits::Poolable<ThrowingDefault>);
     static_assert(std::is_trivially_copyable_v<PoolHandle>);
+    using QuantifiedPool = ConcurrentObjectPool<Widget, Detail::PoolConfig{.capacity = 8}>;
+    static_assert(QuantifiedPool::kFreeListTagBits == 60);
+    static_assert(QuantifiedPool::kFreeListTagPeriod == (std::uint64_t{1} << 60));
+    static_assert(QuantifiedPool::kHandleRecyclePeriod == (std::uint64_t{1} << 15));
 
 } // anonymous namespace
 

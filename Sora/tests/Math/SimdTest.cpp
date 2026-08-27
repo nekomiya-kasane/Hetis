@@ -351,6 +351,33 @@ TEST_CASE("batch executor vectorizes multiple inputs and masks the tail", "[Sora
     }
 }
 
+TEST_CASE("partial SIMD load and store copy every active element", "[Sora][Math][Simd][LoadStore]") {
+    const std::array<float, 4> floatInput{1.0F, 2.0F, 3.0F, 4.0F};
+    for (size_t active = 0; active < floatInput.size(); ++active) {
+        std::array<float, 4> output{-1.0F, -1.0F, -1.0F, -1.0F};
+        const Float4 value = Simd::PartialLoad<Float4>(std::span(floatInput).first(active));
+        Simd::PartialStore(value, std::span(output).first(active));
+        for (size_t index = 0; index < active; ++index) {
+            REQUIRE(output[index] == floatInput[index]);
+        }
+        for (size_t index = active; index < output.size(); ++index) {
+            REQUIRE(output[index] == -1.0F);
+        }
+    }
+
+    using UInt64x4 = Simd::Vector<std::uint64_t, 4>;
+    const std::array<std::uint64_t, 4> wideInput{0x0102'0304'0506'0708ULL, 0x1112'1314'1516'1718ULL,
+                                                 0x2122'2324'2526'2728ULL, 0x3132'3334'3536'3738ULL};
+    for (size_t active = 1; active < wideInput.size(); ++active) {
+        std::array<std::uint64_t, 4> output{};
+        const UInt64x4 value = Simd::PartialLoad<UInt64x4>(std::span(wideInput).first(active));
+        Simd::PartialStore(value, std::span(output).first(active));
+        for (size_t index = 0; index < active; ++index) {
+            REQUIRE(output[index] == wideInput[index]);
+        }
+    }
+}
+
 TEST_CASE("batched JVP combines automatic differentiation with SIMD tail handling", "[Sora][Math][Batch][Autodiff]") {
     constexpr size_t count = 7;
     const std::array<float, count> x{0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F, 0.7F};

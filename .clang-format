@@ -27,6 +27,8 @@ SpaceAfterTemplateKeyword: false
 FixNamespaceComments: true
 IndentCaseLabels: true
 
+AllowBreakBeforeNoexceptSpecifier: OnlyWithParen
+
 # Do NOT reorder includes: this tree relies on deliberate ordering
 # (volk before vulkan.h, stb implementation macros before stb headers, etc.).
 SortIncludes: false

@@ -194,8 +194,10 @@ TEST_CASE("BoundedStack every topology exposes sequential LIFO semantics", AUTO_
     RequireSequentialLifo<QueueTopologies::Mpmc>();
 }
 
-TEST_CASE("BoundedStack reuses every slot without stale-head ABA", AUTO_TAG) {
+TEST_CASE("BoundedStack preserves values across repeated tagged-head reuse within its tag window", AUTO_TAG) {
     BoundedStack<std::uint64_t, 2, QueueTopologies::Mpmc> stack;
+    STATIC_REQUIRE(decltype(stack)::kHeadTagBits == 54);
+    STATIC_REQUIRE(decltype(stack)::kHeadTagPeriod == (std::uint64_t{1} << 54));
     for (std::uint64_t cycle = 0; cycle != 100'000; ++cycle) {
         REQUIRE(stack.TryPush(cycle));
         REQUIRE(stack.TryPush(cycle + 1));
