@@ -236,24 +236,25 @@ namespace Sora {
                 std::meta::info match = std::meta::info{};
                 Sora::Meta::WalkHierarchyMembers(classType, [&](size_t /*depth*/, std::meta::info m) {
                     if (match != std::meta::info{}) {
-                        return;
+                        return false;
                     }
                     if (!Sora::Meta::IsRegularMethod(m)) {
-                        return;
+                        return false;
                     }
                     if (!std::meta::has_identifier(m) || Meta::IdentifierOf(m) != name) {
-                        return;
+                        return false;
                     }
                     if (std::meta::is_const(m) != wantC || std::meta::is_volatile(m) != wantV) {
-                        return;
+                        return false;
                     }
                     if (std::meta::return_type_of(m) != wantRet) {
-                        return;
+                        return false;
                     }
                     if (!std::ranges::equal(ParamTypes(m), wantParams)) {
-                        return;
+                        return false;
                     }
                     match = m;
+                    return true;
                 });
                 return match;
             }

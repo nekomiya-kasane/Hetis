@@ -34,16 +34,14 @@ namespace Sora {
          */
         template<typename T>
         concept CoroutineHandle =
-            Sora::Meta::IsSpecializationOf<std::coroutine_handle>(
-                std::meta::dealias(^^std::remove_cvref_t<T>));
+            Sora::Meta::IsSpecializationOf<std::coroutine_handle>(std::meta::dealias(^^std::remove_cvref_t<T>));
 
         /**
          * @brief Recognize the type-erased @c std::coroutine_handle<> specialization.
          * @tparam T Candidate type.
          */
         template<typename T>
-        concept TypeErasedCoroutineHandle =
-            std::same_as<std::remove_cvref_t<T>, std::coroutine_handle<>>;
+        concept TypeErasedCoroutineHandle = std::same_as<std::remove_cvref_t<T>, std::coroutine_handle<>>;
 
         /**
          * @brief Recognize a promise-typed @c std::coroutine_handle specialization.
@@ -75,9 +73,10 @@ namespace Sora {
          * by @c Concept::AwaiterFor instead. Results preserve derived-first hierarchy order and have static storage.
          *
          * @param[in] awaiter Reflected awaiter class type.
+         * @param[in] requireNoexcept Whether matching declarations must be non-throwing.
          * @return Static reflection sequence of matching member functions.
          */
-        consteval InfoList AwaitSuspendFunctionsOf(std::meta::info awaiter) {
+        consteval InfoList AwaitSuspendFunctionsOf(std::meta::info awaiter, bool requireNoexcept = false) {
             awaiter = std::meta::dealias(awaiter);
             if (!std::meta::is_class_type(awaiter)) {
                 return {};
@@ -85,16 +84,16 @@ namespace Sora {
             std::vector<std::meta::info> suspenders;
             Sora::Meta::WalkHierarchyMembers(
                 awaiter,
-                [&suspenders](std::size_t, std::meta::info member) {
+                [&suspenders, requireNoexcept](std::size_t, std::meta::info member) {
                     if (!std::meta::is_function(member) || !std::meta::has_identifier(member) ||
-                        std::meta::identifier_of(member) != "await_suspend") {
+                        std::meta::identifier_of(member) != "await_suspend" ||
+                        (requireNoexcept && !std::meta::is_noexcept(member))) {
                         return true;
                     }
 
                     const auto parameters = Sora::Meta::ParamTypesOf(member);
-                    if (parameters.size() != 1 ||
-                        !Sora::Meta::IsSpecializationOf<std::coroutine_handle>(
-                            std::meta::dealias(parameters.front()))) {
+                    if (parameters.size() != 1 || !Sora::Meta::IsSpecializationOf<std::coroutine_handle>(
+                                                      std::meta::dealias(parameters.front()))) {
                         return true;
                     }
 
@@ -182,21 +181,29 @@ namespace Sora {
          * @tparam Promise Promise type of the awaiting coroutine; @c void models a type-erased continuation.
          */
         template<typename T, typename Promise>
-        concept AwaiterFor = requires(std::remove_reference_t<T>& awaiter,
-                                      std::coroutine_handle<Promise> continuation) {
-            awaiter.await_ready() ? void() : void();
-            awaiter.await_resume();
-            awaiter.await_suspend(continuation);
-        } && AwaitSuspendResult<decltype(std::declval<std::remove_reference_t<T>&>().await_suspend(
-                 std::declval<std::coroutine_handle<Promise>>()))>;
+        concept AwaiterFor =
+            requires(std::remove_reference_t<T>& awaiter, std::coroutine_handle<Promise> continuation) {
+                { awaiter.await_ready() } -> std::convertible_to<bool>;
+                awaiter.await_resume();
+                awaiter.await_suspend(continuation);
+            } &&
+            AwaitSuspendResult<decltype(std::declval<std::remove_reference_t<T>&>().await_suspend(
+                std::declval<std::coroutine_handle<Promise>>()))>;
 
         /**
-         * @brief Recognize an awaiter accepting a type-erased continuation handle.
-         * @details Use @c AwaiterFor when an awaiter intentionally accepts only one typed promise handle.
+         * @brief Recognize an awaiter with a language-valid protocol.
+         *
+         * @details Unlike @c AwaiterFor, this concept does not require @c await_suspend to accept a particular
+         * continuation handle. It accepts any non-template @c await_suspend declaration with one coroutine-handle
+         * parameter and a language-valid return type.
+         *
          * @tparam T Candidate awaiter type, possibly cv/ref-qualified.
          */
         template<typename T>
-        concept Awaiter = AwaiterFor<T, void>;
+        concept Awaiter = requires(std::remove_reference_t<T>& awaiter) {
+            { awaiter.await_ready() } -> std::convertible_to<bool>;
+            awaiter.await_resume();
+        } && !Meta::AwaitSuspendFunctionsOf(^^std::remove_cvref_t<T>).empty();
 
         /**
          * @brief Recognize an awaiter whose protocol operations cannot throw for @p Promise.
@@ -204,10 +211,9 @@ namespace Sora {
          * @tparam Promise Promise type of the awaiting coroutine.
          */
         template<typename T, typename Promise>
-        concept NothrowAwaiterFor = AwaiterFor<T, Promise> &&
-                                    requires(std::remove_reference_t<T>& awaiter,
-                                             std::coroutine_handle<Promise> continuation) {
-            requires noexcept(awaiter.await_ready() ? void() : void());
+        concept NothrowAwaiterFor = AwaiterFor<T, Promise> && requires(std::remove_reference_t<T>& awaiter,
+                                                                       std::coroutine_handle<Promise> continuation) {
+            requires noexcept(awaiter.await_ready());
             requires noexcept(awaiter.await_suspend(continuation));
             requires noexcept(awaiter.await_resume());
         };
@@ -217,7 +223,14 @@ namespace Sora {
          * @tparam T Candidate awaiter type, possibly cv/ref-qualified.
          */
         template<typename T>
-        concept NothrowAwaiter = NothrowAwaiterFor<T, void>;
+        concept NothrowAwaiter = Awaiter<T> && requires(std::remove_reference_t<T>& awaiter) {
+            requires noexcept(awaiter.await_ready());
+            requires noexcept(awaiter.await_resume());
+        } && [] consteval {
+            auto func = Meta::AwaitSuspendFunctionsOf(^^std::remove_cvref_t<T>, true);
+            return !func.empty() &&
+                   std::ranges::all_of(func, [](std::meta::info member) { return std::meta::is_noexcept(member); });
+        };
 
         /**
          * @brief Recognize one exact @c await_suspend parameter/return signature.
@@ -238,63 +251,57 @@ namespace Sora {
         struct AdlLookupAnchor {};
         void operator co_await(AdlLookupAnchor) = delete;
 
-        template<typename T>
-        concept MemberCoAwaitExpression = requires(T&& awaitable) {
-            std::forward<T>(awaitable).operator co_await();
-        };
+    } // namespace Detail::CoroutineTraits
+    /** @endcond */
+
+    namespace Concept {
 
         template<typename T>
-        concept AdlCoAwaitExpression = requires(T&& awaitable) {
-            operator co_await(std::forward<T>(awaitable));
-        };
+        concept HasCoAwaitOperatorMember = requires(T&& awaitable) { std::forward<T>(awaitable).operator co_await(); };
+
+        template<typename T>
+        concept HasADLCoAwaitOperator = requires(T&& awaitable) { operator co_await(std::forward<T>(awaitable)); };
 
         template<typename T, typename Promise>
-        concept MemberAwaitableFor = MemberCoAwaitExpression<T> && requires(T&& awaitable) {
+        concept MemberAwaitableFor = HasCoAwaitOperatorMember<T> && requires(T&& awaitable) {
             { std::forward<T>(awaitable).operator co_await() } -> Sora::Concept::AwaiterFor<Promise>;
         };
 
         template<typename T, typename Promise>
         concept NothrowMemberAwaitableFor = MemberAwaitableFor<T, Promise> && requires(T&& awaitable) {
             requires noexcept(std::forward<T>(awaitable).operator co_await());
-            requires Sora::Concept::NothrowAwaiterFor<
-                decltype(std::forward<T>(awaitable).operator co_await()), Promise>;
+            requires Sora::Concept::NothrowAwaiterFor<decltype(std::forward<T>(awaitable).operator co_await()),
+                                                      Promise>;
         };
 
         template<typename T, typename Promise>
-        concept AdlAwaitableFor = AdlCoAwaitExpression<T> && requires(T&& awaitable) {
+        concept AdlAwaitableFor = HasADLCoAwaitOperator<T> && requires(T&& awaitable) {
             { operator co_await(std::forward<T>(awaitable)) } -> Sora::Concept::AwaiterFor<Promise>;
         };
 
         template<typename T, typename Promise>
         concept NothrowAdlAwaitableFor = AdlAwaitableFor<T, Promise> && requires(T&& awaitable) {
             requires noexcept(operator co_await(std::forward<T>(awaitable)));
-            requires Sora::Concept::NothrowAwaiterFor<
-                decltype(operator co_await(std::forward<T>(awaitable))), Promise>;
+            requires Sora::Concept::NothrowAwaiterFor<decltype(operator co_await(std::forward<T>(awaitable))), Promise>;
         };
-
-    } // namespace Detail::CoroutineTraits
-    /** @endcond */
-
-    namespace Concept {
 
         /**
          * @brief Recognize a direct awaiter or one produced by member/ADL @c operator co_await for @p Promise.
          *
-         * @details The direct awaiter is considered only when neither operator form is viable, matching the language
-         * transformation. A type with both viable member and ADL operators is rejected conservatively because the
-         * complete overload set is call-site dependent; the concrete @c co_await expression remains authoritative.
+         * @details The direct awaiter is considered only when neither operator form is viable, matching the
+         * language transformation. A type with both viable member and ADL operators is rejected conservatively
+         * because the complete overload set is call-site dependent; the concrete @c co_await expression remains
+         * authoritative.
          *
          * @tparam T Candidate awaitable expression type.
          * @tparam Promise Promise type of the awaiting coroutine.
          */
         template<typename T, typename Promise>
         concept AwaitableFor =
-            (!Sora::Detail::CoroutineTraits::MemberCoAwaitExpression<T> &&
-             !Sora::Detail::CoroutineTraits::AdlCoAwaitExpression<T> && AwaiterFor<T, Promise>) ||
-            (Sora::Detail::CoroutineTraits::MemberAwaitableFor<T, Promise> &&
-             !Sora::Detail::CoroutineTraits::AdlCoAwaitExpression<T>) ||
-            (!Sora::Detail::CoroutineTraits::MemberCoAwaitExpression<T> &&
-             Sora::Detail::CoroutineTraits::AdlAwaitableFor<T, Promise>);
+            (!Sora::Concept::HasCoAwaitOperatorMember<T> && !Sora::Concept::HasADLCoAwaitOperator<T> &&
+             AwaiterFor<T, Promise>) ||
+            (Sora::Concept::MemberAwaitableFor<T, Promise> && !Sora::Concept::HasADLCoAwaitOperator<T>) ||
+            (!Sora::Concept::HasCoAwaitOperatorMember<T> && Sora::Concept::AdlAwaitableFor<T, Promise>);
 
         /**
          * @brief Recognize an awaitable compatible with a type-erased continuation handle.
@@ -305,18 +312,17 @@ namespace Sora {
 
         /**
          * @brief Recognize a non-throwing direct, member, or ADL awaitable for @p Promise.
-         * @details Like @c AwaitableFor, this predicate conservatively rejects simultaneous member and ADL operators.
+         * @details Like @c AwaitableFor, this predicate conservatively rejects simultaneous member and ADL
+         * operators.
          * @tparam T Candidate awaitable expression type.
          * @tparam Promise Promise type of the awaiting coroutine.
          */
         template<typename T, typename Promise>
         concept NothrowAwaitableFor =
-            (!Sora::Detail::CoroutineTraits::MemberCoAwaitExpression<T> &&
-             !Sora::Detail::CoroutineTraits::AdlCoAwaitExpression<T> && NothrowAwaiterFor<T, Promise>) ||
-            (Sora::Detail::CoroutineTraits::NothrowMemberAwaitableFor<T, Promise> &&
-             !Sora::Detail::CoroutineTraits::AdlCoAwaitExpression<T>) ||
-            (!Sora::Detail::CoroutineTraits::MemberCoAwaitExpression<T> &&
-             Sora::Detail::CoroutineTraits::NothrowAdlAwaitableFor<T, Promise>);
+            (!Sora::Concept::HasCoAwaitOperatorMember<T> && !Sora::Concept::HasADLCoAwaitOperator<T> &&
+             NothrowAwaiterFor<T, Promise>) ||
+            (Sora::Concept::NothrowMemberAwaitableFor<T, Promise> && !Sora::Concept::HasADLCoAwaitOperator<T>) ||
+            (!Sora::Concept::HasCoAwaitOperatorMember<T> && Sora::Concept::NothrowAdlAwaitableFor<T, Promise>);
 
         /**
          * @brief Recognize a non-throwing awaitable compatible with a type-erased continuation handle.
@@ -324,6 +330,22 @@ namespace Sora {
          */
         template<typename T>
         concept NothrowAwaitableType = NothrowAwaitableFor<T, void>;
+
+        /**
+         * @brief Recognize a type that is either an awaiter or an awaitable.
+         * @tparam T Candidate type.
+         */
+        template<typename T>
+        concept AwaiterOrAwaitable = Sora::Concept::Awaiter<T> || Sora::Concept::AwaitableType<T>;
+
+        /**
+         * @brief Recognize a type that is either an awaiter or an awaitable for @p Promise.
+         * @tparam T Candidate type.
+         * @tparam Promise Promise type of the awaiting coroutine.
+         */
+        template<typename T, typename Promise>
+        concept AwaiterOrAwaitableFor =
+            Sora::Concept::AwaiterFor<T, Promise> || Sora::Concept::AwaitableFor<T, Promise>;
 
     } // namespace Concept
 
@@ -355,20 +377,23 @@ namespace Sora {
          *
          * @details Completion operations are intentionally separate: which of @c return_void and @c return_value is
          * required depends on the coroutine body, while @c yield_value is orthogonal. Initial and final suspend
-         * results are checked against the candidate promise's typed continuation; the complete final await expression
-         * must be non-throwing. A promise declaring both return forms is rejected.
+         * results are checked against the candidate promise's typed continuation; the complete final await
+         * expression must be non-throwing. A promise declaring both return forms is rejected.
          * @tparam T Candidate promise type.
          */
         template<typename T>
-        concept PromiseType = requires(std::remove_reference_t<T>& promise) {
-            promise.get_return_object();
-            promise.unhandled_exception();
-            { promise.final_suspend() } noexcept;
-        } && requires(std::remove_reference_t<T>& promise) {
-            requires AwaitableFor<decltype(promise.initial_suspend()), std::remove_cvref_t<T>>;
-            requires NothrowAwaitableFor<decltype(promise.final_suspend()), std::remove_cvref_t<T>>;
-        } && !( !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "return_value").empty() &&
-                !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "return_void").empty());
+        concept PromiseType =
+            requires(std::remove_reference_t<T>& promise) {
+                promise.get_return_object();
+                promise.unhandled_exception();
+                { promise.final_suspend() } noexcept;
+            } &&
+            requires(std::remove_reference_t<T>& promise) {
+                requires AwaitableFor<decltype(promise.initial_suspend()), std::remove_cvref_t<T>>;
+                requires NothrowAwaitableFor<decltype(promise.final_suspend()), std::remove_cvref_t<T>>;
+            } &&
+            !(!Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "return_value").empty() &&
+              !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "return_void").empty());
 
         /**
          * @brief Promise declares at least one @c return_value function or function template.
@@ -376,17 +401,15 @@ namespace Sora {
          */
         template<typename T>
         concept PromiseTypeWithValueReturn =
-            PromiseType<T> &&
-            !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "return_value").empty();
+            PromiseType<T> && !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "return_value").empty();
 
         /**
          * @brief Promise supports the nullary @c return_void expression.
          * @tparam T Candidate promise type.
          */
         template<typename T>
-        concept PromiseTypeWithVoidReturn = PromiseType<T> && requires(std::remove_reference_t<T>& promise) {
-            promise.return_void();
-        };
+        concept PromiseTypeWithVoidReturn =
+            PromiseType<T> && requires(std::remove_reference_t<T>& promise) { promise.return_void(); };
 
         /**
          * @brief Promise declares at least one @c yield_value function or function template.
@@ -394,8 +417,7 @@ namespace Sora {
          */
         template<typename T>
         concept PromiseTypeWithYieldReturn =
-            PromiseType<T> &&
-            !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "yield_value").empty();
+            PromiseType<T> && !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "yield_value").empty();
 
         /**
          * @brief Promise declares at least one @c await_transform function or function template.
@@ -403,8 +425,7 @@ namespace Sora {
          */
         template<typename T>
         concept PromiseTypeWithTransformer =
-            PromiseType<T> &&
-            !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "await_transform").empty();
+            PromiseType<T> && !Sora::Meta::CoroutineFunctionsNamed(^^std::remove_cvref_t<T>, "await_transform").empty();
 
         /**
          * @brief Promise accepts @p Value through @c return_value.
@@ -412,10 +433,10 @@ namespace Sora {
          * @tparam Value Argument type and value category supplied to @c return_value.
          */
         template<typename T, typename Value>
-        concept ValueReturningPromiseFor = PromiseType<T> && requires(std::remove_reference_t<T>& promise,
-                                                                      Value&& value) {
-            promise.return_value(std::forward<Value>(value));
-        };
+        concept ValueReturningPromiseFor =
+            PromiseType<T> && requires(std::remove_reference_t<T>& promise, Value&& value) {
+                promise.return_value(std::forward<Value>(value));
+            };
 
         /**
          * @brief Promise converts @p Value through @c yield_value to an awaitable for the same promise.
@@ -433,11 +454,11 @@ namespace Sora {
          * @tparam Awaitable Argument type and value category supplied to @c await_transform.
          */
         template<typename T, typename Awaitable>
-        concept TransformingPromiseFor = PromiseType<T> && requires(std::remove_reference_t<T>& promise,
-                                                                    Awaitable&& awaitable) {
-            requires AwaitableFor<decltype(promise.await_transform(std::forward<Awaitable>(awaitable))),
-                                  std::remove_cvref_t<T>>;
-        };
+        concept TransformingPromiseFor =
+            PromiseType<T> && requires(std::remove_reference_t<T>& promise, Awaitable&& awaitable) {
+                requires AwaitableFor<decltype(promise.await_transform(std::forward<Awaitable>(awaitable))),
+                                      std::remove_cvref_t<T>>;
+            };
 
         /**
          * @brief Recognize a coroutine return object exposing a conforming nested @c promise_type.
@@ -460,8 +481,8 @@ namespace Sora {
          * @tparam T Candidate coroutine return-object type.
          */
         template<typename T>
-        concept CoroutineTypeWithVoidReturn = CoroutineType<T> &&
-                                              PromiseTypeWithVoidReturn<typename std::remove_cvref_t<T>::promise_type>;
+        concept CoroutineTypeWithVoidReturn =
+            CoroutineType<T> && PromiseTypeWithVoidReturn<typename std::remove_cvref_t<T>::promise_type>;
 
         /**
          * @brief Coroutine return object whose promise declares @c yield_value.
@@ -481,7 +502,8 @@ namespace Sora {
 
         /**
          * @brief Recognize a coroutine return object with a syntactically declared yield capability.
-         * @details Use @c YieldingPromiseFor with a concrete yielded type when expression-level validation is needed.
+         * @details Use @c YieldingPromiseFor with a concrete yielded type when expression-level validation is
+         * needed.
          * @tparam T Candidate coroutine return-object type.
          */
         template<typename T>

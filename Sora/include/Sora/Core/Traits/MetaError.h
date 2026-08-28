@@ -28,6 +28,17 @@ namespace Sora {
 
         inline namespace Error {
 
+            /** @brief Exception type representing a compile-time error in meta algorithms. (P3068 / P3378) */
+            struct CompileTimeError : std::exception {
+                std::string message;
+
+                explicit CompileTimeError(std::string msg) : message(std::move(msg)) {}
+
+                [[nodiscard]] constexpr auto What() const noexcept -> char const* { return message.c_str(); }
+
+                [[nodiscard]] constexpr auto what() const noexcept -> char const* override { return message.c_str(); }
+            };
+
             /** @brief Neutral marker used when a computation has no error. */
             struct MetaSuccess {};
 
@@ -70,6 +81,9 @@ namespace Sora {
                 struct OutOfRange {};
 
             } // namespace Category
+
+            // TODO: Add some error throwers for the above categories, with a static string message that includes the
+            // reflected context.
 
         } // namespace Error
 
