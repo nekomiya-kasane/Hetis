@@ -172,7 +172,7 @@ namespace Sora::Math {
         template<typename Control, size_t Count, typename Parameter>
         inline constexpr bool kNothrowEvaluateBezierControls = [] {
             if constexpr (Count == 1) {
-                return kNothrowBezierBlend<Control, Control, Parameter>;
+                return std::is_nothrow_copy_constructible_v<Control>;
             } else {
                 using Result = std::remove_cvref_t<decltype(BezierBlend(
                     std::declval<const Control&>(), std::declval<const Control&>(),
@@ -188,7 +188,7 @@ namespace Sora::Math {
             kNothrowEvaluateBezierControls<Control, Count, Parameter>) {
             static_assert(Count > 0);
             if constexpr (Count == 1) {
-                return BezierBlend(controls[0], controls[0], parameter);
+                return controls[0];
             } else {
                 using Result = std::remove_cvref_t<decltype(BezierBlend(controls[0], controls[1], parameter))>;
                 auto level = GenerateStaticArray<Result, Count - 1>(
@@ -226,20 +226,50 @@ namespace Sora::Math {
         [[nodiscard]] constexpr auto SubdivideBezierControls(const std::array<Control, Count>& controls,
                                                               const Parameter& parameter) {
             static_assert(Count > 0);
-            using Result = std::remove_cvref_t<decltype(BezierBlend(controls[0], controls[0], parameter))>;
-            auto level = GenerateStaticArray<Result, Count>(
-                [&](auto index) { return BezierBlend(controls[index], controls[index], parameter); });
-            auto left = GenerateStaticArray<Result, Count>([&](auto) { return level[0]; });
-            auto right = GenerateStaticArray<Result, Count>([&](auto) { return level[Count - 1]; });
-            for (size_t remaining = Count - 1; remaining > 0; --remaining) {
-                for (size_t index = 0; index < remaining; ++index) {
-                    level[index] = BezierBlend(level[index], level[index + 1], parameter);
+            if constexpr (Count == 1) {
+                return std::pair{std::array<Control, 1>{controls[0]}, std::array<Control, 1>{controls[0]}};
+            } else {
+                using Result = std::remove_cvref_t<decltype(BezierBlend(controls[0], controls[0], parameter))>;
+                auto level = GenerateStaticArray<Result, Count>(
+                    [&](auto index) { return BezierBlend(controls[index], controls[index], parameter); });
+                auto left = GenerateStaticArray<Result, Count>([&](auto) { return level[0]; });
+                auto right = GenerateStaticArray<Result, Count>([&](auto) { return level[Count - 1]; });
+                for (size_t remaining = Count - 1; remaining > 0; --remaining) {
+                    for (size_t index = 0; index < remaining; ++index) {
+                        level[index] = BezierBlend(level[index], level[index + 1], parameter);
+                    }
+                    const size_t depth = Count - remaining;
+                    left[depth] = level[0];
+                    right[Count - 1 - depth] = level[remaining - 1];
                 }
-                const size_t depth = Count - remaining;
-                left[depth] = level[0];
-                right[Count - 1 - depth] = level[remaining - 1];
+                return std::pair{std::move(left), std::move(right)};
             }
-            return std::pair{std::move(left), std::move(right)};
+        }
+
+        template<size_t Degree, typename Parameter>
+            requires OneInitializable<std::remove_cvref_t<Parameter>> &&
+                     requires(const Parameter& parameter) {
+                         Sora::Math::Sub(parameter, parameter);
+                         Sora::Math::Add(parameter, parameter);
+                         Sora::Math::Mul(parameter, parameter);
+                     }
+        [[nodiscard]] constexpr auto EvaluateBernsteinBasis(const Parameter& parameter) {
+            using Value = std::remove_cvref_t<Parameter>;
+            const Value zero = Sora::Math::Sub(parameter, parameter);
+            const Value one = OneValue<Value>();
+            const Value complement = Sora::Math::Sub(one, parameter);
+            std::array<Value, Degree + 1> basis{};
+            basis[0] = one;
+            for (size_t order = 1; order <= Degree; ++order) {
+                Value saved = zero;
+                for (size_t index = 0; index < order; ++index) {
+                    const Value previous = basis[index];
+                    basis[index] = Sora::Math::Add(Sora::Math::Mul(complement, previous), saved);
+                    saved = Sora::Math::Mul(parameter, previous);
+                }
+                basis[order] = saved;
+            }
+            return basis;
         }
 
         template<typename Control>
@@ -640,25 +670,34 @@ namespace Sora::Math {
         [[nodiscard]] constexpr auto ElevatedAxis() const {
             constexpr size_t degree = Degrees...[Axis];
             constexpr size_t extent = degree + 1;
-            using Scalar = Detail::BezierScalar<Control>;
-            const Scalar endpointWeight = Scalar{1} / static_cast<Scalar>(degree + 1);
-            using ElevatedControl = std::remove_cvref_t<decltype(Detail::BezierBlend(
-                std::declval<const Control&>(), std::declval<const Control&>(), endpointWeight))>;
-            auto elevated = TransformTensorAxis<Axis, degree + 2>(
-                controls_, [&](const std::array<Control, extent>& fiber) {
-                return GenerateStaticArray<ElevatedControl, degree + 2>([&](auto index) {
-                    if constexpr (decltype(index)::value == 0) {
-                        return Detail::BezierBlend(fiber[0], fiber[0], endpointWeight);
-                    } else if constexpr (decltype(index)::value == degree + 1) {
-                        return Detail::BezierBlend(fiber[degree], fiber[degree], endpointWeight);
-                    } else {
-                        const Scalar weight = static_cast<Scalar>(index) / static_cast<Scalar>(degree + 1);
-                        return Detail::BezierBlend(fiber[index], fiber[index - 1], weight);
-                    }
-                });
-            });
-            using Result = Detail::BezierPatchFor<decltype(elevated)>;
-            return Result{std::move(elevated)};
+            if constexpr (degree == 0) {
+                auto elevated = TransformTensorAxis<Axis, 2>(
+                    controls_, [](const std::array<Control, 1>& fiber) {
+                        return std::array<Control, 2>{fiber[0], fiber[0]};
+                    });
+                using Result = Detail::BezierPatchFor<decltype(elevated)>;
+                return Result{std::move(elevated)};
+            } else {
+                using Scalar = Detail::BezierScalar<Control>;
+                const Scalar endpointWeight = Scalar{1} / static_cast<Scalar>(degree + 1);
+                using ElevatedControl = std::remove_cvref_t<decltype(Detail::BezierBlend(
+                    std::declval<const Control&>(), std::declval<const Control&>(), endpointWeight))>;
+                auto elevated = TransformTensorAxis<Axis, degree + 2>(
+                    controls_, [&](const std::array<Control, extent>& fiber) {
+                        return GenerateStaticArray<ElevatedControl, degree + 2>([&](auto index) {
+                            if constexpr (decltype(index)::value == 0) {
+                                return Detail::BezierBlend(fiber[0], fiber[0], endpointWeight);
+                            } else if constexpr (decltype(index)::value == degree + 1) {
+                                return Detail::BezierBlend(fiber[degree], fiber[degree], endpointWeight);
+                            } else {
+                                const Scalar weight = static_cast<Scalar>(index) / static_cast<Scalar>(degree + 1);
+                                return Detail::BezierBlend(fiber[index], fiber[index - 1], weight);
+                            }
+                        });
+                    });
+                using Result = Detail::BezierPatchFor<decltype(elevated)>;
+                return Result{std::move(elevated)};
+            }
         }
 
         /** @brief Elevate the degree of a rank-one patch once. */

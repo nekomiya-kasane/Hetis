@@ -146,6 +146,11 @@ namespace Sora::Math {
         template<typename Shape>
         using Mapping = LayoutPolicy::mapping<Shape>;
         static constexpr MatrixLayout kMatrixLayout = MatrixLayout::RowMajor;
+
+        template<typename Shape>
+        [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
+            return physicalIndex;
+        }
     };
 
     /** @brief Dense mapping with the first logical axis contiguous. */
@@ -154,6 +159,21 @@ namespace Sora::Math {
         template<typename Shape>
         using Mapping = LayoutPolicy::mapping<Shape>;
         static constexpr MatrixLayout kMatrixLayout = MatrixLayout::ColumnMajor;
+
+        template<typename Shape>
+        [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
+            constexpr size_t rank = Shape::rank();
+            std::array<size_t, rank> coordinates{};
+            for (size_t axis = 0; axis < rank; ++axis) {
+                coordinates[axis] = physicalIndex % Shape::static_extent(axis);
+                physicalIndex /= Shape::static_extent(axis);
+            }
+            size_t logicalIndex = 0;
+            for (size_t axis = 0; axis < rank; ++axis) {
+                logicalIndex = logicalIndex * Shape::static_extent(axis) + coordinates[axis];
+            }
+            return logicalIndex;
+        }
     };
 
     /** @brief Matrix mapping preserving the existing enum-based public layout contract. */
@@ -321,13 +341,8 @@ namespace Sora::Math {
             return Map(Coordinates(logicalIndex), std::make_index_sequence<kRank>{});
         }
 
-        [[nodiscard]] static consteval size_t LogicalIndex(size_t physicalIndex) noexcept {
-            for (size_t logicalIndex = 0; logicalIndex < kElementCount; ++logicalIndex) {
-                if (StorageIndex(logicalIndex) == physicalIndex) {
-                    return logicalIndex;
-                }
-            }
-            return 0;
+        [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
+            return MappingPolicy::template LogicalIndex<Shape>(physicalIndex);
         }
 
         std::array<T, kElementCount> values_;
