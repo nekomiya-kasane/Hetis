@@ -397,7 +397,7 @@ namespace Sora::Meta {
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::Map(^^std::add_pointer_t,
      *     Sora::Meta::InfoList{^^int, ^^double});
- * static_assert(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(result),
+     * static_assert(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(result),
      *                                  Sora::Meta::InfoList{^^int*, ^^double*}));
      * @endcode
      * @par Complexity Linear in @p input, excluding template substitution cost.
@@ -435,7 +435,7 @@ namespace Sora::Meta {
      * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
      * constexpr auto result = Sora::Meta::Filter(^^IsIntegral,
      *     Sora::Meta::InfoList{^^int, ^^double});
- * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^int);
+     * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^int);
      * @endcode
      * @par Complexity Linear in @p input.
      */
@@ -476,7 +476,7 @@ namespace Sora::Meta {
      * @code{.cpp}
      * consteval Sora::Meta::InfoList Duplicate(std::meta::info entity) { return {entity, entity}; }
      * constexpr auto result = Sora::Meta::FlatMap(^^Duplicate, Sora::Meta::InfoList{^^int});
- * static_assert(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(result),
+     * static_assert(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(result),
      *                                  Sora::Meta::InfoList{^^int, ^^int}));
      * @endcode
      * @note As with the meta-predicate protocol, @p function must be invocable during constant evaluation. C++26
@@ -533,7 +533,7 @@ namespace Sora::Meta {
      * consteval bool Integral(std::meta::info type) noexcept { return std::meta::is_integral_type(type); }
      * constexpr auto result = Sora::Meta::RemoveIf(^^Integral,
      *                                              Sora::Meta::InfoList{^^int, ^^double});
- * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^double);
+     * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^double);
      * @endcode
      */
     [[nodiscard]] consteval std::meta::info RemoveIf(std::meta::info pred, const InfoList& input) {
@@ -570,7 +570,7 @@ namespace Sora::Meta {
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::Zip(^^std::pair,
      *     Sora::Meta::InfoList{^^int}, Sora::Meta::InfoList{^^double});
- * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^std::pair<int, double>);
+     * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^std::pair<int, double>);
      * @endcode
      * @par Complexity Linear in the common input length.
      */
@@ -602,6 +602,98 @@ namespace Sora::Meta {
             output.push_back(std::meta::dealias(mapped));
         }
         return Reflect(Promote(output));
+    }
+
+    namespace Detail {
+
+        /**
+         * @brief Zip recursively validated sequences and retain public operand provenance in length errors.
+         * @param[in] function Validated reflected template.
+         * @param[in] sequences Non-empty, error-free input sequences.
+         * @param[in] operands Public operand reflections corresponding one-to-one with @p sequences.
+         * @return Reflected output `InfoList`, `LengthMismatch`, or the first substitution error.
+         * @pre @p sequences and @p operands have the same positive size.
+         */
+        [[nodiscard]] consteval std::meta::info ZipSequences(std::meta::info function,
+                                                             std::span<const InfoList> sequences,
+                                                             const InfoList& operands) {
+            const auto length = sequences.front().size();
+            for (std::size_t index = 1; index < sequences.size(); ++index) {
+                if (sequences[index].size() != length) {
+                    return MakeMetaError(^^Error::LengthMismatch,
+                                         {function, std::meta::reflect_constant(index), operands[index],
+                                          std::meta::reflect_constant(length),
+                                          std::meta::reflect_constant(sequences[index].size())});
+                }
+            }
+
+            std::vector<std::meta::info> output;
+            output.reserve(length);
+            std::vector<std::meta::info> arguments;
+            arguments.reserve(sequences.size());
+            for (std::size_t index = 0; index < length; ++index) {
+                arguments.clear();
+                for (const auto sequence : sequences) {
+                    arguments.push_back(sequence[index]);
+                }
+                const auto mapped = Apply(function, arguments);
+                if (IsMetaError(mapped)) {
+                    return mapped;
+                }
+                output.push_back(std::meta::dealias(mapped));
+            }
+            return Reflect(output.empty() ? InfoList{} : Promote(output));
+        }
+
+    } // namespace Detail
+
+    /**
+     * @brief Zip any positive number of equal-length sequences through a reflected template.
+     * @details For inputs @c X_0, ..., @c X_n of common length @c m, element @c i of the output is
+     * `function(X_0[i], ..., X_n[i])`. After validating the function, each operand is recursively validated in source
+     * order; cross-operand lengths and column substitutions are checked only after every operand is error-free.
+     * @param[in] function Reflected template accepting one entity from every input sequence.
+     * @param[in] inputs Reflected `InfoList` values in argument order.
+     * @return Reflected output `InfoList`, or the first validation, length, or invocation error.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto inputs = Sora::Meta::InfoList{
+     *     Sora::Meta::Reflect(Sora::Meta::InfoList{^^int}),
+     *     Sora::Meta::Reflect(Sora::Meta::InfoList{^^double}),
+     *     Sora::Meta::Reflect(Sora::Meta::InfoList{^^char})};
+     * constexpr auto result = Sora::Meta::ZipN(^^std::tuple, inputs);
+     * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^std::tuple<int, double, char>);
+     * @endcode
+     * @note At least one input sequence is required. Equal-length empty inputs produce an empty output after validating
+     * that @p function denotes a template; no element substitution is needed.
+     * @par Complexity Linear in the product of sequence count and common sequence length.
+     */
+    [[nodiscard]] consteval std::meta::info ZipN(std::meta::info function, const InfoList& inputs) {
+        if (IsMetaError(function)) {
+            return function;
+        }
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
+        if (inputs.empty()) {
+            return MakeMetaError(^^Error::InvalidSequence, {function});
+        }
+        std::vector<InfoList> sequences;
+        sequences.reserve(inputs.size());
+        for (const auto input : inputs) {
+            if (IsMetaError(input)) {
+                return input;
+            }
+            if (!IsInfoList(input)) {
+                return MakeMetaError(^^Error::InvalidSequence, {function, input});
+            }
+            const auto sequence = ExtractInfoList(input);
+            if (const auto error = FirstMetaError(sequence); error != std::meta::info{}) {
+                return error;
+            }
+            sequences.push_back(sequence);
+        }
+        return Detail::ZipSequences(function, sequences, inputs);
     }
 
     /**
@@ -871,7 +963,7 @@ namespace Sora::Meta {
      * @par Example
      * @code{.cpp}
      * consteval bool IsIntegral(std::meta::info value) { return std::meta::is_integral_type(value); }
- * static_assert(Sora::Meta::ExtractSizeType(
+     * static_assert(Sora::Meta::ExtractSizeType(
      *     Sora::Meta::CountIf(^^IsIntegral, Sora::Meta::InfoList{^^int, ^^double, ^^long}) == 2);
      * @endcode
      */
@@ -1790,6 +1882,46 @@ namespace Sora::Meta {
                 return rightList.error;
             }
             return ToTypeList(Sora::Meta::Zip(function, leftList.types, rightList.types));
+        }
+
+        /**
+         * @brief Zip any positive number of reflected `TypeList` operands.
+         * @details Converts each input once, applies the shared `InfoList` column kernel, then validates and projects
+         * the result back to a reflected `TypeList`.
+         * @param[in] function Reflected template accepting one type from every list.
+         * @param[in] lists Reflected `TypeList` operands in argument order.
+         * @return Reflected output `TypeList`, or the first validation, length, invocation, or type-result error.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::ZipN(^^std::tuple,
+         *     Sora::Meta::InfoList{^^Sora::Traits::TypeList<int>,
+         *                          ^^Sora::Traits::TypeList<double>,
+         *                          ^^Sora::Traits::TypeList<char>});
+         * static_assert(result == ^^Sora::Traits::TypeList<std::tuple<int, double, char>>);
+         * @endcode
+         * @note At least one input list is required. Equal-length empty lists produce an empty `TypeList`.
+         */
+        [[nodiscard]] consteval std::meta::info ZipN(std::meta::info function, const InfoList& lists) {
+            if (IsMetaError(function)) {
+                return function;
+            }
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
+                return error;
+            }
+            if (lists.empty()) {
+                return MakeMetaError(^^Error::InvalidSequence, {function});
+            }
+
+            std::vector<InfoList> sequences;
+            sequences.reserve(lists.size());
+            for (const auto list : lists) {
+                const auto inspected = Detail::InspectTypeList(list, InfoList{function, list});
+                if (!inspected) {
+                    return inspected.error;
+                }
+                sequences.push_back(inspected.types);
+            }
+            return ToTypeList(Detail::ZipSequences(function, sequences, lists));
         }
 
         /**
@@ -3024,6 +3156,24 @@ namespace Sora::Traits {
     template<std::meta::info Function, typename Left, typename Right>
         requires(Concept::TypeList<Left> && Concept::TypeList<Right>)
     using Zip = Meta::InfoType<Meta::Types::Zip(Function, ^^Left, ^^Right)>;
+
+    /**
+     * @brief Zip any positive number of equal-length `TypeList` operands.
+     * @details This is the ordinary C++ type projection of `Meta::Types::ZipN`; it does not own another sequence
+     * algorithm.
+     * @tparam Function Reflected template accepting one type from every list.
+     * @tparam Lists `TypeList` operands in argument order.
+     * @return Resulting `TypeList`, or a `MetaError` type for invalid inputs, lengths, or invocation results.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::ZipN<^^std::tuple,
+     *     Sora::Traits::TypeList<int>, Sora::Traits::TypeList<double>, Sora::Traits::TypeList<char>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<std::tuple<int, double, char>>>);
+     * @endcode
+     */
+    template<std::meta::info Function, typename... Lists>
+        requires(sizeof...(Lists) > 0 && (Concept::TypeList<Lists> && ...))
+    using ZipN = Meta::InfoType<Meta::Types::ZipN(Function, Meta::InfoList{^^Lists...})>;
 
     /**
      * @brief Stable intersection of two `TypeList` operands.
