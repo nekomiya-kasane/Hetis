@@ -67,12 +67,12 @@ namespace Sora::Math {
     };
 
     template<ValueCarrier T, size_t N, MatrixLayout Layout = MatrixLayout::ColumnMajor>
-        requires(N > 0)
+        requires(N > 0 && (Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor))
     class Affine;
 
     /** @brief Compact affine matrix `[linear | translation]` with an implicit bottom row `[0 ... 0 1]`. */
     template<ValueCarrier T, size_t N, MatrixLayout Layout = MatrixLayout::ColumnMajor>
-        requires(N > 0)
+        requires(N > 0 && (Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor))
     using AffineMatrix = Matrix<T, N, N + 1, Layout>;
 
     namespace Traits {
@@ -96,7 +96,7 @@ namespace Sora::Math {
      * composed with the same fixed-size Matrix and Vector carriers used by the rest of Sora Math.
      */
     template<ValueCarrier T, size_t N, MatrixLayout Layout>
-        requires(N > 0)
+        requires(N > 0 && (Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor))
     class Affine {
     public:
         using CarrierType = T;

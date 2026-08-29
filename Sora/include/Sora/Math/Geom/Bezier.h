@@ -248,28 +248,32 @@ namespace Sora::Math {
 
         template<size_t Degree, typename Parameter>
             requires OneInitializable<std::remove_cvref_t<Parameter>> &&
-                     requires(const Parameter& parameter) {
+                     (Degree == 0 || requires(const Parameter& parameter) {
                          Sora::Math::Sub(parameter, parameter);
                          Sora::Math::Add(parameter, parameter);
                          Sora::Math::Mul(parameter, parameter);
-                     }
+                     })
         [[nodiscard]] constexpr auto EvaluateBernsteinBasis(const Parameter& parameter) {
             using Value = std::remove_cvref_t<Parameter>;
-            const Value zero = Sora::Math::Sub(parameter, parameter);
             const Value one = OneValue<Value>();
-            const Value complement = Sora::Math::Sub(one, parameter);
-            std::array<Value, Degree + 1> basis{};
-            basis[0] = one;
-            for (size_t order = 1; order <= Degree; ++order) {
-                Value saved = zero;
-                for (size_t index = 0; index < order; ++index) {
-                    const Value previous = basis[index];
-                    basis[index] = Sora::Math::Add(Sora::Math::Mul(complement, previous), saved);
-                    saved = Sora::Math::Mul(parameter, previous);
+            if constexpr (Degree == 0) {
+                return std::array<Value, 1>{one};
+            } else {
+                const Value zero = Sora::Math::Sub(parameter, parameter);
+                const Value complement = Sora::Math::Sub(one, parameter);
+                auto basis = GenerateStaticArray<Value, Degree + 1>([&](auto) { return zero; });
+                basis[0] = one;
+                for (size_t order = 1; order <= Degree; ++order) {
+                    Value saved = zero;
+                    for (size_t index = 0; index < order; ++index) {
+                        const Value previous = basis[index];
+                        basis[index] = Sora::Math::Add(Sora::Math::Mul(complement, previous), saved);
+                        saved = Sora::Math::Mul(parameter, previous);
+                    }
+                    basis[order] = saved;
                 }
-                basis[order] = saved;
+                return basis;
             }
-            return basis;
         }
 
         template<typename Control>
@@ -743,6 +747,19 @@ namespace Sora::Math {
     /** @brief Three-dimensional tensor-product polynomial Bezier surface. */
     template<ValueCarrier T, size_t UDegree, size_t VDegree>
     using BezierSurface3D = BezierSurface<Point<T, 3>, UDegree, VDegree>;
+
+    /**
+     * @brief Evaluate all degree-@p Degree Bernstein basis functions at @p parameter.
+     * @details The returned array contains `B_{Degree,0}` through `B_{Degree,Degree}`. The in-place triangular
+     * recurrence uses O(Degree^2) primitive operations, no dynamic storage, and preserves SIMD or automatic
+     * differentiation carriers supplied as @p Parameter.
+     */
+    template<size_t Degree, typename Parameter>
+        requires requires(const Parameter& parameter) { Detail::EvaluateBernsteinBasis<Degree>(parameter); }
+    [[nodiscard]] constexpr auto BernsteinBasis(const Parameter& parameter) {
+        using Value = std::remove_cvref_t<Parameter>;
+        return Tensor<Value, Degree + 1>{Detail::EvaluateBernsteinBasis<Degree>(parameter)};
+    }
 
     /** @brief Value and the first @p Order exact curve derivatives at one parameter. */
     template<TensorElement Value, TensorElement Derivative, size_t Order>

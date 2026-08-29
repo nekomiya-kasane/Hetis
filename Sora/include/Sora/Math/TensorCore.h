@@ -138,27 +138,46 @@ namespace Sora::Math {
     enum class MatrixLayout : unsigned char {
         ColumnMajor,
         RowMajor,
+        Strided,
+        Unknown,
     };
 
     /** @brief Dense mapping with the final logical axis contiguous. */
     struct RightMapping {
         using LayoutPolicy = std::layout_right;
+        static constexpr bool kRequiresMapping = false;
         template<typename Shape>
         using Mapping = LayoutPolicy::mapping<Shape>;
         static constexpr MatrixLayout kMatrixLayout = MatrixLayout::RowMajor;
 
         template<typename Shape>
+        [[nodiscard]] static constexpr auto MakeMapping() noexcept {
+            return Mapping<Shape>{};
+        }
+
+        template<typename Shape>
         [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
             return physicalIndex;
+        }
+
+        template<typename Shape>
+        [[nodiscard]] static constexpr size_t PhysicalIndex(size_t logicalIndex) noexcept {
+            return logicalIndex;
         }
     };
 
     /** @brief Dense mapping with the first logical axis contiguous. */
     struct LeftMapping {
         using LayoutPolicy = std::layout_left;
+        static constexpr bool kRequiresMapping = false;
         template<typename Shape>
         using Mapping = LayoutPolicy::mapping<Shape>;
         static constexpr MatrixLayout kMatrixLayout = MatrixLayout::ColumnMajor;
+
+        template<typename Shape>
+        [[nodiscard]] static constexpr auto MakeMapping() noexcept {
+            return Mapping<Shape>{};
+        }
 
         template<typename Shape>
         [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
@@ -174,6 +193,23 @@ namespace Sora::Math {
             }
             return logicalIndex;
         }
+
+        template<typename Shape>
+        [[nodiscard]] static constexpr size_t PhysicalIndex(size_t logicalIndex) noexcept {
+            constexpr size_t rank = Shape::rank();
+            std::array<size_t, rank> coordinates{};
+            for (size_t axis = rank; axis-- > 0;) {
+                coordinates[axis] = logicalIndex % Shape::static_extent(axis);
+                logicalIndex /= Shape::static_extent(axis);
+            }
+            size_t physicalIndex = 0;
+            size_t stride = 1;
+            for (size_t axis = 0; axis < rank; ++axis) {
+                physicalIndex += coordinates[axis] * stride;
+                stride *= Shape::static_extent(axis);
+            }
+            return physicalIndex;
+        }
     };
 
     /** @brief Matrix mapping preserving the existing enum-based public layout contract. */
@@ -185,6 +221,63 @@ namespace Sora::Math {
 
     template<>
     struct MatrixMapping<MatrixLayout::RowMajor> : RightMapping {};
+
+    /**
+     * @brief Dense mapping with explicit compile-time strides for each logical axis.
+     * @details The mapping is accepted by owning storage when the supplied strides describe a packed,
+     * exhaustive and unique layout. Padded strides belong to a non-owning mdspan adapter, not this owner.
+     */
+    template<size_t... Strides>
+        requires(sizeof...(Strides) > 0 && ((Strides > 0) && ...))
+    struct StridedMapping {
+        using LayoutPolicy = std::layout_stride;
+        static constexpr bool kRequiresMapping = true;
+        static constexpr MatrixLayout kMatrixLayout = MatrixLayout::Strided;
+        static constexpr auto kStrides = std::array<size_t, sizeof...(Strides)>{Strides...};
+
+        template<typename Shape>
+        using Mapping = LayoutPolicy::mapping<Shape>;
+
+        template<typename Shape>
+            requires(sizeof...(Strides) == Shape::rank())
+        [[nodiscard]] static constexpr auto MakeMapping() noexcept {
+            return Mapping<Shape>{Shape{}, kStrides};
+        }
+
+        template<typename Shape>
+            requires(sizeof...(Strides) == Shape::rank())
+        [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
+            constexpr size_t rank = Shape::rank();
+            std::array<size_t, rank> coordinates{};
+            constexpr auto extents = [] {
+                std::array<size_t, rank> result{};
+                for (size_t axis = 0; axis < rank; ++axis) {
+                    result[axis] = Shape::static_extent(axis);
+                }
+                return result;
+            }();
+            for (size_t axis = 0; axis < rank; ++axis) {
+                coordinates[axis] = (physicalIndex / kStrides[axis]) % extents[axis];
+            }
+            size_t logicalIndex = 0;
+            for (size_t axis = 0; axis < rank; ++axis) {
+                logicalIndex = logicalIndex * extents[axis] + coordinates[axis];
+            }
+            return logicalIndex;
+        }
+
+        template<typename Shape>
+            requires(sizeof...(Strides) == Shape::rank())
+        [[nodiscard]] static constexpr size_t PhysicalIndex(size_t logicalIndex) noexcept {
+            constexpr size_t rank = Shape::rank();
+            size_t physicalIndex = 0;
+            for (size_t axis = rank; axis-- > 0;) {
+                physicalIndex += (logicalIndex % Shape::static_extent(axis)) * kStrides[axis];
+                logicalIndex /= Shape::static_extent(axis);
+            }
+            return physicalIndex;
+        }
+    };
 
     /** @brief Tag selecting logical row-major input independently of physical dense mapping. */
     struct LogicalValuesTag {};
@@ -211,6 +304,11 @@ namespace Sora::Math::Detail {
     template<typename T, typename Shape>
     using DenseMappingType = typename T::template Mapping<Shape>;
 
+    template<typename T, typename Shape>
+    [[nodiscard]] constexpr auto MakeDenseMapping() noexcept {
+        return T::template MakeMapping<Shape>();
+    }
+
     template<typename T, typename Shape, size_t... Axes>
     consteval bool SupportsDenseMapping(std::index_sequence<Axes...>) {
         using Mapping = DenseMappingType<T, Shape>;
@@ -233,13 +331,17 @@ namespace Sora::Concept {
     concept DenseMapping = requires {
         typename T::LayoutPolicy;
         typename Sora::Math::Detail::DenseMappingType<T, Shape>;
+        { T::kRequiresMapping } -> std::convertible_to<bool>;
+        { T::template MakeMapping<Shape>() } -> std::same_as<Sora::Math::Detail::DenseMappingType<T, Shape>>;
+        { T::template LogicalIndex<Shape>(size_t{}) } -> std::convertible_to<size_t>;
+        { T::template PhysicalIndex<Shape>(size_t{}) } -> std::convertible_to<size_t>;
         { T::kMatrixLayout } -> std::convertible_to<Sora::Math::MatrixLayout>;
-        { Sora::Math::Detail::DenseMappingType<T, Shape>{}.required_span_size() } -> std::convertible_to<size_t>;
-        { Sora::Math::Detail::DenseMappingType<T, Shape>{}.is_exhaustive() } -> std::same_as<bool>;
-        { Sora::Math::Detail::DenseMappingType<T, Shape>{}.is_unique() } -> std::same_as<bool>;
-    } && Sora::Math::Detail::DenseMappingType<T, Shape>{}.is_exhaustive() &&
-        Sora::Math::Detail::DenseMappingType<T, Shape>{}.is_unique() &&
-        (Sora::Math::Detail::DenseMappingType<T, Shape>{}.required_span_size() ==
+        { Sora::Math::Detail::MakeDenseMapping<T, Shape>().required_span_size() } -> std::convertible_to<size_t>;
+        { Sora::Math::Detail::MakeDenseMapping<T, Shape>().is_exhaustive() } -> std::same_as<bool>;
+        { Sora::Math::Detail::MakeDenseMapping<T, Shape>().is_unique() } -> std::same_as<bool>;
+    } && Sora::Math::Detail::MakeDenseMapping<T, Shape>().is_exhaustive() &&
+        Sora::Math::Detail::MakeDenseMapping<T, Shape>().is_unique() &&
+        (Sora::Math::Detail::MakeDenseMapping<T, Shape>().required_span_size() ==
          Sora::Math::Detail::StaticExtentProduct<Shape>(std::make_index_sequence<Shape::rank()>{})) &&
         Sora::Math::Detail::SupportsDenseMapping<T, Shape>(std::make_index_sequence<Shape::rank()>{});
 
@@ -261,7 +363,13 @@ namespace Sora::Math {
         using MappingPolicy = Mapping;
         using MappingType = typename Mapping::template Mapping<Shape>;
         static constexpr size_t kRank = Shape::rank();
-        static constexpr size_t kElementCount = MappingType{}.required_span_size();
+        inline static constexpr MappingType kMapping = MappingPolicy::template MakeMapping<Shape>();
+
+        [[nodiscard]] static constexpr MappingType MappingObject() noexcept {
+            return kMapping;
+        }
+
+        static constexpr size_t kElementCount = kMapping.required_span_size();
         static constexpr auto kExtents = [] {
             std::array<size_t, kRank> extents{};
             for (size_t axis = 0; axis < kRank; ++axis) {
@@ -294,7 +402,7 @@ namespace Sora::Math {
         template<typename Self, std::convertible_to<size_t>... Indices>
             requires(sizeof...(Indices) == kRank)
         [[nodiscard]] constexpr decltype(auto) At(this Self&& self, Indices... indices) noexcept {
-            return std::forward_like<Self>(self.values_[MappingType{}(static_cast<size_t>(indices)...)]);
+            return std::forward_like<Self>(self.values_[kMapping(static_cast<size_t>(indices)...)]);
         }
 
         template<typename Self>
@@ -312,7 +420,12 @@ namespace Sora::Math {
             requires std::is_lvalue_reference_v<Self&&>
         [[nodiscard]] constexpr auto View(this Self&& self) noexcept {
             using Element = std::conditional_t<std::is_const_v<std::remove_reference_t<Self>>, const T, T>;
-            return std::mdspan<Element, Shape, typename MappingPolicy::LayoutPolicy>{self.values_.data()};
+            if constexpr (requires { MappingPolicy::kRequiresMapping; } && MappingPolicy::kRequiresMapping) {
+                return std::mdspan<Element, Shape, typename MappingPolicy::LayoutPolicy>{
+                    self.values_.data(), kMapping};
+            } else {
+                return std::mdspan<Element, Shape, typename MappingPolicy::LayoutPolicy>{self.values_.data()};
+            }
         }
 
     private:
@@ -334,11 +447,11 @@ namespace Sora::Math {
         template<size_t... Axes>
         [[nodiscard]] static constexpr size_t Map(const std::array<size_t, kRank>& coordinates,
                                                   std::index_sequence<Axes...>) noexcept {
-            return MappingType{}(coordinates[Axes]...);
+            return kMapping(coordinates[Axes]...);
         }
 
         [[nodiscard]] static constexpr size_t StorageIndex(size_t logicalIndex) noexcept {
-            return Map(Coordinates(logicalIndex), std::make_index_sequence<kRank>{});
+            return MappingPolicy::template PhysicalIndex<Shape>(logicalIndex);
         }
 
         [[nodiscard]] static constexpr size_t LogicalIndex(size_t physicalIndex) noexcept {
@@ -363,9 +476,8 @@ namespace Sora::Math::Detail {
     }
 
     template<typename T, size_t... Axes>
-    consteval bool HasValidExtents(std::index_sequence<Axes...>) {
-        return ((T::kExtents[Axes] > 0) && ...) &&
-               ((size_t{1} * ... * T::kExtents[Axes]) == T::kElementCount);
+    consteval bool HasPositiveExtents(std::index_sequence<Axes...>) {
+        return ((T::kExtents[Axes] > 0) && ...);
     }
 
 } // namespace Sora::Math::Detail
@@ -373,15 +485,22 @@ namespace Sora::Math::Detail {
 namespace Sora::Concept {
 
     template<typename T>
-    concept TensorStorage = requires(T storage, size_t index) {
+    /**
+     * @brief Logical tensor storage protocol independent of physical representation.
+     * @details @c kElementCount is the logical linear domain size. A compressed storage may retain fewer physical
+     * values and resolve implicit entries inside @c AtLogicalLinear; dense algorithms additionally require
+     * @ref DenseTensorStorage.
+     */
+    concept TensorStorage = requires(T storage, const T constStorage, size_t index) {
         typename T::ElementType;
         typename T::ShapeType;
         { T::kRank } -> std::convertible_to<size_t>;
         { T::kElementCount } -> std::convertible_to<size_t>;
         { T::kExtents.size() } -> std::convertible_to<size_t>;
-        storage.AtLogicalLinear(index);
+        { storage.AtLogicalLinear(index) } -> std::convertible_to<typename T::ElementType>;
+        { constStorage.AtLogicalLinear(index) } -> std::convertible_to<typename T::ElementType>;
     } && (T::kRank > 0) && (T::kElementCount > 0) && (T::kExtents.size() == T::kRank) &&
-        Sora::Math::Detail::HasValidExtents<T>(std::make_index_sequence<T::kRank>{});
+        Sora::Math::Detail::HasPositiveExtents<T>(std::make_index_sequence<T::kRank>{});
 
     template<typename T>
     concept DenseTensorStorage = TensorStorage<T> && TensorElement<typename T::ElementType> &&
@@ -408,16 +527,38 @@ namespace Sora::Concept {
         typename Storage::template RebindElement<Element>;
     } && DenseTensorStorage<typename Storage::template RebindElement<Element>>;
 
+    /** @brief Storage that can be rebound without changing its logical shape or traversal contract. */
+    template<typename Storage, typename Element>
+    concept RebindableTensorStorage = TensorElement<Element> && requires {
+        typename Storage::template RebindElement<Element>;
+    } && TensorStorage<typename Storage::template RebindElement<Element>>;
+
 } // namespace Sora::Concept
 
 namespace Sora::Math {
+
+    namespace Detail {
+
+        template<typename Storage, bool = Sora::Concept::DenseTensorStorage<Storage>>
+        struct StorageMapping {
+            using Type = void;
+            static constexpr MatrixLayout kLayout = MatrixLayout::Unknown;
+        };
+
+        template<typename Storage>
+        struct StorageMapping<Storage, true> {
+            using Type = typename Storage::MappingPolicy;
+            static constexpr MatrixLayout kLayout = Type::kMatrixLayout;
+        };
+
+    } // namespace Detail
 
     /**
      * @brief Semantic facade over one tensor storage object.
      * @details @p Interpretation is compile-time metadata and occupies no object storage. Algebraic operations are
      * constrained separately, so affine points cannot accidentally acquire vector or general-tensor arithmetic.
      */
-    template<Sora::Concept::DenseTensorStorage StoragePolicy, typename Interpretation = Algebra::GeneralTensor>
+    template<Sora::Concept::TensorStorage StoragePolicy, typename Interpretation = Algebra::GeneralTensor>
     class BasicTensor {
     public:
         using ElementType = typename StoragePolicy::ElementType;
@@ -425,7 +566,7 @@ namespace Sora::Math {
         using ShapeType = typename StoragePolicy::ShapeType;
         using StorageType = StoragePolicy;
         using InterpretationType = Interpretation;
-        using MappingPolicy = typename StoragePolicy::MappingPolicy;
+        using MappingPolicy = typename Detail::StorageMapping<StoragePolicy>::Type;
         static constexpr size_t kRank = StoragePolicy::kRank;
         static constexpr size_t kElementCount = StoragePolicy::kElementCount;
         static constexpr size_t kSize = kElementCount;
@@ -433,29 +574,31 @@ namespace Sora::Math {
         static constexpr size_t kDimension = kRank == 1 ? kExtents[0] : 0;
         static constexpr size_t kRows = kRank == 2 ? kExtents[0] : 0;
         static constexpr size_t kColumns = kRank == 2 ? kExtents[1] : 0;
-        static constexpr MatrixLayout kLayout = MappingPolicy::kMatrixLayout;
+        static constexpr MatrixLayout kLayout = Detail::StorageMapping<StoragePolicy>::kLayout;
 
         template<TensorElement U>
-            requires Sora::Concept::RebindableDenseTensorStorage<StoragePolicy, U>
+            requires Sora::Concept::RebindableTensorStorage<StoragePolicy, U>
         using Rebind = BasicTensor<typename StoragePolicy::template RebindElement<U>, Interpretation>;
 
         template<TensorElement U>
-            requires Sora::Concept::RebindableDenseTensorStorage<StoragePolicy, U>
+            requires Sora::Concept::RebindableTensorStorage<StoragePolicy, U>
         using RebindElement = Rebind<U>;
 
         constexpr BasicTensor() noexcept(kNothrowDefaultConstruction)
             requires(std::same_as<Interpretation, Algebra::GeneralTensor> ?
                          std::default_initializable<StoragePolicy> :
-                         ZeroInitializable<ElementType>)
+                         (Sora::Concept::DenseTensorStorage<StoragePolicy> && ZeroInitializable<ElementType>))
             : storage_(DefaultStorage()) {}
 
         constexpr explicit BasicTensor(std::array<ElementType, kElementCount> storageValues)
             noexcept(std::is_nothrow_constructible_v<StoragePolicy, LogicalValuesTag,
                                                      std::array<ElementType, kElementCount>>)
+            requires Sora::Concept::DenseTensorStorage<StoragePolicy>
             : storage_(LogicalValues, std::move(storageValues)) {}
 
         template<typename... U>
-            requires(sizeof...(U) == kElementCount && (std::constructible_from<ElementType, U&&> && ...))
+            requires(Sora::Concept::DenseTensorStorage<StoragePolicy> && sizeof...(U) == kElementCount &&
+                     (std::constructible_from<ElementType, U&&> && ...))
         constexpr explicit(!(std::convertible_to<U&&, ElementType> && ...))
             BasicTensor(U&&... values) noexcept(
                 (std::is_nothrow_constructible_v<ElementType, U&&> && ...) &&
@@ -469,13 +612,17 @@ namespace Sora::Math {
             : storage_(std::move(storage)) {}
 
         template<typename Self>
-        [[nodiscard]] constexpr decltype(auto) operator[](this Self&& self, size_t logicalIndex) noexcept {
+        [[nodiscard]] constexpr decltype(auto) operator[](this Self&& self, size_t logicalIndex) noexcept(
+            noexcept(std::forward<Self>(self).storage_.AtLogicalLinear(logicalIndex))) {
             return std::forward_like<Self>(self.storage_).AtLogicalLinear(logicalIndex);
         }
 
         template<typename Self, std::convertible_to<size_t>... Indices>
-            requires(sizeof...(Indices) == kRank)
-        [[nodiscard]] constexpr decltype(auto) operator()(this Self&& self, Indices... indices) noexcept {
+            requires(sizeof...(Indices) == kRank && requires(Self&& self) {
+                std::forward<Self>(self).storage_.At(static_cast<size_t>(std::declval<Indices>())...);
+            })
+        [[nodiscard]] constexpr decltype(auto) operator()(this Self&& self, Indices... indices) noexcept(
+            noexcept(std::forward<Self>(self).storage_.At(static_cast<size_t>(indices)...))) {
             return std::forward_like<Self>(self.storage_).At(static_cast<size_t>(indices)...);
         }
 
@@ -491,6 +638,12 @@ namespace Sora::Math {
             return std::forward_like<Self>(self.storage_).Values();
         }
 
+        /** @brief Access the storage policy object for storage-specific algorithms. */
+        template<typename Self>
+        [[nodiscard]] constexpr decltype(auto) StorageObject(this Self&& self) noexcept {
+            return std::forward_like<Self>(self.storage_);
+        }
+
         template<typename Self>
             requires Sora::Concept::DenseTensorStorage<StoragePolicy> && std::is_lvalue_reference_v<Self&&>
         [[nodiscard]] constexpr auto Data(this Self&& self) noexcept {
@@ -504,13 +657,15 @@ namespace Sora::Math {
         }
 
         template<typename Self>
-            requires std::same_as<Interpretation, Algebra::FreeVector>
+            requires std::same_as<Interpretation, Algebra::FreeVector> &&
+                     Sora::Concept::DenseTensorStorage<StoragePolicy>
         [[nodiscard]] constexpr decltype(auto) Components(this Self&& self) noexcept {
             return std::forward_like<Self>(self.storage_).Values();
         }
 
         template<typename Self>
-            requires std::same_as<Interpretation, Algebra::AffinePoint>
+            requires std::same_as<Interpretation, Algebra::AffinePoint> &&
+                     Sora::Concept::DenseTensorStorage<StoragePolicy>
         [[nodiscard]] constexpr decltype(auto) Coordinates(this Self&& self) noexcept {
             return std::forward_like<Self>(self.storage_).Values();
         }
@@ -526,7 +681,8 @@ namespace Sora::Math {
                      std::is_nothrow_constructible_v<StoragePolicy, LogicalValuesTag,
                                                      std::array<ElementType, kElementCount>> &&
                      std::is_nothrow_move_constructible_v<StoragePolicy>)
-            requires std::same_as<Interpretation, Algebra::LinearMap> && (kRank == 2) && (kRows == kColumns) &&
+            requires Sora::Concept::DenseTensorStorage<StoragePolicy> &&
+                     std::same_as<Interpretation, Algebra::LinearMap> && (kRank == 2) && (kRows == kColumns) &&
                      ZeroInitializable<ElementType> && OneInitializable<ElementType>
         {
             return BasicTensor{StoragePolicy{LogicalValues,

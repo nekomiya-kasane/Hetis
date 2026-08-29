@@ -303,17 +303,17 @@ namespace Sora::Math {
         });
     }
 
-    /** @brief Contract two equally shaped tensors to one scalar with fused multiply-add when available. */
-    template<TensorElement T, TensorElement U, size_t... Extents>
-        requires requires(T left, U right) {
-            Sora::Math::Mul(left, right);
-            Sora::Math::Fma(left, right, Sora::Math::Mul(left, right));
-        }
-    [[nodiscard]] constexpr auto InnerProduct(const Tensor<T, Extents...>& left,
-                                              const Tensor<U, Extents...>& right) {
+    /** @brief Contract two equally shaped dense tensors to one scalar with fused multiply-add when available. */
+    template<Sora::Concept::DenseTensor Left, Sora::Concept::DenseTensor Right>
+        requires(Left::kExtents == Right::kExtents) &&
+                requires(const typename Left::ElementType& left, const typename Right::ElementType& right) {
+                    Sora::Math::Mul(left, right);
+                    Sora::Math::Fma(left, right, Sora::Math::Mul(left, right));
+                }
+    [[nodiscard]] constexpr auto InnerProduct(const Left& left, const Right& right) {
         auto result = Sora::Math::Mul(left[0], right[0]);
         template for (constexpr size_t index :
-                      std::define_static_array(std::views::iota(size_t{1}, Tensor<T, Extents...>::kSize))) {
+                      std::define_static_array(std::views::iota(size_t{1}, Left::kElementCount))) {
             if consteval {
                 result = Sora::Math::Add(result, Sora::Math::Mul(left[index], right[index]));
             } else {
@@ -327,29 +327,47 @@ namespace Sora::Math {
      * @brief Form the outer tensor product, concatenating the left and right shapes.
      * @details The result is row-major. Each left element owns one contiguous block of all right elements.
      */
-    template<TensorElement T, size_t... LeftExtents, TensorElement U, size_t... RightExtents, typename Product>
-        requires std::invocable<Product&, const T&, const U&> &&
-                 TensorElement<std::remove_cvref_t<std::invoke_result_t<Product&, const T&, const U&>>>
-    [[nodiscard]] constexpr auto TensorProduct(const Tensor<T, LeftExtents...>& left,
-                                               const Tensor<U, RightExtents...>& right, Product&& product) noexcept(
-        std::is_nothrow_invocable_v<Product&, const T&, const U&>) {
-        using R = std::remove_cvref_t<std::invoke_result_t<Product&, const T&, const U&>>;
-        using Left = Tensor<T, LeftExtents...>;
-        using Right = Tensor<U, RightExtents...>;
-        return Tensor<R, LeftExtents..., RightExtents...>{GenerateStaticArray<R, Left::kSize * Right::kSize>(
-            [&](auto index) noexcept(std::is_nothrow_invocable_v<Product&, const T&, const U&>) {
-                constexpr size_t leftIndex = decltype(index)::value / Right::kSize;
-                constexpr size_t rightIndex = decltype(index)::value % Right::kSize;
+    template<Sora::Concept::DenseTensor Left, Sora::Concept::DenseTensor Right, typename Product>
+        requires std::invocable<Product&, const typename Left::ElementType&, const typename Right::ElementType&> &&
+                 TensorElement<std::remove_cvref_t<std::invoke_result_t<
+                     Product&, const typename Left::ElementType&, const typename Right::ElementType&>>>
+    [[nodiscard]] constexpr auto TensorProduct(const Left& left, const Right& right, Product&& product) noexcept(
+        std::is_nothrow_invocable_v<Product&, const typename Left::ElementType&, const typename Right::ElementType&>) {
+        using LeftElement = typename Left::ElementType;
+        using RightElement = typename Right::ElementType;
+        using R = std::remove_cvref_t<std::invoke_result_t<Product&, const LeftElement&, const RightElement&>>;
+        constexpr auto leftExtents = Left::kExtents;
+        constexpr auto rightExtents = Right::kExtents;
+        constexpr size_t outputRank = Left::kRank + Right::kRank;
+        constexpr auto outputExtents = [&] {
+            std::array<size_t, outputRank> result{};
+            for (size_t axis = 0; axis < Left::kRank; ++axis) {
+                result[axis] = leftExtents[axis];
+            }
+            for (size_t axis = 0; axis < Right::kRank; ++axis) {
+                result[Left::kRank + axis] = rightExtents[axis];
+            }
+            return result;
+        }();
+        using Output = Sora::Meta::InfoType<Detail::TensorTypeInfo<R>(outputExtents)>;
+        return Output{GenerateStaticArray<R, Left::kElementCount * Right::kElementCount>(
+            [&](auto index) noexcept(std::is_nothrow_invocable_v<Product&, const LeftElement&, const RightElement&>) {
+                constexpr size_t leftIndex = decltype(index)::value / Right::kElementCount;
+                constexpr size_t rightIndex = decltype(index)::value % Right::kElementCount;
                 return std::invoke(product, left[leftIndex], right[rightIndex]);
             })};
     }
 
     /** @brief Form the multiplicative outer tensor product. */
-    template<TensorElement T, size_t... LeftExtents, TensorElement U, size_t... RightExtents>
-        requires requires(T left, U right) { Sora::Math::Mul(left, right); }
-    [[nodiscard]] constexpr auto TensorProduct(const Tensor<T, LeftExtents...>& left,
-                                               const Tensor<U, RightExtents...>& right) {
-        return TensorProduct(left, right, [](const T& a, const U& b) noexcept(noexcept(Sora::Math::Mul(a, b))) {
+    template<Sora::Concept::DenseTensor Left, Sora::Concept::DenseTensor Right>
+        requires requires(const typename Left::ElementType& left, const typename Right::ElementType& right) {
+            Sora::Math::Mul(left, right);
+        }
+    [[nodiscard]] constexpr auto TensorProduct(const Left& left, const Right& right) {
+        using LeftElement = typename Left::ElementType;
+        using RightElement = typename Right::ElementType;
+        return TensorProduct(left, right, [](const LeftElement& a,
+                                             const RightElement& b) noexcept(noexcept(Sora::Math::Mul(a, b))) {
             return Sora::Math::Mul(a, b);
         });
     }

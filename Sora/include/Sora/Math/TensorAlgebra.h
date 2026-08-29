@@ -187,7 +187,7 @@ namespace Sora::Math {
 
     /** @brief Apply an elementwise operation to a tensor and an explicitly broadcast scalar. */
     template<typename Operation, Sora::Concept::DenseTensor First, TensorElement Scalar>
-        requires(std::is_arithmetic_v<Scalar> &&
+        requires(!Sora::Concept::TensorValue<std::remove_cvref_t<Scalar>> &&
                  std::invocable<Operation&, const typename First::ElementType&, const Scalar&>)
     [[nodiscard]] constexpr auto Elementwise(Operation&& operation, const First& first, const Scalar& scalar) {
         using Result =
@@ -206,20 +206,21 @@ namespace Sora::Math {
      * @details If @p Axes is @c {2,0,1}, output axis 0 reads input axis 2, output axis 1 reads input axis 0, and output
      * axis 2 reads input axis 1. The result is a row-major general tensor.
      */
-    template<size_t... Axes, TensorElement T, size_t... Extents>
-        requires(sizeof...(Axes) == sizeof...(Extents) && ((Axes < sizeof...(Extents)) && ...) &&
+    template<size_t... Axes, Sora::Concept::DenseTensor Input>
+        requires(sizeof...(Axes) == Input::kRank && ((Axes < Input::kRank) && ...) &&
                  TensorAlgebraDetail::UniqueAxes<Axes...>())
-    [[nodiscard]] constexpr auto PermuteAxes(const Tensor<T, Extents...>& input) {
+    [[nodiscard]] constexpr auto PermuteAxes(const Input& input) {
+        using T = typename Input::ElementType;
         static_assert(TensorAlgebraDetail::UniqueAxes<Axes...>(), "PermuteAxes requires unique axes");
-        static_assert(((Axes < sizeof...(Extents)) && ...), "PermuteAxes axis is out of range");
+        static_assert(((Axes < Input::kRank) && ...), "PermuteAxes axis is out of range");
         constexpr std::array axes{Axes...};
-        constexpr std::array extents{Extents...};
+        constexpr auto extents = Input::kExtents;
         constexpr auto outputExtents =
-            TensorAlgebraDetail::PermutedExtents(std::array{Axes...}, std::array{Extents...});
+            TensorAlgebraDetail::PermutedExtents(std::array{Axes...}, Input::kExtents);
         using Output = Sora::Meta::InfoType<Detail::TensorTypeInfo<T>(outputExtents)>;
         return Output{TensorAlgebraDetail::GenerateValues<T, Output::kSize>([&](size_t outputIndex) {
             const auto outputCoordinates = TensorAlgebraDetail::Coordinates(outputIndex, outputExtents);
-            std::array<size_t, sizeof...(Extents)> inputCoordinates{};
+            std::array<size_t, Input::kRank> inputCoordinates{};
             for (size_t outputAxis = 0; outputAxis < axes.size(); ++outputAxis) {
                 inputCoordinates[axes[outputAxis]] = outputCoordinates[outputAxis];
             }
@@ -228,12 +229,14 @@ namespace Sora::Math {
     }
 
     /** @brief Change physical dense layout without changing logical tensor values or interpretation. */
-    template<MatrixLayout Layout, TensorElement T, size_t... Extents>
-    [[nodiscard]] constexpr auto Relayout(const Tensor<T, Extents...>& input) {
-        using Shape = StaticShape<Extents...>;
+    template<MatrixLayout Layout, Sora::Concept::DenseTensor Input>
+        requires(Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor)
+    [[nodiscard]] constexpr auto Relayout(const Input& input) {
+        using T = typename Input::ElementType;
+        using Shape = typename Input::ShapeType;
         using Storage = StaticDenseStorage<T, Shape, MatrixMapping<Layout>>;
-        return BasicTensor<Storage, Algebra::GeneralTensor>{Storage{
-            LogicalValues, TensorAlgebraDetail::GenerateValues<T, Tensor<T, Extents...>::kSize>([&](size_t index) {
+        return BasicTensor<Storage, typename Input::InterpretationType>{Storage{
+            LogicalValues, TensorAlgebraDetail::GenerateValues<T, Input::kElementCount>([&](size_t index) {
                 return input[index];
             })}};
     }
@@ -244,30 +247,30 @@ namespace Sora::Math {
      * use a distinct axis on each operand and matching extents. A complete contraction returns the product carrier
      * as a scalar.
      */
-    template<AxisPair... Pairs, TensorElement LeftElement, size_t... LeftExtents, TensorElement RightElement,
-             size_t... RightExtents>
+    template<AxisPair... Pairs, Sora::Concept::DenseTensor Left, Sora::Concept::DenseTensor Right>
         requires(sizeof...(Pairs) > 0 &&
-                  ((Pairs.left < sizeof...(LeftExtents) && Pairs.right < sizeof...(RightExtents)) && ...) &&
+                  ((Pairs.left < Left::kRank && Pairs.right < Right::kRank) && ...) &&
                   TensorAlgebraDetail::UniqueContractedAxes<Pairs...>() &&
-                  ((TensorAlgebraDetail::ExtentAt<Pairs.left, LeftExtents...>() ==
-                    TensorAlgebraDetail::ExtentAt<Pairs.right, RightExtents...>()) && ...) &&
-                  requires(const LeftElement& left, const RightElement& right) {
+                  ((Left::kExtents[Pairs.left] == Right::kExtents[Pairs.right]) && ...) &&
+                  requires(const typename Left::ElementType& left, const typename Right::ElementType& right) {
                      Sora::Math::Mul(left, right);
                      Sora::Math::Add(Sora::Math::Mul(left, right), Sora::Math::Mul(left, right));
                  } &&
-                 std::assignable_from<
-                     std::remove_cvref_t<decltype(Sora::Math::Mul(std::declval<const LeftElement&>(),
-                                                                   std::declval<const RightElement&>()))>&,
-                     decltype(Sora::Math::Add(Sora::Math::Mul(std::declval<const LeftElement&>(),
-                                                               std::declval<const RightElement&>()),
-                                              Sora::Math::Mul(std::declval<const LeftElement&>(),
-                                                              std::declval<const RightElement&>())))>)
-    [[nodiscard]] constexpr auto Contract(const Tensor<LeftElement, LeftExtents...>& left,
-                                          const Tensor<RightElement, RightExtents...>& right) {
+                  std::assignable_from<
+                     std::remove_cvref_t<decltype(Sora::Math::Mul(
+                         std::declval<const typename Left::ElementType&>(),
+                         std::declval<const typename Right::ElementType&>()))>&,
+                     decltype(Sora::Math::Add(
+                         Sora::Math::Mul(std::declval<const typename Left::ElementType&>(),
+                                         std::declval<const typename Right::ElementType&>()),
+                         Sora::Math::Mul(std::declval<const typename Left::ElementType&>(),
+                                         std::declval<const typename Right::ElementType&>())))>)
+    [[nodiscard]] constexpr auto Contract(const Left& left, const Right& right) {
+        using LeftElement = typename Left::ElementType;
+        using RightElement = typename Right::ElementType;
         static_assert(TensorAlgebraDetail::UniqueContractedAxes<Pairs...>(),
                       "Contract requires unique axes on each operand");
-        static_assert(((TensorAlgebraDetail::ExtentAt<Pairs.left, LeftExtents...>() ==
-                        TensorAlgebraDetail::ExtentAt<Pairs.right, RightExtents...>()) && ...),
+        static_assert(((Left::kExtents[Pairs.left] == Right::kExtents[Pairs.right]) && ...),
                       "Contracted extents must match");
 
         using Product = std::remove_cvref_t<decltype(Sora::Math::Mul(std::declval<const LeftElement&>(),
@@ -276,18 +279,18 @@ namespace Sora::Math {
         constexpr size_t pairCount = sizeof...(Pairs);
         constexpr std::array leftAxes{Pairs.left...};
         constexpr std::array rightAxes{Pairs.right...};
-        constexpr std::array contractionExtents{TensorAlgebraDetail::ExtentAt<Pairs.left, LeftExtents...>()...};
-        constexpr auto leftExtents = std::array{LeftExtents...};
-        constexpr auto rightExtents = std::array{RightExtents...};
+        constexpr std::array contractionExtents{Left::kExtents[Pairs.left]...};
+        constexpr auto leftExtents = Left::kExtents;
+        constexpr auto rightExtents = Right::kExtents;
         constexpr auto outputExtents = TensorAlgebraDetail::ContractExtents(
-            std::array{Pairs...}, std::array{LeftExtents...}, std::array{RightExtents...});
+            std::array{Pairs...}, Left::kExtents, Right::kExtents);
         constexpr size_t outputSize = TensorAlgebraDetail::ExtentProduct(outputExtents);
         using Output = Sora::Meta::InfoType<Detail::TensorTypeInfo<Product>(outputExtents)>;
 
         auto evaluate = [&](size_t outputIndex) {
             const auto outputCoordinates = TensorAlgebraDetail::Coordinates(outputIndex, outputExtents);
-            std::array<size_t, sizeof...(LeftExtents)> leftCoordinates{};
-            std::array<size_t, sizeof...(RightExtents)> rightCoordinates{};
+            std::array<size_t, Left::kRank> leftCoordinates{};
+            std::array<size_t, Right::kRank> rightCoordinates{};
             size_t outputAxis = 0;
             for (size_t axis = 0; axis < leftCoordinates.size(); ++axis) {
                 bool contracted = false;
@@ -322,7 +325,25 @@ namespace Sora::Math {
                 Product result = self(self, depth + 1);
                 for (size_t coordinate = 1; coordinate < contractionExtents[depth]; ++coordinate) {
                     contractionCoordinates[depth] = coordinate;
-                    result = Sora::Math::Add(result, self(self, depth + 1));
+                    if constexpr (pairCount == 1 &&
+                                  requires(const LeftElement& a, const RightElement& b, const Product& addend) {
+                                      requires std::assignable_from<Product&, decltype(Sora::Math::Fma(a, b, addend))>;
+                                  }) {
+                        if consteval {
+                            result = Sora::Math::Add(
+                                result, self(self, depth + 1));
+                        } else {
+                            for (size_t pair = 0; pair < pairCount; ++pair) {
+                                leftCoordinates[leftAxes[pair]] = contractionCoordinates[pair];
+                                rightCoordinates[rightAxes[pair]] = contractionCoordinates[pair];
+                            }
+                            result = Sora::Math::Fma(
+                                left[TensorAlgebraDetail::LinearIndex(leftCoordinates, leftExtents)],
+                                right[TensorAlgebraDetail::LinearIndex(rightCoordinates, rightExtents)], result);
+                        }
+                    } else {
+                        result = Sora::Math::Add(result, self(self, depth + 1));
+                    }
                 }
                 contractionCoordinates[depth] = 0;
                 return result;
@@ -340,56 +361,64 @@ namespace Sora::Math {
     }
 
     /** @brief Contract using one pair of integer axis indices. */
-    template<size_t LeftAxis, size_t RightAxis, TensorElement LeftElement, size_t... LeftExtents,
-             TensorElement RightElement, size_t... RightExtents>
-        requires(LeftAxis < sizeof...(LeftExtents) && RightAxis < sizeof...(RightExtents))
-    [[nodiscard]] constexpr auto Contract(const Tensor<LeftElement, LeftExtents...>& left,
-                                          const Tensor<RightElement, RightExtents...>& right) {
+    template<size_t LeftAxis, size_t RightAxis, Sora::Concept::DenseTensor Left, Sora::Concept::DenseTensor Right>
+        requires(LeftAxis < Left::kRank && RightAxis < Right::kRank)
+    [[nodiscard]] constexpr auto Contract(const Left& left, const Right& right) {
         return Contract<AxisPair{LeftAxis, RightAxis}>(left, right);
     }
 
-    /** @brief Multiply equally shaped tensors elementwise. */
-    template<TensorElement LeftElement, TensorElement RightElement, size_t... Extents>
-        requires requires(const LeftElement& left, const RightElement& right) { Sora::Math::Mul(left, right); }
-    [[nodiscard]] constexpr auto Hadamard(const Tensor<LeftElement, Extents...>& left,
-                                          const Tensor<RightElement, Extents...>& right) {
-        return Elementwise([](const LeftElement& a, const RightElement& b) { return Sora::Math::Mul(a, b); }, left,
-                           right);
+    /** @brief Multiply equally shaped dense tensors elementwise. */
+    template<Sora::Concept::DenseTensor Left, Sora::Concept::DenseTensor Right>
+        requires(Left::kExtents == Right::kExtents) &&
+                requires(const typename Left::ElementType& left, const typename Right::ElementType& right) {
+                    Sora::Math::Mul(left, right);
+                }
+    [[nodiscard]] constexpr auto Hadamard(const Left& left, const Right& right) {
+        return Elementwise(
+            [](const typename Left::ElementType& a, const typename Right::ElementType& b) {
+                return Sora::Math::Mul(a, b);
+            },
+            left, right);
     }
 
-    /** @brief Project a rank-two tensor contraction onto the existing matrix-vector operation. */
-    template<TensorElement MatrixElement, TensorElement VectorElement, size_t Rows, size_t Columns>
-        requires requires(const Matrix<MatrixElement, Rows, Columns>& matrix,
-                          const Vector<VectorElement, Columns>& vector) { matrix * vector; }
-    [[nodiscard]] constexpr auto MatVec(const Tensor<MatrixElement, Rows, Columns>& matrix,
-                                        const Tensor<VectorElement, Columns>& vector)
-        -> Vector<Traits::MulResult<MatrixElement, VectorElement>, Rows> {
-        using LinearStorage = StaticDenseStorage<MatrixElement, StaticShape<Rows, Columns>,
-                                                 MatrixMapping<MatrixLayout::ColumnMajor>>;
-        Matrix<MatrixElement, Rows, Columns> linear{LinearStorage{LogicalValues, matrix.Values()}};
-        Vector<VectorElement, Columns> freeVector{vector.Values()};
-        return linear * freeVector;
+    /** @brief Contract a rank-two dense tensor with a rank-one dense tensor. */
+    template<Sora::Concept::DenseTensor MatrixTensor, Sora::Concept::DenseTensor VectorTensor>
+        requires(MatrixTensor::kRank == 2 && VectorTensor::kRank == 1 &&
+                 MatrixTensor::kExtents[1] == VectorTensor::kExtents[0]) &&
+                requires(const MatrixTensor& matrix, const VectorTensor& vector) {
+                    Contract<AxisPair{1, 0}>(matrix, vector);
+                }
+    [[nodiscard]] constexpr auto MatVec(const MatrixTensor& matrix, const VectorTensor& vector) {
+        if constexpr (std::same_as<typename MatrixTensor::InterpretationType, Algebra::LinearMap> &&
+                      std::same_as<typename VectorTensor::InterpretationType, Algebra::FreeVector> &&
+                      requires { matrix * vector; }) {
+            return matrix * vector;
+        } else {
+            return Contract<AxisPair{1, 0}>(matrix, vector);
+        }
     }
 
-    /** @brief Project a rank-two tensor contraction onto the existing matrix-matrix operation. */
-    template<TensorElement LeftElement, TensorElement RightElement, size_t Rows, size_t Inner, size_t Columns>
-        requires requires(const Matrix<LeftElement, Rows, Inner>& left,
-                          const Matrix<RightElement, Inner, Columns>& right) { left * right; }
-    [[nodiscard]] constexpr auto MatMul(const Tensor<LeftElement, Rows, Inner>& left,
-                                        const Tensor<RightElement, Inner, Columns>& right)
-        -> Matrix<Traits::MulResult<LeftElement, RightElement>, Rows, Columns> {
-        using LeftStorage = StaticDenseStorage<LeftElement, StaticShape<Rows, Inner>,
-                                               MatrixMapping<MatrixLayout::ColumnMajor>>;
-        using RightStorage = StaticDenseStorage<RightElement, StaticShape<Inner, Columns>,
-                                                MatrixMapping<MatrixLayout::ColumnMajor>>;
-        Matrix<LeftElement, Rows, Inner> leftMatrix{LeftStorage{LogicalValues, left.Values()}};
-        Matrix<RightElement, Inner, Columns> rightMatrix{RightStorage{LogicalValues, right.Values()}};
-        return leftMatrix * rightMatrix;
+    /** @brief Contract two rank-two dense tensors over the inner axis. */
+    template<Sora::Concept::DenseTensor LeftTensor, Sora::Concept::DenseTensor RightTensor>
+        requires(LeftTensor::kRank == 2 && RightTensor::kRank == 2 &&
+                 LeftTensor::kExtents[1] == RightTensor::kExtents[0]) &&
+                requires(const LeftTensor& left, const RightTensor& right) {
+                    Contract<AxisPair{1, 0}>(left, right);
+                }
+    [[nodiscard]] constexpr auto MatMul(const LeftTensor& left, const RightTensor& right) {
+        if constexpr (std::same_as<typename LeftTensor::InterpretationType, Algebra::LinearMap> &&
+                      std::same_as<typename RightTensor::InterpretationType, Algebra::LinearMap> &&
+                      requires { left * right; }) {
+            return left * right;
+        } else {
+            return Contract<AxisPair{1, 0}>(left, right);
+        }
     }
 
     /** @brief Project a rank-two tensor axis permutation onto the existing matrix transpose operation. */
-    template<TensorElement T, size_t Rows, size_t Columns>
-    [[nodiscard]] constexpr auto Transpose(const Tensor<T, Rows, Columns>& input) {
+    template<Sora::Concept::DenseTensor Input>
+        requires(Input::kRank == 2)
+    [[nodiscard]] constexpr auto Transpose(const Input& input) {
         return PermuteAxes<1, 0>(input);
     }
 

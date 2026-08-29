@@ -35,7 +35,8 @@ namespace Sora::Math {
      * @tparam Layout Physical storage order.
      */
     template<typename T, size_t Rows, size_t Columns, MatrixLayout Layout = MatrixLayout::ColumnMajor>
-        requires(Rows > 0 && Columns > 0)
+        requires(Rows > 0 && Columns > 0 &&
+                 (Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor))
     using MatrixView = std::mdspan<T, std::extents<size_t, Rows, Columns>, Detail::MatrixMdspanLayout<Layout>>;
 
     /**
@@ -48,7 +49,8 @@ namespace Sora::Math {
      * row-major order, while @p Layout controls only their physical placement.
      */
     template<ValueCarrier T, size_t Rows, size_t Columns, MatrixLayout Layout = MatrixLayout::ColumnMajor>
-        requires(Rows > 0 && Columns > 0)
+        requires(Rows > 0 && Columns > 0 &&
+                 (Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor))
     using Matrix = BasicTensor<StaticDenseStorage<T, StaticShape<Rows, Columns>, MatrixMapping<Layout>>,
                                Algebra::LinearMap>;
 
@@ -97,7 +99,8 @@ namespace Sora::Math {
 
     /** @brief Canonical short name for a fixed-size matrix. */
     template<ValueCarrier T, size_t Rows, size_t Columns, MatrixLayout Layout = MatrixLayout::ColumnMajor>
-        requires(Rows > 0 && Columns > 0)
+        requires(Rows > 0 && Columns > 0 &&
+                 (Layout == MatrixLayout::ColumnMajor || Layout == MatrixLayout::RowMajor))
     using Mat = Matrix<T, Rows, Columns, Layout>;
 
     /** @brief Add two matrices componentwise regardless of physical layout. */
