@@ -23,7 +23,7 @@
  * @par InfoList pipeline
  * @code{.cpp}
  * constexpr Sora::Meta::InfoList input{^^int, ^^double, ^^const double};
- * constexpr auto decayed = Sora::Meta::RequireInfoList(Sora::Meta::Map(^^std::decay_t, input));
+ * constexpr auto decayed = Sora::Meta::ExtractInfoList(Sora::Meta::Map(^^std::decay_t, input));
  * constexpr auto unique = Sora::Meta::Unique(decayed);
  * constexpr auto result = Sora::Meta::Apply(^^std::variant, unique);
  *
@@ -221,7 +221,7 @@ namespace Sora::Meta {
     [[nodiscard]] consteval std::meta::info Apply(std::meta::info function, const InfoList& arguments) {
         return Detail::Apply(function, {arguments.begin(), arguments.size()});
     }
-    static_assert(Apply(^^std::pair, Sora::Meta::InfoList{^^int, ^^double}) == ^^std::pair<int, double>);
+    // Validation lives in focused tests to keep public-header inclusion lightweight.
 
     /**
      * @brief Invoke a reflected template with a dynamically assembled argument list.
@@ -238,7 +238,7 @@ namespace Sora::Meta {
                                                   std::initializer_list<std::meta::info> arguments) {
         return Detail::Apply(function, {arguments.begin(), arguments.size()});
     }
-    static_assert(Apply(^^std::pair, {^^int, ^^double}) == ^^std::pair<int, double>);
+    // Validation lives in focused tests to keep public-header inclusion lightweight.
 
     namespace Detail {
 
@@ -250,8 +250,6 @@ namespace Sora::Meta {
             return std::meta::is_template(function) ? std::meta::info{}
                                                     : MakeMetaError(^^Error::NonInvocable, {function});
         }
-        static_assert(VerifyTemplate(^^std::pair) == std::meta::info{});
-        static_assert(VerifyTemplate(^^int) == MakeMetaError(^^Error::NonInvocable, {^^int}));
 
         /** @brief Validate the unary boolean predicate protocol used by collection algorithms. */
         [[nodiscard]] consteval std::meta::info VerifyUnaryPred(std::meta::info pred) {
@@ -399,7 +397,7 @@ namespace Sora::Meta {
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::Map(^^std::add_pointer_t,
      *     Sora::Meta::InfoList{^^int, ^^double});
-     * static_assert(Sora::Meta::Equal(Sora::Meta::RequireInfoList(result),
+ * static_assert(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(result),
      *                                  Sora::Meta::InfoList{^^int*, ^^double*}));
      * @endcode
      * @par Complexity Linear in @p input, excluding template substitution cost.
@@ -437,7 +435,7 @@ namespace Sora::Meta {
      * consteval bool IsIntegral(std::meta::info type) { return std::meta::is_integral_type(type); }
      * constexpr auto result = Sora::Meta::Filter(^^IsIntegral,
      *     Sora::Meta::InfoList{^^int, ^^double});
-     * static_assert(Sora::Meta::RequireInfoList(result).front() == ^^int);
+ * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^int);
      * @endcode
      * @par Complexity Linear in @p input.
      */
@@ -478,7 +476,7 @@ namespace Sora::Meta {
      * @code{.cpp}
      * consteval Sora::Meta::InfoList Duplicate(std::meta::info entity) { return {entity, entity}; }
      * constexpr auto result = Sora::Meta::FlatMap(^^Duplicate, Sora::Meta::InfoList{^^int});
-     * static_assert(Sora::Meta::Equal(Sora::Meta::RequireInfoList(result),
+ * static_assert(Sora::Meta::Equal(Sora::Meta::ExtractInfoList(result),
      *                                  Sora::Meta::InfoList{^^int, ^^int}));
      * @endcode
      * @note As with the meta-predicate protocol, @p function must be invocable during constant evaluation. C++26
@@ -535,7 +533,7 @@ namespace Sora::Meta {
      * consteval bool Integral(std::meta::info type) noexcept { return std::meta::is_integral_type(type); }
      * constexpr auto result = Sora::Meta::RemoveIf(^^Integral,
      *                                              Sora::Meta::InfoList{^^int, ^^double});
-     * static_assert(Sora::Meta::RequireInfoList(result).front() == ^^double);
+ * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^double);
      * @endcode
      */
     [[nodiscard]] consteval std::meta::info RemoveIf(std::meta::info pred, const InfoList& input) {
@@ -572,7 +570,7 @@ namespace Sora::Meta {
      * @code{.cpp}
      * constexpr auto result = Sora::Meta::Zip(^^std::pair,
      *     Sora::Meta::InfoList{^^int}, Sora::Meta::InfoList{^^double});
-     * static_assert(Sora::Meta::RequireInfoList(result).front() == ^^std::pair<int, double>);
+ * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^std::pair<int, double>);
      * @endcode
      * @par Complexity Linear in the common input length.
      */
@@ -680,6 +678,26 @@ namespace Sora::Meta {
             }
         }
         return accumulator;
+    }
+
+    /**
+     * @brief Reduce a reflected sequence with a binary template.
+     * @details `Reduce` is the conventional functional name for the left fold; it preserves the same accumulator
+     * order and empty-input law as @ref FoldLeft.
+     * @param[in] function Reflected binary template invoked as `function(accumulator, entity)`.
+     * @param[in] initial Initial accumulator entity.
+     * @param[in] input Entities visited from front to back.
+     * @return Final accumulator, or the first reflected error.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::Reduce(^^std::pair, ^^void,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(result == ^^std::pair<std::pair<void, int>, double>);
+     * @endcode
+     */
+    [[nodiscard]] consteval std::meta::info Reduce(std::meta::info function, std::meta::info initial,
+                                                   const InfoList& input) {
+        return FoldLeft(function, initial, input);
     }
 
     /**
@@ -853,7 +871,7 @@ namespace Sora::Meta {
      * @par Example
      * @code{.cpp}
      * consteval bool IsIntegral(std::meta::info value) { return std::meta::is_integral_type(value); }
-     * static_assert(Sora::Meta::RequireSizeResult(
+ * static_assert(Sora::Meta::ExtractSizeType(
      *     Sora::Meta::CountIf(^^IsIntegral, Sora::Meta::InfoList{^^int, ^^double, ^^long}) == 2);
      * @endcode
      */
@@ -876,6 +894,119 @@ namespace Sora::Meta {
             count += std::meta::extract<bool>(accepted);
         }
         return std::meta::reflect_constant(count);
+    }
+
+    /**
+     * @brief Return inclusive left-prefix accumulators for @p input.
+     * @param[in] function Reflected binary template invoked as `function(accumulator, entity)`.
+     * @param[in] initial Initial accumulator entity; it is not included in the output.
+     * @param[in] input Entities visited from front to back.
+     * @return Reflected `InfoList` containing one accumulator per input entity, or the first `MetaError`.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::ScanLeft(^^std::pair, ^^void,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(Sora::Meta::ExtractInfoList(result).back() == ^^std::pair<std::pair<void, int>, double>);
+     * @endcode
+     */
+    [[nodiscard]] consteval std::meta::info ScanLeft(std::meta::info function, std::meta::info initial,
+                                                     const InfoList& input) {
+        if (IsMetaError(function)) {
+            return function;
+        }
+        if (IsMetaError(initial)) {
+            return initial;
+        }
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+            return error;
+        }
+        std::vector<std::meta::info> output;
+        output.reserve(input.size());
+        auto accumulator = initial;
+        for (const auto value : input) {
+            accumulator = Detail::Apply(function, InfoList{accumulator, value});
+            if (IsMetaError(accumulator)) {
+                return accumulator;
+            }
+            output.push_back(accumulator);
+        }
+        return Reflect(output.empty() ? InfoList{} : Promote(output));
+    }
+
+    /**
+     * @brief Return inclusive right-prefix accumulators for @p input.
+     * @param[in] function Reflected binary template invoked as `function(entity, accumulator)`.
+     * @param[in] initial Initial accumulator entity; it is not included in the output.
+     * @param[in] input Entities visited from back to front.
+     * @return Reflected `InfoList` in original order, or the first `MetaError`.
+     * @par Example
+     * @code{.cpp}
+     * constexpr auto result = Sora::Meta::ScanRight(^^std::pair, ^^void,
+     *     Sora::Meta::InfoList{^^int, ^^double});
+     * static_assert(Sora::Meta::ExtractInfoList(result).front() == ^^std::pair<int, std::pair<double, void>>);
+     * @endcode
+     */
+    [[nodiscard]] consteval std::meta::info ScanRight(std::meta::info function, std::meta::info initial,
+                                                      const InfoList& input) {
+        if (IsMetaError(function)) {
+            return function;
+        }
+        if (IsMetaError(initial)) {
+            return initial;
+        }
+        if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
+            return error;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+            return error;
+        }
+        std::vector<std::meta::info> output(input.size());
+        auto accumulator = initial;
+        for (std::size_t index = input.size(); index > 0; --index) {
+            accumulator = Detail::Apply(function, InfoList{input[index - 1], accumulator});
+            if (IsMetaError(accumulator)) {
+                return accumulator;
+            }
+            output[index - 1] = accumulator;
+        }
+        return Reflect(output.empty() ? InfoList{} : Promote(output));
+    }
+
+    /**
+     * @brief Return the first index accepted by @p pred.
+     * @param[in] pred Reflected unary boolean predicate.
+     * @param[in] input Source sequence inspected from front to back.
+     * @return Reflected `std::size_t`, or `InfoList::npos` when no entity matches.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info value) { return value == ^^double; }
+     * static_assert(Sora::Meta::ExtractSizeType(Sora::Meta::FindIndex(
+     *     ^^IsDouble, Sora::Meta::InfoList{^^int, ^^double})) == 1);
+     * @endcode
+     */
+    [[nodiscard]] consteval std::meta::info FindIndex(std::meta::info pred, const InfoList& input) {
+        if (IsMetaError(pred)) {
+            return pred;
+        }
+        if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
+            return error;
+        }
+        if (const auto error = FirstMetaError(input); error != std::meta::info{}) {
+            return error;
+        }
+        for (std::size_t index = 0; index < input.size(); ++index) {
+            const auto accepted = InvokePred(pred, input[index]);
+            if (IsMetaError(accepted)) {
+                return accepted;
+            }
+            if (std::meta::extract<bool>(accepted)) {
+                return std::meta::reflect_constant(index);
+            }
+        }
+        return std::meta::reflect_constant(InfoList::npos);
     }
 
     /**
@@ -1854,6 +1985,24 @@ namespace Sora::Meta {
         }
 
         /**
+         * @brief Reduce a reflected `TypeList` from left to right.
+         * @param[in] function Reflected binary type template.
+         * @param[in] initial Initial reflected accumulator type.
+         * @param[in] list Reflected `Traits::TypeList` specialization.
+         * @return The same result as @ref FoldLeft.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::Reduce(^^std::pair, ^^void,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^std::pair<std::pair<void, int>, double>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info Reduce(std::meta::info function, std::meta::info initial,
+                                                       std::meta::info list) {
+            return FoldLeft(function, initial, list);
+        }
+
+        /**
          * @brief Find the first type accepted by a reflected predicate.
          * @param[in] pred Reflected unary boolean predicate.
          * @param[in] list Reflected `Traits::TypeList` specialization.
@@ -2030,6 +2179,86 @@ namespace Sora::Meta {
                 return inspected.error;
             }
             return Sora::Meta::CountIf(pred, inspected.types);
+        }
+
+        /**
+         * @brief TypeList projection of @ref Sora::Meta::ScanLeft.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::ScanLeft(^^std::pair, ^^void,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<std::pair<void, int>,
+         *                                                   std::pair<std::pair<void, int>, double>>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info ScanLeft(std::meta::info function, std::meta::info initial,
+                                                         std::meta::info list) {
+            if (IsMetaError(function)) {
+                return function;
+            }
+            if (IsMetaError(initial)) {
+                return initial;
+            }
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
+                return error;
+            }
+            const auto inspected = Detail::InspectTypeList(list, InfoList{function, initial, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return ToTypeList(Sora::Meta::ScanLeft(function, initial, inspected.types));
+        }
+
+        /**
+         * @brief TypeList projection of @ref Sora::Meta::ScanRight.
+         * @par Example
+         * @code{.cpp}
+         * constexpr auto result = Sora::Meta::Types::ScanRight(^^std::pair, ^^void,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(result == ^^Sora::Traits::TypeList<std::pair<int, std::pair<double, void>>,
+         *                                                   std::pair<double, void>>);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info ScanRight(std::meta::info function, std::meta::info initial,
+                                                          std::meta::info list) {
+            if (IsMetaError(function)) {
+                return function;
+            }
+            if (IsMetaError(initial)) {
+                return initial;
+            }
+            if (const auto error = Detail::VerifyTemplate(function); error != std::meta::info{}) {
+                return error;
+            }
+            const auto inspected = Detail::InspectTypeList(list, InfoList{function, initial, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return ToTypeList(Sora::Meta::ScanRight(function, initial, inspected.types));
+        }
+
+        /**
+         * @brief TypeList projection of @ref Sora::Meta::FindIndex.
+         * @par Example
+         * @code{.cpp}
+         * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+         * constexpr auto result = Sora::Meta::Types::FindIndex(^^IsDouble,
+         *     ^^Sora::Traits::TypeList<int, double>);
+         * static_assert(std::meta::extract<std::size_t>(result) == 1);
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info FindIndex(std::meta::info pred, std::meta::info list) {
+            if (IsMetaError(pred)) {
+                return pred;
+            }
+            if (const auto error = Detail::VerifyUnaryPred(pred); error != std::meta::info{}) {
+                return error;
+            }
+            const auto inspected = Detail::InspectTypeList(list, InfoList{pred, list});
+            if (!inspected) {
+                return inspected.error;
+            }
+            return Sora::Meta::FindIndex(pred, inspected.types);
         }
 
     } // namespace Types
@@ -2509,6 +2738,56 @@ namespace Sora::Traits {
     using FoldRight = Meta::InfoType<Meta::Types::FoldRight(Function, ^^Initial, ^^List)>;
 
     /**
+     * @brief Reduce @p List from left to right.
+     * @tparam Function Reflected binary type template.
+     * @tparam Initial Initial accumulator type.
+     * @tparam List `TypeList` specialization to reduce.
+     * @return Final type or the first `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::Reduce<^^std::pair, void, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, std::pair<std::pair<void, int>, double>>);
+     * @endcode
+     */
+    template<std::meta::info Function, typename Initial, typename List>
+        requires Concept::TypeList<List>
+    using Reduce = Meta::InfoType<Meta::Types::Reduce(Function, ^^Initial, ^^List)>;
+
+    /**
+     * @brief Inclusive left scan over a `TypeList`.
+     * @tparam Function Reflected binary type template.
+     * @tparam Initial Initial accumulator type, excluded from the output.
+     * @tparam List `TypeList` specialization to scan.
+     * @return `TypeList` of prefix accumulators, or a `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::ScanLeft<^^std::pair, void, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<std::pair<void, int>,
+     *                                                           std::pair<std::pair<void, int>, double>>>);
+     * @endcode
+     */
+    template<std::meta::info Function, typename Initial, typename List>
+        requires Concept::TypeList<List>
+    using ScanLeft = Meta::InfoType<Meta::Types::ScanLeft(Function, ^^Initial, ^^List)>;
+
+    /**
+     * @brief Inclusive right scan over a `TypeList`.
+     * @tparam Function Reflected binary type template.
+     * @tparam Initial Initial accumulator type, excluded from the output.
+     * @tparam List `TypeList` specialization to scan.
+     * @return `TypeList` of suffix accumulators in source order, or a `MetaError` type.
+     * @par Example
+     * @code{.cpp}
+     * using Result = Sora::Traits::ScanRight<^^std::pair, void, Sora::Traits::TypeList<int, double>>;
+     * static_assert(std::same_as<Result, Sora::Traits::TypeList<std::pair<int, std::pair<double, void>>,
+     *                                                           std::pair<double, void>>>);
+     * @endcode
+     */
+    template<std::meta::info Function, typename Initial, typename List>
+        requires Concept::TypeList<List>
+    using ScanRight = Meta::InfoType<Meta::Types::ScanRight(Function, ^^Initial, ^^List)>;
+
+    /**
      * @brief First index of @p Type in @p List, or @ref Meta::InfoList::npos.
      * @tparam List `TypeList` specialization to inspect.
      * @tparam Type Reflected type to find.
@@ -2521,6 +2800,21 @@ namespace Sora::Traits {
     template<typename List, typename Type>
         requires Concept::TypeList<List>
     inline constexpr std::size_t IndexOf = Meta::ExtractSizeType(Meta::Types::IndexOf(^^List, ^^Type));
+
+    /**
+     * @brief First index accepted by @p Pred in @p List, or `InfoList::npos`.
+     * @tparam Pred Reflected unary boolean predicate.
+     * @tparam List `TypeList` specialization to inspect.
+     * @return Zero-based index, or the missing-index sentinel.
+     * @par Example
+     * @code{.cpp}
+     * consteval bool IsDouble(std::meta::info type) { return type == ^^double; }
+     * static_assert(Sora::Traits::FindIndex<^^IsDouble, Sora::Traits::TypeList<int, double>> == 1);
+     * @endcode
+     */
+    template<std::meta::info Pred, typename List>
+        requires Concept::TypeList<List>
+    inline constexpr std::size_t FindIndex = Meta::ExtractSizeType(Meta::Types::FindIndex(Pred, ^^List));
 
     /**
      * @brief Whether @p List contains @p Type.

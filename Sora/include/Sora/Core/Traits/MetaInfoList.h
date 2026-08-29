@@ -93,7 +93,12 @@ namespace Sora::Meta {
          * static_assert(list.back() == ^^double);
          * @endcode
          */
-        consteval InfoList(const value_type* items, std::size_t length) noexcept : first{items}, count{length} {}
+        consteval InfoList(const value_type* items, std::size_t length) : first{items}, count{length} {
+            if (length != 0 && items == nullptr) {
+                throw std::define_static_string(
+                    "Sora::Meta::InfoList requires a non-null pointer for non-empty input.");
+            }
+        }
 
         /**
          * @brief Promote an inline reflection list into static storage.

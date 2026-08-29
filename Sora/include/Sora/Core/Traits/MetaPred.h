@@ -3,10 +3,11 @@
  * @brief Reflection-native compile-time predicate protocol for arbitrary arity.
  * @ingroup Core
  *
- * @details A Sora meta predicate is a reflected function returning @c bool whose parameters can all accept
- * @c std::meta::info. Predicates of every arity use the same invocation and signature-validation path. The function
- * must additionally be callable during constant evaluation; current C++26 reflection exposes no query for that
- * declaration property, so violating it is a translation-time failure at `reflect_invoke`, not a `MetaError`.
+ * @details A Sora meta predicate is a reflected function returning @c bool whose declared parameters can all accept
+ * @c std::meta::info. Invocation uses exactly the declared parameter count; default arguments and variadic
+ * expansion do not make a predicate callable at another arity. The function must additionally be callable during
+ * constant evaluation; current C++26 reflection exposes no query for that declaration property, so violating it is a
+ * translation-time failure at `reflect_invoke`, not a `MetaError`.
  */
 #pragma once
 
@@ -24,7 +25,8 @@ namespace Sora::Meta {
     /**
      * @brief Test whether @p pred satisfies the arbitrary-arity meta-predicate protocol.
      * @param[in] pred Reflection of the function to inspect.
-     * @return @c true when @p pred is a function returning @c bool and every parameter accepts @c std::meta::info.
+     * @return @c true when @p pred is a function returning @c bool and every declared parameter accepts
+     *     @c std::meta::info.
      * @par Example
      * @code{.cpp}
      * consteval bool Same(std::meta::info left, std::meta::info right) noexcept { return left == right; }
@@ -32,7 +34,8 @@ namespace Sora::Meta {
      * @endcode
      */
     [[nodiscard]] consteval bool IsMetaPred(std::meta::info pred) {
-        if (!std::meta::is_function(pred) || std::meta::return_type_of(pred) != ^^bool) {
+        if (!std::meta::is_function(pred) || std::meta::has_ellipsis_parameter(pred) ||
+            std::meta::return_type_of(pred) != ^^bool) {
             return false;
         }
 
@@ -44,7 +47,7 @@ namespace Sora::Meta {
     /**
      * @brief Invoke a reflected predicate with zero or more reflected arguments.
      *
-     * @details Meta errors propagate from left to right. A non-function or incompatible arity produces
+     * @details Meta errors propagate from left to right. A non-function or incompatible declared arity produces
      * @c Error::NonInvocable; a successful invocation returning a non-bool value produces
      * @c Error::NonBooleanPredResult. The number of supplied arguments must match the reflected function's
      * declared arity; a zero-argument call is valid only for a zero-argument predicate.
@@ -70,12 +73,13 @@ namespace Sora::Meta {
         }
         std::vector<std::meta::info> context{pred};
         context.append_range(inputs);
-        if (!std::meta::is_function(pred)) {
+        if (!std::meta::is_function(pred) || std::meta::has_ellipsis_parameter(pred)) {
             return MakeMetaError(^^Error::NonInvocable, context);
         }
 
         const std::vector<std::meta::info> argumentTypes(inputs.size(), ^^std::meta::info);
-        if (!std::meta::is_invocable_type(std::meta::type_of(pred), argumentTypes)) {
+        if (std::meta::parameters_of(pred).size() != inputs.size() ||
+            !std::meta::is_invocable_type(std::meta::type_of(pred), argumentTypes)) {
             return MakeMetaError(^^Error::NonInvocable, context);
         }
         if (std::meta::return_type_of(pred) != ^^bool) {
@@ -85,6 +89,9 @@ namespace Sora::Meta {
         for (const auto input : inputs) {
             if (IsMetaError(input)) {
                 return input;
+            }
+            if (input == std::meta::info{}) {
+                return MakeMetaError(^^Error::NonInvocable, context);
             }
         }
 

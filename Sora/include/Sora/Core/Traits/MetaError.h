@@ -82,9 +82,6 @@ namespace Sora {
 
             } // namespace Category
 
-            // TODO: Add some error throwers for the above categories, with a static string message that includes the
-            // reflected context.
-
         } // namespace Error
 
     } // namespace Meta
@@ -94,7 +91,8 @@ namespace Sora {
         /**
          * @brief Build a reflected error from a tag and a compile-time context range.
          * @param[in] tag Reflection of the category entity.
-         * @param[in] contexts Provenance reflections in source order.
+         * @param[in] contexts Provenance reflections in source order. Empty reflections are ignored so malformed
+         *     source entities still produce the requested error category without corrupting the error value.
          * @return Reflection of `Error::MetaError<tag, contexts...>`.
          * @par Example
          * @code{.cpp}
@@ -110,16 +108,13 @@ namespace Sora {
             if (!std::meta::is_type(tag)) {
                 throw std::define_static_string("Meta::MakeMetaError requires a reflected category type.");
             }
-            for (const auto context : contexts) {
-                if (context == std::meta::info{}) {
-                    throw std::define_static_string("Meta::MakeMetaError requires non-empty context reflections.");
-                }
-            }
             std::vector<std::meta::info> arguments;
             arguments.reserve(contexts.size() + 1);
             arguments.push_back(std::meta::reflect_constant(tag));
             for (const auto context : contexts) {
-                arguments.push_back(std::meta::reflect_constant(context));
+                if (context != std::meta::info{}) {
+                    arguments.push_back(std::meta::reflect_constant(context));
+                }
             }
             return std::meta::substitute(^^Error::MetaError, arguments);
         }
@@ -219,7 +214,7 @@ namespace Sora {
          * @param[in] error Reflected `Error::MetaError` to extend.
          * @param[in] contexts Additional provenance reflections in source order.
          * @return A reflected `MetaError` with the same category and appended contexts.
-         * @pre `IsMetaError(error)` is `true`; every context is non-empty.
+         * @pre `IsMetaError(error)` is `true`.
          * @par Example
          * @code{.cpp}
          * constexpr auto error = Sora::Meta::MakeMetaError(^^Sora::Meta::Error::OutOfRange, {^^int});

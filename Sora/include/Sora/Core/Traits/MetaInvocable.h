@@ -9,6 +9,8 @@
 #pragma once
 
 #include <meta>
+#include <ranges>
+#include <vector>
 
 #include <Sora/Core/Traits/MetaError.h>
 #include <Sora/Core/Traits/MetaInfo.h>
@@ -100,8 +102,8 @@ namespace Sora {
          * @endcode
          */
         template<std::meta::info Function, typename... Arguments>
-        concept InvocableReturningType =
-            Invocable<Function, ^^Arguments...> && std::meta::is_type(Invoke<Function, ^^Arguments...>);
+        concept InvocableReturningType
+            = Invocable<Function, ^^Arguments...> && std::meta::is_type(Invoke<Function, ^^Arguments...>);
 
         /**
          * @brief True when a reflected template can be substituted with @p Arguments.
@@ -115,8 +117,8 @@ namespace Sora {
          * @endcode
          */
         template<std::meta::info Function, std::meta::info... Arguments>
-        concept DirectlyInvocable =
-            std::meta::is_template(Function) && std::meta::can_substitute(Function, {Arguments...});
+        concept DirectlyInvocable
+            = std::meta::is_template(Function) && std::meta::can_substitute(Function, {Arguments...});
 
         namespace Detail {
 
@@ -157,8 +159,8 @@ namespace Sora {
          * @endcode
          */
         template<std::meta::info Function, std::meta::info... Arguments>
-        using InvokeResultType =
-            InfoType<Detail::RequireType<Invoke<Function, Arguments...>, Function, Arguments...>()>;
+        using InvokeResultType
+            = InfoType<Detail::RequireType<Invoke<Function, Arguments...>, Function, Arguments...>()>;
 
         /**
          * @brief Invoke a reflected template with ordinary C++ type arguments.
@@ -173,6 +175,114 @@ namespace Sora {
          */
         template<std::meta::info Function, typename... Arguments>
         using InvokeResult = InvokeResultType<Function, ^^Arguments...>;
+
+        /**
+         * @brief Invoke a reflected non-template function with reflected arguments.
+         *
+         * @details
+         * This operation is deliberately distinct from @ref Invoke: it uses
+         * `std::meta::reflect_invoke` and therefore executes a reflected function,
+         * while @ref Invoke uses `std::meta::substitute` to apply a reflected
+         * template. Each input reflection is passed to the function as a
+         * `std::meta::info` value. The function's normal C++ invocability rules
+         * apply, including default and variadic parameters.
+         *
+         * The first input @ref MetaError is propagated unchanged. Invalid
+         * functions, empty argument reflections, and incompatible argument lists
+         * produce @c Error::NonInvocable. A successful invocation preserves the
+         * complete reflected result: it may denote a type, value, function, or
+         * another reflection entity.
+         *
+         * @note Reflection currently exposes no query for constant-evaluation
+         *     availability. Passing a runtime-only function therefore remains
+         *     a translation-time failure at `std::meta::reflect_invoke`.
+         *
+         * @param[in] function Reflection of a non-template function.
+         * @param[in] arguments Reflections passed as `std::meta::info` values in
+         *     source order.
+         * @return Reflected invocation result, propagated input error, or a
+         *     reflection-native @c Error::NonInvocable.
+         * @par Example
+         * @code{.cpp}
+         * consteval std::meta::info Identity(std::meta::info value) noexcept { return value; }
+         * constexpr auto result = Sora::Meta::InvokeFunction(^^Identity, {^^int});
+         * static_assert(result == ^^int); // input: ^^int, output: ^^int
+         * @endcode
+         */
+        [[nodiscard]] consteval std::meta::info InvokeFunction(std::meta::info function,
+                                                               std::vector<std::meta::info> arguments = {}) {
+            if (IsMetaError(function)) {
+                return function;
+            }
+
+            std::vector<std::meta::info> context;
+            context.reserve(arguments.size() + 1);
+            context.push_back(function);
+            for (const auto argument : arguments) {
+                context.push_back(argument);
+                if (IsMetaError(argument)) {
+                    return argument;
+                }
+            }
+            if (function == std::meta::info{} || !std::meta::is_function(function)) {
+                return MakeMetaError(^^Error::NonInvocable, context);
+            }
+            for (const auto argument : arguments) {
+                if (argument == std::meta::info{}) {
+                    return MakeMetaError(^^Error::NonInvocable, context);
+                }
+            }
+
+            const std::vector<std::meta::info> argumentTypes(arguments.size(), ^^std::meta::info);
+            if (!std::meta::is_invocable_type(std::meta::type_of(function), argumentTypes)) {
+                return MakeMetaError(^^Error::NonInvocable, context);
+            }
+
+            std::vector<std::meta::info> reflectedArguments
+                = arguments
+                  | std::views::transform([](std::meta::info arg) { return std::meta::reflect_constant(arg); })
+                  | std::ranges::to<std::vector>();
+            const auto result = std::meta::reflect_invoke(function, reflectedArguments);
+            // A function returning std::meta::info yields a value reflection whose payload is the entity handle.
+            // Unwrap that transport value so callers receive the same reflection they returned from the function.
+            if (std::meta::dealias(std::meta::return_type_of(function)) == std::meta::dealias(^^std::meta::info)) {
+                return std::meta::extract<std::meta::info>(result);
+            }
+            return result;
+        }
+
+        /**
+         * @brief Test whether a reflected function accepts the supplied reflected arguments.
+         * @tparam Function Reflected non-template function.
+         * @tparam Arguments Reflected arguments passed as `std::meta::info` values.
+         * @return @c true when invocation succeeds without a reflection-native error.
+         * @par Example
+         * @code{.cpp}
+         * consteval std::meta::info Identity(std::meta::info value) noexcept { return value; }
+         * static_assert(Sora::Meta::FunctionInvocable<^^Identity, ^^int>);
+         * static_assert(!Sora::Meta::FunctionInvocable<^^Identity>);
+         * @endcode
+         */
+        template<std::meta::info Function, std::meta::info... Arguments>
+        concept FunctionInvocable = !IsMetaError(InvokeFunction(Function, {Arguments...}));
+
+        /**
+         * @brief Compile-time reflected result of invoking a non-template function.
+         * @tparam Function Reflected non-template function.
+         * @tparam Arguments Reflected arguments passed as `std::meta::info` values.
+         * @return The complete reflected result. The result may denote a type,
+         *     value, function, or another entity; no type projection is applied.
+         * @par Example
+         * @code{.cpp}
+         * consteval int IsIntegral(std::meta::info type) noexcept {
+         *     return std::meta::is_integral_type(type) ? 1 : 0;
+         * }
+         * constexpr auto result = Sora::Meta::FunctionResult<^^IsIntegral, ^^int>;
+         * static_assert(std::meta::extract<int>(result) == 1); // input: ^^int, output: 1
+         * @endcode
+         */
+        template<std::meta::info Function, std::meta::info... Arguments>
+        inline constexpr std::meta::info FunctionResult = InvokeFunction(Function, {Arguments...});
 
     } // namespace Meta
 
