@@ -2,6 +2,61 @@
  * @file SystemAPI.h
  * @brief Dynamically resolved operating-system entry points used by the platform abstraction layer.
  * @ingroup PAL
+ * @anchor SoraPALSystemAPIHeader
+ *
+ * @section SoraPALSystemAPITableOfContents API table directory
+ *
+ * @par Common tables
+ * - @ref Sora::PAL::SocketSystemAPI
+ * - @ref Sora::PAL::TcpSystemAPI
+ * - @ref Sora::PAL::UdpSystemAPI
+ * - @ref Sora::PAL::ClockSystemAPI
+ * - @ref Sora::PAL::AdvancedSocketSystemAPI
+ * - @ref Sora::PAL::NetworkInterfaceSystemAPI
+ * - @ref Sora::PAL::ProcessControlSystemAPI
+ * - @ref Sora::PAL::ModernFileSystemAPI
+ * - @ref Sora::PAL::RandomSystemAPI
+ * - @ref Sora::PAL::VirtualMemorySystemAPI
+ * - @ref Sora::PAL::FileMappingSystemAPI
+ * - @ref Sora::PAL::EnvironmentSystemAPI
+ * - @ref Sora::PAL::ModuleSystemAPI
+ * - @ref Sora::PAL::ProcessSystemAPI
+ * - @ref Sora::PAL::ThreadSystemAPI
+ * - @ref Sora::PAL::ThreadControlSystemAPI
+ * - @ref Sora::PAL::GlobalMemorySystemAPI
+ * - @ref Sora::PAL::ClipboardSystemAPI
+ * - @ref Sora::PAL::DisplaySystemAPI
+ * - @ref Sora::PAL::FileSystemAPI
+ *
+ * @par Windows tables
+ * - @ref Sora::PAL::NativeErrorSystemAPI
+ * - @ref Sora::PAL::StructuredExceptionSystemAPI
+ * - @ref Sora::PAL::LocalMemorySystemAPI
+ * - @ref Sora::PAL::HandleSystemAPI
+ * - @ref Sora::PAL::SynchronizationSystemAPI
+ * - @ref Sora::PAL::EventSystemAPI
+ * - @ref Sora::PAL::IOCPSystemAPI
+ * - @ref Sora::PAL::WindowsIORingSystemAPI
+ * - @ref Sora::PAL::WinsockOverlappedSystemAPI
+ * - @ref Sora::PAL::Win32WindowSystemAPI
+ * - @ref Sora::PAL::SystemInformationSystemAPI
+ * - @ref Sora::PAL::DebugSystemAPI
+ * - @ref Sora::PAL::SchedulerTraceSystemAPI
+ * - @ref Sora::PAL::DbgHelpSystemAPI
+ * - @ref Sora::PAL::StackTraceSystemAPI
+ *
+ * @par Linux and POSIX tables
+ * - @ref Sora::PAL::EpollSystemAPI
+ * - @ref Sora::PAL::EventFdSystemAPI
+ * - @ref Sora::PAL::TimerFdSystemAPI
+ * - @ref Sora::PAL::SignalFdSystemAPI
+ * - @ref Sora::PAL::FanotifySystemAPI
+ * - @ref Sora::PAL::LinuxSyscallSystemAPI
+ * - @ref Sora::PAL::PerfEventSystemAPI
+ * - @ref Sora::PAL::LinuxIoUringSystemAPI
+ * - @ref Sora::PAL::X11WindowSystemAPI
+ * - @ref Sora::PAL::XcbWindowSystemAPI
+ * - @ref Sora::PAL::WaylandWindowSystemAPI
  *
  * @details The accessors in this file initialize immutable, process-lifetime function tables on first use. Callers
  * must test optional entry points before invoking them because an older operating system may not export them.
@@ -113,6 +168,7 @@ struct xcb_setup_t;
 
 #if defined(PLATFORM_WINDOWS)
 
+struct _DEBUG_EVENT;
 struct _EXCEPTION_POINTERS;
 struct _IMAGEHLP_LINE64;
 struct _IMAGEHLP_MODULE64;
@@ -1068,6 +1124,19 @@ namespace Sora::PAL {
             uint16_t processorRevision;
         };
 
+        /** @brief ABI-compatible Win32 physical-memory status without exposing the Windows SDK. */
+        struct MemoryStatus {
+            DWord length = sizeof(MemoryStatus);
+            DWord memoryLoadPercent = 0;
+            uint64_t totalPhysicalBytes = 0;
+            uint64_t availablePhysicalBytes = 0;
+            uint64_t totalPageFileBytes = 0;
+            uint64_t availablePageFileBytes = 0;
+            uint64_t totalVirtualBytes = 0;
+            uint64_t availableVirtualBytes = 0;
+            uint64_t availableExtendedVirtualBytes = 0;
+        };
+
         /**
          * @brief ABI-compatible Win32 storage information used for direct-I/O alignment.
          *
@@ -1127,6 +1196,9 @@ namespace Sora::PAL {
                 // clang-format on
 
             } // namespace Common
+
+            /** @brief Processor-feature selector consumed by @c SystemInformationSystemAPI. */
+            inline constexpr DWord kArmNeonInstructionsAvailable = 19;
 
             /** @brief Status and formatting flags consumed by @c NativeErrorSystemAPI. */
             inline namespace NativeError {
@@ -1782,9 +1854,63 @@ namespace Sora::PAL {
 
     /** @brief Dynamically resolved Win32 system-information queries. */
     struct SystemInformationSystemAPI {
-        using GetSystemInfoFunction = void(__stdcall*)(void*);
+        // clang-format off
+        using GetSystemInfoFunction          = void(__stdcall*)(void*);
+        using GlobalMemoryStatusFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MemoryStatus*);
+        using IsProcessorFeatureFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DWord);
 
-        [[= $::Syscall{"GetSystemInfo"}]] GetSystemInfoFunction getSystemInfo = nullptr;
+        [[= $::Syscall{"GetSystemInfo"}]]
+        GetSystemInfoFunction      getSystemInfo      = nullptr;
+        [[= $::Syscall{"GlobalMemoryStatusEx"}]]
+        GlobalMemoryStatusFunction globalMemoryStatus = nullptr;
+        [[= $::Syscall{"IsProcessorFeaturePresent"}]]
+        IsProcessorFeatureFunction isProcessorFeature = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Indivisible documented Win32 debugger entry points. */
+    struct DebugSystemAPI {
+        // clang-format off
+        using CheckRemoteDebuggerPresentFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Bool*);
+        using ContinueDebugEventFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord);
+        using DebugActiveProcessFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DWord);
+        using DebugBreakProcessFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
+        using DebugSetProcessKillOnExitFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Bool);
+        using FatalExitFunction                  = void(__stdcall*)(int);
+        using IsDebuggerPresentFunction          = WindowsSystem::Bool(__stdcall*)();
+        using BreakpointFunction                 = void(__stdcall*)();
+        using OutputDebugStringAnsiFunction      = void(__stdcall*)(const char*);
+        using OutputDebugStringWideFunction      = void(__stdcall*)(const wchar_t*);
+        using WaitForDebugEventFunction          = WindowsSystem::Bool(__stdcall*)(::_DEBUG_EVENT*,
+                                                                                    WindowsSystem::DWord);
+
+        [[= $::Syscall{"CheckRemoteDebuggerPresent"}]]
+        CheckRemoteDebuggerPresentFunction checkRemoteDebuggerPresent = nullptr;
+        [[= $::Syscall{"ContinueDebugEvent"}]]
+        ContinueDebugEventFunction         continueDebugEvent          = nullptr;
+        [[= $::Syscall{"DebugActiveProcess"}]]
+        DebugActiveProcessFunction         debugActiveProcess          = nullptr;
+        [[= $::Syscall{"DebugActiveProcessStop"}]]
+        DebugActiveProcessFunction         debugActiveProcessStop      = nullptr;
+        [[= $::Syscall{"IsDebuggerPresent"}]]
+        IsDebuggerPresentFunction          isDebuggerPresent           = nullptr;
+        [[= $::Syscall{"DebugBreak"}]]
+        BreakpointFunction                 breakpoint                  = nullptr;
+        [[= $::Syscall{"DebugBreakProcess"}]]
+        DebugBreakProcessFunction          breakpointProcess           = nullptr;
+        [[= $::Syscall{"DebugSetProcessKillOnExit"}]]
+        DebugSetProcessKillOnExitFunction  setProcessKillOnExit        = nullptr;
+        [[= $::Syscall{"FatalExit"}]]
+        FatalExitFunction                  fatalExit                    = nullptr;
+        [[= $::Syscall{"OutputDebugStringA"}]]
+        OutputDebugStringAnsiFunction      outputDebugStringAnsi       = nullptr;
+        [[= $::Syscall{"OutputDebugStringW"}]]
+        OutputDebugStringWideFunction      outputDebugStringWide       = nullptr;
+        [[= $::Syscall{"WaitForDebugEvent"}]]
+        WaitForDebugEventFunction          waitForDebugEvent           = nullptr;
+        [[= $::Syscall{"WaitForDebugEventEx"}]]
+        WaitForDebugEventFunction          waitForDebugEventExtended   = nullptr;
+        // clang-format on
     };
 
     /** @brief Dynamically resolved Win32 environment entry points. */
@@ -2418,6 +2544,100 @@ namespace Sora::PAL {
 
         } // namespace File
 
+        /** @brief Native CPU-discovery selectors and masks consumed by upper-layer capability composition. */
+        inline namespace CpuDiscovery {
+
+#    if defined(PLATFORM_LINUX)
+            inline constexpr unsigned long kHardwareCapabilities = 16;
+            inline constexpr unsigned long kHardwareCapabilities2 = 26;
+            inline constexpr int kPhysicalPageCountConfiguration = 85;
+            inline constexpr int kAvailablePhysicalPageCountConfiguration = 86;
+#        if defined(__aarch64__)
+            inline constexpr unsigned long kArmFloatingPoint = 1UL << 0;
+            inline constexpr unsigned long kArmAdvancedSimd = 1UL << 1;
+            inline constexpr unsigned long kArmScalableVector = 1UL << 22;
+            inline constexpr unsigned long kArmScalableVector2 = 1UL << 1;
+            inline constexpr int kGetScalableVectorLength = 51;
+            inline constexpr int kScalableVectorLengthMask = 0xFFFF;
+#        elif defined(__riscv)
+            inline constexpr unsigned long kRiscVDoublePrecision = 1UL << 3;
+            inline constexpr unsigned long kRiscVSinglePrecision = 1UL << 5;
+            inline constexpr unsigned long kRiscVVector = 1UL << 21;
+#        endif
+#    endif
+
+        } // namespace CpuDiscovery
+
+        inline namespace Debugging {
+
+#    if defined(PLATFORM_LINUX)
+            /** @brief Architecture-independent Linux @c ptrace request identifiers. */
+            enum class TraceRequest : int {
+                // clang-format off
+                TraceMe              = 0,
+                PeekText             = 1,
+                PeekData             = 2,
+                PeekUser             = 3,
+                PokeText             = 4,
+                PokeData             = 5,
+                PokeUser             = 6,
+                Continue             = 7,
+                Kill                 = 8,
+                SingleStep           = 9,
+                Attach               = 16,
+                Detach               = 17,
+                SystemCall           = 24,
+                SetOptions           = 0x4200,
+                GetEventMessage      = 0x4201,
+                GetSignalInfo        = 0x4202,
+                SetSignalInfo        = 0x4203,
+                GetRegisterSet       = 0x4204,
+                SetRegisterSet       = 0x4205,
+                Seize                = 0x4206,
+                Interrupt            = 0x4207,
+                Listen               = 0x4208,
+                PeekSignalInfo       = 0x4209,
+                GetSignalMask        = 0x420A,
+                SetSignalMask        = 0x420B,
+                GetSeccompFilter     = 0x420C,
+                GetSeccompMetadata   = 0x420D,
+                GetSystemCallInfo    = 0x420E,
+                GetRseqConfiguration = 0x420F,
+                SetSystemCallUserDispatchConfiguration = 0x4210,
+                GetSystemCallUserDispatchConfiguration = 0x4211,
+                SetSystemCallInfo = 0x4212,
+                // clang-format on
+            };
+
+            // clang-format off
+            inline constexpr uint32_t kTraceOptionSystemCallsGood = 0x00000001;
+            inline constexpr uint32_t kTraceOptionFork            = 0x00000002;
+            inline constexpr uint32_t kTraceOptionVFork           = 0x00000004;
+            inline constexpr uint32_t kTraceOptionClone           = 0x00000008;
+            inline constexpr uint32_t kTraceOptionExec            = 0x00000010;
+            inline constexpr uint32_t kTraceOptionVForkDone       = 0x00000020;
+            inline constexpr uint32_t kTraceOptionExit            = 0x00000040;
+            inline constexpr uint32_t kTraceOptionSeccomp         = 0x00000080;
+            inline constexpr uint32_t kTraceOptionExitKill        = 0x00100000;
+            inline constexpr uint32_t kTraceOptionSuspendSeccomp  = 0x00200000;
+            inline constexpr uint32_t kTraceOptionMask            = 0x003000FF;
+
+            inline constexpr int kTraceEventFork      = 1;
+            inline constexpr int kTraceEventVFork     = 2;
+            inline constexpr int kTraceEventClone     = 3;
+            inline constexpr int kTraceEventExec      = 4;
+            inline constexpr int kTraceEventVForkDone = 5;
+            inline constexpr int kTraceEventExit      = 6;
+            inline constexpr int kTraceEventSeccomp   = 7;
+            inline constexpr int kTraceEventStop      = 128;
+            // clang-format on
+#    endif
+
+            /** @brief Signal number used by the native debugger breakpoint trap. */
+            inline constexpr int kBreakpointSignal = 5;
+
+        } // namespace Debugging
+
         /** @brief POSIX virtual-memory protection, mapping, and synchronization constants. */
         inline namespace Mapping {
 
@@ -2879,20 +3099,45 @@ namespace Sora::PAL {
         // clang-format on
     };
     struct SystemInformationSystemAPI {
-        using SystemConfigurationFunction = long (*)(int);
+        // clang-format off
+        using SystemConfigurationFunction  = long (*)(int);
 
-        [[= $::Syscall{"sysconf"}]] 
+        [[= $::Syscall{"sysconf"}]]
         SystemConfigurationFunction systemConfiguration = nullptr;
 
 #    if defined(PLATFORM_LINUX)
-        using SystemInfoFunction = int (*)(::sysinfo*);
-        using FileSystemStatisticsFunction = int (*)(const char*, ::statvfs*);
+        using AuxiliaryValueFunction        = unsigned long (*)(unsigned long);
+        using ProcessControlFunction        = int (*)(int, ...);
+        using FileSystemStatisticsFunction  = int (*)(const char*, ::statvfs*);
 
-        [[= $::Syscall{"sysinfo"}]] 
-        SystemInfoFunction systemInfo = nullptr;
-        [[= $::Syscall{"statvfs"}]] 
-        FileSystemStatisticsFunction fileSystemStatistics = nullptr;
+        [[= $::Syscall{"getauxval"}]]
+        AuxiliaryValueFunction        auxiliaryValue       = nullptr;
+        [[= $::Syscall{"prctl"}]]
+        ProcessControlFunction        processControl       = nullptr;
+        [[= $::Syscall{"statvfs"}]]
+        FileSystemStatisticsFunction  fileSystemStatistics = nullptr;
+#    elif defined(PLATFORM_MACOS)
+        using SysctlByNameFunction = int (*)(const char*, void*, size_t*, void*, size_t);
+
+        [[= $::Syscall{"sysctlbyname"}]]
+        SysctlByNameFunction sysctlByName = nullptr;
 #    endif
+        // clang-format on
+    };
+
+    /** @brief Indivisible POSIX debugger and process-tracing entry points. */
+    struct DebugSystemAPI {
+#    if defined(PLATFORM_LINUX)
+        using TraceProcessFunction = long (*)(PosixSystem::TraceRequest, ...);
+#    endif
+        using RaiseSignalFunction = int (*)(int);
+
+#    if defined(PLATFORM_LINUX)
+        [[= $::Syscall{"ptrace"}]] 
+        TraceProcessFunction traceProcess = nullptr;
+#    endif
+        [[= $::Syscall{"raise"}]] 
+        RaiseSignalFunction raiseSignal = nullptr;
     };
 
     /** @brief Win32 event objects are unavailable on POSIX targets. */
@@ -3243,6 +3488,8 @@ namespace Sora::PAL {
     struct IOCPSystemAPI {};
     /** @brief System-information entry points are unavailable on this target. */ 
     struct SystemInformationSystemAPI {};
+    /** @brief Debugger system calls are unavailable on this target. */
+    struct DebugSystemAPI {};
     /** @brief Environment entry points are unavailable on this target. */ 
     struct EnvironmentSystemAPI {};
     /** @brief Module entry points are unavailable on this target. */ 
@@ -3395,6 +3642,9 @@ namespace Sora::PAL {
 
         /** @brief Load and return the immutable system-information function table. */
         [[nodiscard]] const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable native debugger entry-point table. */
+        [[nodiscard]] const DebugSystemAPI& LoadDebugSystemAPI() noexcept;
 
         /** @brief Load and return the immutable process-environment function table. */
         [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;
