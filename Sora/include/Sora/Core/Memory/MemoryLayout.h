@@ -11,8 +11,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <type_traits>
+
+#include <Sora/Platform.h>
 
 namespace Sora {
 
@@ -117,10 +120,16 @@ namespace Sora {
     }
 
     /** @brief Compact representation of a concrete non-zero power-of-two byte alignment. */
-    class Align {
+    struct Align {
+        /** @brief Structural representation containing log2 of the alignment. */
+        uint8_t log2_ = 0;
+
     public:
         /** @brief Construct byte alignment, which means no stronger alignment requirement. */
         constexpr Align() noexcept = default;
+
+        /** @brief Construct from a concrete byte alignment. */
+        explicit constexpr Align(std::align_val_t value) : Align(static_cast<uint64_t>(value)) {}
 
         /** @brief Construct from a concrete non-zero power-of-two byte alignment. */
         explicit constexpr Align(uint64_t value) : log2_(CheckedLog2(value)) {}
@@ -166,8 +175,6 @@ namespace Sora {
     private:
         struct TrustedTag {};
 
-        uint8_t log2_ = 0;
-
         constexpr Align(uint8_t log2, TrustedTag) noexcept : log2_(log2) {}
 
         [[nodiscard]] static constexpr uint8_t CheckedLog2(uint64_t value) {
@@ -182,7 +189,10 @@ namespace Sora {
     using Alignment = Align;
 
     /** @brief Optional alignment value. Undefined means no explicit alignment was supplied. */
-    class MaybeAlign {
+    struct MaybeAlign {
+        /** @brief Structural representation: zero is undefined; otherwise log2(alignment) + 1. */
+        uint8_t encoded_ = 0;
+
     public:
         /** @brief Construct an undefined optional alignment. */
         constexpr MaybeAlign() noexcept = default;
@@ -191,36 +201,39 @@ namespace Sora {
         constexpr MaybeAlign(std::nullopt_t) noexcept {}
 
         /** @brief Construct from a concrete alignment. */
-        constexpr MaybeAlign(Align value) noexcept : value_(value) {}
+        constexpr MaybeAlign(Align value) noexcept : encoded_(static_cast<uint8_t>(value.Log2() + 1u)) {}
+
+        /** @brief Construct from a concrete alignment specified as std::align_val_t. */
+        constexpr MaybeAlign(std::align_val_t value) noexcept : MaybeAlign(Align(static_cast<uint64_t>(value))) {}
 
         /** @brief Construct from @p value, treating zero as undefined. */
         explicit constexpr MaybeAlign(uint64_t value) {
             if (value != 0) {
-                value_.emplace(value);
+                encoded_ = static_cast<uint8_t>(Align{value}.Log2() + 1u);
             }
         }
 
         /** @brief Return whether this value carries a concrete alignment. */
-        [[nodiscard]] constexpr bool HasValue() const noexcept { return value_.has_value(); }
+        [[nodiscard]] constexpr bool HasValue() const noexcept { return encoded_ != 0; }
 
         /** @brief Return whether this value carries a concrete alignment. */
         [[nodiscard]] constexpr explicit operator bool() const noexcept { return HasValue(); }
 
         /** @brief Return the concrete alignment, or throw if this value is undefined. */
         [[nodiscard]] constexpr Align Value() const {
-            if (!value_) {
+            if (!HasValue()) {
                 throw "Sora::MaybeAlign::Value: alignment is undefined.";
             }
-            return *value_;
+            return Align::FromLog2(static_cast<uint8_t>(encoded_ - 1u));
         }
 
         /** @brief Return the concrete alignment, or byte alignment when this value is undefined. */
-        [[nodiscard]] constexpr Align ValueOrOne() const noexcept { return value_.value_or(Align{}); }
+        [[nodiscard]] constexpr Align ValueOrOne() const noexcept {
+            return HasValue() ? Align::FromLog2(static_cast<uint8_t>(encoded_ - 1u)) : Align{};
+        }
 
         /** @brief Encode undefined as zero and concrete alignments as @c log2(value) + 1. */
-        [[nodiscard]] constexpr unsigned Encode() const noexcept {
-            return value_ ? static_cast<unsigned>(value_->Log2()) + 1u : 0u;
-        }
+        [[nodiscard]] constexpr unsigned Encode() const noexcept { return encoded_; }
 
         /** @brief Decode the representation produced by @ref Encode. */
         [[nodiscard]] static constexpr MaybeAlign Decode(unsigned encoded) {
@@ -234,10 +247,47 @@ namespace Sora {
         }
 
         [[nodiscard]] constexpr bool operator==(const MaybeAlign&) const noexcept = default;
-
-    private:
-        std::optional<Align> value_{};
     };
+
+    /** @brief Descriptor for a memory request, including size and alignment. */
+    struct MemorySpanDescriptor {
+        uint64_t size{};
+        MaybeAlign alignment{std::alignment_of_v<void*>};
+
+        [[nodiscard]] constexpr bool operator==(const MemorySpanDescriptor&) const noexcept = default;
+    };
+
+    /** @brief Merge multiple memory span descriptors into a single descriptor. */
+    [[nodiscard]] constexpr MemorySpanDescriptor
+    MergeMemorySpanDescriptor(std::initializer_list<MemorySpanDescriptor> descriptors) {
+        // In order not to depend on Math infrastructure, we implement LCM here. The LCM of two power-of-two alignments
+        // is the stronger alignment, so we can skip the LCM computation in release builds.
+        const auto lcm = [](uint64_t lhs, uint64_t rhs) constexpr noexcept {
+            auto a = lhs;
+            auto b = rhs;
+            while (b != 0) {
+                const auto remainder = a % b;
+                a = b;
+                b = remainder;
+            }
+            return lhs / a * rhs;
+        };
+
+        auto iter = descriptors.begin();
+        if (iter == descriptors.end()) {
+            return MemorySpanDescriptor{};
+        }
+        MemorySpanDescriptor result{};
+        for (const auto& request : descriptors) {
+            result.size = result.size > request.size ? result.size : request.size;
+            if (!result.alignment) {
+                result.alignment = request.alignment;
+            } else if (request.alignment) {
+                result.alignment = MaybeAlign{lcm(result.alignment.Value().Value(), request.alignment.Value().Value())};
+            }
+        }
+        return result;
+    }
 
     /** @brief Encode a concrete alignment as @c log2(value) + 1. */
     [[nodiscard]] constexpr unsigned Encode(Align alignment) noexcept {
