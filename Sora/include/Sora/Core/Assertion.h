@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
 #include <format>
 #include <source_location>
 #include <string>
@@ -76,6 +77,12 @@ namespace Sora {
     /** @cond INTERNAL */
     namespace Detail {
 
+        /** @brief Post-report behavior requested by the assertion entry point. */
+        enum class AssertionDisposition : uint8_t {
+            ApplyConfiguredAction,
+            ReturnAfterReport,
+        };
+
         /** @brief Boolean condition paired with the source location at which its implicit conversion occurs. */
         struct LocatedCondition {
             bool value = false;            /**< Evaluated condition value. */
@@ -87,9 +94,11 @@ namespace Sora {
                 : value(condition), source(location) {}
         };
 
-        /** @brief Materialize, report, and apply policy to one failed condition. */
+        /** @brief Materialize and report one failed condition, then apply @p disposition. */
         void ReportAssertionFailure(AssertionKind kind, std::string_view condition, std::string message,
-                                    std::source_location source) noexcept;
+                                    std::source_location source,
+                                    AssertionDisposition disposition
+                                    = AssertionDisposition::ApplyConfiguredAction) noexcept;
 
         /** @brief Evaluate an unformatted condition and report failure when false. */
         [[nodiscard]] inline bool EvaluateCondition(bool value, AssertionKind kind, std::string_view condition,
@@ -147,7 +156,15 @@ namespace Sora {
                                                  condition.source, format, std::forward<Args>(args)...);
     }
 
+    /** @brief Report an impossible control-flow path, then terminate unconditionally. */
+    [[noreturn]] inline void Unreachable(std::source_location source = std::source_location::current()) noexcept {
+        ::Sora::Detail::ReportAssertionFailure(::Sora::AssertionKind::Assertion, "unreachable", {}, source,
+                                               ::Sora::Detail::AssertionDisposition::ReturnAfterReport);
+        std::terminate();
+    }
+
 } // namespace Sora
 
 using Sora::Assert;
+using Sora::Unreachable;
 using Sora::Verify;
