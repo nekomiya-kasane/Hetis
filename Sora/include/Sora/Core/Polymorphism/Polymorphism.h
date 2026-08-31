@@ -119,16 +119,17 @@ namespace Sora {
                 std::vector<std::meta::info> out;
                 Sora::Meta::WalkHierarchyMembers(^^Iface, [&](size_t /*depth*/, std::meta::info m) {
                     if (!IsAdapterEntry(m)) {
-                        return;
+                        return true;
                     }
                     // Override filter: skip a base-class method whose identifier matches one already selected from a
                     // more-derived class. The first occurrence wins because the walk is derived-first.
                     for (const auto name = Sora::Meta::IdentifierOf(m); auto kept : out) {
                         if (Sora::Meta::IdentifierOf(kept) == name) {
-                            return;
+                            return true;
                         }
                     }
                     out.push_back(m);
+                    return true;
                 });
                 return out;
             }
@@ -239,22 +240,22 @@ namespace Sora {
                         return false;
                     }
                     if (!Sora::Meta::IsRegularMethod(m)) {
-                        return false;
+                        return true;
                     }
                     if (!std::meta::has_identifier(m) || Meta::IdentifierOf(m) != name) {
-                        return false;
+                        return true;
                     }
                     if (std::meta::is_const(m) != wantC || std::meta::is_volatile(m) != wantV) {
-                        return false;
+                        return true;
                     }
                     if (std::meta::return_type_of(m) != wantRet) {
-                        return false;
+                        return true;
                     }
                     if (!std::ranges::equal(ParamTypes(m), wantParams)) {
-                        return false;
+                        return true;
                     }
                     match = m;
-                    return true;
+                    return false;
                 });
                 return match;
             }
@@ -266,7 +267,6 @@ namespace Sora {
             consteval bool AllMethodsMatch() {
                 return std::ranges::all_of(SelectMethods<Iface>(),
                                            [&](auto m) { return FindCompatible(^^Impl, m) != std::meta::info{}; });
-                return true;
             }
 
             /**

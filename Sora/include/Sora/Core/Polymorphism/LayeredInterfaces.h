@@ -37,7 +37,7 @@
  *
  * @par Complete example
  * @code{.cpp}
- * #include <Sora/Core/Traits/LayeredInterfaces.h>
+ * #include <Sora/Core/Polymorphism/LayeredInterfaces.h>
  *
  * #include <cassert>
  * #include <concepts>

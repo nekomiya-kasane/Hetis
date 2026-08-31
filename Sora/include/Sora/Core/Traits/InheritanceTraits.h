@@ -70,7 +70,8 @@ namespace Sora {
          * diamond inheritance and virtual bases); duplicates are filtered by reflection-info equality of the base
          * class type.
          *
-         * @tparam Visit Callable as @c void(size_t, std::meta::info). Depth is 0 for @p root, 1 for direct bases, etc.
+         * @tparam Visit Callable as @c bool(size_t, std::meta::info). Returning @c false stops traversal. Depth is 0
+         *     for @p root, 1 for direct bases, etc.
          * @param[in] root Reflected root class type.
          * @param[in] visit Callback invoked once for every member of each unique class type.
          * @param[in] context Reflection access context used for member and base discovery.
