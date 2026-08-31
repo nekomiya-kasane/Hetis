@@ -556,16 +556,15 @@ namespace Sora::Meta {
         return fold.Result();
     }
 
-    namespace Detail {
-
-        template<LayeredInterfaceDescriptor... Interfaces>
-        struct LayeredInterfaceClosure {
-            template<typename Core>
-            using Apply
-                = InfoType<ExtendLayeredInterfaces(^^Core, InfoList{std::meta::reflect_constant(Interfaces)...})>;
-        };
-
-    } // namespace Detail
+    /**
+     * @brief Carrier for applying a sequence of layered interfaces.
+     * @tparam Interfaces Interface descriptors captured by the closure.
+     */
+    template<LayeredInterfaceDescriptor... Interfaces>
+    struct ExtendsCarrier {
+        template<typename Core>
+        using Apply = InfoType<ExtendLayeredInterfaces(^^Core, InfoList{std::meta::reflect_constant(Interfaces)...})>;
+    };
 
     /**
      * @brief Reflect a unary metafunction that applies an ordered interface sequence.
@@ -574,7 +573,7 @@ namespace Sora::Meta {
      * @details Capturing no interfaces produces the identity metafunction.
      */
     template<LayeredInterfaceDescriptor... Interfaces>
-    inline constexpr std::meta::info Extends = ^^Detail::LayeredInterfaceClosure<Interfaces...>::template Apply;
+    inline constexpr std::meta::info Extends = ^^ExtendsCarrier<Interfaces...>::template Apply;
 
 } // namespace Sora::Meta
 
