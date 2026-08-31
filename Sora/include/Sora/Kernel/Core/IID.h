@@ -7,7 +7,7 @@
 
 #include <Sora/Core/Traits/AnnotationTraits.h>
 #include <Sora/Core/Hash.h>
-#include <Sora/Core/Polymorphism.h>
+#include <Sora/Core/Polymorphism/Polymorphism.h>
 #include <Sora/Core/Traits/ScopeTraits.h>
 
 #include <Sora/Kernel/Core/ClassTypes.h>

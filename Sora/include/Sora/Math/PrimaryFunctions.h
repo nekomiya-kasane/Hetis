@@ -137,6 +137,46 @@ namespace Sora::Math {
         };
 
         /**
+         * @brief CPO implementing backend-dispatched greatest common divisor.
+         * @details Scalar and fixed-width SIMD integer carriers share this frontend; SIMD binary results contain one
+         * GCD magnitude per lane. Scalar backends additionally accept a variadic operand list.
+         */
+        struct GcdFn {
+            template<typename First, typename Second, typename... Rest>
+                requires requires(First&& first, Second&& second, Rest&&... rest) {
+                    BackendFor<First, Second, Rest...>::GCD(std::forward<First>(first), std::forward<Second>(second),
+                                                            std::forward<Rest>(rest)...);
+                }
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
+            operator()(First&& first, Second&& second, Rest&&... rest) const noexcept(noexcept(
+                BackendFor<First, Second, Rest...>::GCD(std::forward<First>(first), std::forward<Second>(second),
+                                                        std::forward<Rest>(rest)...))) {
+                return BackendFor<First, Second, Rest...>::GCD(std::forward<First>(first), std::forward<Second>(second),
+                                                               std::forward<Rest>(rest)...);
+            }
+        };
+
+        /**
+         * @brief CPO implementing backend-dispatched least common multiple.
+         * @details Scalar and fixed-width SIMD integer carriers share this frontend. The call reports
+         * @c std::overflow_error when a scalar result or any SIMD lane is not representable.
+         */
+        struct LcmFn {
+            template<typename First, typename Second, typename... Rest>
+                requires requires(First&& first, Second&& second, Rest&&... rest) {
+                    BackendFor<First, Second, Rest...>::LCM(std::forward<First>(first), std::forward<Second>(second),
+                                                            std::forward<Rest>(rest)...);
+                }
+            [[nodiscard, gnu::always_inline]] constexpr decltype(auto)
+            operator()(First&& first, Second&& second, Rest&&... rest) const noexcept(noexcept(
+                BackendFor<First, Second, Rest...>::LCM(std::forward<First>(first), std::forward<Second>(second),
+                                                        std::forward<Rest>(rest)...))) {
+                return BackendFor<First, Second, Rest...>::LCM(std::forward<First>(first), std::forward<Second>(second),
+                                                               std::forward<Rest>(rest)...);
+            }
+        };
+
+        /**
          * @brief CPO implementing backend-dispatched negation.
          * @code{.cpp}
          * constexpr auto input = 2.0F;
@@ -608,6 +648,12 @@ namespace Sora::Math {
      * @endcode
      */
     inline constexpr CPO::DivFn Div{};
+
+    /** @brief Compute the greatest common divisor through the selected scalar or SIMD backend. */
+    inline constexpr CPO::GcdFn GCD{};
+
+    /** @brief Compute the checked least common multiple through the selected scalar or SIMD backend. */
+    inline constexpr CPO::LcmFn LCM{};
 
     /**
      * @brief Negate a value.

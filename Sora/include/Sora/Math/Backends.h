@@ -17,6 +17,7 @@
 
 #include <Sora/Core/Traits/TypeTraits.h>
 #include <Sora/Math/ConstexprMath.h>
+#include <Sora/Math/Integer.h>
 #include <Sora/Math/Simd.h>
 
 namespace Sora {
@@ -100,6 +101,28 @@ namespace Sora {
                 template<Sora::Concept::NumericScalar T>
                 [[nodiscard]] static constexpr T Square(T x) noexcept {
                     return x * x;
+                }
+
+                template<std::integral T, std::integral... Ts>
+                    requires(!std::same_as<std::remove_cv_t<T>, bool> &&
+                             (std::same_as<std::remove_cv_t<T>, std::remove_cv_t<Ts>> && ...))
+                [[nodiscard]] static constexpr auto GCD(T first, T second, Ts... rest) noexcept {
+                    auto result = Integer::GCD(first, second);
+                    ((result = Integer::GCD(result, Integer::MagnitudeOf(rest))), ...);
+                    return result;
+                }
+
+                template<std::integral T, std::integral... Ts>
+                    requires(!std::same_as<std::remove_cv_t<T>, bool> &&
+                             (std::same_as<std::remove_cv_t<T>, std::remove_cv_t<Ts>> && ...))
+                [[nodiscard]] static constexpr auto LCM(T first, T second, Ts... rest) {
+                    using U = Integer::Magnitude<T>;
+                    if (first == T{0} || second == T{0} || ((rest == T{0}) || ...)) {
+                        return U{0};
+                    }
+                    auto result = Integer::LCM(first, second);
+                    ((result = Integer::LCM(result, Integer::MagnitudeOf(rest))), ...);
+                    return result;
                 }
 
                 template<Sora::Concept::NumericScalar T>
@@ -479,6 +502,34 @@ namespace Sora {
                     } else {
                         return x.Fabs();
                     }
+                }
+
+                template<typename First, typename Second>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N>) &&
+                             std::same_as<ElementTypeOf<First>, ElementTypeOf<Second>> &&
+                             std::integral<typename ResultVector<First, Second>::ValueType> &&
+                             !std::same_as<typename ResultVector<First, Second>::ValueType, bool>)
+                [[nodiscard]] static constexpr auto GCD(First&& left, Second&& right) noexcept {
+                    using Input = ResultVector<First, Second>;
+                    using Result = Simd::Rebind<std::make_unsigned_t<typename Input::ValueType>, Input>;
+                    const Input leftInput = Convert<Input>(std::forward<First>(left));
+                    const Input rightInput = Convert<Input>(std::forward<Second>(right));
+                    return Result([&](auto index) { return Integer::GCD(leftInput[index], rightInput[index]); });
+                }
+
+                template<typename First, typename Second>
+                    requires(kCompatibleOperand<First> && kCompatibleOperand<Second> &&
+                             (Concept::FixedSimdValue<First, N> || Concept::FixedSimdValue<Second, N>) &&
+                             std::same_as<ElementTypeOf<First>, ElementTypeOf<Second>> &&
+                             std::integral<typename ResultVector<First, Second>::ValueType> &&
+                             !std::same_as<typename ResultVector<First, Second>::ValueType, bool>)
+                [[nodiscard]] static constexpr auto LCM(First&& left, Second&& right) {
+                    using Input = ResultVector<First, Second>;
+                    using Result = Simd::Rebind<std::make_unsigned_t<typename Input::ValueType>, Input>;
+                    const Input leftInput = Convert<Input>(std::forward<First>(left));
+                    const Input rightInput = Convert<Input>(std::forward<Second>(right));
+                    return Result([&](auto index) { return Integer::LCM(leftInput[index], rightInput[index]); });
                 }
 
                 [[nodiscard]] static constexpr auto Sin(const Concept::FixedSimdFloatingValue<N> auto& x) noexcept {
