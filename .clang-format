@@ -33,3 +33,6 @@ AllowBreakBeforeNoexceptSpecifier: OnlyWithParen
 # (volk before vulkan.h, stb implementation macros before stb headers, etc.).
 SortIncludes: false
 IncludeBlocks: Preserve
+
+BreakBinaryOperations: OnePerLine
+BreakBeforeBinaryOperators: true

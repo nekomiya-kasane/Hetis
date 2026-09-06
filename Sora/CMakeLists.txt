@@ -27,9 +27,55 @@ set(SORA_CORE_MEMORY_SOURCES
 )
 
 file(GLOB_RECURSE Sora_SOURCES CONFIGURE_DEPENDS
+    "src/*.c"
+    "src/*.cc"
     "src/*.cpp"
+    "src/*.cxx"
     "src/*.h"
+    "src/*.hpp"
+    "src/*.hxx"
 )
+
+file(GLOB_RECURSE SORA_PLATFORM_BOUNDARY_FILES CONFIGURE_DEPENDS
+    "include/*.h"
+    "include/*.hpp"
+    "include/*.hxx"
+)
+list(APPEND SORA_PLATFORM_BOUNDARY_FILES ${Sora_SOURCES})
+
+function(sora_enforce_platform_header_boundary)
+    string(CONCAT _sora_platform_header_pattern
+        "#[ \t]*include[ \t]*[<\"]((Windows|windows|winsock2|ws2tcpip|bcrypt|iphlpapi|ioringapi|werapi|"
+        "DbgHelp|Psapi|Shellapi|TlHelp32|evntrace|evntcons|debugapi|errhandlingapi|handleapi|memoryapi|"
+        "processthreadsapi|synchapi|sysinfoapi|objbase|combaseapi|ole2|oleauto|oleidl|oleacc|"
+        "unknwn|objidl|oaidl|guiddef|propidl|propkey|wtypes|rpc|rpcndr|"
+        "rpcdce)\\.h|(sys|linux|mach|net|arpa|asm)/[^>\"]+|"
+        "(unistd|pthread|signal|spawn|dlfcn|execinfo|fcntl|ifaddrs|poll|ucontext|netdb|libproc|process)\\.h|"
+        "X11/[^>\"]+|xcb/[^>\"]+|wayland[^>\"]*)[>\"]"
+    )
+    cmake_path(ABSOLUTE_PATH CMAKE_CURRENT_SOURCE_DIR NORMALIZE OUTPUT_VARIABLE _sora_source_root)
+    cmake_path(APPEND _sora_source_root "src/PAL/SystemAPI.cpp" OUTPUT_VARIABLE _sora_platform_implementation)
+
+    foreach(_sora_source IN LISTS ARGN)
+        cmake_path(NORMAL_PATH _sora_source OUTPUT_VARIABLE _sora_normalized_source)
+        if(_sora_normalized_source STREQUAL _sora_platform_implementation)
+            continue()
+        endif()
+        file(READ "${_sora_normalized_source}" _sora_source_text)
+        if(_sora_source_text MATCHES "${_sora_platform_header_pattern}")
+            cmake_path(RELATIVE_PATH _sora_normalized_source BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                       OUTPUT_VARIABLE _sora_relative_source)
+            message(FATAL_ERROR
+                "${_sora_relative_source} directly includes an operating-system header. "
+                "Expose the required normalized operation through Core/PAL/SystemAPI.h and implement it only in "
+                "src/PAL/SystemAPI.cpp."
+            )
+        endif()
+    endforeach()
+endfunction()
+
+sora_enforce_platform_header_boundary(${SORA_PLATFORM_BOUNDARY_FILES})
+
 list(FILTER Sora_SOURCES EXCLUDE REGEX "/src/(Math|Compute)/")
 set(SORA_COMPONENT_SOURCES
     ${SORA_CORE_MEMORY_SOURCES}
@@ -80,6 +126,8 @@ set_target_properties(Sora.PAL.Storage PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     FOLDER "Sora/PAL"
 )
+
+target_link_libraries(Sora.PAL.Cpu PUBLIC Sora.PAL.Storage)
 
 add_library(Sora.PAL.Tracing STATIC ${SORA_PAL_TRACING_SOURCES})
 add_library(Sora::PAL::Tracing ALIAS Sora.PAL.Tracing)

@@ -10,7 +10,10 @@ CompileFlags:
   CompilationDatabase: build/x64-debug
   # clang doesn't recognise a few MSVC switches that appear in the DB; drop the
   # noisiest rather than emit "unknown argument" diagnostics.
-  Add: [-Wno-unknown-warning-option, -Wno-unknown-attributes]
+  # Standalone public headers may not have a directly associated translation
+  # unit yet. Keep their project include root available when clangd infers a
+  # compile command from an unrelated source file.
+  Add: [-I../../Sora/include, -Wno-unknown-warning-option, -Wno-unknown-attributes]
   Remove: [/Zc:preprocessor, /external:*, -external:*]
 
 Index:
