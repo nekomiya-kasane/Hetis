@@ -33,6 +33,9 @@
 #    include <bcrypt.h>
 #    include <iphlpapi.h>
 #    include <ioringapi.h>
+#    include <objbase.h>
+#    include <ole2.h>
+#    include <oleauto.h>
 #    include <werapi.h>
 #    include <DbgHelp.h>
 #    include <Psapi.h>
@@ -63,12 +66,21 @@
 #    include <netdb.h>
 #    include <net/if.h>
 #    include <unistd.h>
+#    if defined(PLATFORM_MACOS)
+#        include <sys/sysctl.h>
+#    endif
 #    if defined(PLATFORM_LINUX)
-#        include <sys/sysinfo.h>
+#        if defined(__aarch64__) || defined(__riscv)
+#            include <asm/hwcap.h>
+#        endif
+#        include <sys/auxv.h>
 #        include <sys/epoll.h>
 #        include <sys/eventfd.h>
 #        include <sys/fanotify.h>
 #        include <sys/inotify.h>
+#        include <sys/prctl.h>
+#        include <sys/ptrace.h>
+#        include <linux/ptrace.h>
 #        include <sys/sendfile.h>
 #        include <sys/signalfd.h>
 #        include <sys/syscall.h>
@@ -137,6 +149,16 @@ namespace Sora::PAL {
 
         [[nodiscard]] const ModulePtr& Kernel32Module() noexcept {
             static const ModulePtr module = LoadSystemModule("kernel32.dll");
+            return module;
+        }
+
+        [[nodiscard]] const ModulePtr& Ole32Module() noexcept {
+            static const ModulePtr module = LoadSystemModule("ole32.dll");
+            return module;
+        }
+
+        [[nodiscard]] const ModulePtr& OleAut32Module() noexcept {
+            static const ModulePtr module = LoadSystemModule("oleaut32.dll");
             return module;
         }
 
@@ -277,8 +299,8 @@ namespace Sora::PAL {
             *ticksPerSecond = 0;
 
             const SchedulerTraceSystemAPI& api = LoadSchedulerTraceSystemAPI();
-            auto session =
-                std::unique_ptr<WindowsSchedulerTraceSession>{new (std::nothrow) WindowsSchedulerTraceSession};
+            auto session
+                = std::unique_ptr<WindowsSchedulerTraceSession>{new (std::nothrow) WindowsSchedulerTraceSession};
             if (session == nullptr) {
                 return ErrorCode::OutOfMemory;
             }
@@ -296,8 +318,10 @@ namespace Sora::PAL {
             properties.MaximumBuffers = options.maximumBuffers;
             properties.FlushTimer = 1;
             properties.LogFileMode = EVENT_TRACE_REAL_TIME_MODE | EVENT_TRACE_SYSTEM_LOGGER_MODE;
-            properties.EnableFlags = EVENT_TRACE_FLAG_PROCESS | EVENT_TRACE_FLAG_THREAD | EVENT_TRACE_FLAG_CSWITCH |
-                                     EVENT_TRACE_FLAG_DISPATCHER;
+            properties.EnableFlags = EVENT_TRACE_FLAG_PROCESS
+                                     | EVENT_TRACE_FLAG_THREAD
+                                     | EVENT_TRACE_FLAG_CSWITCH
+                                     | EVENT_TRACE_FLAG_DISPATCHER;
             properties.LoggerNameOffset = static_cast<ULONG>(offsetof(WindowsSchedulerTraceProperties, loggerName));
             std::memcpy(session->properties.loggerName, kSoraSchedulerSessionName, sizeof(kSoraSchedulerSessionName));
 
@@ -307,16 +331,16 @@ namespace Sora::PAL {
             }
             *ticksPerSecond = static_cast<uint64_t>(frequency.QuadPart);
 
-            ULONG status =
-                api.startTrace(&session->producerHandle, session->properties.loggerName, session->Properties());
+            ULONG status
+                = api.startTrace(&session->producerHandle, session->properties.loggerName, session->Properties());
             if (status != ERROR_SUCCESS) {
                 return ClassifyTraceStatus(status);
             }
 
             EVENT_TRACE_LOGFILEW log{};
             log.LoggerName = session->properties.loggerName;
-            log.ProcessTraceMode =
-                PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+            log.ProcessTraceMode
+                = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
             log.EventRecordCallback = &WindowsSchedulerTraceSession::EventCallback;
             log.BufferCallback = &WindowsSchedulerTraceSession::BufferCallback;
             log.Context = session.get();
@@ -365,8 +389,8 @@ namespace Sora::PAL {
             if (status == ERROR_WMI_INSTANCE_NOT_FOUND) {
                 status = ERROR_SUCCESS;
             } else if (status != ERROR_SUCCESS) {
-                const TRACEHANDLE consumerHandle =
-                    session.consumerHandle.exchange(INVALID_PROCESSTRACE_HANDLE, std::memory_order_acq_rel);
+                const TRACEHANDLE consumerHandle
+                    = session.consumerHandle.exchange(INVALID_PROCESSTRACE_HANDLE, std::memory_order_acq_rel);
                 if (consumerHandle != INVALID_PROCESSTRACE_HANDLE) {
                     session.api->closeTrace(consumerHandle);
                 }
@@ -383,8 +407,8 @@ namespace Sora::PAL {
                 session->api->controlTrace(session->producerHandle, session->properties.loggerName,
                                            session->Properties(), EVENT_TRACE_CONTROL_STOP);
             }
-            const TRACEHANDLE consumerHandle =
-                session->consumerHandle.exchange(INVALID_PROCESSTRACE_HANDLE, std::memory_order_acq_rel);
+            const TRACEHANDLE consumerHandle
+                = session->consumerHandle.exchange(INVALID_PROCESSTRACE_HANDLE, std::memory_order_acq_rel);
             if (consumerHandle != INVALID_PROCESSTRACE_HANDLE) {
                 session->api->closeTrace(consumerHandle);
             }
@@ -438,16 +462,22 @@ namespace Sora::PAL {
             FILETIME created{}, exited{}, kernel{}, user{};
             PROCESS_MEMORY_COUNTERS memory{};
             memory.cb = sizeof(memory);
-            if (api.getProcessTimes(process, &created, &exited, &kernel, &user) == FALSE ||
-                api.getProcessMemoryInfo(process, &memory, sizeof(memory)) == FALSE) {
+            if (api.getProcessTimes(process, &created, &exited, &kernel, &user)
+                == FALSE
+                || api.getProcessMemoryInfo(process, &memory, sizeof(memory))
+                == FALSE) {
                 return false;
             }
 
             constexpr uint64_t kNanosecondsPerTick = 100;
             const uint64_t userTicks = FileTimeTicks(user);
             const uint64_t kernelTicks = FileTimeTicks(kernel);
-            if (userTicks > std::numeric_limits<uint64_t>::max() / kNanosecondsPerTick ||
-                kernelTicks > std::numeric_limits<uint64_t>::max() / kNanosecondsPerTick) {
+            if (userTicks
+                > std::numeric_limits<uint64_t>::max()
+                / kNanosecondsPerTick
+                || kernelTicks
+                > std::numeric_limits<uint64_t>::max()
+                / kNanosecondsPerTick) {
                 return false;
             }
             *output = {
@@ -459,41 +489,46 @@ namespace Sora::PAL {
             return true;
         }
         // clang-format off
-        static_assert(sizeof(WindowsSystem::ProcessorNumber)                     == sizeof(PROCESSOR_NUMBER));
-        static_assert(alignof(WindowsSystem::ProcessorNumber)                    == alignof(PROCESSOR_NUMBER));
-        static_assert(sizeof(WindowsSystem::Overlapped)                          == sizeof(OVERLAPPED));
-        static_assert(alignof(WindowsSystem::Overlapped)                         == alignof(OVERLAPPED));
-        static_assert(offsetof(WindowsSystem::Overlapped, internal)              == offsetof(OVERLAPPED, Internal));
-        static_assert(offsetof(WindowsSystem::Overlapped, internalHigh)          == offsetof(OVERLAPPED, InternalHigh));
-        static_assert(sizeof(WindowsSystem::FileNotifyInformationHeader)         == offsetof(FILE_NOTIFY_INFORMATION, FileName));
-        static_assert(alignof(WindowsSystem::FileNotifyInformationHeader)        == alignof(FILE_NOTIFY_INFORMATION));
-        static_assert(sizeof(WindowsSystem::SystemInfo)                          == sizeof(SYSTEM_INFO));
-        static_assert(alignof(WindowsSystem::SystemInfo)                         == alignof(SYSTEM_INFO));
-        static_assert(offsetof(WindowsSystem::SystemInfo, allocationGranularity) == offsetof(SYSTEM_INFO, dwAllocationGranularity));
-        static_assert(sizeof(WindowsSystem::FileStorageInfo)                     == sizeof(FILE_STORAGE_INFO));
-        static_assert(alignof(WindowsSystem::FileStorageInfo)                    == alignof(FILE_STORAGE_INFO));
-        static_assert(sizeof(WindowsSystem::LargeInteger)                        == sizeof(LARGE_INTEGER));
-        static_assert(alignof(WindowsSystem::LargeInteger)                       == alignof(LARGE_INTEGER));
-        static_assert(sizeof(WindowsSystem::FileEndOfFileInformation)            == sizeof(FILE_END_OF_FILE_INFO));
-        static_assert(WindowsSystem::kFileStorageInformation                     == FileStorageInfo);
-        static_assert(WindowsSystem::kFileEndOfFileInformation                   == FileEndOfFileInfo);
-        static_assert(WindowsSystem::kFileListDirectory                          == FILE_LIST_DIRECTORY);
-        static_assert(WindowsSystem::kNotifyFileName                             == FILE_NOTIFY_CHANGE_FILE_NAME);
-        static_assert(WindowsSystem::kNotifyDirectoryName                        == FILE_NOTIFY_CHANGE_DIR_NAME);
-        static_assert(WindowsSystem::kNotifySize                                 == FILE_NOTIFY_CHANGE_SIZE);
-        static_assert(WindowsSystem::kNotifyLastWrite                            == FILE_NOTIFY_CHANGE_LAST_WRITE);
-        static_assert(WindowsSystem::kNotifyCreation                             == FILE_NOTIFY_CHANGE_CREATION);
-        static_assert(WindowsSystem::kNotifySecurity                             == FILE_NOTIFY_CHANGE_SECURITY);
-        static_assert(WindowsSystem::kActionAdded                                == FILE_ACTION_ADDED);
-        static_assert(WindowsSystem::kActionRemoved                              == FILE_ACTION_REMOVED);
-        static_assert(WindowsSystem::kActionModified                             == FILE_ACTION_MODIFIED);
-        static_assert(WindowsSystem::kActionRenamedOld                           == FILE_ACTION_RENAMED_OLD_NAME);
-        static_assert(WindowsSystem::kActionRenamedNew                           == FILE_ACTION_RENAMED_NEW_NAME);
-        static_assert(WindowsSystem::kErrorIoPending                             == ERROR_IO_PENDING);
-        static_assert(WindowsSystem::kInfinite                                   == INFINITE);
-        static_assert(WindowsSystem::kWaitObject                                 == WAIT_OBJECT_0);
-        static_assert(WindowsSystem::kWaitTimeout                                == WAIT_TIMEOUT);
-        static_assert(WindowsSystem::kSnapshotThreads                            == TH32CS_SNAPTHREAD);
+        static_assert(sizeof(WindowsSystem::ProcessorNumber)                        == sizeof(PROCESSOR_NUMBER));
+        static_assert(alignof(WindowsSystem::ProcessorNumber)                       == alignof(PROCESSOR_NUMBER));
+        static_assert(sizeof(WindowsSystem::Overlapped)                             == sizeof(OVERLAPPED));
+        static_assert(alignof(WindowsSystem::Overlapped)                            == alignof(OVERLAPPED));
+        static_assert(offsetof(WindowsSystem::Overlapped, internal)                 == offsetof(OVERLAPPED, Internal));
+        static_assert(offsetof(WindowsSystem::Overlapped, internalHigh)             == offsetof(OVERLAPPED, InternalHigh));
+        static_assert(sizeof(WindowsSystem::FileNotifyInformationHeader)            == offsetof(FILE_NOTIFY_INFORMATION, FileName));
+        static_assert(alignof(WindowsSystem::FileNotifyInformationHeader)           == alignof(FILE_NOTIFY_INFORMATION));
+        static_assert(sizeof(WindowsSystem::SystemInfo)                             == sizeof(SYSTEM_INFO));
+        static_assert(alignof(WindowsSystem::SystemInfo)                            == alignof(SYSTEM_INFO));
+        static_assert(offsetof(WindowsSystem::SystemInfo, allocationGranularity)    == offsetof(SYSTEM_INFO, dwAllocationGranularity));
+        static_assert(sizeof(WindowsSystem::MemoryStatus)                           == sizeof(MEMORYSTATUSEX));
+        static_assert(alignof(WindowsSystem::MemoryStatus)                          == alignof(MEMORYSTATUSEX));
+        static_assert(offsetof(WindowsSystem::MemoryStatus, totalPhysicalBytes)     == offsetof(MEMORYSTATUSEX, ullTotalPhys));
+        static_assert(offsetof(WindowsSystem::MemoryStatus, availablePhysicalBytes) == offsetof(MEMORYSTATUSEX, ullAvailPhys));
+        static_assert(sizeof(WindowsSystem::FileStorageInfo)                        == sizeof(FILE_STORAGE_INFO));
+        static_assert(alignof(WindowsSystem::FileStorageInfo)                       == alignof(FILE_STORAGE_INFO));
+        static_assert(sizeof(WindowsSystem::LargeInteger)                           == sizeof(LARGE_INTEGER));
+        static_assert(alignof(WindowsSystem::LargeInteger)                          == alignof(LARGE_INTEGER));
+        static_assert(sizeof(WindowsSystem::FileEndOfFileInformation)               == sizeof(FILE_END_OF_FILE_INFO));
+        static_assert(WindowsSystem::kFileStorageInformation                        == FileStorageInfo);
+        static_assert(WindowsSystem::kFileEndOfFileInformation                      == FileEndOfFileInfo);
+        static_assert(WindowsSystem::kFileListDirectory                             == FILE_LIST_DIRECTORY);
+        static_assert(WindowsSystem::kNotifyFileName                                == FILE_NOTIFY_CHANGE_FILE_NAME);
+        static_assert(WindowsSystem::kNotifyDirectoryName                           == FILE_NOTIFY_CHANGE_DIR_NAME);
+        static_assert(WindowsSystem::kNotifySize                                    == FILE_NOTIFY_CHANGE_SIZE);
+        static_assert(WindowsSystem::kNotifyLastWrite                               == FILE_NOTIFY_CHANGE_LAST_WRITE);
+        static_assert(WindowsSystem::kNotifyCreation                                == FILE_NOTIFY_CHANGE_CREATION);
+        static_assert(WindowsSystem::kNotifySecurity                                == FILE_NOTIFY_CHANGE_SECURITY);
+        static_assert(WindowsSystem::kActionAdded                                   == FILE_ACTION_ADDED);
+        static_assert(WindowsSystem::kActionRemoved                                 == FILE_ACTION_REMOVED);
+        static_assert(WindowsSystem::kActionModified                                == FILE_ACTION_MODIFIED);
+        static_assert(WindowsSystem::kActionRenamedOld                              == FILE_ACTION_RENAMED_OLD_NAME);
+        static_assert(WindowsSystem::kActionRenamedNew                              == FILE_ACTION_RENAMED_NEW_NAME);
+        static_assert(WindowsSystem::kErrorIoPending                                == ERROR_IO_PENDING);
+        static_assert(WindowsSystem::kInfinite                                      == INFINITE);
+        static_assert(WindowsSystem::kWaitObject                                    == WAIT_OBJECT_0);
+        static_assert(WindowsSystem::kWaitTimeout                                   == WAIT_TIMEOUT);
+        static_assert(WindowsSystem::kSnapshotThreads                               == TH32CS_SNAPTHREAD);
+        static_assert(WindowsSystem::kArmNeonInstructionsAvailable                  == PF_ARM_NEON_INSTRUCTIONS_AVAILABLE);
 
         static_assert(std::is_same_v<WindowsSystem::Bool, BOOL>);
         static_assert(std::is_same_v<WindowsSystem::Byte, BYTE>);
@@ -509,14 +544,14 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<WindowsSystem::Int32, INT32>);
         static_assert(std::is_same_v<WindowsSystem::Int64, INT64>);
         static_assert(std::is_same_v<WindowsSystem::Long, LONG>);
-        static_assert(sizeof(WindowsSystem::Rect) == sizeof(RECT));
-        static_assert(alignof(WindowsSystem::Rect) == alignof(RECT));
-        static_assert(offsetof(WindowsSystem::Rect, left) == offsetof(RECT, left));
+        static_assert(sizeof(WindowsSystem::Rect)           == sizeof(RECT));
+        static_assert(alignof(WindowsSystem::Rect)          == alignof(RECT));
+        static_assert(offsetof(WindowsSystem::Rect, left)   == offsetof(RECT, left));
         static_assert(offsetof(WindowsSystem::Rect, bottom) == offsetof(RECT, bottom));
-        static_assert(sizeof(WindowsSystem::Point) == sizeof(POINT));
-        static_assert(alignof(WindowsSystem::Point) == alignof(POINT));
-        static_assert(offsetof(WindowsSystem::Point, x) == offsetof(POINT, x));
-        static_assert(offsetof(WindowsSystem::Point, y) == offsetof(POINT, y));
+        static_assert(sizeof(WindowsSystem::Point)          == sizeof(POINT));
+        static_assert(alignof(WindowsSystem::Point)         == alignof(POINT));
+        static_assert(offsetof(WindowsSystem::Point, x)     == offsetof(POINT, x));
+        static_assert(offsetof(WindowsSystem::Point, y)     == offsetof(POINT, y));
         static_assert(std::is_same_v<WindowsSystem::PointerSizedLong, LONG_PTR>);
         static_assert(std::is_same_v<WindowsSystem::ConstCharPointer, LPCSTR>);
         static_assert(std::is_same_v<WindowsSystem::ConstVoidPointer, LPCVOID>);
@@ -550,8 +585,7 @@ namespace Sora::PAL {
         static_assert(offsetof(WindowsSystem::Luid, highPart) == offsetof(LUID, HighPart));
         static_assert(sizeof(WindowsSystem::SecurityAttributes) == sizeof(SECURITY_ATTRIBUTES));
         static_assert(alignof(WindowsSystem::SecurityAttributes) == alignof(SECURITY_ATTRIBUTES));
-        static_assert(offsetof(WindowsSystem::SecurityAttributes, inheritHandle) ==
-                      offsetof(SECURITY_ATTRIBUTES, bInheritHandle));
+        static_assert(offsetof(WindowsSystem::SecurityAttributes, inheritHandle) == offsetof(SECURITY_ATTRIBUTES, bInheritHandle));
         static_assert(sizeof(WindowsSystem::FileTime) == sizeof(FILETIME));
         static_assert(alignof(WindowsSystem::FileTime) == alignof(FILETIME));
         static_assert(sizeof(WindowsSystem::Unknown) == sizeof(void*));
@@ -610,13 +644,10 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ReceiveFunction, decltype(&::WSARecv)>);
         static_assert(std::is_same_v<WinsockOverlappedSystemAPI::SendToFunction, decltype(&::WSASendTo)>);
         static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ReceiveFromFunction, decltype(&::WSARecvFrom)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::GetResultFunction,
-                                     decltype(&::WSAGetOverlappedResult)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::GetResultFunction, decltype(&::WSAGetOverlappedResult)>);
         static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ControlFunction, decltype(&::WSAIoctl)>);
-        static_assert(std::is_same_v<IOCPSystemAPI::GetQueuedCompletionStatusExFunction,
-                                     decltype(&::GetQueuedCompletionStatusEx)>);
-        static_assert(std::is_same_v<IOCPSystemAPI::SetFileCompletionNotificationModesFunction,
-                                     decltype(&::SetFileCompletionNotificationModes)>);
+        static_assert(std::is_same_v<IOCPSystemAPI::GetQueuedCompletionStatusExFunction, decltype(&::GetQueuedCompletionStatusEx)>);
+        static_assert(std::is_same_v<IOCPSystemAPI::SetFileCompletionNotificationModesFunction, decltype(&::SetFileCompletionNotificationModes)>);
         static_assert(sizeof(WindowsSystem::IoRingCreateFlags) == sizeof(IORING_CREATE_FLAGS));
         static_assert(sizeof(WindowsSystem::IoRingVersion) == sizeof(IORING_VERSION));
         static_assert(sizeof(WindowsSystem::IoRingOperation) == sizeof(IORING_OP_CODE));
@@ -631,20 +662,14 @@ namespace Sora::PAL {
         static_assert(sizeof(WindowsSystem::IoRingCompletion) == sizeof(IORING_CQE));
         static_assert(sizeof(WindowsSystem::IoRingHandle) == sizeof(HIORING));
         static_assert(alignof(WindowsSystem::IoRingHandle) == alignof(HIORING));
-        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxVersion) ==
-                      offsetof(IORING_CAPABILITIES, MaxVersion));
-        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxSubmissionQueueSize) ==
-                      offsetof(IORING_CAPABILITIES, MaxSubmissionQueueSize));
-        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxCompletionQueueSize) ==
-                      offsetof(IORING_CAPABILITIES, MaxCompletionQueueSize));
-        static_assert(offsetof(WindowsSystem::IoRingCapabilities, featureFlags) ==
-                      offsetof(IORING_CAPABILITIES, FeatureFlags));
+        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxVersion) == offsetof(IORING_CAPABILITIES, MaxVersion));
+        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxSubmissionQueueSize) == offsetof(IORING_CAPABILITIES, MaxSubmissionQueueSize));
+        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxCompletionQueueSize) == offsetof(IORING_CAPABILITIES, MaxCompletionQueueSize));
+        static_assert(offsetof(WindowsSystem::IoRingCapabilities, featureFlags) == offsetof(IORING_CAPABILITIES, FeatureFlags));
         static_assert(offsetof(WindowsSystem::IoRingInfo, version) == offsetof(IORING_INFO, IoRingVersion));
         static_assert(offsetof(WindowsSystem::IoRingInfo, flags) == offsetof(IORING_INFO, Flags));
-        static_assert(offsetof(WindowsSystem::IoRingInfo, submissionQueueSize) ==
-                      offsetof(IORING_INFO, SubmissionQueueSize));
-        static_assert(offsetof(WindowsSystem::IoRingInfo, completionQueueSize) ==
-                      offsetof(IORING_INFO, CompletionQueueSize));
+        static_assert(offsetof(WindowsSystem::IoRingInfo, submissionQueueSize) == offsetof(IORING_INFO, SubmissionQueueSize));
+        static_assert(offsetof(WindowsSystem::IoRingInfo, completionQueueSize) == offsetof(IORING_INFO, CompletionQueueSize));
         static_assert(sizeof(DisplayDpiAwareness) == sizeof(DPI_AWARENESS));
         static_assert(sizeof(WindowsSystem::DpiAwarenessContext) == sizeof(DPI_AWARENESS_CONTEXT));
         static_assert(alignof(WindowsSystem::IoRingHandleRef) == alignof(IORING_HANDLE_REF));
@@ -695,6 +720,54 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<DbgHelpSystemAPI::UndecorateSymbolNameFunction,              decltype(&::UnDecorateSymbolName)>);
        
         static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction,          decltype(&::RtlCaptureStackBackTrace)>);
+
+        static_assert(std::is_same_v<DebugSystemAPI::CheckRemoteDebuggerPresentFunction, decltype(&::CheckRemoteDebuggerPresent)>);
+        static_assert(std::is_same_v<DebugSystemAPI::ContinueDebugEventFunction,         decltype(&::ContinueDebugEvent)>);
+        static_assert(std::is_same_v<DebugSystemAPI::DebugActiveProcessFunction,         decltype(&::DebugActiveProcess)>);
+        static_assert(std::is_same_v<DebugSystemAPI::DebugActiveProcessFunction,         decltype(&::DebugActiveProcessStop)>);
+        static_assert(std::is_same_v<DebugSystemAPI::IsDebuggerPresentFunction,          decltype(&::IsDebuggerPresent)>);
+        static_assert(std::is_same_v<DebugSystemAPI::BreakpointFunction,                 decltype(&::DebugBreak)>);
+        static_assert(std::is_same_v<DebugSystemAPI::DebugBreakProcessFunction,          decltype(&::DebugBreakProcess)>);
+        static_assert(std::is_same_v<DebugSystemAPI::DebugSetProcessKillOnExitFunction,  decltype(&::DebugSetProcessKillOnExit)>);
+        static_assert(std::is_same_v<DebugSystemAPI::FatalExitFunction,                  decltype(&::FatalExit)>);
+        static_assert(std::is_same_v<DebugSystemAPI::OutputDebugStringAnsiFunction,      decltype(&::OutputDebugStringA)>);
+        static_assert(std::is_same_v<DebugSystemAPI::OutputDebugStringWideFunction,      decltype(&::OutputDebugStringW)>);
+        static_assert(std::is_same_v<DebugSystemAPI::WaitForDebugEventFunction,          decltype(&::WaitForDebugEvent)>);
+        static_assert(std::is_same_v<DebugSystemAPI::WaitForDebugEventFunction,          decltype(&::WaitForDebugEventEx)>);
+
+        // Keep the COM/OLE projections aligned with the Windows SDK.  The public header intentionally uses opaque
+        // PAL-owned records; these native aliases validate return types, calling conventions, and argument order here.
+        using NativeCoWaitForMultipleHandlesFunction = HRESULT(WINAPI*)(DWORD, DWORD, ULONG, LPHANDLE, LPDWORD);
+        using NativeCreateStreamOnHGlobalFunction    = HRESULT(WINAPI*)(HGLOBAL, BOOL, IStream**);
+        using NativeGetHGlobalFromStreamFunction     = HRESULT(WINAPI*)(IStream*, HGLOBAL*);
+        using NativeOleCreateExFunction              = HRESULT(WINAPI*)(REFCLSID, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
+        using NativeOleCreateFromDataExFunction      = HRESULT(WINAPI*)(LPDATAOBJECT, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
+        using NativeOleCreateLinkExFunction          = HRESULT(WINAPI*)(LPMONIKER, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
+        using NativeOleCreateLinkToFileExFunction    = HRESULT(WINAPI*)(LPCOLESTR, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
+        using NativeOleCreateFromFileExFunction      = HRESULT(WINAPI*)(REFCLSID, LPCOLESTR, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
+        using NativeVariantCopyIndFunction           = HRESULT(WINAPI*)(VARIANTARG*, const VARIANTARG*);
+        using NativeVariantChangeTypeExFunction      = HRESULT(WINAPI*)(VARIANTARG*, const VARIANTARG*, LCID, USHORT, VARTYPE);
+        using NativeLoadTypeLibExFunction            = HRESULT(WINAPI*)(LPCOLESTR, REGKIND, ITypeLib**);
+        using NativeQueryPathOfRegTypeLibFunction    = HRESULT(WINAPI*)(REFGUID, USHORT, USHORT, LCID, LPBSTR);
+        using NativeRegisterActiveObjectFunction     = HRESULT(WINAPI*)(IUnknown*, REFCLSID, DWORD, DWORD*);
+        using NativeRevokeActiveObjectFunction       = HRESULT(WINAPI*)(DWORD, void*);
+
+        static_assert(std::is_same_v<NativeCoWaitForMultipleHandlesFunction, decltype(&::CoWaitForMultipleHandles)>);
+        static_assert(std::is_same_v<NativeCreateStreamOnHGlobalFunction,    decltype(&::CreateStreamOnHGlobal)>);
+        static_assert(std::is_same_v<NativeGetHGlobalFromStreamFunction,     decltype(&::GetHGlobalFromStream)>);
+        static_assert(std::is_same_v<NativeOleCreateExFunction,              decltype(&::OleCreateEx)>);
+        static_assert(std::is_same_v<NativeOleCreateFromDataExFunction,      decltype(&::OleCreateFromDataEx)>);
+        static_assert(std::is_same_v<NativeOleCreateLinkExFunction,          decltype(&::OleCreateLinkEx)>);
+        static_assert(std::is_same_v<NativeOleCreateLinkToFileExFunction,    decltype(&::OleCreateLinkToFileEx)>);
+        static_assert(std::is_same_v<NativeOleCreateFromFileExFunction,      decltype(&::OleCreateFromFileEx)>);
+        static_assert(std::is_same_v<NativeVariantCopyIndFunction,           decltype(&::VariantCopyInd)>);
+        static_assert(std::is_same_v<NativeVariantChangeTypeExFunction,      decltype(&::VariantChangeTypeEx)>);
+        static_assert(std::is_same_v<NativeLoadTypeLibExFunction,            decltype(&::LoadTypeLibEx)>);
+        static_assert(std::is_same_v<NativeQueryPathOfRegTypeLibFunction,    decltype(&::QueryPathOfRegTypeLib)>);
+        static_assert(std::is_same_v<NativeRegisterActiveObjectFunction,     decltype(&::RegisterActiveObject)>);
+        static_assert(std::is_same_v<NativeRevokeActiveObjectFunction,       decltype(&::RevokeActiveObject)>);
+        static_assert(sizeof(WindowsSystem::Guid)  == sizeof(GUID));
+        static_assert(alignof(WindowsSystem::Guid) == alignof(GUID));
 
         static_assert(std::is_same_v<SchedulerTraceSystemAPI::StartTraceFunction,                 decltype(&::StartTraceW)>);
         static_assert(std::is_same_v<SchedulerTraceSystemAPI::ControlTraceFunction,               decltype(&::ControlTraceW)>);
@@ -904,8 +977,13 @@ namespace Sora::PAL {
             uint64_t residentPages = 0;
             parsed = std::from_chars(current, end, residentPages);
             const long pageSize = system.systemConfiguration(_SC_PAGESIZE);
-            if (parsed.ec != std::errc{} || pageSize <= 0 ||
-                residentPages > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(pageSize)) {
+            if (parsed.ec
+                != std::errc{}
+                || pageSize
+                <= 0
+                || residentPages
+                > std::numeric_limits<uint64_t>::max()
+                / static_cast<uint64_t>(pageSize)) {
                 return false;
             }
             *output = residentPages * static_cast<uint64_t>(pageSize);
@@ -928,15 +1006,17 @@ namespace Sora::PAL {
             }
             uint64_t userNanoseconds = 0;
             uint64_t kernelNanoseconds = 0;
-            if (!TimeValueNanoseconds(usage.ru_utime, &userNanoseconds) ||
-                !TimeValueNanoseconds(usage.ru_stime, &kernelNanoseconds)) {
+            if (!TimeValueNanoseconds(usage.ru_utime, &userNanoseconds)
+                || !TimeValueNanoseconds(usage.ru_stime, &kernelNanoseconds)) {
                 return false;
             }
 
             uint64_t residentBytes = 0;
 #    if defined(PLATFORM_LINUX)
-            if (!LinuxResidentMemory(&residentBytes) ||
-                static_cast<uint64_t>(usage.ru_maxrss) > std::numeric_limits<uint64_t>::max() / 1024) {
+            if (!LinuxResidentMemory(&residentBytes)
+                || static_cast<uint64_t>(usage.ru_maxrss)
+                > std::numeric_limits<uint64_t>::max()
+                / 1024) {
                 return false;
             }
             uint64_t peakResidentBytes = static_cast<uint64_t>(usage.ru_maxrss) * 1024;
@@ -946,7 +1026,8 @@ namespace Sora::PAL {
             }
             rusage_info_v2 nativeUsage{};
             if (api.processResourceUsage(api.getProcessId(), RUSAGE_INFO_V2,
-                                         reinterpret_cast<rusage_info_t*>(&nativeUsage)) != 0) {
+                                         reinterpret_cast<rusage_info_t*>(&nativeUsage))
+                != 0) {
                 return false;
             }
             residentBytes = nativeUsage.ri_resident_size;
@@ -1101,12 +1182,77 @@ namespace Sora::PAL {
         static_assert(std::is_convertible_v<decltype(&::mlock),                   VirtualMemorySystemAPI::LockFunction>);
         static_assert(std::is_convertible_v<decltype(&::munlock),                 VirtualMemorySystemAPI::UnlockFunction>);
 #    if defined(PLATFORM_LINUX)   
+        static_assert(sizeof(__ptrace_request) == sizeof(int));
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::TraceMe)              == PTRACE_TRACEME);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PeekText)             == PTRACE_PEEKTEXT);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PeekData)             == PTRACE_PEEKDATA);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PeekUser)             == PTRACE_PEEKUSER);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PokeText)             == PTRACE_POKETEXT);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PokeData)             == PTRACE_POKEDATA);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PokeUser)             == PTRACE_POKEUSER);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Continue)             == PTRACE_CONT);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Kill)                 == PTRACE_KILL);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SingleStep)           == PTRACE_SINGLESTEP);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Attach)               == PTRACE_ATTACH);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Detach)               == PTRACE_DETACH);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SystemCall)           == PTRACE_SYSCALL);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SetOptions)           == PTRACE_SETOPTIONS);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetEventMessage)      == PTRACE_GETEVENTMSG);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetSignalInfo)        == PTRACE_GETSIGINFO);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SetSignalInfo)        == PTRACE_SETSIGINFO);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetRegisterSet)       == PTRACE_GETREGSET);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SetRegisterSet)       == PTRACE_SETREGSET);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Seize)                == PTRACE_SEIZE);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Interrupt)            == PTRACE_INTERRUPT);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::Listen)               == PTRACE_LISTEN);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::PeekSignalInfo)       == PTRACE_PEEKSIGINFO);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetSignalMask)        == PTRACE_GETSIGMASK);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SetSignalMask)        == PTRACE_SETSIGMASK);
+#        if defined(PTRACE_SECCOMP_GET_FILTER)
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetSeccompFilter)     == PTRACE_SECCOMP_GET_FILTER);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetSeccompMetadata)   == PTRACE_SECCOMP_GET_METADATA);
+#        endif
+#        if defined(PTRACE_GET_SYSCALL_INFO)
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetSystemCallInfo)    == PTRACE_GET_SYSCALL_INFO);
+#        endif
+#        if defined(PTRACE_GET_RSEQ_CONFIGURATION)
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetRseqConfiguration) == PTRACE_GET_RSEQ_CONFIGURATION);
+#        endif
+#        if defined(PTRACE_SET_SYSCALL_USER_DISPATCH_CONFIG)
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SetSystemCallUserDispatchConfiguration) == PTRACE_SET_SYSCALL_USER_DISPATCH_CONFIG);
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::GetSystemCallUserDispatchConfiguration) == PTRACE_GET_SYSCALL_USER_DISPATCH_CONFIG);
+#        endif
+#        if defined(PTRACE_SET_SYSCALL_INFO)
+        static_assert(static_cast<int>(PosixSystem::TraceRequest::SetSystemCallInfo)    == PTRACE_SET_SYSCALL_INFO);
+#        endif
+        static_assert(PosixSystem::kTraceOptionSystemCallsGood == PTRACE_O_TRACESYSGOOD);
+        static_assert(PosixSystem::kTraceOptionFork            == PTRACE_O_TRACEFORK);
+        static_assert(PosixSystem::kTraceOptionVFork           == PTRACE_O_TRACEVFORK);
+        static_assert(PosixSystem::kTraceOptionClone           == PTRACE_O_TRACECLONE);
+        static_assert(PosixSystem::kTraceOptionExec            == PTRACE_O_TRACEEXEC);
+        static_assert(PosixSystem::kTraceOptionVForkDone       == PTRACE_O_TRACEVFORKDONE);
+        static_assert(PosixSystem::kTraceOptionExit            == PTRACE_O_TRACEEXIT);
+        static_assert(PosixSystem::kTraceOptionSeccomp         == PTRACE_O_TRACESECCOMP);
+        static_assert(PosixSystem::kTraceOptionExitKill        == PTRACE_O_EXITKILL);
+#        if defined(PTRACE_O_SUSPEND_SECCOMP)
+        static_assert(PosixSystem::kTraceOptionSuspendSeccomp  == PTRACE_O_SUSPEND_SECCOMP);
+        static_assert(PosixSystem::kTraceOptionMask            == PTRACE_O_MASK);
+#        endif
+        static_assert(PosixSystem::kTraceEventFork             == PTRACE_EVENT_FORK);
+        static_assert(PosixSystem::kTraceEventVFork            == PTRACE_EVENT_VFORK);
+        static_assert(PosixSystem::kTraceEventClone            == PTRACE_EVENT_CLONE);
+        static_assert(PosixSystem::kTraceEventExec             == PTRACE_EVENT_EXEC);
+        static_assert(PosixSystem::kTraceEventVForkDone        == PTRACE_EVENT_VFORK_DONE);
+        static_assert(PosixSystem::kTraceEventExit             == PTRACE_EVENT_EXIT);
+        static_assert(PosixSystem::kTraceEventSeccomp          == PTRACE_EVENT_SECCOMP);
+        static_assert(PosixSystem::kTraceEventStop             == PTRACE_EVENT_STOP);
         static_assert(std::is_convertible_v<decltype(&::accept4),                 AdvancedSocketSystemAPI::Accept4Function>);
         static_assert(std::is_convertible_v<decltype(&::sendmmsg),                AdvancedSocketSystemAPI::SendMessagesFunction>);
         static_assert(std::is_convertible_v<decltype(&::recvmmsg),                AdvancedSocketSystemAPI::ReceiveMessagesFunction>);
         static_assert(std::is_convertible_v<decltype(&::fanotify_init),           FanotifySystemAPI::InitializeFunction>);
         static_assert(std::is_convertible_v<decltype(&::fanotify_mark),           FanotifySystemAPI::MarkFunction>);
-        static_assert(std::is_convertible_v<decltype(&::sysinfo),                 SystemInformationSystemAPI::SystemInfoFunction>);
+        static_assert(std::is_convertible_v<decltype(&::getauxval),               SystemInformationSystemAPI::AuxiliaryValueFunction>);
+        static_assert(std::is_convertible_v<decltype(&::prctl),                   SystemInformationSystemAPI::ProcessControlFunction>);
         static_assert(std::is_convertible_v<decltype(&::statvfs),                 SystemInformationSystemAPI::FileSystemStatisticsFunction>);
 #    endif   
         static_assert(std::is_convertible_v<decltype(&::epoll_create1),           EpollSystemAPI::CreateFunction>);
@@ -1128,6 +1274,18 @@ namespace Sora::PAL {
         static_assert(PosixSystem::kOpenDirect            == O_DIRECT);
         static_assert(PosixSystem::kOpenSync              == O_SYNC);
         static_assert(PosixSystem::kPageSizeConfiguration == _SC_PAGESIZE);
+        static_assert(PosixSystem::kPhysicalPageCountConfiguration == _SC_PHYS_PAGES);
+        static_assert(PosixSystem::kAvailablePhysicalPageCountConfiguration == _SC_AVPHYS_PAGES);
+#        if defined(__aarch64__)
+        static_assert(PosixSystem::kHardwareCapabilities     == AT_HWCAP);
+        static_assert(PosixSystem::kHardwareCapabilities2    == AT_HWCAP2);
+        static_assert(PosixSystem::kArmFloatingPoint         == HWCAP_FP);
+        static_assert(PosixSystem::kArmAdvancedSimd          == HWCAP_ASIMD);
+        static_assert(PosixSystem::kArmScalableVector        == HWCAP_SVE);
+        static_assert(PosixSystem::kArmScalableVector2       == HWCAP2_SVE2);
+        static_assert(PosixSystem::kGetScalableVectorLength  == PR_SVE_GET_VL);
+        static_assert(PosixSystem::kScalableVectorLengthMask == PR_SVE_VL_LEN_MASK);
+#        endif
         static_assert(PosixSystem::kFileAdviceSequential  == POSIX_FADV_SEQUENTIAL);
         static_assert(PosixSystem::kFileAdviceRandom      == POSIX_FADV_RANDOM);
         static_assert(PosixSystem::kEventModify           == IN_MODIFY);
@@ -1147,6 +1305,7 @@ namespace Sora::PAL {
         static_assert(PosixSystem::kPollHangup            == POLLHUP);
         static_assert(PosixSystem::kPollInvalid           == POLLNVAL);
 #    elif defined(PLATFORM_MACOS)
+        static_assert(std::is_convertible_v<decltype(&::sysctlbyname), SystemInformationSystemAPI::SysctlByNameFunction>);
         static_assert(sizeof(PosixSystem::KernelEvent)                 == sizeof(kevent));
         static_assert(alignof(PosixSystem::KernelEvent)                == alignof(kevent));
         static_assert(offsetof(PosixSystem::KernelEvent, identifier)   == offsetof(kevent, ident));
@@ -1184,13 +1343,13 @@ namespace Sora::PAL {
 
 #if defined(PLATFORM_LINUX)
         using NativeEpollWaitMaskedFunction = decltype(&::epoll_pwait);
-        using NativeEpollWaitMaskedTimeFunction = int (*)(int, ::epoll_event*, int, const ::timespec*,
-                                                          const ::sigset_t*);
+        using NativeEpollWaitMaskedTimeFunction
+            = int (*)(int, ::epoll_event*, int, const ::timespec*, const ::sigset_t*);
         using NativeSignalFdFunction = decltype(&::signalfd);
-        using NativeIoUringSubmitAndWaitTimeoutFunction = int (*)(::io_uring*, ::io_uring_cqe**, unsigned,
-                                                                  ::__kernel_timespec*, ::sigset_t*);
-        using NativeIoUringWaitCompletionsFunction = int (*)(::io_uring*, ::io_uring_cqe**, unsigned,
-                                                             ::__kernel_timespec*, ::sigset_t*);
+        using NativeIoUringSubmitAndWaitTimeoutFunction
+            = int (*)(::io_uring*, ::io_uring_cqe**, unsigned, ::__kernel_timespec*, ::sigset_t*);
+        using NativeIoUringWaitCompletionsFunction
+            = int (*)(::io_uring*, ::io_uring_cqe**, unsigned, ::__kernel_timespec*, ::sigset_t*);
 
         NativeEpollWaitMaskedFunction gNativeEpollWaitMasked = nullptr;
         NativeEpollWaitMaskedTimeFunction gNativeEpollWaitMaskedTime = nullptr;
@@ -1331,8 +1490,8 @@ namespace Sora::PAL {
             return api;
         }
 
-        inline constexpr WindowsSystem::DWord kSuppressedErrorModeFlags =
-            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
+        inline constexpr WindowsSystem::DWord kSuppressedErrorModeFlags
+            = SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
         inline constexpr WindowsSystem::DWord kWerNoUiFlag = 32;
         inline constexpr WindowsSystem::HResult kWerFlagsNotInitialized = -2147023728L;
 
@@ -1410,8 +1569,8 @@ namespace Sora::PAL {
                 .reason = ExceptionName(code),
                 .code = code,
                 .faultAddress = record != nullptr ? reinterpret_cast<uintptr_t>(record->ExceptionAddress) : 0,
-                .instructionPointer =
-                    WindowsInstructionPointer(exception != nullptr ? exception->ContextRecord : nullptr),
+                .instructionPointer
+                = WindowsInstructionPointer(exception != nullptr ? exception->ContextRecord : nullptr),
             };
             registration->callback(context, registration->userData);
 
@@ -1430,8 +1589,14 @@ namespace Sora::PAL {
                 const WindowsSystem::DWord currentMode = api.getErrorMode();
                 api.setErrorMode(currentMode & ~registration.addedErrorModeFlags);
             }
-            if (registration.addedWerFlags != 0 && registration.process != nullptr && api.werGetFlags != nullptr &&
-                api.werSetFlags != nullptr) {
+            if (registration.addedWerFlags
+                != 0
+                && registration.process
+                != nullptr
+                && api.werGetFlags
+                != nullptr
+                && api.werSetFlags
+                != nullptr) {
                 WindowsSystem::DWord currentFlags = 0;
                 if (WindowsSystem::Succeeded(api.werGetFlags(registration.process, &currentFlags))) {
                     api.werSetFlags(currentFlags & ~registration.addedWerFlags);
@@ -1494,8 +1659,9 @@ namespace Sora::PAL {
                 }
 
                 registration.addedWerFlags = kWerNoUiFlag & ~currentWerFlags;
-                if (registration.addedWerFlags != 0 &&
-                    !WindowsSystem::Succeeded(api.werSetFlags(currentWerFlags | registration.addedWerFlags))) {
+                if (registration.addedWerFlags
+                    != 0
+                    && !WindowsSystem::Succeeded(api.werSetFlags(currentWerFlags | registration.addedWerFlags))) {
                     RestoreWindowsCrashPolicy(registration, api);
                     registration = {};
                     return false;
@@ -1510,8 +1676,8 @@ namespace Sora::PAL {
 
         void UninstallNativeCrashHandlerImpl() noexcept {
             std::lock_guard lock{gNativeCrashRegistry.mutex};
-            WindowsCrashRegistration* registration =
-                gNativeCrashRegistry.active.exchange(nullptr, std::memory_order_acq_rel);
+            WindowsCrashRegistration* registration
+                = gNativeCrashRegistry.active.exchange(nullptr, std::memory_order_acq_rel);
             if (registration == nullptr) {
                 return;
             }
@@ -1697,8 +1863,8 @@ namespace Sora::PAL {
 
         void UninstallNativeCrashHandlerImpl() noexcept {
             std::lock_guard lock{gNativeCrashRegistry.mutex};
-            PosixCrashRegistration* registration =
-                gNativeCrashRegistry.active.exchange(nullptr, std::memory_order_acq_rel);
+            PosixCrashRegistration* registration
+                = gNativeCrashRegistry.active.exchange(nullptr, std::memory_order_acq_rel);
             if (registration == nullptr) {
                 return;
             }
@@ -1781,8 +1947,8 @@ namespace Sora::PAL {
 #if defined(PLATFORM_WINDOWS)
                 if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
                     loaded.closeHandle = module->TryFindFunction<HandleSystemAPI::CloseHandleFunction>("CloseHandle");
-                    loaded.duplicateHandle =
-                        module->TryFindFunction<HandleSystemAPI::DuplicateHandleFunction>("DuplicateHandle");
+                    loaded.duplicateHandle
+                        = module->TryFindFunction<HandleSystemAPI::DuplicateHandleFunction>("DuplicateHandle");
                 }
 #endif
                 return loaded;
@@ -1970,23 +2136,219 @@ namespace Sora::PAL {
         const SystemInformationSystemAPI& LoadSystemInformationSystemAPI() noexcept {
             static const SystemInformationSystemAPI api = [] {
                 SystemInformationSystemAPI loaded{};
+                // clang-format off
 #if defined(PLATFORM_WINDOWS)
                 if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
-                    loaded.getSystemInfo =
-                        module->TryFindFunction<SystemInformationSystemAPI::GetSystemInfoFunction>("GetSystemInfo");
+                    loaded.getSystemInfo         = module->TryFindFunction<SystemInformationSystemAPI::GetSystemInfoFunction>("GetSystemInfo");
+                    loaded.globalMemoryStatus    = module->TryFindFunction<SystemInformationSystemAPI::GlobalMemoryStatusFunction>("GlobalMemoryStatusEx");
+                    loaded.isProcessorFeature    = module->TryFindFunction<SystemInformationSystemAPI::IsProcessorFeatureFunction>("IsProcessorFeaturePresent");
                 }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
                 if (const ModulePtr& module = CurrentProcessModule(); module != nullptr) {
-                    loaded.systemConfiguration =
-                        module->TryFindFunction<SystemInformationSystemAPI::SystemConfigurationFunction>("sysconf");
+                    loaded.systemConfiguration   = module->TryFindFunction<SystemInformationSystemAPI::SystemConfigurationFunction>("sysconf");
 #    if defined(PLATFORM_LINUX)
-                    loaded.systemInfo =
-                        module->TryFindFunction<SystemInformationSystemAPI::SystemInfoFunction>("sysinfo");
-                    loaded.fileSystemStatistics =
-                        module->TryFindFunction<SystemInformationSystemAPI::FileSystemStatisticsFunction>("statvfs");
+                    loaded.auxiliaryValue        = module->TryFindFunction<SystemInformationSystemAPI::AuxiliaryValueFunction>("getauxval");
+                    loaded.processControl        = module->TryFindFunction<SystemInformationSystemAPI::ProcessControlFunction>("prctl");
+                    loaded.fileSystemStatistics  = module->TryFindFunction<SystemInformationSystemAPI::FileSystemStatisticsFunction>("statvfs");
+#    elif defined(PLATFORM_MACOS)
+                    loaded.sysctlByName          = module->TryFindFunction<SystemInformationSystemAPI::SysctlByNameFunction>("sysctlbyname");
 #    endif
                 }
 #endif
+                // clang-format on
+                return loaded;
+            }();
+            return api;
+        }
+
+        const DebugSystemAPI& LoadDebugSystemAPI() noexcept {
+            static const DebugSystemAPI api = [] {
+                using API = DebugSystemAPI;
+                API loaded{};
+                // clang-format off
+#if defined(PLATFORM_WINDOWS)
+                if (const ModulePtr& module = Kernel32Module(); module != nullptr) {
+                    loaded.checkRemoteDebuggerPresent = module->TryFindFunction<API::CheckRemoteDebuggerPresentFunction>("CheckRemoteDebuggerPresent");
+                    loaded.continueDebugEvent         = module->TryFindFunction<API::ContinueDebugEventFunction>("ContinueDebugEvent");
+                    loaded.debugActiveProcess         = module->TryFindFunction<API::DebugActiveProcessFunction>("DebugActiveProcess");
+                    loaded.debugActiveProcessStop     = module->TryFindFunction<API::DebugActiveProcessFunction>("DebugActiveProcessStop");
+                    loaded.isDebuggerPresent          = module->TryFindFunction<API::IsDebuggerPresentFunction>("IsDebuggerPresent");
+                    loaded.breakpoint                 = module->TryFindFunction<API::BreakpointFunction>("DebugBreak");
+                    loaded.breakpointProcess          = module->TryFindFunction<API::DebugBreakProcessFunction>("DebugBreakProcess");
+                    loaded.setProcessKillOnExit       = module->TryFindFunction<API::DebugSetProcessKillOnExitFunction>("DebugSetProcessKillOnExit");
+                    loaded.fatalExit                  = module->TryFindFunction<API::FatalExitFunction>("FatalExit");
+                    loaded.outputDebugStringAnsi      = module->TryFindFunction<API::OutputDebugStringAnsiFunction>("OutputDebugStringA");
+                    loaded.outputDebugStringWide      = module->TryFindFunction<API::OutputDebugStringWideFunction>("OutputDebugStringW");
+                    loaded.waitForDebugEvent          = module->TryFindFunction<API::WaitForDebugEventFunction>("WaitForDebugEvent");
+                    loaded.waitForDebugEventExtended  = module->TryFindFunction<API::WaitForDebugEventFunction>("WaitForDebugEventEx");
+                }
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+                if (const ModulePtr& module = CurrentProcessModule(); module != nullptr) {
+#    if defined(PLATFORM_LINUX)
+                    loaded.traceProcess               = module->TryFindFunction<API::TraceProcessFunction>("ptrace");
+#    endif
+                }
+#endif
+                // clang-format on
+                return loaded;
+            }();
+            return api;
+        }
+
+        const COMSystemAPI& LoadCOMSystemAPI() noexcept {
+            static const COMSystemAPI api = [] {
+                COMSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+                if (const ModulePtr& module = Ole32Module(); module != nullptr) {
+                    // clang-format off
+                    loaded.initialize                    = module->TryFindFunction<COMSystemAPI::InitializeFunction>("CoInitialize");
+                    loaded.initializeEx                  = module->TryFindFunction<COMSystemAPI::InitializeExFunction>("CoInitializeEx");
+                    loaded.initializeSecurity            = module->TryFindFunction<COMSystemAPI::InitializeSecurityFunction>("CoInitializeSecurity");
+                    loaded.uninitialize                  = module->TryFindFunction<COMSystemAPI::UninitializeFunction>("CoUninitialize");
+                    loaded.getApartmentType              = module->TryFindFunction<COMSystemAPI::GetApartmentTypeFunction>("CoGetApartmentType");
+                    loaded.getCallerThreadId             = module->TryFindFunction<COMSystemAPI::GetCallerThreadIdFunction>("CoGetCallerTID");
+                    loaded.getContextToken               = module->TryFindFunction<COMSystemAPI::GetContextTokenFunction>("CoGetContextToken");
+                    loaded.getObjectContext              = module->TryFindFunction<COMSystemAPI::GetObjectContextFunction>("CoGetObjectContext");
+                    loaded.getClassObject                = module->TryFindFunction<COMSystemAPI::GetClassObjectFunction>("CoGetClassObject");
+                    loaded.createInstance                = module->TryFindFunction<COMSystemAPI::CreateInstanceFunction>("CoCreateInstance");
+                    loaded.createInstanceEx              = module->TryFindFunction<COMSystemAPI::CreateInstanceExFunction>("CoCreateInstanceEx");
+                    loaded.createInstanceFromApp         = module->TryFindFunction<COMSystemAPI::CreateInstanceFromAppFunction>("CoCreateInstanceFromApp");
+                    loaded.registerClassObject           = module->TryFindFunction<COMSystemAPI::RegisterClassObjectFunction>("CoRegisterClassObject");
+                    loaded.revokeClassObject             = module->TryFindFunction<COMSystemAPI::RevokeClassObjectFunction>("CoRevokeClassObject");
+                    loaded.resumeClassObjects            = module->TryFindFunction<COMSystemAPI::ResumeSuspendClassObjectsFunction>("CoResumeClassObjects");
+                    loaded.suspendClassObjects           = module->TryFindFunction<COMSystemAPI::ResumeSuspendClassObjectsFunction>("CoSuspendClassObjects");
+                    loaded.getMalloc                     = module->TryFindFunction<COMSystemAPI::GetMallocFunction>("CoGetMalloc");
+                    loaded.createStandardMalloc          = module->TryFindFunction<COMSystemAPI::CreateStandardMallocFunction>("CoCreateStandardMalloc");
+                    loaded.taskMemAlloc                  = module->TryFindFunction<COMSystemAPI::TaskMemAllocFunction>("CoTaskMemAlloc");
+                    loaded.taskMemRealloc                = module->TryFindFunction<COMSystemAPI::TaskMemReallocFunction>("CoTaskMemRealloc");
+                    loaded.taskMemFree                   = module->TryFindFunction<COMSystemAPI::TaskMemFreeFunction>("CoTaskMemFree");
+                    loaded.createStreamOnGlobal          = module->TryFindFunction<COMSystemAPI::CreateStreamOnGlobalFunction>("CreateStreamOnHGlobal");
+                    loaded.getGlobalFromStream           = module->TryFindFunction<COMSystemAPI::GetGlobalFromStreamFunction>("GetHGlobalFromStream");
+                    loaded.getMarshalSizeMax             = module->TryFindFunction<COMSystemAPI::MarshalSizeMaxFunction>("CoGetMarshalSizeMax");
+                    loaded.marshalInterface              = module->TryFindFunction<COMSystemAPI::MarshalInterfaceFunction>("CoMarshalInterface");
+                    loaded.unmarshalInterface            = module->TryFindFunction<COMSystemAPI::UnmarshalInterfaceFunction>("CoUnmarshalInterface");
+                    loaded.releaseMarshalData            = module->TryFindFunction<COMSystemAPI::ReleaseMarshalDataFunction>("CoReleaseMarshalData");
+                    loaded.marshalInterThreadInterface   = module->TryFindFunction<COMSystemAPI::MarshalInterThreadInterfaceFunction>("CoMarshalInterThreadInterfaceInStream");
+                    loaded.getInterfaceAndReleaseStream  = module->TryFindFunction<COMSystemAPI::GetInterfaceAndReleaseStreamFunction>("CoGetInterfaceAndReleaseStream");
+                    loaded.createFreeThreadedMarshaler   = module->TryFindFunction<COMSystemAPI::CreateFreeThreadedMarshalerFunction>("CoCreateFreeThreadedMarshaler");
+                    loaded.disconnectObject              = module->TryFindFunction<COMSystemAPI::DisconnectObjectFunction>("CoDisconnectObject");
+                    loaded.lockObjectExternal            = module->TryFindFunction<COMSystemAPI::LockObjectExternalFunction>("CoLockObjectExternal");
+                    loaded.queryProxyBlanket             = module->TryFindFunction<COMSystemAPI::QueryProxyBlanketFunction>("CoQueryProxyBlanket");
+                    loaded.setProxyBlanket               = module->TryFindFunction<COMSystemAPI::SetProxyBlanketFunction>("CoSetProxyBlanket");
+                    loaded.cancelCall                    = module->TryFindFunction<COMSystemAPI::CancelCallFunction>("CoCancelCall");
+                    loaded.testCancel                    = module->TryFindFunction<COMSystemAPI::TestCancelFunction>("CoTestCancel");
+                    loaded.enableCallCancellation        = module->TryFindFunction<COMSystemAPI::EnableDisableCallCancellationFunction>("CoEnableCallCancellation");
+                    loaded.disableCallCancellation       = module->TryFindFunction<COMSystemAPI::EnableDisableCallCancellationFunction>("CoDisableCallCancellation");
+                    loaded.createGuid                    = module->TryFindFunction<COMSystemAPI::CreateGuidFunction>("CoCreateGuid");
+                    loaded.stringFromClsid               = module->TryFindFunction<COMSystemAPI::StringFromGuidFunction>("StringFromCLSID");
+                    loaded.clsidFromString               = module->TryFindFunction<COMSystemAPI::GuidFromStringFunction>("CLSIDFromString");
+                    loaded.stringFromIid                 = module->TryFindFunction<COMSystemAPI::StringFromGuidFunction>("StringFromIID");
+                    loaded.iidFromString                 = module->TryFindFunction<COMSystemAPI::GuidFromStringFunction>("IIDFromString");
+                    loaded.stringFromGuid2               = module->TryFindFunction<COMSystemAPI::StringFromGuid2Function>("StringFromGUID2");
+                    loaded.progIdFromClsid               = module->TryFindFunction<COMSystemAPI::ProgIdFromClsidFunction>("ProgIDFromCLSID");
+                    loaded.clsidFromProgId               = module->TryFindFunction<COMSystemAPI::ClsidFromProgIdFunction>("CLSIDFromProgID");
+                    loaded.waitForMultipleHandles        = module->TryFindFunction<COMSystemAPI::WaitForMultipleHandlesFunction>("CoWaitForMultipleHandles");
+                    loaded.freeUnusedLibraries           = module->TryFindFunction<COMSystemAPI::FreeUnusedLibrariesFunction>("CoFreeUnusedLibraries");
+                    loaded.freeUnusedLibrariesEx         = module->TryFindFunction<COMSystemAPI::FreeUnusedLibrariesExFunction>("CoFreeUnusedLibrariesEx");
+                    // clang-format on
+                }
+#endif
+                return loaded;
+            }();
+            return api;
+        }
+
+        const OleSystemAPI& LoadOleSystemAPI() noexcept {
+            static const OleSystemAPI api = [] {
+                OleSystemAPI loaded{};
+                // clang-format off
+#if defined(PLATFORM_WINDOWS)
+                if (const ModulePtr& module = Ole32Module(); module != nullptr) {
+                    loaded.initialize                      = module->TryFindFunction<OleSystemAPI::InitializeFunction>("OleInitialize");
+                    loaded.uninitialize                    = module->TryFindFunction<OleSystemAPI::UninitializeFunction>("OleUninitialize");
+                    loaded.buildVersion                    = module->TryFindFunction<OleSystemAPI::BuildVersionFunction>("OleBuildVersion");
+                    loaded.queryLinkFromData               = module->TryFindFunction<OleSystemAPI::QueryDataFunction>("OleQueryLinkFromData");
+                    loaded.queryCreateFromData             = module->TryFindFunction<OleSystemAPI::QueryDataFunction>("OleQueryCreateFromData");
+                    loaded.create                          = module->TryFindFunction<OleSystemAPI::CreateObjectFunction>("OleCreate");
+                    loaded.createEx                        = module->TryFindFunction<OleSystemAPI::CreateObjectExFunction>("OleCreateEx");
+                    loaded.createFromData                  = module->TryFindFunction<OleSystemAPI::CreateFromDataFunction>("OleCreateFromData");
+                    loaded.createFromDataEx                = module->TryFindFunction<OleSystemAPI::CreateFromDataExFunction>("OleCreateFromDataEx");
+                    loaded.createLink                      = module->TryFindFunction<OleSystemAPI::CreateLinkFunction>("OleCreateLink");
+                    loaded.createLinkEx                    = module->TryFindFunction<OleSystemAPI::CreateLinkExFunction>("OleCreateLinkEx");
+                    loaded.createLinkToFile                = module->TryFindFunction<OleSystemAPI::CreateLinkToFileFunction>("OleCreateLinkToFile");
+                    loaded.createLinkToFileEx              = module->TryFindFunction<OleSystemAPI::CreateLinkToFileExFunction>("OleCreateLinkToFileEx");
+                    loaded.createFromFile                  = module->TryFindFunction<OleSystemAPI::CreateFromFileFunction>("OleCreateFromFile");
+                    loaded.createFromFileEx                = module->TryFindFunction<OleSystemAPI::CreateFromFileExFunction>("OleCreateFromFileEx");
+                    loaded.load                            = module->TryFindFunction<OleSystemAPI::LoadFunction>("OleLoad");
+                    loaded.save                            = module->TryFindFunction<OleSystemAPI::SaveFunction>("OleSave");
+                    loaded.loadFromStream                  = module->TryFindFunction<OleSystemAPI::LoadFromStreamFunction>("OleLoadFromStream");
+                    loaded.saveToStream                    = module->TryFindFunction<OleSystemAPI::SaveToStreamFunction>("OleSaveToStream");
+                    loaded.setContainedObject              = module->TryFindFunction<OleSystemAPI::SetObjectStateFunction>("OleSetContainedObject");
+                    loaded.noteObjectVisible               = module->TryFindFunction<OleSystemAPI::SetObjectStateFunction>("OleNoteObjectVisible");
+                    loaded.registerDragDrop                = module->TryFindFunction<OleSystemAPI::RegisterDragDropFunction>("RegisterDragDrop");
+                    loaded.revokeDragDrop                  = module->TryFindFunction<OleSystemAPI::RevokeDragDropFunction>("RevokeDragDrop");
+                    loaded.doDragDrop                      = module->TryFindFunction<OleSystemAPI::DoDragDropFunction>("DoDragDrop");
+                    loaded.setClipboard                    = module->TryFindFunction<OleSystemAPI::SetClipboardFunction>("OleSetClipboard");
+                    loaded.getClipboard                    = module->TryFindFunction<OleSystemAPI::GetClipboardFunction>("OleGetClipboard");
+                    loaded.flushClipboard                  = module->TryFindFunction<OleSystemAPI::FlushClipboardFunction>("OleFlushClipboard");
+                    loaded.isCurrentClipboard              = module->TryFindFunction<OleSystemAPI::IsCurrentClipboardFunction>("OleIsCurrentClipboard");
+                    loaded.draw                            = module->TryFindFunction<OleSystemAPI::DrawFunction>("OleDraw");
+                    loaded.run                             = module->TryFindFunction<OleSystemAPI::QueryDataFunction>("OleRun");
+                    loaded.isRunning                       = module->TryFindFunction<OleSystemAPI::IsRunningFunction>("OleIsRunning");
+                    loaded.lockRunning                     = module->TryFindFunction<OleSystemAPI::LockRunningFunction>("OleLockRunning");
+                    loaded.releaseStorageMedium            = module->TryFindFunction<OleSystemAPI::ReleaseStorageMediumFunction>("ReleaseStgMedium");
+                    loaded.createOleAdviseHolder           = module->TryFindFunction<OleSystemAPI::CreateAdviseHolderFunction>("CreateOleAdviseHolder");
+                    loaded.createDataAdviseHolder          = module->TryFindFunction<OleSystemAPI::CreateAdviseHolderFunction>("CreateDataAdviseHolder");
+                    loaded.createDataCache                 = module->TryFindFunction<OleSystemAPI::CreateDataCacheFunction>("CreateDataCache");
+                }
+#endif
+                // clang-format on
+                return loaded;
+            }();
+            return api;
+        }
+
+        const OleAutomationSystemAPI& LoadOleAutomationSystemAPI() noexcept {
+            static const OleAutomationSystemAPI api = [] {
+                OleAutomationSystemAPI loaded{};
+                // clang-format off
+#if defined(PLATFORM_WINDOWS)
+                if (const ModulePtr& module = OleAut32Module(); module != nullptr) {
+                    loaded.allocString                      = module->TryFindFunction<OleAutomationSystemAPI::AllocStringFunction>("SysAllocString");
+                    loaded.allocStringLen                   = module->TryFindFunction<OleAutomationSystemAPI::AllocStringLengthFunction>("SysAllocStringLen");
+                    loaded.reallocStringLen                 = module->TryFindFunction<OleAutomationSystemAPI::ReallocStringLengthFunction>("SysReAllocStringLen");
+                    loaded.freeString                       = module->TryFindFunction<OleAutomationSystemAPI::FreeStringFunction>("SysFreeString");
+                    loaded.stringLength                     = module->TryFindFunction<OleAutomationSystemAPI::StringLengthFunction>("SysStringLen");
+                    loaded.stringByteLength                 = module->TryFindFunction<OleAutomationSystemAPI::StringLengthFunction>("SysStringByteLen");
+                    loaded.safeArrayCreate                  = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayCreateFunction>("SafeArrayCreate");
+                    loaded.safeArrayCreateVector            = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayCreateVectorFunction>("SafeArrayCreateVector");
+                    loaded.safeArrayDestroy                 = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayDestroyFunction>("SafeArrayDestroy");
+                    loaded.safeArrayCopy                    = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayCopyFunction>("SafeArrayCopy");
+                    loaded.safeArrayAccessData              = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayAccessDataFunction>("SafeArrayAccessData");
+                    loaded.safeArrayUnaccessData            = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayUnaccessDataFunction>("SafeArrayUnaccessData");
+                    loaded.safeArrayGetElement              = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayGetElementFunction>("SafeArrayGetElement");
+                    loaded.safeArrayPutElement              = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayPutElementFunction>("SafeArrayPutElement");
+                    loaded.safeArrayGetLowerBound           = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayGetBoundFunction>("SafeArrayGetLBound");
+                    loaded.safeArrayGetUpperBound           = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayGetBoundFunction>("SafeArrayGetUBound");
+                    loaded.safeArrayLock                    = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayLockFunction>("SafeArrayLock");
+                    loaded.safeArrayUnlock                  = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayUnlockFunction>("SafeArrayUnlock");
+                    loaded.safeArrayGetDimension            = module->TryFindFunction<OleAutomationSystemAPI::SafeArrayGetDimensionFunction>("SafeArrayGetDim");
+                    loaded.variantInit                      = module->TryFindFunction<OleAutomationSystemAPI::VariantInitFunction>("VariantInit");
+                    loaded.variantClear                     = module->TryFindFunction<OleAutomationSystemAPI::VariantOperationFunction>("VariantClear");
+                    loaded.variantCopy                      = module->TryFindFunction<OleAutomationSystemAPI::VariantCopyFunction>("VariantCopy");
+                    loaded.variantCopyInd                   = module->TryFindFunction<OleAutomationSystemAPI::VariantCopyIndFunction>("VariantCopyInd");
+                    loaded.variantChangeType                = module->TryFindFunction<OleAutomationSystemAPI::VariantChangeTypeFunction>("VariantChangeType");
+                    loaded.variantChangeTypeEx              = module->TryFindFunction<OleAutomationSystemAPI::VariantChangeTypeExFunction>("VariantChangeTypeEx");
+                    loaded.registerActiveObject             = module->TryFindFunction<OleAutomationSystemAPI::RegisterActiveObjectFunction>("RegisterActiveObject");
+                    loaded.revokeActiveObject               = module->TryFindFunction<OleAutomationSystemAPI::RevokeActiveObjectFunction>("RevokeActiveObject");
+                    loaded.getActiveObject                  = module->TryFindFunction<OleAutomationSystemAPI::GetActiveObjectFunction>("GetActiveObject");
+                    loaded.loadTypeLibrary                  = module->TryFindFunction<OleAutomationSystemAPI::LoadTypeLibraryFunction>("LoadTypeLib");
+                    loaded.loadTypeLibraryEx                = module->TryFindFunction<OleAutomationSystemAPI::LoadTypeLibraryExFunction>("LoadTypeLibEx");
+                    loaded.loadRegisteredTypeLibrary        = module->TryFindFunction<OleAutomationSystemAPI::LoadRegisteredTypeLibraryFunction>("LoadRegTypeLib");
+                    loaded.queryPathOfRegisteredTypeLibrary = module->TryFindFunction<OleAutomationSystemAPI::QueryTypeLibraryPathFunction>("QueryPathOfRegTypeLib");
+                }
+#endif
+                // clang-format on
                 return loaded;
             }();
             return api;
@@ -2081,8 +2443,8 @@ namespace Sora::PAL {
 
                 const ModulePtr& shell = Shell32Module();
                 if (shell != nullptr) {
-                    loaded.commandLineToArgvWide =
-                        shell->TryFindFunction<ProcessSystemAPI::CommandLineToArgvWideFunction>("CommandLineToArgvW");
+                    loaded.commandLineToArgvWide
+                        = shell->TryFindFunction<ProcessSystemAPI::CommandLineToArgvWideFunction>("CommandLineToArgvW");
                 }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
                 const ModulePtr& module = CurrentProcessModule();
@@ -2189,6 +2551,7 @@ namespace Sora::PAL {
                     gNativeWaitId       = module->TryFindFunction<NativeWaitIdFunction>("waitid");
                     loaded.waitId       = gNativeWaitId != nullptr ? &WaitIdAdapter : nullptr;
                     loaded.kill         = module->TryFindFunction<API::SignalFunction>("kill");
+                    loaded.raiseSignal  = module->TryFindFunction<API::RaiseSignalFunction>("raise");
                     gNativeSignalAction = module->TryFindFunction<NativeSignalActionFunction>("sigaction");
                     loaded.signalAction = gNativeSignalAction != nullptr ? &SignalActionAdapter : nullptr;
                     // clang-format on
@@ -3043,8 +3406,10 @@ namespace Sora::PAL {
             IMAGEHLP_LINE64 line{};
             line.SizeOfStruct = sizeof(line);
             WindowsSystem::DWord displacement = 0;
-            if (api_.symGetLineFromAddress(process, nativeAddress, &displacement, &line) != FALSE &&
-                line.FileName != nullptr) {
+            if (api_.symGetLineFromAddress(process, nativeAddress, &displacement, &line)
+                != FALSE
+                && line.FileName
+                != nullptr) {
                 output.sourceFile = line.FileName;
                 output.sourceLine = line.LineNumber;
                 resolved = true;

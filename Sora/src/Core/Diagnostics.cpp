@@ -4,12 +4,12 @@
  * @ingroup Core
  */
 
-#include "Sora/Platform.h"
 #include "Sora/Core/Assertion.h"
 #include "Sora/Core/Debugging.h"
 #include "Sora/Core/StackTrace.h"
 #include "Sora/Core/ToString.h"
 #include "Sora/Core/ToStyledString.h"
+#include <Sora/Core/PAL/SystemAPI.h>
 
 #include <array>
 #include <atomic>
@@ -24,76 +24,60 @@
 #    include <debugging>
 #endif
 
-#if defined(PLATFORM_WINDOWS)
-#    ifndef WIN32_LEAN_AND_MEAN
-#        define WIN32_LEAN_AND_MEAN
-#    endif
-#    ifndef NOMINMAX
-#        define NOMINMAX
-#    endif
-#    include <Windows.h>
-#elif defined(PLATFORM_LINUX)
-#    include <csignal>
-#    include <cstring>
-#elif defined(PLATFORM_MACOS)
-#    include <csignal>
-#    include <sys/sysctl.h>
-#    include <unistd.h>
-#endif
-
 namespace Sora::Debug {
 
     bool IsDebuggerPresent() noexcept {
 #if defined(__cpp_lib_debugging) && __cpp_lib_debugging >= 202311L
         return std::is_debugger_present();
 #elif defined(PLATFORM_WINDOWS)
-        return ::IsDebuggerPresent() != FALSE;
+        const PAL::DebugSystemAPI& api = PAL::LoadDebugSystemAPI();
+        return api.isDebuggerPresent != nullptr && api.isDebuggerPresent() != 0;
 #elif defined(PLATFORM_LINUX)
-        std::FILE* status = std::fopen("/proc/self/status", "r");
-        if (status == nullptr) {
+        const PAL::FileSystemAPI& file = PAL::LoadFileSystemAPI();
+        if (!PAL::EnsureSystemAPIs(file.open, file.read, file.close)) {
             return false;
         }
-
-        std::array<char, 256> line{};
-        bool attached = false;
-        while (std::fgets(line.data(), static_cast<int>(line.size()), status) != nullptr) {
-            constexpr std::string_view prefix = "TracerPid:";
-            if (std::strncmp(line.data(), prefix.data(), prefix.size()) != 0) {
-                continue;
-            }
-            const char* first = line.data() + prefix.size();
-            while (*first == ' ' || *first == '\t') {
-                ++first;
-            }
-            const char* last = line.data() + std::strlen(line.data());
-            int tracerPid = 0;
-            if (std::from_chars(first, last, tracerPid).ec == std::errc{}) {
-                attached = tracerPid != 0;
-            }
-            break;
-        }
-        std::fclose(status);
-        return attached;
-#elif defined(PLATFORM_MACOS)
-        int query[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(::getpid())};
-        kinfo_proc process{};
-        size_t size = sizeof(process);
-        if (::sysctl(query, 4, &process, &size, nullptr, 0) != 0) {
+        const int descriptor = file.open("/proc/self/status", PAL::PosixSystem::kOpenReadOnly);
+        if (descriptor < 0) {
             return false;
         }
-        return (process.kp_proc.p_flag & P_TRACED) != 0;
+        std::array<char, 4096> text{};
+        const Sora::ssize_t size = file.read(descriptor, text.data(), text.size());
+        const bool closed = file.close(descriptor) == 0;
+        if (size <= 0 || !closed) {
+            return false;
+        }
+        constexpr std::string_view prefix = "TracerPid:";
+        const std::string_view status{text.data(), static_cast<size_t>(size)};
+        const size_t prefixOffset = status.find(prefix);
+        if (prefixOffset == std::string_view::npos) {
+            return false;
+        }
+        const size_t valueOffset = status.find_first_not_of(" \t", prefixOffset + prefix.size());
+        if (valueOffset == std::string_view::npos) {
+            return false;
+        }
+        const size_t valueEnd = status.find_first_of("\r\n", valueOffset);
+        int tracerId = 0;
+        const char* first = text.data() + valueOffset;
+        const char* last = text.data() + (valueEnd == std::string_view::npos ? status.size() : valueEnd);
+        return std::from_chars(first, last, tracerId).ec == std::errc{} && tracerId != 0;
 #else
         return false;
 #endif
     }
 
     void Breakpoint() noexcept {
-#if defined(__cpp_lib_debugging) && __cpp_lib_debugging >= 202311L
-        std::breakpoint();
-#elif defined(PLATFORM_WINDOWS)
-        ::DebugBreak();
+#if defined(PLATFORM_WINDOWS)
+        const PAL::DebugSystemAPI& api = PAL::LoadDebugSystemAPI();
+        if (api.breakpoint != nullptr) {
+            api.breakpoint();
+        }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-        std::raise(SIGTRAP);
+        const PAL::ProcessControlSystemAPI& api = PAL::LoadProcessControlSystemAPI();
+        if (api.raiseSignal != nullptr) {
+            api.raiseSignal(PAL::PosixSystem::kBreakpointSignal);
+        }
 #endif
     }
 
@@ -235,7 +219,7 @@ namespace Sora {
     namespace Detail {
 
         void ReportAssertionFailure(AssertionKind kind, std::string_view condition, std::string message,
-                                    std::source_location source) noexcept {
+                                    std::source_location source, AssertionDisposition disposition) noexcept {
             thread_local bool reporting = false;
             if (reporting) {
                 WriteStderr("\nRecursive Sora assertion failure; aborting without further diagnostics.\n");
@@ -261,7 +245,9 @@ namespace Sora {
             (reporter != nullptr ? reporter : DefaultAssertionReporter)(failure);
 
             reporting = false;
-            ApplyAssertionAction(settings.action);
+            if (disposition == AssertionDisposition::ApplyConfiguredAction) {
+                ApplyAssertionAction(settings.action);
+            }
         }
 
     } // namespace Detail

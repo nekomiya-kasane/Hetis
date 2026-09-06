@@ -41,6 +41,9 @@
  * - @ref Sora::PAL::Win32WindowSystemAPI
  * - @ref Sora::PAL::SystemInformationSystemAPI
  * - @ref Sora::PAL::DebugSystemAPI
+ * - @ref Sora::PAL::COMSystemAPI
+ * - @ref Sora::PAL::OleSystemAPI
+ * - @ref Sora::PAL::OleAutomationSystemAPI
  * - @ref Sora::PAL::SchedulerTraceSystemAPI
  * - @ref Sora::PAL::DbgHelpSystemAPI
  * - @ref Sora::PAL::StackTraceSystemAPI
@@ -170,6 +173,19 @@ struct xcb_setup_t;
 
 struct _DEBUG_EVENT;
 struct _EXCEPTION_POINTERS;
+struct IUnknown;
+struct IStream;
+struct IStorage;
+struct IDataObject;
+struct IDropSource;
+struct IDropTarget;
+struct ITypeLib;
+struct ITypeInfo;
+struct IDispatch;
+struct IRecordInfo;
+struct tagSAFEARRAY;
+struct tagVARIANT;
+struct tagSTGMEDIUM;
 struct _IMAGEHLP_LINE64;
 struct _IMAGEHLP_MODULE64;
 struct _EVENT_TRACE_LOGFILEW;
@@ -1913,6 +1929,438 @@ namespace Sora::PAL {
         // clang-format on
     };
 
+    /** @brief Dynamically resolved COM runtime, activation, marshaling, identity, allocator, and stream operations. */
+    struct COMSystemAPI {
+        using InitializeFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using InitializeExFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::DWord);
+        using InitializeSecurityFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, long, void*, void*, WindowsSystem::DWord, WindowsSystem::DWord,
+                                                 void*, WindowsSystem::DWord, void*);
+        using UninitializeFunction = void(__stdcall*)();
+        using GetApartmentTypeFunction = WindowsSystem::HResult(__stdcall*)(int*, int*);
+        using GetCallerThreadIdFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord*);
+        using GetContextTokenFunction = WindowsSystem::HResult(__stdcall*)(uintptr_t*);
+        using GetObjectContextFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefInterfaceId, void**);
+        using GetClassObjectFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, WindowsSystem::DWord, void*,
+                                                 WindowsSystem::RefInterfaceId, void**);
+        using CreateInstanceFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, void*, WindowsSystem::DWord,
+                                                 WindowsSystem::RefInterfaceId, void**);
+        using CreateInstanceExFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, void*, WindowsSystem::DWord, void*,
+                                                 WindowsSystem::DWord, void*);
+        using CreateInstanceFromAppFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, void*, WindowsSystem::DWord, void*,
+                                                 WindowsSystem::DWord, void*);
+        using RegisterClassObjectFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, void*, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::DWord*);
+        using RevokeClassObjectFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord);
+        using ResumeSuspendClassObjectsFunction = WindowsSystem::HResult(__stdcall*)();
+        using GetMallocFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord, void**);
+        using CreateStandardMallocFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord, void**);
+        using TaskMemAllocFunction = void*(__stdcall*)(size_t);
+        using TaskMemReallocFunction = void*(__stdcall*)(void*, size_t);
+        using TaskMemFreeFunction = void(__stdcall*)(void*);
+        using CreateStreamOnGlobalFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Bool, void**);
+        using GetGlobalFromStreamFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::Handle*);
+        using MarshalSizeMaxFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::ULong*, WindowsSystem::RefInterfaceId, void*,
+                                                 WindowsSystem::DWord, void*, WindowsSystem::DWord);
+        using MarshalInterfaceFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, void*, WindowsSystem::DWord,
+                                                 void*, WindowsSystem::DWord);
+        using UnmarshalInterfaceFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, void**);
+        using ReleaseMarshalDataFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using MarshalInterThreadInterfaceFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefInterfaceId, void*, void**);
+        using GetInterfaceAndReleaseStreamFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, void**);
+        using CreateFreeThreadedMarshalerFunction = WindowsSystem::HResult(__stdcall*)(void*, void**);
+        using DisconnectObjectFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::DWord);
+        using LockObjectExternalFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::Bool, WindowsSystem::Bool);
+        using QueryProxyBlanketFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::DWord*, WindowsSystem::DWord*, wchar_t**,
+                                                 WindowsSystem::DWord*, WindowsSystem::DWord*, void**,
+                                                 WindowsSystem::DWord*);
+        using SetProxyBlanketFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::DWord, WindowsSystem::DWord, wchar_t*,
+                                                 WindowsSystem::DWord, WindowsSystem::DWord, void*,
+                                                 WindowsSystem::DWord);
+        using CancelCallFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord, WindowsSystem::ULong);
+        using TestCancelFunction = WindowsSystem::HResult(__stdcall*)();
+        using EnableDisableCallCancellationFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using CreateGuidFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Guid*);
+        using StringFromGuidFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefGuid, wchar_t**);
+        using GuidFromStringFunction = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::Guid*);
+        using StringFromGuid2Function = int(__stdcall*)(WindowsSystem::RefGuid, wchar_t*, int);
+        using ProgIdFromClsidFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, wchar_t**);
+        using ClsidFromProgIdFunction = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::ClassId*);
+        using WaitForMultipleHandlesFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::ULong,
+                                                 WindowsSystem::Handle*, WindowsSystem::DWord*);
+        using FreeUnusedLibrariesFunction = void(__stdcall*)();
+        using FreeUnusedLibrariesExFunction = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord);
+
+        // clang-format off
+        [[= $::Syscall{"CoInitialize"}]]
+        InitializeFunction                          initialize = nullptr;
+        [[= $::Syscall{"CoInitializeEx"}]]
+        InitializeExFunction                        initializeEx = nullptr;
+        [[= $::Syscall{"CoInitializeSecurity"}]]
+        InitializeSecurityFunction                  initializeSecurity = nullptr;
+        [[= $::Syscall{"CoUninitialize"}]]
+        UninitializeFunction                         uninitialize = nullptr;
+        [[= $::Syscall{"CoGetApartmentType"}]]
+        GetApartmentTypeFunction                    getApartmentType = nullptr;
+        [[= $::Syscall{"CoGetCallerTID"}]]
+        GetCallerThreadIdFunction                   getCallerThreadId = nullptr;
+        [[= $::Syscall{"CoGetContextToken"}]]
+        GetContextTokenFunction                    getContextToken = nullptr;
+        [[= $::Syscall{"CoGetObjectContext"}]]
+        GetObjectContextFunction                    getObjectContext = nullptr;
+        [[= $::Syscall{"CoGetClassObject"}]]
+        GetClassObjectFunction                     getClassObject = nullptr;
+        [[= $::Syscall{"CoCreateInstance"}]]
+        CreateInstanceFunction                     createInstance = nullptr;
+        [[= $::Syscall{"CoCreateInstanceEx"}]]
+        CreateInstanceExFunction                   createInstanceEx = nullptr;
+        [[= $::Syscall{"CoCreateInstanceFromApp"}]]
+        CreateInstanceFromAppFunction              createInstanceFromApp = nullptr;
+        [[= $::Syscall{"CoRegisterClassObject"}]]
+        RegisterClassObjectFunction                registerClassObject = nullptr;
+        [[= $::Syscall{"CoRevokeClassObject"}]]
+        RevokeClassObjectFunction                  revokeClassObject = nullptr;
+        [[= $::Syscall{"CoResumeClassObjects"}]]
+        ResumeSuspendClassObjectsFunction          resumeClassObjects = nullptr;
+        [[= $::Syscall{"CoSuspendClassObjects"}]]
+        ResumeSuspendClassObjectsFunction          suspendClassObjects = nullptr;
+        [[= $::Syscall{"CoGetMalloc"}]]
+        GetMallocFunction                          getMalloc = nullptr;
+        [[= $::Syscall{"CoCreateStandardMalloc"}]]
+        CreateStandardMallocFunction               createStandardMalloc = nullptr;
+        [[= $::Syscall{"CoTaskMemAlloc"}]]
+        TaskMemAllocFunction                       taskMemAlloc = nullptr;
+        [[= $::Syscall{"CoTaskMemRealloc"}]]
+        TaskMemReallocFunction                     taskMemRealloc = nullptr;
+        [[= $::Syscall{"CoTaskMemFree"}]]
+        TaskMemFreeFunction                        taskMemFree = nullptr;
+        [[= $::Syscall{"CreateStreamOnHGlobal"}]]
+        CreateStreamOnGlobalFunction               createStreamOnGlobal = nullptr;
+        [[= $::Syscall{"GetHGlobalFromStream"}]]
+        GetGlobalFromStreamFunction                getGlobalFromStream = nullptr;
+        [[= $::Syscall{"CoGetMarshalSizeMax"}]]
+        MarshalSizeMaxFunction                     getMarshalSizeMax = nullptr;
+        [[= $::Syscall{"CoMarshalInterface"}]]
+        MarshalInterfaceFunction                   marshalInterface = nullptr;
+        [[= $::Syscall{"CoUnmarshalInterface"}]]
+        UnmarshalInterfaceFunction                 unmarshalInterface = nullptr;
+        [[= $::Syscall{"CoReleaseMarshalData"}]]
+        ReleaseMarshalDataFunction                 releaseMarshalData = nullptr;
+        [[= $::Syscall{"CoMarshalInterThreadInterfaceInStream"}]]
+        MarshalInterThreadInterfaceFunction        marshalInterThreadInterface = nullptr;
+        [[= $::Syscall{"CoGetInterfaceAndReleaseStream"}]]
+        GetInterfaceAndReleaseStreamFunction       getInterfaceAndReleaseStream = nullptr;
+        [[= $::Syscall{"CoCreateFreeThreadedMarshaler"}]]
+        CreateFreeThreadedMarshalerFunction        createFreeThreadedMarshaler = nullptr;
+        [[= $::Syscall{"CoDisconnectObject"}]]
+        DisconnectObjectFunction                   disconnectObject = nullptr;
+        [[= $::Syscall{"CoLockObjectExternal"}]]
+        LockObjectExternalFunction                 lockObjectExternal = nullptr;
+        [[= $::Syscall{"CoQueryProxyBlanket"}]]
+        QueryProxyBlanketFunction                   queryProxyBlanket = nullptr;
+        [[= $::Syscall{"CoSetProxyBlanket"}]]
+        SetProxyBlanketFunction                     setProxyBlanket = nullptr;
+        [[= $::Syscall{"CoCancelCall"}]]
+        CancelCallFunction                          cancelCall = nullptr;
+        [[= $::Syscall{"CoTestCancel"}]]
+        TestCancelFunction                          testCancel = nullptr;
+        [[= $::Syscall{"CoEnableCallCancellation"}]]
+        EnableDisableCallCancellationFunction       enableCallCancellation = nullptr;
+        [[= $::Syscall{"CoDisableCallCancellation"}]]
+        EnableDisableCallCancellationFunction       disableCallCancellation = nullptr;
+        [[= $::Syscall{"CoCreateGuid"}]]
+        CreateGuidFunction                         createGuid = nullptr;
+        [[= $::Syscall{"StringFromCLSID"}]]
+        StringFromGuidFunction                     stringFromClsid = nullptr;
+        [[= $::Syscall{"CLSIDFromString"}]]
+        GuidFromStringFunction                     clsidFromString = nullptr;
+        [[= $::Syscall{"StringFromIID"}]]
+        StringFromGuidFunction                     stringFromIid = nullptr;
+        [[= $::Syscall{"IIDFromString"}]]
+        GuidFromStringFunction                     iidFromString = nullptr;
+        [[= $::Syscall{"StringFromGUID2"}]]
+        StringFromGuid2Function                    stringFromGuid2 = nullptr;
+        [[= $::Syscall{"ProgIDFromCLSID"}]]
+        ProgIdFromClsidFunction                    progIdFromClsid = nullptr;
+        [[= $::Syscall{"CLSIDFromProgID"}]]
+        ClsidFromProgIdFunction                    clsidFromProgId = nullptr;
+        [[= $::Syscall{"CoWaitForMultipleHandles"}]]
+        WaitForMultipleHandlesFunction             waitForMultipleHandles = nullptr;
+        [[= $::Syscall{"CoFreeUnusedLibraries"}]]
+        FreeUnusedLibrariesFunction                freeUnusedLibraries = nullptr;
+        [[= $::Syscall{"CoFreeUnusedLibrariesEx"}]]
+        FreeUnusedLibrariesExFunction              freeUnusedLibrariesEx = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved OLE object, persistence, data-transfer, drag/drop, and clipboard operations. */
+    struct OleSystemAPI {
+        using InitializeFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using UninitializeFunction = void(__stdcall*)();
+        using BuildVersionFunction = WindowsSystem::DWord(__stdcall*)();
+        using QueryDataFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using CreateObjectFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, WindowsSystem::RefInterfaceId,
+                                                 WindowsSystem::DWord, void*, void*, void*, void**);
+        using CreateFromDataFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, WindowsSystem::DWord, void*,
+                                                 void*, void*, void**);
+        using CreateLinkFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, WindowsSystem::DWord, void*,
+                                                 void*, void*, void**);
+        using CreateLinkToFileFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::RefInterfaceId, WindowsSystem::DWord,
+                                                 void*, void*, void*, void**);
+        using CreateObjectExFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, WindowsSystem::RefInterfaceId,
+                                                 WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::ULong,
+                                                 WindowsSystem::DWord*, void*, void*, WindowsSystem::DWord*, void*,
+                                                 void*, void**);
+        using CreateFromDataExFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::ULong, WindowsSystem::DWord*,
+                                                 void*, void*, WindowsSystem::DWord*, void*, void*, void**);
+        using CreateLinkExFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::ULong, WindowsSystem::DWord*,
+                                                 void*, void*, WindowsSystem::DWord*, void*, void*, void**);
+        using CreateLinkToFileExFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::RefInterfaceId, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::ULong, WindowsSystem::DWord*,
+                                                 void*, void*, WindowsSystem::DWord*, void*, void*, void**);
+        using CreateFromFileFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, const wchar_t*,
+                                                 WindowsSystem::RefInterfaceId, WindowsSystem::DWord, void*, void*,
+                                                 void*, void**);
+        using CreateFromFileExFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, const wchar_t*,
+                                                 WindowsSystem::RefInterfaceId, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::ULong, WindowsSystem::DWord*,
+                                                 void*, void*, WindowsSystem::DWord*, void*, void*, void**);
+        using LoadFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, void*, void**);
+        using SaveFunction = WindowsSystem::HResult(__stdcall*)(void*, void*, WindowsSystem::Bool);
+        using LoadFromStreamFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefInterfaceId, void**);
+        using SaveToStreamFunction = WindowsSystem::HResult(__stdcall*)(void*, void*);
+        using SetObjectStateFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::Bool);
+        using RegisterDragDropFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::WindowHandle, void*);
+        using RevokeDragDropFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::WindowHandle);
+        using DoDragDropFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, void*, WindowsSystem::DWord, WindowsSystem::DWord*);
+        using SetClipboardFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using GetClipboardFunction = WindowsSystem::HResult(__stdcall*)(void**);
+        using FlushClipboardFunction = WindowsSystem::HResult(__stdcall*)();
+        using IsCurrentClipboardFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using DrawFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::DWord, WindowsSystem::DeviceContextHandle,
+                                                 const WindowsSystem::Rect*);
+        using IsRunningFunction = WindowsSystem::Bool(__stdcall*)(void*);
+        using LockRunningFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::Bool, WindowsSystem::Bool);
+        using ReleaseStorageMediumFunction = void(__stdcall*)(void*);
+        using CreateAdviseHolderFunction = WindowsSystem::HResult(__stdcall*)(void**);
+        using CreateDataCacheFunction = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefClassId,
+                                                                           WindowsSystem::RefInterfaceId, void**);
+
+        // clang-format off
+        [[= $::Syscall{"OleInitialize"}]]
+        InitializeFunction                    initialize = nullptr;
+        [[= $::Syscall{"OleUninitialize"}]]
+        UninitializeFunction                  uninitialize = nullptr;
+        [[= $::Syscall{"OleBuildVersion"}]]
+        BuildVersionFunction                  buildVersion = nullptr;
+        [[= $::Syscall{"OleQueryLinkFromData"}]]
+        QueryDataFunction                     queryLinkFromData = nullptr;
+        [[= $::Syscall{"OleQueryCreateFromData"}]]
+        QueryDataFunction                     queryCreateFromData = nullptr;
+        [[= $::Syscall{"OleCreate"}]]
+        CreateObjectFunction                  create = nullptr;
+        [[= $::Syscall{"OleCreateEx"}]]
+        CreateObjectExFunction                createEx = nullptr;
+        [[= $::Syscall{"OleCreateFromData"}]]
+        CreateFromDataFunction               createFromData = nullptr;
+        [[= $::Syscall{"OleCreateFromDataEx"}]]
+        CreateFromDataExFunction             createFromDataEx = nullptr;
+        [[= $::Syscall{"OleCreateLink"}]]
+        CreateLinkFunction                   createLink = nullptr;
+        [[= $::Syscall{"OleCreateLinkEx"}]]
+        CreateLinkExFunction                  createLinkEx = nullptr;
+        [[= $::Syscall{"OleCreateLinkToFile"}]]
+        CreateLinkToFileFunction              createLinkToFile = nullptr;
+        [[= $::Syscall{"OleCreateLinkToFileEx"}]]
+        CreateLinkToFileExFunction            createLinkToFileEx = nullptr;
+        [[= $::Syscall{"OleCreateFromFile"}]]
+        CreateFromFileFunction                createFromFile = nullptr;
+        [[= $::Syscall{"OleCreateFromFileEx"}]]
+        CreateFromFileExFunction              createFromFileEx = nullptr;
+        [[= $::Syscall{"OleLoad"}]]
+        LoadFunction                          load = nullptr;
+        [[= $::Syscall{"OleSave"}]]
+        SaveFunction                          save = nullptr;
+        [[= $::Syscall{"OleLoadFromStream"}]]
+        LoadFromStreamFunction                loadFromStream = nullptr;
+        [[= $::Syscall{"OleSaveToStream"}]]
+        SaveToStreamFunction                  saveToStream = nullptr;
+        [[= $::Syscall{"OleSetContainedObject"}]]
+        SetObjectStateFunction                setContainedObject = nullptr;
+        [[= $::Syscall{"OleNoteObjectVisible"}]]
+        SetObjectStateFunction                noteObjectVisible = nullptr;
+        [[= $::Syscall{"RegisterDragDrop"}]]
+        RegisterDragDropFunction              registerDragDrop = nullptr;
+        [[= $::Syscall{"RevokeDragDrop"}]]
+        RevokeDragDropFunction                revokeDragDrop = nullptr;
+        [[= $::Syscall{"DoDragDrop"}]]
+        DoDragDropFunction                    doDragDrop = nullptr;
+        [[= $::Syscall{"OleSetClipboard"}]]
+        SetClipboardFunction                  setClipboard = nullptr;
+        [[= $::Syscall{"OleGetClipboard"}]]
+        GetClipboardFunction                  getClipboard = nullptr;
+        [[= $::Syscall{"OleFlushClipboard"}]]
+        FlushClipboardFunction                flushClipboard = nullptr;
+        [[= $::Syscall{"OleIsCurrentClipboard"}]]
+        IsCurrentClipboardFunction            isCurrentClipboard = nullptr;
+        [[= $::Syscall{"OleDraw"}]]
+        DrawFunction                          draw = nullptr;
+        [[= $::Syscall{"OleRun"}]]
+        QueryDataFunction                     run = nullptr;
+        [[= $::Syscall{"OleIsRunning"}]]
+        IsRunningFunction                     isRunning = nullptr;
+        [[= $::Syscall{"OleLockRunning"}]]
+        LockRunningFunction                   lockRunning = nullptr;
+        [[= $::Syscall{"ReleaseStgMedium"}]]
+        ReleaseStorageMediumFunction          releaseStorageMedium = nullptr;
+        [[= $::Syscall{"CreateOleAdviseHolder"}]]
+        CreateAdviseHolderFunction            createOleAdviseHolder = nullptr;
+        [[= $::Syscall{"CreateDataAdviseHolder"}]]
+        CreateAdviseHolderFunction            createDataAdviseHolder = nullptr;
+        [[= $::Syscall{"CreateDataCache"}]]
+        CreateDataCacheFunction               createDataCache = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved OLE Automation values, active objects, and type-library operations. */
+    struct OleAutomationSystemAPI {
+        using AllocStringFunction = WindowsSystem::AutomationString(__stdcall*)(const wchar_t*);
+        using AllocStringLengthFunction = WindowsSystem::AutomationString(__stdcall*)(const wchar_t*, unsigned int);
+        using ReallocStringLengthFunction
+            = WindowsSystem::Bool(__stdcall*)(WindowsSystem::AutomationString*, const wchar_t*, unsigned int);
+        using FreeStringFunction = void(__stdcall*)(WindowsSystem::AutomationString);
+        using StringLengthFunction = unsigned int(__stdcall*)(WindowsSystem::AutomationString);
+        using SafeArrayCreateFunction = void*(__stdcall*)(unsigned short, unsigned int, void*);
+        using SafeArrayCreateVectorFunction = void*(__stdcall*)(unsigned short, long, unsigned long);
+        using SafeArrayDestroyFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using SafeArrayCopyFunction = WindowsSystem::HResult(__stdcall*)(void*, void**);
+        using SafeArrayAccessDataFunction = WindowsSystem::HResult(__stdcall*)(void*, void**);
+        using SafeArrayUnaccessDataFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using SafeArrayGetElementFunction = WindowsSystem::HResult(__stdcall*)(void*, long*, void*);
+        using SafeArrayPutElementFunction = WindowsSystem::HResult(__stdcall*)(void*, long*, void*);
+        using SafeArrayGetBoundFunction = WindowsSystem::HResult(__stdcall*)(void*, unsigned int, long*);
+        using SafeArrayLockFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using SafeArrayUnlockFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using SafeArrayGetDimensionFunction = unsigned int(__stdcall*)(void*);
+        using VariantInitFunction = void(__stdcall*)(void*);
+        using VariantOperationFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using VariantCopyFunction = WindowsSystem::HResult(__stdcall*)(void*, const void*);
+        using VariantCopyIndFunction = WindowsSystem::HResult(__stdcall*)(void*, const void*);
+        using VariantChangeTypeFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, const void*, unsigned short, unsigned short);
+        using VariantChangeTypeExFunction = WindowsSystem::HResult(__stdcall*)(void*, const void*, WindowsSystem::DWord,
+                                                                               unsigned short, unsigned short);
+        using RegisterActiveObjectFunction
+            = WindowsSystem::HResult(__stdcall*)(void*, WindowsSystem::RefClassId, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord*);
+        using RevokeActiveObjectFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::DWord, void*);
+        using GetActiveObjectFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefClassId, void*, void**);
+        using LoadTypeLibraryFunction = WindowsSystem::HResult(__stdcall*)(const wchar_t*, void**);
+        using LoadTypeLibraryExFunction = WindowsSystem::HResult(__stdcall*)(const wchar_t*, int, void**);
+        using LoadRegisteredTypeLibraryFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefGuid, unsigned short, unsigned short,
+                                                 WindowsSystem::DWord, void**);
+        using QueryTypeLibraryPathFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::RefGuid, unsigned short, unsigned short,
+                                                 WindowsSystem::DWord, wchar_t**);
+
+        // clang-format off
+        [[= $::Syscall{"SysAllocString"}]]
+        AllocStringFunction                    allocString = nullptr;
+        [[= $::Syscall{"SysAllocStringLen"}]]
+        AllocStringLengthFunction              allocStringLen = nullptr;
+        [[= $::Syscall{"SysReAllocStringLen"}]]
+        ReallocStringLengthFunction            reallocStringLen = nullptr;
+        [[= $::Syscall{"SysFreeString"}]]
+        FreeStringFunction                     freeString = nullptr;
+        [[= $::Syscall{"SysStringLen"}]]
+        StringLengthFunction                   stringLength = nullptr;
+        [[= $::Syscall{"SysStringByteLen"}]]
+        StringLengthFunction                   stringByteLength = nullptr;
+        [[= $::Syscall{"SafeArrayCreate"}]]
+        SafeArrayCreateFunction                safeArrayCreate = nullptr;
+        [[= $::Syscall{"SafeArrayCreateVector"}]]
+        SafeArrayCreateVectorFunction          safeArrayCreateVector = nullptr;
+        [[= $::Syscall{"SafeArrayDestroy"}]]
+        SafeArrayDestroyFunction               safeArrayDestroy = nullptr;
+        [[= $::Syscall{"SafeArrayCopy"}]]
+        SafeArrayCopyFunction                  safeArrayCopy = nullptr;
+        [[= $::Syscall{"SafeArrayAccessData"}]]
+        SafeArrayAccessDataFunction            safeArrayAccessData = nullptr;
+        [[= $::Syscall{"SafeArrayUnaccessData"}]]
+        SafeArrayUnaccessDataFunction          safeArrayUnaccessData = nullptr;
+        [[= $::Syscall{"SafeArrayGetElement"}]]
+        SafeArrayGetElementFunction            safeArrayGetElement = nullptr;
+        [[= $::Syscall{"SafeArrayPutElement"}]]
+        SafeArrayPutElementFunction            safeArrayPutElement = nullptr;
+        [[= $::Syscall{"SafeArrayGetLBound"}]]
+        SafeArrayGetBoundFunction              safeArrayGetLowerBound = nullptr;
+        [[= $::Syscall{"SafeArrayGetUBound"}]]
+        SafeArrayGetBoundFunction              safeArrayGetUpperBound = nullptr;
+        [[= $::Syscall{"SafeArrayLock"}]]
+        SafeArrayLockFunction                 safeArrayLock = nullptr;
+        [[= $::Syscall{"SafeArrayUnlock"}]]
+        SafeArrayUnlockFunction               safeArrayUnlock = nullptr;
+        [[= $::Syscall{"SafeArrayGetDim"}]]
+        SafeArrayGetDimensionFunction         safeArrayGetDimension = nullptr;
+        [[= $::Syscall{"VariantInit"}]]
+        VariantInitFunction                   variantInit = nullptr;
+        [[= $::Syscall{"VariantClear"}]]
+        VariantOperationFunction              variantClear = nullptr;
+        [[= $::Syscall{"VariantCopy"}]]
+        VariantCopyFunction                   variantCopy = nullptr;
+        [[= $::Syscall{"VariantCopyInd"}]]
+        VariantCopyIndFunction                variantCopyInd = nullptr;
+        [[= $::Syscall{"VariantChangeType"}]]
+        VariantChangeTypeFunction             variantChangeType = nullptr;
+        [[= $::Syscall{"VariantChangeTypeEx"}]]
+        VariantChangeTypeExFunction           variantChangeTypeEx = nullptr;
+        [[= $::Syscall{"RegisterActiveObject"}]]
+        RegisterActiveObjectFunction          registerActiveObject = nullptr;
+        [[= $::Syscall{"RevokeActiveObject"}]]
+        RevokeActiveObjectFunction            revokeActiveObject = nullptr;
+        [[= $::Syscall{"GetActiveObject"}]]
+        GetActiveObjectFunction               getActiveObject = nullptr;
+        [[= $::Syscall{"LoadTypeLib"}]]
+        LoadTypeLibraryFunction               loadTypeLibrary = nullptr;
+        [[= $::Syscall{"LoadTypeLibEx"}]]
+        LoadTypeLibraryExFunction             loadTypeLibraryEx = nullptr;
+        [[= $::Syscall{"LoadRegTypeLib"}]]
+        LoadRegisteredTypeLibraryFunction     loadRegisteredTypeLibrary = nullptr;
+        [[= $::Syscall{"QueryPathOfRegTypeLib"}]]
+        QueryTypeLibraryPathFunction          queryPathOfRegisteredTypeLibrary = nullptr;
+        // clang-format on
+    };
+
     /** @brief Dynamically resolved Win32 environment entry points. */
     struct EnvironmentSystemAPI {
         // clang-format off
@@ -2863,6 +3311,7 @@ namespace Sora::PAL {
         using WaitIdFunction                  = int (*)(PosixSystem::WaitIdType, PosixSystem::WaitId, PosixSystem::SignalInfo*, int);
         using SignalFunction                  = int (*)(PosixSystem::ProcessId, int);
         using ThreadSignalFunction            = int (*)(PosixSystem::ProcessId, PosixSystem::ProcessId, int);
+        using RaiseSignalFunction             = int (*)(int);
         using SignalActionFunction            = int (*)(int, const PosixSystem::SignalAction*, PosixSystem::SignalAction*);
         using ProcessDescriptorOpenFunction   = int (*)(PosixSystem::ProcessId, unsigned int);
         using ProcessDescriptorSignalFunction = int (*)(int, int, PosixSystem::SignalInfo*, unsigned int);
@@ -2881,6 +3330,8 @@ namespace Sora::PAL {
         SignalFunction kill = nullptr;
         [[= $::Syscall{"tgkill"}]] 
         ThreadSignalFunction threadKill = nullptr;
+        [[= $::Syscall{"raise"}]]
+        RaiseSignalFunction raiseSignal = nullptr;
         [[= $::Syscall{"sigaction"}]] 
         SignalActionFunction signalAction = nullptr;
         [[= $::Syscall{"pidfd_open"}]] 
@@ -3130,15 +3581,20 @@ namespace Sora::PAL {
 #    if defined(PLATFORM_LINUX)
         using TraceProcessFunction = long (*)(PosixSystem::TraceRequest, ...);
 #    endif
-        using RaiseSignalFunction = int (*)(int);
-
 #    if defined(PLATFORM_LINUX)
         [[= $::Syscall{"ptrace"}]] 
         TraceProcessFunction traceProcess = nullptr;
 #    endif
-        [[= $::Syscall{"raise"}]] 
-        RaiseSignalFunction raiseSignal = nullptr;
     };
+
+    /** @brief Windows COM entry points are unavailable on POSIX targets. */
+    struct COMSystemAPI {};
+
+    /** @brief Windows OLE entry points are unavailable on POSIX targets. */
+    struct OleSystemAPI {};
+
+    /** @brief Windows OLE Automation entry points are unavailable on POSIX targets. */
+    struct OleAutomationSystemAPI {};
 
     /** @brief Win32 event objects are unavailable on POSIX targets. */
     struct EventSystemAPI {};
@@ -3490,7 +3946,13 @@ namespace Sora::PAL {
     struct SystemInformationSystemAPI {};
     /** @brief Debugger system calls are unavailable on this target. */
     struct DebugSystemAPI {};
-    /** @brief Environment entry points are unavailable on this target. */ 
+    /** @brief COM entry points are unavailable on this target. */
+    struct COMSystemAPI {};
+    /** @brief OLE entry points are unavailable on this target. */
+    struct OleSystemAPI {};
+    /** @brief OLE Automation entry points are unavailable on this target. */
+    struct OleAutomationSystemAPI {};
+    /** @brief Environment entry points are unavailable on this target. */
     struct EnvironmentSystemAPI {};
     /** @brief Module entry points are unavailable on this target. */ 
     struct ModuleSystemAPI {};
@@ -3645,6 +4107,15 @@ namespace Sora::PAL {
 
         /** @brief Load and return the immutable native debugger entry-point table. */
         [[nodiscard]] const DebugSystemAPI& LoadDebugSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable COM apartment and activation function table. */
+        [[nodiscard]] const COMSystemAPI& LoadCOMSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable OLE object-model function table. */
+        [[nodiscard]] const OleSystemAPI& LoadOleSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable OLE Automation function table. */
+        [[nodiscard]] const OleAutomationSystemAPI& LoadOleAutomationSystemAPI() noexcept;
 
         /** @brief Load and return the immutable process-environment function table. */
         [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;

@@ -9,36 +9,12 @@
 #include <cstring>
 #include <thread>
 
+#include <Sora/Core/PAL/SystemAPI.h>
+
 #if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86))
 #    include <intrin.h>
 #elif (defined(__x86_64__) || defined(__i386__)) && (defined(__clang__) || defined(__GNUC__))
 #    include <cpuid.h>
-#endif
-
-#if defined(_WIN32) && (defined(__aarch64__) || defined(_M_ARM64))
-#    define WIN32_LEAN_AND_MEAN
-#    define NOMINMAX
-#    include <Windows.h>
-#endif
-
-#if defined(__APPLE__) && defined(__aarch64__)
-#    include <sys/sysctl.h>
-#endif
-
-#if defined(__linux__) && (defined(__aarch64__) || defined(__riscv))
-#    include <asm/hwcap.h>
-#    include <sys/auxv.h>
-#endif
-
-#if defined(__linux__) && defined(__aarch64__)
-#    include <sys/prctl.h>
-#endif
-
-#if defined(__linux__) && defined(__riscv) && __has_include(<asm/hwprobe.h>)
-#    include <asm/hwprobe.h>
-#    include <sys/syscall.h>
-#    include <unistd.h>
-#    define SORA_HAS_RISCV_HWPROBE 1
 #endif
 
 #include <Sora/Core/PAL/CpuInfo.h>
@@ -133,62 +109,45 @@ namespace Sora::PAL {
         }
 #endif
 
-#if defined(__linux__) && defined(__aarch64__)
-        [[nodiscard]] uint32_t CurrentSveVectorBits() noexcept {
-#    if defined(PR_SVE_GET_VL) && defined(PR_SVE_VL_LEN_MASK)
-            const int configuration = prctl(PR_SVE_GET_VL);
-            if (configuration >= 0) {
-                return static_cast<uint32_t>(configuration & PR_SVE_VL_LEN_MASK) * CHAR_BIT;
-            }
-#    endif
-            return 0;
-        }
-#endif
-
-#if defined(__APPLE__) && defined(__aarch64__)
-        [[nodiscard]] bool AppleCpuFeature(const char* name) noexcept {
-            int enabled = 0;
-            size_t size = sizeof(enabled);
-            return sysctlbyname(name, &enabled, &size, nullptr, 0) == 0 && size == sizeof(enabled) && enabled != 0;
-        }
-#endif
-
 #if defined(__aarch64__) || defined(_M_ARM64)
         void DetectArm64(CpuInfo& info) noexcept {
-            bool neon = false;
-            bool fma = false;
-            bool sve = false;
-            bool sve2 = false;
-#    if defined(__linux__)
-            const unsigned long capabilities = getauxval(AT_HWCAP);
-#        if defined(HWCAP_ASIMD)
-            neon = (capabilities & HWCAP_ASIMD) != 0;
-#        endif
-#        if defined(HWCAP_FP)
-            fma = (capabilities & HWCAP_FP) != 0;
-#        endif
-#        if defined(HWCAP_SVE)
-            sve = (capabilities & HWCAP_SVE) != 0;
-#        endif
-#        if defined(AT_HWCAP2) && defined(HWCAP2_SVE2)
-            sve2 = (getauxval(AT_HWCAP2) & HWCAP2_SVE2) != 0;
-#        endif
-#    elif defined(_WIN32)
-#        if defined(PF_ARM_NEON_INSTRUCTIONS_AVAILABLE)
-            neon = IsProcessorFeaturePresent(PF_ARM_NEON_INSTRUCTIONS_AVAILABLE) != FALSE;
-#        endif
-            fma = neon;
+            const SystemInformationSystemAPI& system = LoadSystemInformationSystemAPI();
+            bool neon = HasAny(kCompileTargetCpuFeatures, CpuFeature::ArmNeon);
+            bool fma = HasAny(kCompileTargetCpuFeatures, CpuFeature::Fma);
+            bool sve = HasAny(kCompileTargetCpuFeatures, CpuFeature::ArmSve);
+            bool sve2 = HasAny(kCompileTargetCpuFeatures, CpuFeature::ArmSve2);
+#    if defined(_WIN32)
+            if (system.isProcessorFeature != nullptr) {
+                neon = system.isProcessorFeature(WindowsSystem::kArmNeonInstructionsAvailable) != 0;
+                fma = neon;
+            }
+#    elif defined(__linux__)
+            if (system.auxiliaryValue != nullptr) {
+                const unsigned long hardware = system.auxiliaryValue(PosixSystem::kHardwareCapabilities);
+                neon = (hardware & PosixSystem::kArmAdvancedSimd) != 0;
+                fma = (hardware & PosixSystem::kArmFloatingPoint) != 0;
+                sve = (hardware & PosixSystem::kArmScalableVector) != 0;
+                const unsigned long hardware2 = system.auxiliaryValue(PosixSystem::kHardwareCapabilities2);
+                sve2 = (hardware2 & PosixSystem::kArmScalableVector2) != 0;
+            }
+            if (sve && system.processControl != nullptr) {
+                const int configuration = system.processControl(PosixSystem::kGetScalableVectorLength);
+                if (configuration >= 0) {
+                    info.currentScalableVectorBits =
+                        static_cast<uint32_t>(configuration & PosixSystem::kScalableVectorLengthMask) * CHAR_BIT;
+                }
+            }
 #    elif defined(__APPLE__)
+            const auto feature = [&](const char* name) noexcept {
+                int enabled = 0;
+                size_t size = sizeof(enabled);
+                return system.sysctlByName != nullptr &&
+                       system.sysctlByName(name, &enabled, &size, nullptr, 0) == 0 && enabled != 0;
+            };
             neon = true;
             fma = true;
-            sve = AppleCpuFeature("hw.optional.arm.FEAT_SVE");
-            sve2 = AppleCpuFeature("hw.optional.arm.FEAT_SVE2");
-#    else
-            constexpr CpuFeature compiled = kCompileTargetCpuFeatures;
-            neon = HasAny(compiled, CpuFeature::ArmNeon);
-            fma = HasAny(compiled, CpuFeature::Fma);
-            sve = HasAny(compiled, CpuFeature::ArmSve);
-            sve2 = HasAny(compiled, CpuFeature::ArmSve2);
+            sve = feature("hw.optional.arm.FEAT_SVE");
+            sve2 = feature("hw.optional.arm.FEAT_SVE2");
 #    endif
             if (neon) {
                 info.features |= CpuFeature::ArmNeon;
@@ -198,9 +157,6 @@ namespace Sora::PAL {
             }
             if (sve) {
                 info.features |= CpuFeature::ArmSve;
-#    if defined(__linux__)
-                info.currentScalableVectorBits = CurrentSveVectorBits();
-#    endif
             }
             if (sve2) {
                 info.features |= CpuFeature::ArmSve | CpuFeature::ArmSve2;
@@ -211,27 +167,16 @@ namespace Sora::PAL {
 #if defined(__riscv)
         void DetectRiscV(CpuInfo& info) noexcept {
             info.features |= kCompileTargetCpuFeatures;
-#    if defined(SORA_HAS_RISCV_HWPROBE) && defined(__NR_riscv_hwprobe) && defined(RISCV_HWPROBE_KEY_IMA_EXT_0)
-            riscv_hwprobe extensions{.key = RISCV_HWPROBE_KEY_IMA_EXT_0};
-            if (syscall(__NR_riscv_hwprobe, &extensions, size_t{1}, size_t{0}, nullptr, uint32_t{0}) == 0 &&
-                extensions.key >= 0) {
-#        if defined(RISCV_HWPROBE_IMA_FD)
-                if ((extensions.value & RISCV_HWPROBE_IMA_FD) != 0) {
+            const SystemInformationSystemAPI& system = LoadSystemInformationSystemAPI();
+            if (system.auxiliaryValue != nullptr) {
+                const unsigned long hardware = system.auxiliaryValue(PosixSystem::kHardwareCapabilities);
+                if ((hardware & (PosixSystem::kRiscVSinglePrecision | PosixSystem::kRiscVDoublePrecision)) != 0) {
                     info.features |= CpuFeature::Fma;
                 }
-#        endif
-#        if defined(RISCV_HWPROBE_IMA_V)
-                if ((extensions.value & RISCV_HWPROBE_IMA_V) != 0) {
+                if ((hardware & PosixSystem::kRiscVVector) != 0) {
                     info.features |= CpuFeature::RiscVVector;
                 }
-#        endif
-#        if defined(RISCV_HWPROBE_EXT_ZVE32X)
-                if ((extensions.value & RISCV_HWPROBE_EXT_ZVE32X) != 0) {
-                    info.features |= CpuFeature::RiscVVector;
-                }
-#        endif
             }
-#    endif
         }
 #endif
 
