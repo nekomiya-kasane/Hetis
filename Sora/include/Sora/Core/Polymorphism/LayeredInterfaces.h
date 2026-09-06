@@ -482,10 +482,7 @@ namespace Sora::Meta {
                 "DescribeLayeredInterface requires a template and valid layered-interface dependencies.");
         }
 
-        return {
-            Interface,
-            InfoList{std::meta::reflect_constant(Bases)...},
-        };
+        return {.interface = Interface, .bases = InfoList{std::meta::reflect_constant(Bases)...}};
     }
 
     /**
@@ -562,8 +559,15 @@ namespace Sora::Meta {
      */
     template<LayeredInterfaceDescriptor... Interfaces>
     struct ExtendsCarrier {
+        inline static constexpr InfoList Descriptors{std::meta::reflect_constant(Interfaces)...};
+
+        /** @brief Return whether every captured descriptor has a valid dependency graph. */
+        [[nodiscard]] static consteval bool IsValid() noexcept {
+            return (Detail::IsValidDescriptor(Interfaces) && ...);
+        }
+
         template<typename Core>
-        using Apply = InfoType<ExtendLayeredInterfaces(^^Core, InfoList{std::meta::reflect_constant(Interfaces)...})>;
+        using Apply = InfoType<ExtendLayeredInterfaces(^^Core, Descriptors)>;
     };
 
     /**
