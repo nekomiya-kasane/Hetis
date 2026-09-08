@@ -176,6 +176,18 @@ struct _EXCEPTION_POINTERS;
 struct IUnknown;
 struct IStream;
 struct IStorage;
+struct ILockBytes;
+struct IRootStorage;
+struct IPersist;
+struct IPersistStream;
+struct IPersistFile;
+struct IPersistStorage;
+struct IPropertyStorage;
+struct IPropertySetStorage;
+struct IEnumSTATPROPSTG;
+struct IEnumSTATPROPSETSTG;
+struct tagSTATSTG;
+struct tagSTGOPTIONS;
 struct IDataObject;
 struct IDropSource;
 struct IDropTarget;
@@ -384,11 +396,11 @@ namespace Sora::PAL {
         DisplayFd = uint64_t{1} << 8,      /**< Expose a pollable display-connection file descriptor. */
     };
 
-    /** @brief Raw feature mask for one dynamically loaded native window backend. */
+    /** @brief Capabilities for one dynamically loaded native window backend. */
     struct WindowSystemCapabilities {
         Platform::WindowSystem windowSystem = Platform::WindowSystem::Unknown;
         NativeWindowBackend backend = NativeWindowBackend::Unknown;
-        uint64_t features = 0;
+        WindowSystemFeature features = WindowSystemFeature::None;
 
         /**
          * @brief Return whether every bit in @p feature is declared by this backend.
@@ -397,7 +409,8 @@ namespace Sora::PAL {
          */
         [[nodiscard]] constexpr bool Supports(WindowSystemFeature feature) const noexcept {
             const auto requested = std::to_underlying(feature);
-            return requested != 0 && (features & requested) == requested;
+            const auto available = std::to_underlying(features);
+            return requested != 0 && (available & requested) == requested;
         }
     };
 
@@ -734,14 +747,15 @@ namespace Sora::PAL {
         [[nodiscard]] static constexpr WindowSystemCapabilities DeclaredCapabilities() noexcept {
             return {.windowSystem = Platform::WindowSystem::Win32,
                     .backend = NativeWindowBackend::Win32,
-                    .features = std::to_underlying(WindowSystemFeature::WindowCreation) |
-                                std::to_underlying(WindowSystemFeature::EventQueue) |
-                                std::to_underlying(WindowSystemFeature::WindowPosition) |
-                                std::to_underlying(WindowSystemFeature::WindowResize) |
-                                std::to_underlying(WindowSystemFeature::WindowState) |
-                                std::to_underlying(WindowSystemFeature::PointerCapture) |
-                                std::to_underlying(WindowSystemFeature::TextInput) |
-                                std::to_underlying(WindowSystemFeature::VulkanSurface)};
+                    .features = static_cast<WindowSystemFeature>(
+                        std::to_underlying(WindowSystemFeature::WindowCreation) |
+                        std::to_underlying(WindowSystemFeature::EventQueue) |
+                        std::to_underlying(WindowSystemFeature::WindowPosition) |
+                        std::to_underlying(WindowSystemFeature::WindowResize) |
+                        std::to_underlying(WindowSystemFeature::WindowState) |
+                        std::to_underlying(WindowSystemFeature::PointerCapture) |
+                        std::to_underlying(WindowSystemFeature::TextInput) |
+                        std::to_underlying(WindowSystemFeature::VulkanSurface))};
         }
 
         /** @brief Return whether the minimum window lifecycle and message-pump symbols were resolved. */
@@ -871,15 +885,16 @@ namespace Sora::PAL {
         [[nodiscard]] static constexpr WindowSystemCapabilities DeclaredCapabilities() noexcept {
             return {.windowSystem = Platform::WindowSystem::X11,
                     .backend = NativeWindowBackend::Xlib,
-                    .features = std::to_underlying(WindowSystemFeature::WindowCreation) |
-                                std::to_underlying(WindowSystemFeature::EventQueue) |
-                                std::to_underlying(WindowSystemFeature::WindowPosition) |
-                                std::to_underlying(WindowSystemFeature::WindowResize) |
-                                std::to_underlying(WindowSystemFeature::WindowState) |
-                                std::to_underlying(WindowSystemFeature::PointerCapture) |
-                                std::to_underlying(WindowSystemFeature::TextInput) |
-                                std::to_underlying(WindowSystemFeature::VulkanSurface) |
-                                std::to_underlying(WindowSystemFeature::DisplayFd)};
+                    .features = static_cast<WindowSystemFeature>(
+                        std::to_underlying(WindowSystemFeature::WindowCreation) |
+                        std::to_underlying(WindowSystemFeature::EventQueue) |
+                        std::to_underlying(WindowSystemFeature::WindowPosition) |
+                        std::to_underlying(WindowSystemFeature::WindowResize) |
+                        std::to_underlying(WindowSystemFeature::WindowState) |
+                        std::to_underlying(WindowSystemFeature::PointerCapture) |
+                        std::to_underlying(WindowSystemFeature::TextInput) |
+                        std::to_underlying(WindowSystemFeature::VulkanSurface) |
+                        std::to_underlying(WindowSystemFeature::DisplayFd))};
         }
 
         /** @brief Return whether the minimum Xlib connection, lifecycle, and event symbols were resolved. */
@@ -958,12 +973,13 @@ namespace Sora::PAL {
         [[nodiscard]] static constexpr WindowSystemCapabilities DeclaredCapabilities() noexcept {
             return {.windowSystem = Platform::WindowSystem::X11,
                     .backend = NativeWindowBackend::Xcb,
-                    .features = std::to_underlying(WindowSystemFeature::WindowCreation) |
-                                std::to_underlying(WindowSystemFeature::EventQueue) |
-                                std::to_underlying(WindowSystemFeature::WindowPosition) |
-                                std::to_underlying(WindowSystemFeature::WindowResize) |
-                                std::to_underlying(WindowSystemFeature::VulkanSurface) |
-                                std::to_underlying(WindowSystemFeature::DisplayFd)};
+                    .features = static_cast<WindowSystemFeature>(
+                        std::to_underlying(WindowSystemFeature::WindowCreation) |
+                        std::to_underlying(WindowSystemFeature::EventQueue) |
+                        std::to_underlying(WindowSystemFeature::WindowPosition) |
+                        std::to_underlying(WindowSystemFeature::WindowResize) |
+                        std::to_underlying(WindowSystemFeature::VulkanSurface) |
+                        std::to_underlying(WindowSystemFeature::DisplayFd))};
         }
 
         /** @brief Return whether the minimum XCB connection, lifecycle, and event symbols were resolved. */
@@ -1051,8 +1067,9 @@ namespace Sora::PAL {
         [[nodiscard]] static constexpr WindowSystemCapabilities DeclaredCapabilities() noexcept {
             return {.windowSystem = Platform::WindowSystem::Wayland,
                     .backend = NativeWindowBackend::Wayland,
-                    .features = std::to_underlying(WindowSystemFeature::EventQueue) |
-                                std::to_underlying(WindowSystemFeature::DisplayFd)};
+                    .features = static_cast<WindowSystemFeature>(
+                        std::to_underlying(WindowSystemFeature::EventQueue) |
+                        std::to_underlying(WindowSystemFeature::DisplayFd))};
         }
 
         /** @brief Return whether the minimum Wayland transport symbols were resolved. */
