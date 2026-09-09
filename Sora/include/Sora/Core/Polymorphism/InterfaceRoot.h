@@ -115,11 +115,14 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <type_traits>
 #include <typeinfo>
+#include <utility>
 
 #include <Sora/Core/Assertion.h>
 #include <Sora/Core/Memory/MemoryLayout.h>
+#include <Sora/Core/Polymorphism/Box.h>
 #include <Sora/Core/Polymorphism/LayeredInterfaces.h>
 
 namespace Sora::Meta {
@@ -234,6 +237,95 @@ namespace Sora::Meta {
     inline constexpr auto ObjectType = ObjectAccess::TypeCpo{};
     inline constexpr auto ObjectData = ObjectAccess::DataCpo{};
     inline constexpr auto DeleteObject = ObjectAccess::DeleteCpo{};
+
+    /**
+     * @brief Always-engaged object root that directly owns one concrete model.
+     * @tparam AbstractInterface Erased abstract interface core extended by concrete interface layers.
+     * @tparam T Complete, unqualified, non-array object type stored by the root.
+     * @details
+     * The root supplies representation identity and the object protocol while @p Box owns the value. Allocation and
+     * destruction remain the responsibility of an enclosing erased model; consequently @c DeleteObject is not
+     * overridden here. The root cannot become empty and @c ResetObject is intentionally a no-op.
+     */
+    template<typename AbstractInterface, typename T>
+        requires(std::derived_from<AbstractInterface, ErasedObjectRoot> && std::is_object_v<T> &&
+                 !std::is_array_v<T> && std::same_as<T, std::decay_t<T>> && requires { sizeof(T); })
+    struct ObjectValueRoot : AbstractInterface {
+        static constexpr InterfaceLayer Layer = InterfaceLayer::Object;
+        static constexpr RootBinding Binding = RootBinding::Value;
+        using ValueType = T;
+        using InterfaceType = AbstractInterface;
+        using AbstractInterface::AbstractInterface;
+
+        /** @name Constructors @{ ------------------------------------------------------------------------------ */
+
+        /** @brief Default-construct the concrete model when @p T is default-initializable. */
+        constexpr ObjectValueRoot()
+            requires std::default_initializable<T>
+        = default;
+
+        /** @brief Construct the root from an exact concrete value. */
+        template<typename Value>
+            requires(std::same_as<std::remove_cvref_t<Value>, T> &&
+                     !std::same_as<std::remove_cvref_t<Value>, ObjectValueRoot>)
+        constexpr explicit ObjectValueRoot(Value&& value)
+            noexcept(std::is_nothrow_constructible_v<T, Value&&>)
+            : storage_(std::forward<Value>(value)) {}
+
+        /** @brief Construct the concrete model in place. */
+        template<typename... Args>
+            requires std::constructible_from<T, Args...>
+        constexpr explicit ObjectValueRoot(std::in_place_t, Args&&... args)
+            noexcept(std::is_nothrow_constructible_v<T, Args...>)
+            : storage_(std::in_place, std::forward<Args>(args)...) {}
+
+        /** @brief Invoke a factory and construct the model from its exact result. */
+        template<typename Factory, typename... Args>
+            requires(std::invocable<Factory&&, Args&&...> &&
+                     std::same_as<std::invoke_result_t<Factory&&, Args&&...>, T>)
+        constexpr explicit ObjectValueRoot(Polymorphism::BoxFromFactoryTag, Factory&& factory, Args&&... args)
+            noexcept(std::is_nothrow_invocable_v<Factory&&, Args&&...>)
+            : storage_(Polymorphism::BoxFromFactory, std::forward<Factory>(factory), std::forward<Args>(args)...) {}
+
+        /** @} ----------------------------------------------------------------------------------------------- */
+
+        /** @name Special Members @{ -------------------------------------------------------------------------- */
+
+        ObjectValueRoot(const ObjectValueRoot&) = default;
+        ObjectValueRoot(ObjectValueRoot&&) = default;
+        ObjectValueRoot& operator=(const ObjectValueRoot&) = default;
+        ObjectValueRoot& operator=(ObjectValueRoot&&) = default;
+        ~ObjectValueRoot() = default;
+
+        /** @} ----------------------------------------------------------------------------------------------- */
+
+        /** @brief Access the owned model while preserving the root's cv/ref qualification. */
+        [[nodiscard]] constexpr decltype(auto) Value(this auto&& self) noexcept {
+            return std::forward_like<decltype(self)>(self.storage_).Value();
+        }
+
+        /** @brief Return the storage occupied by the concrete root itself. */
+        [[nodiscard]] static consteval InterfaceStorageRequirement StorageRequirement() noexcept {
+            return {.size = sizeof(ObjectValueRoot),
+                    .alignment = MaybeAlign{static_cast<std::uint64_t>(alignof(ObjectValueRoot))}};
+        }
+
+    private:
+        [[nodiscard]] constexpr bool IsObjectEmpty() const noexcept override { return false; }
+        constexpr void ResetObject() noexcept override {}
+
+        [[nodiscard]] constexpr const std::type_info& ObjectType() const noexcept override { return typeid(T); }
+
+        [[nodiscard]] constexpr void* ObjectData() noexcept override {
+            return static_cast<void*>(std::addressof(storage_.Value()));
+        }
+
+        [[nodiscard]] constexpr const void* ObjectData() const noexcept override {
+            return static_cast<const void*>(std::addressof(storage_.Value()));
+        }
+
+        SORA_NO_UNIQUE_ADDRESS Polymorphism::Box<T> storage_;
+    };
 
     /**
      * @brief Default total inline-model capacity used by an interface that does not request another layout.

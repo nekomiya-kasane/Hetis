@@ -268,6 +268,15 @@ namespace Sora {
         Proxy,    /**< Interface implementation forwarding to another abstract model. */
     };
 
+    /**
+     * @brief Binding mode of a concrete representation root.
+     * @ingroup Core
+     */
+    enum class RootBinding : std::uint8_t {
+        Value,     /**< The root directly owns its concrete model. */
+        Reference, /**< The root refers to a model owned elsewhere. */
+    };
+
 } // namespace Sora
 
 namespace Sora::Meta {

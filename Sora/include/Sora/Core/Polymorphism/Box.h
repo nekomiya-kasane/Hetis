@@ -37,7 +37,7 @@ namespace Sora::Polymorphism {
      * conversion at a type-erasure boundary.
      */
     template<typename T>
-        requires(std::is_object_v<T> && !std::is_array_v<T>)
+        requires(std::is_object_v<T> && !std::is_array_v<T> && requires { sizeof(T); })
     class Box {
     public:
         using ValueType = T;
