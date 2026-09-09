@@ -13,7 +13,7 @@
 
 #include <Sora/Core/Contracts.h>
 #include <Sora/Math/Simd.h>
-#include <Sora/Surface/ColorSpace.h>
+#include <Sora/Core/ColorSpace.h>
 
 #include <algorithm>
 #include <cmath>

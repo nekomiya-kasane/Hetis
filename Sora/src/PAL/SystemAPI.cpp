@@ -5,6 +5,7 @@
  */
 
 #include <Sora/Core/PAL/SystemAPI.h>
+#include <Sora/Core/PAL/ComAPI.h>
 
 #include <atomic>
 #include <array>
@@ -34,7 +35,10 @@
 #    include <iphlpapi.h>
 #    include <ioringapi.h>
 #    include <objbase.h>
+#    include <coml2api.h>
+#    include <PropIdl.h>
 #    include <ole2.h>
+#    include <DocObj.h>
 #    include <oleauto.h>
 #    include <werapi.h>
 #    include <DbgHelp.h>
@@ -489,6 +493,9 @@ namespace Sora::PAL {
             return true;
         }
         // clang-format off
+        using NativeSystemInfoFunction = void(__stdcall*)(SYSTEM_INFO*);
+        static_assert(std::is_same_v<NativeSystemInfoFunction, decltype(&::GetSystemInfo)>);
+        static_assert(std::is_same_v<NativeSystemInfoFunction, decltype(&::GetNativeSystemInfo)>);
         static_assert(sizeof(WindowsSystem::ProcessorNumber)                        == sizeof(PROCESSOR_NUMBER));
         static_assert(alignof(WindowsSystem::ProcessorNumber)                       == alignof(PROCESSOR_NUMBER));
         static_assert(sizeof(WindowsSystem::Overlapped)                             == sizeof(OVERLAPPED));
@@ -529,6 +536,24 @@ namespace Sora::PAL {
         static_assert(WindowsSystem::kWaitTimeout                                   == WAIT_TIMEOUT);
         static_assert(WindowsSystem::kSnapshotThreads                               == TH32CS_SNAPTHREAD);
         static_assert(WindowsSystem::kArmNeonInstructionsAvailable                  == PF_ARM_NEON_INSTRUCTIONS_AVAILABLE);
+        static_assert(sizeof(WindowsSystem::StartupInfo)                            == sizeof(STARTUPINFOW));
+        static_assert(alignof(WindowsSystem::StartupInfo)                           == alignof(STARTUPINFOW));
+        static_assert(offsetof(WindowsSystem::StartupInfo, flags)                   == offsetof(STARTUPINFOW, dwFlags));
+        static_assert(offsetof(WindowsSystem::StartupInfo, standardError)           == offsetof(STARTUPINFOW, hStdError));
+        static_assert(sizeof(WindowsSystem::ProcessInformation)                     == sizeof(PROCESS_INFORMATION));
+        static_assert(alignof(WindowsSystem::ProcessInformation)                    == alignof(PROCESS_INFORMATION));
+        static_assert(offsetof(WindowsSystem::ProcessInformation, processId)        == offsetof(PROCESS_INFORMATION, dwProcessId));
+        static_assert(WindowsSystem::kCreateNoWindow                                == CREATE_NO_WINDOW);
+        static_assert(WindowsSystem::kStartUseStandardHandles                       == STARTF_USESTDHANDLES);
+        static_assert(WindowsSystem::kFailCriticalErrors                            == SEM_FAILCRITICALERRORS);
+        static_assert(WindowsSystem::kNoGeneralProtectionBox                        == SEM_NOGPFAULTERRORBOX);
+        static_assert(WindowsSystem::kExceptionNoncontinuable                       == EXCEPTION_NONCONTINUABLE);
+        static_assert(WindowsSystem::kAccessViolation                               == EXCEPTION_ACCESS_VIOLATION);
+        static_assert(sizeof(WindowsSystem::SocketRuntimeDataStorage)               == sizeof(WSADATA));
+        static_assert(alignof(WindowsSystem::SocketRuntimeDataStorage)              == alignof(WSADATA));
+        static_assert(SocketSystemAPI::kNameInfoNumericHost                         == NI_NUMERICHOST);
+        static_assert(SocketSystemAPI::kNameInfoNumericService                      == NI_NUMERICSERV);
+        static_assert(SocketSystemAPI::kInvalidArgumentError                        == WSAEINVAL);
 
         static_assert(std::is_same_v<WindowsSystem::Bool, BOOL>);
         static_assert(std::is_same_v<WindowsSystem::Byte, BYTE>);
@@ -559,13 +584,13 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<WindowsSystem::CharPointer, LPSTR>);
         static_assert(std::is_same_v<WindowsSystem::VoidPointer, LPVOID>);
         static_assert(std::is_same_v<WindowsSystem::WideCharPointer, LPWSTR>);
-        static_assert(sizeof(WindowsSystem::WindowHandle) == sizeof(HWND));
-        static_assert(alignof(WindowsSystem::WindowHandle) == alignof(HWND));
-        static_assert(sizeof(WindowsSystem::ModuleHandle) == sizeof(HMODULE));
-        static_assert(alignof(WindowsSystem::ModuleHandle) == alignof(HMODULE));
-        static_assert(sizeof(WindowsSystem::MonitorHandle) == sizeof(HMONITOR));
-        static_assert(alignof(WindowsSystem::MonitorHandle) == alignof(HMONITOR));
-        static_assert(sizeof(WindowsSystem::DeviceContextHandle) == sizeof(HDC));
+        static_assert(sizeof(WindowsSystem::WindowHandle)         == sizeof(HWND));
+        static_assert(alignof(WindowsSystem::WindowHandle)        == alignof(HWND));
+        static_assert(sizeof(WindowsSystem::ModuleHandle)         == sizeof(HMODULE));
+        static_assert(alignof(WindowsSystem::ModuleHandle)        == alignof(HMODULE));
+        static_assert(sizeof(WindowsSystem::MonitorHandle)        == sizeof(HMONITOR));
+        static_assert(alignof(WindowsSystem::MonitorHandle)       == alignof(HMONITOR));
+        static_assert(sizeof(WindowsSystem::DeviceContextHandle)  == sizeof(HDC));
         static_assert(alignof(WindowsSystem::DeviceContextHandle) == alignof(HDC));
         static_assert(std::is_same_v<WindowsSystem::Size, SIZE_T>);
         static_assert(std::is_same_v<WindowsSystem::UInt, UINT>);
@@ -576,109 +601,109 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<WindowsSystem::ULong, ULONG>);
         static_assert(std::is_same_v<WindowsSystem::PointerSizedULong, ULONG_PTR>);
         static_assert(std::is_same_v<WindowsSystem::WChar, WCHAR>);
-        static_assert(sizeof(WindowsSystem::Guid) == sizeof(GUID));
-        static_assert(alignof(WindowsSystem::Guid) == alignof(GUID));
-        static_assert(offsetof(WindowsSystem::Guid, data1) == offsetof(GUID, Data1));
-        static_assert(offsetof(WindowsSystem::Guid, data4) == offsetof(GUID, Data4));
-        static_assert(sizeof(WindowsSystem::Luid) == sizeof(LUID));
-        static_assert(alignof(WindowsSystem::Luid) == alignof(LUID));
-        static_assert(offsetof(WindowsSystem::Luid, highPart) == offsetof(LUID, HighPart));
-        static_assert(sizeof(WindowsSystem::SecurityAttributes) == sizeof(SECURITY_ATTRIBUTES));
-        static_assert(alignof(WindowsSystem::SecurityAttributes) == alignof(SECURITY_ATTRIBUTES));
+        static_assert(sizeof(WindowsSystem::Guid)                                == sizeof(GUID));
+        static_assert(alignof(WindowsSystem::Guid)                               == alignof(GUID));
+        static_assert(offsetof(WindowsSystem::Guid, data1)                       == offsetof(GUID, Data1));
+        static_assert(offsetof(WindowsSystem::Guid, data4)                       == offsetof(GUID, Data4));
+        static_assert(sizeof(WindowsSystem::Luid)                                == sizeof(LUID));
+        static_assert(alignof(WindowsSystem::Luid)                               == alignof(LUID));
+        static_assert(offsetof(WindowsSystem::Luid, highPart)                    == offsetof(LUID, HighPart));
+        static_assert(sizeof(WindowsSystem::SecurityAttributes)                  == sizeof(SECURITY_ATTRIBUTES));
+        static_assert(alignof(WindowsSystem::SecurityAttributes)                 == alignof(SECURITY_ATTRIBUTES));
         static_assert(offsetof(WindowsSystem::SecurityAttributes, inheritHandle) == offsetof(SECURITY_ATTRIBUTES, bInheritHandle));
-        static_assert(sizeof(WindowsSystem::FileTime) == sizeof(FILETIME));
-        static_assert(alignof(WindowsSystem::FileTime) == alignof(FILETIME));
-        static_assert(sizeof(WindowsSystem::Unknown) == sizeof(void*));
-        static_assert(alignof(WindowsSystem::Unknown) == alignof(void*));
-        static_assert(sizeof(WindowsSystem::SequentialStream) == sizeof(void*));
-        static_assert(alignof(WindowsSystem::SequentialStream) == alignof(void*));
-        static_assert(sizeof(WindowsSystem::ThreadEntry) == sizeof(THREADENTRY32));
-        static_assert(alignof(WindowsSystem::ThreadEntry) == alignof(THREADENTRY32));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, size) == offsetof(THREADENTRY32, dwSize));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, usageCount) == offsetof(THREADENTRY32, cntUsage));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, threadId) == offsetof(THREADENTRY32, th32ThreadID));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, ownerProcessId) == offsetof(THREADENTRY32, th32OwnerProcessID));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, basePriority) == offsetof(THREADENTRY32, tpBasePri));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, priorityDelta) == offsetof(THREADENTRY32, tpDeltaPri));
-        static_assert(offsetof(WindowsSystem::ThreadEntry, flags) == offsetof(THREADENTRY32, dwFlags));
-        static_assert(sizeof(WindowsSystem::WindowClassEx) == sizeof(WNDCLASSEXW));
-        static_assert(alignof(WindowsSystem::WindowClassEx) == alignof(WNDCLASSEXW));
-        static_assert(offsetof(WindowsSystem::WindowClassEx, size) == offsetof(WNDCLASSEXW, cbSize));
-        static_assert(offsetof(WindowsSystem::WindowClassEx, style) == offsetof(WNDCLASSEXW, style));
-        static_assert(offsetof(WindowsSystem::WindowClassEx, windowProcedure) == offsetof(WNDCLASSEXW, lpfnWndProc));
-        static_assert(offsetof(WindowsSystem::WindowClassEx, className) == offsetof(WNDCLASSEXW, lpszClassName));
-        static_assert(sizeof(WindowsSystem::WindowMessage) == sizeof(MSG));
-        static_assert(alignof(WindowsSystem::WindowMessage) == alignof(MSG));
-        static_assert(offsetof(WindowsSystem::WindowMessage, window) == offsetof(MSG, hwnd));
-        static_assert(offsetof(WindowsSystem::WindowMessage, message) == offsetof(MSG, message));
-        static_assert(offsetof(WindowsSystem::WindowMessage, wParam) == offsetof(MSG, wParam));
-        static_assert(offsetof(WindowsSystem::WindowMessage, lParam) == offsetof(MSG, lParam));
-        static_assert(offsetof(WindowsSystem::WindowMessage, time) == offsetof(MSG, time));
-        static_assert(offsetof(WindowsSystem::WindowMessage, point) == offsetof(MSG, pt));
-        static_assert(sizeof(WindowsSystem::PollDescriptor) == sizeof(WSAPOLLFD));
-        static_assert(alignof(WindowsSystem::PollDescriptor) == alignof(WSAPOLLFD));
-        static_assert(std::is_same_v<SocketSystemAPI::StartupFunction, decltype(&::WSAStartup)>);
-        static_assert(std::is_same_v<SocketSystemAPI::CleanupFunction, decltype(&::WSACleanup)>);
-        static_assert(std::is_same_v<SocketSystemAPI::GetLastErrorFunction, decltype(&::WSAGetLastError)>);
-        static_assert(std::is_same_v<SocketSystemAPI::SetLastErrorFunction, decltype(&::WSASetLastError)>);
-        static_assert(std::is_same_v<SocketSystemAPI::SocketFunction, decltype(&::socket)>);
-        static_assert(std::is_same_v<SocketSystemAPI::CloseFunction, decltype(&::closesocket)>);
-        static_assert(std::is_same_v<SocketSystemAPI::BindFunction, decltype(&::bind)>);
-        static_assert(std::is_same_v<SocketSystemAPI::NameFunction, decltype(&::getsockname)>);
-        static_assert(std::is_same_v<SocketSystemAPI::OptionFunction, decltype(&::setsockopt)>);
-        static_assert(std::is_same_v<SocketSystemAPI::GetOptionFunction, decltype(&::getsockopt)>);
-        static_assert(std::is_same_v<SocketSystemAPI::IoctlFunction, decltype(&::ioctlsocket)>);
-        static_assert(std::is_same_v<SocketSystemAPI::GetAddressInfoFunction, decltype(&::getaddrinfo)>);
-        static_assert(std::is_same_v<SocketSystemAPI::FreeAddressInfoFunction, decltype(&::freeaddrinfo)>);
-        static_assert(std::is_same_v<SocketSystemAPI::GetNameInfoFunction, decltype(&::getnameinfo)>);
-        static_assert(std::is_same_v<TcpSystemAPI::ListenFunction, decltype(&::listen)>);
-        static_assert(std::is_same_v<TcpSystemAPI::AcceptFunction, decltype(&::accept)>);
-        static_assert(std::is_same_v<TcpSystemAPI::ConnectFunction, decltype(&::connect)>);
-        static_assert(std::is_same_v<TcpSystemAPI::SendFunction, decltype(&::send)>);
-        static_assert(std::is_same_v<TcpSystemAPI::TransferFunction, decltype(&::recv)>);
-        static_assert(std::is_same_v<TcpSystemAPI::ShutdownFunction, decltype(&::shutdown)>);
-        static_assert(std::is_same_v<UdpSystemAPI::SendToFunction, decltype(&::sendto)>);
-        static_assert(std::is_same_v<UdpSystemAPI::ReceiveFromFunction, decltype(&::recvfrom)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::CreateFunction, decltype(&::WSASocketW)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::SendFunction, decltype(&::WSASend)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ReceiveFunction, decltype(&::WSARecv)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::SendToFunction, decltype(&::WSASendTo)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ReceiveFromFunction, decltype(&::WSARecvFrom)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::GetResultFunction, decltype(&::WSAGetOverlappedResult)>);
-        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ControlFunction, decltype(&::WSAIoctl)>);
-        static_assert(std::is_same_v<IOCPSystemAPI::GetQueuedCompletionStatusExFunction, decltype(&::GetQueuedCompletionStatusEx)>);
+        static_assert(sizeof(WindowsSystem::FileTime)                            == sizeof(FILETIME));
+        static_assert(alignof(WindowsSystem::FileTime)                           == alignof(FILETIME));
+        static_assert(sizeof(WindowsSystem::Unknown)                             == sizeof(void*));
+        static_assert(alignof(WindowsSystem::Unknown)                            == alignof(void*));
+        static_assert(sizeof(WindowsSystem::SequentialStream)                    == sizeof(void*));
+        static_assert(alignof(WindowsSystem::SequentialStream)                   == alignof(void*));
+        static_assert(sizeof(WindowsSystem::ThreadEntry)                         == sizeof(THREADENTRY32));
+        static_assert(alignof(WindowsSystem::ThreadEntry)                        == alignof(THREADENTRY32));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, size)                 == offsetof(THREADENTRY32, dwSize));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, usageCount)           == offsetof(THREADENTRY32, cntUsage));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, threadId)             == offsetof(THREADENTRY32, th32ThreadID));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, ownerProcessId)       == offsetof(THREADENTRY32, th32OwnerProcessID));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, basePriority)         == offsetof(THREADENTRY32, tpBasePri));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, priorityDelta)        == offsetof(THREADENTRY32, tpDeltaPri));
+        static_assert(offsetof(WindowsSystem::ThreadEntry, flags)                == offsetof(THREADENTRY32, dwFlags));
+        static_assert(sizeof(WindowsSystem::WindowClassEx)                       == sizeof(WNDCLASSEXW));
+        static_assert(alignof(WindowsSystem::WindowClassEx)                      == alignof(WNDCLASSEXW));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, size)               == offsetof(WNDCLASSEXW, cbSize));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, style)              == offsetof(WNDCLASSEXW, style));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, windowProcedure)    == offsetof(WNDCLASSEXW, lpfnWndProc));
+        static_assert(offsetof(WindowsSystem::WindowClassEx, className)          == offsetof(WNDCLASSEXW, lpszClassName));
+        static_assert(sizeof(WindowsSystem::WindowMessage)                       == sizeof(MSG));
+        static_assert(alignof(WindowsSystem::WindowMessage)                      == alignof(MSG));
+        static_assert(offsetof(WindowsSystem::WindowMessage, window)             == offsetof(MSG, hwnd));
+        static_assert(offsetof(WindowsSystem::WindowMessage, message)            == offsetof(MSG, message));
+        static_assert(offsetof(WindowsSystem::WindowMessage, wParam)             == offsetof(MSG, wParam));
+        static_assert(offsetof(WindowsSystem::WindowMessage, lParam)             == offsetof(MSG, lParam));
+        static_assert(offsetof(WindowsSystem::WindowMessage, time)               == offsetof(MSG, time));
+        static_assert(offsetof(WindowsSystem::WindowMessage, point)              == offsetof(MSG, pt));
+        static_assert(sizeof(WindowsSystem::PollDescriptor)                      == sizeof(WSAPOLLFD));
+        static_assert(alignof(WindowsSystem::PollDescriptor)                     == alignof(WSAPOLLFD));
+        static_assert(std::is_same_v<SocketSystemAPI::StartupFunction,                          decltype(&::WSAStartup)>);
+        static_assert(std::is_same_v<SocketSystemAPI::CleanupFunction,                          decltype(&::WSACleanup)>);
+        static_assert(std::is_same_v<SocketSystemAPI::GetLastErrorFunction,                     decltype(&::WSAGetLastError)>);
+        static_assert(std::is_same_v<SocketSystemAPI::SetLastErrorFunction,                     decltype(&::WSASetLastError)>);
+        static_assert(std::is_same_v<SocketSystemAPI::SocketFunction,                           decltype(&::socket)>);
+        static_assert(std::is_same_v<SocketSystemAPI::CloseFunction,                            decltype(&::closesocket)>);
+        static_assert(std::is_same_v<SocketSystemAPI::BindFunction,                             decltype(&::bind)>);
+        static_assert(std::is_same_v<SocketSystemAPI::NameFunction,                             decltype(&::getsockname)>);
+        static_assert(std::is_same_v<SocketSystemAPI::OptionFunction,                           decltype(&::setsockopt)>);
+        static_assert(std::is_same_v<SocketSystemAPI::GetOptionFunction,                        decltype(&::getsockopt)>);
+        static_assert(std::is_same_v<SocketSystemAPI::IoctlFunction,                            decltype(&::ioctlsocket)>);
+        static_assert(std::is_same_v<SocketSystemAPI::GetAddressInfoFunction,                   decltype(&::getaddrinfo)>);
+        static_assert(std::is_same_v<SocketSystemAPI::FreeAddressInfoFunction,                  decltype(&::freeaddrinfo)>);
+        static_assert(std::is_same_v<SocketSystemAPI::GetNameInfoFunction,                      decltype(&::getnameinfo)>);
+        static_assert(std::is_same_v<TcpSystemAPI::ListenFunction,                              decltype(&::listen)>);
+        static_assert(std::is_same_v<TcpSystemAPI::AcceptFunction,                              decltype(&::accept)>);
+        static_assert(std::is_same_v<TcpSystemAPI::ConnectFunction,                             decltype(&::connect)>);
+        static_assert(std::is_same_v<TcpSystemAPI::SendFunction,                                decltype(&::send)>);
+        static_assert(std::is_same_v<TcpSystemAPI::TransferFunction,                            decltype(&::recv)>);
+        static_assert(std::is_same_v<TcpSystemAPI::ShutdownFunction,                            decltype(&::shutdown)>);
+        static_assert(std::is_same_v<UdpSystemAPI::SendToFunction,                              decltype(&::sendto)>);
+        static_assert(std::is_same_v<UdpSystemAPI::ReceiveFromFunction,                         decltype(&::recvfrom)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::CreateFunction,                decltype(&::WSASocketW)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::SendFunction,                  decltype(&::WSASend)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ReceiveFunction,               decltype(&::WSARecv)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::SendToFunction,                decltype(&::WSASendTo)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ReceiveFromFunction,           decltype(&::WSARecvFrom)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::GetResultFunction,             decltype(&::WSAGetOverlappedResult)>);
+        static_assert(std::is_same_v<WinsockOverlappedSystemAPI::ControlFunction,               decltype(&::WSAIoctl)>);
+        static_assert(std::is_same_v<IOCPSystemAPI::GetQueuedCompletionStatusExFunction,        decltype(&::GetQueuedCompletionStatusEx)>);
         static_assert(std::is_same_v<IOCPSystemAPI::SetFileCompletionNotificationModesFunction, decltype(&::SetFileCompletionNotificationModes)>);
-        static_assert(sizeof(WindowsSystem::IoRingCreateFlags) == sizeof(IORING_CREATE_FLAGS));
-        static_assert(sizeof(WindowsSystem::IoRingVersion) == sizeof(IORING_VERSION));
-        static_assert(sizeof(WindowsSystem::IoRingOperation) == sizeof(IORING_OP_CODE));
-        static_assert(sizeof(WindowsSystem::IoRingSqeFlags) == sizeof(IORING_SQE_FLAGS));
-        static_assert(sizeof(WindowsSystem::IoRingWriteFlags) == sizeof(FILE_WRITE_FLAGS));
-        static_assert(sizeof(WindowsSystem::IoRingFlushMode) == sizeof(FILE_FLUSH_MODE));
-        static_assert(sizeof(WindowsSystem::IoRingCapabilities) == sizeof(IORING_CAPABILITIES));
-        static_assert(sizeof(WindowsSystem::IoRingInfo) == sizeof(IORING_INFO));
-        static_assert(sizeof(WindowsSystem::IoRingHandleRef) == sizeof(IORING_HANDLE_REF));
-        static_assert(sizeof(WindowsSystem::IoRingBufferRef) == sizeof(IORING_BUFFER_REF));
-        static_assert(sizeof(WindowsSystem::IoRingBufferInfo) == sizeof(IORING_BUFFER_INFO));
-        static_assert(sizeof(WindowsSystem::IoRingCompletion) == sizeof(IORING_CQE));
-        static_assert(sizeof(WindowsSystem::IoRingHandle) == sizeof(HIORING));
-        static_assert(alignof(WindowsSystem::IoRingHandle) == alignof(HIORING));
-        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxVersion) == offsetof(IORING_CAPABILITIES, MaxVersion));
+        static_assert(sizeof(WindowsSystem::IoRingCreateFlags)                            == sizeof(IORING_CREATE_FLAGS));
+        static_assert(sizeof(WindowsSystem::IoRingVersion)                                == sizeof(IORING_VERSION));
+        static_assert(sizeof(WindowsSystem::IoRingOperation)                              == sizeof(IORING_OP_CODE));
+        static_assert(sizeof(WindowsSystem::IoRingSqeFlags)                               == sizeof(IORING_SQE_FLAGS));
+        static_assert(sizeof(WindowsSystem::IoRingWriteFlags)                             == sizeof(FILE_WRITE_FLAGS));
+        static_assert(sizeof(WindowsSystem::IoRingFlushMode)                              == sizeof(FILE_FLUSH_MODE));
+        static_assert(sizeof(WindowsSystem::IoRingCapabilities)                           == sizeof(IORING_CAPABILITIES));
+        static_assert(sizeof(WindowsSystem::IoRingInfo)                                   == sizeof(IORING_INFO));
+        static_assert(sizeof(WindowsSystem::IoRingHandleRef)                              == sizeof(IORING_HANDLE_REF));
+        static_assert(sizeof(WindowsSystem::IoRingBufferRef)                              == sizeof(IORING_BUFFER_REF));
+        static_assert(sizeof(WindowsSystem::IoRingBufferInfo)                             == sizeof(IORING_BUFFER_INFO));
+        static_assert(sizeof(WindowsSystem::IoRingCompletion)                             == sizeof(IORING_CQE));
+        static_assert(sizeof(WindowsSystem::IoRingHandle)                                 == sizeof(HIORING));
+        static_assert(alignof(WindowsSystem::IoRingHandle)                                == alignof(HIORING));
+        static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxVersion)             == offsetof(IORING_CAPABILITIES, MaxVersion));
         static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxSubmissionQueueSize) == offsetof(IORING_CAPABILITIES, MaxSubmissionQueueSize));
         static_assert(offsetof(WindowsSystem::IoRingCapabilities, maxCompletionQueueSize) == offsetof(IORING_CAPABILITIES, MaxCompletionQueueSize));
-        static_assert(offsetof(WindowsSystem::IoRingCapabilities, featureFlags) == offsetof(IORING_CAPABILITIES, FeatureFlags));
-        static_assert(offsetof(WindowsSystem::IoRingInfo, version) == offsetof(IORING_INFO, IoRingVersion));
-        static_assert(offsetof(WindowsSystem::IoRingInfo, flags) == offsetof(IORING_INFO, Flags));
-        static_assert(offsetof(WindowsSystem::IoRingInfo, submissionQueueSize) == offsetof(IORING_INFO, SubmissionQueueSize));
-        static_assert(offsetof(WindowsSystem::IoRingInfo, completionQueueSize) == offsetof(IORING_INFO, CompletionQueueSize));
-        static_assert(sizeof(DisplayDpiAwareness) == sizeof(DPI_AWARENESS));
-        static_assert(sizeof(WindowsSystem::DpiAwarenessContext) == sizeof(DPI_AWARENESS_CONTEXT));
-        static_assert(alignof(WindowsSystem::IoRingHandleRef) == alignof(IORING_HANDLE_REF));
-        static_assert(alignof(WindowsSystem::IoRingBufferRef) == alignof(IORING_BUFFER_REF));
-        static_assert(alignof(WindowsSystem::IoRingCompletion) == alignof(IORING_CQE));
-        static_assert(offsetof(WindowsSystem::IoRingHandleRef, kind) == offsetof(IORING_HANDLE_REF, Kind));
-        static_assert(offsetof(WindowsSystem::IoRingHandleRef, value) == offsetof(IORING_HANDLE_REF, Handle));
-        static_assert(offsetof(WindowsSystem::IoRingBufferRef, kind) == offsetof(IORING_BUFFER_REF, Kind));
-        static_assert(offsetof(WindowsSystem::IoRingBufferRef, value) == offsetof(IORING_BUFFER_REF, Buffer));
+        static_assert(offsetof(WindowsSystem::IoRingCapabilities, featureFlags)           == offsetof(IORING_CAPABILITIES, FeatureFlags));
+        static_assert(offsetof(WindowsSystem::IoRingInfo, version)                        == offsetof(IORING_INFO, IoRingVersion));
+        static_assert(offsetof(WindowsSystem::IoRingInfo, flags)                          == offsetof(IORING_INFO, Flags));
+        static_assert(offsetof(WindowsSystem::IoRingInfo, submissionQueueSize)            == offsetof(IORING_INFO, SubmissionQueueSize));
+        static_assert(offsetof(WindowsSystem::IoRingInfo, completionQueueSize)            == offsetof(IORING_INFO, CompletionQueueSize));
+        static_assert(sizeof(DisplayDpiAwareness)                                         == sizeof(DPI_AWARENESS));
+        static_assert(sizeof(WindowsSystem::DpiAwarenessContext)                          == sizeof(DPI_AWARENESS_CONTEXT));
+        static_assert(alignof(WindowsSystem::IoRingHandleRef)                             == alignof(IORING_HANDLE_REF));
+        static_assert(alignof(WindowsSystem::IoRingBufferRef)                             == alignof(IORING_BUFFER_REF));
+        static_assert(alignof(WindowsSystem::IoRingCompletion)                            == alignof(IORING_CQE));
+        static_assert(offsetof(WindowsSystem::IoRingHandleRef, kind)                      == offsetof(IORING_HANDLE_REF, Kind));
+        static_assert(offsetof(WindowsSystem::IoRingHandleRef, value)                     == offsetof(IORING_HANDLE_REF, Handle));
+        static_assert(offsetof(WindowsSystem::IoRingBufferRef, kind)                      == offsetof(IORING_BUFFER_REF, Kind));
+        static_assert(offsetof(WindowsSystem::IoRingBufferRef, value)                     == offsetof(IORING_BUFFER_REF, Buffer));
 
         // The public PAL uses fixed-width ABI projections so its header stays independent of the Windows SDK.
         // Keep the native declarations checked here; the layout assertions above establish projection equivalence.
@@ -712,14 +737,14 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<NativeBuildIoRingRegisterFileHandlesFunction, decltype(&::BuildIoRingRegisterFileHandles)>);
         static_assert(std::is_same_v<NativeBuildIoRingRegisterBuffersFunction,     decltype(&::BuildIoRingRegisterBuffers)>);
 
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction,                     decltype(&::SymSetOptions)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction,                     decltype(&::SymInitialize)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymFromAddressFunction,                    decltype(&::SymFromAddr)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetLineFromAddressFunction,             decltype(&::SymGetLineFromAddr64)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetModuleInfoFunction,                  decltype(&::SymGetModuleInfo64)>);
-        static_assert(std::is_same_v<DbgHelpSystemAPI::UndecorateSymbolNameFunction,              decltype(&::UnDecorateSymbolName)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymSetOptionsFunction,            decltype(&::SymSetOptions)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymInitializeFunction,            decltype(&::SymInitialize)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymFromAddressFunction,           decltype(&::SymFromAddr)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetLineFromAddressFunction,    decltype(&::SymGetLineFromAddr64)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::SymGetModuleInfoFunction,         decltype(&::SymGetModuleInfo64)>);
+        static_assert(std::is_same_v<DbgHelpSystemAPI::UndecorateSymbolNameFunction,     decltype(&::UnDecorateSymbolName)>);
        
-        static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction,          decltype(&::RtlCaptureStackBackTrace)>);
+        static_assert(std::is_same_v<StackTraceSystemAPI::CaptureStackBackTraceFunction, decltype(&::RtlCaptureStackBackTrace)>);
 
         static_assert(std::is_same_v<DebugSystemAPI::CheckRemoteDebuggerPresentFunction, decltype(&::CheckRemoteDebuggerPresent)>);
         static_assert(std::is_same_v<DebugSystemAPI::ContinueDebugEventFunction,         decltype(&::ContinueDebugEvent)>);
@@ -738,8 +763,8 @@ namespace Sora::PAL {
         // Keep the COM/OLE projections aligned with the Windows SDK.  The public header intentionally uses opaque
         // PAL-owned records; these native aliases validate return types, calling conventions, and argument order here.
         using NativeCoWaitForMultipleHandlesFunction = HRESULT(WINAPI*)(DWORD, DWORD, ULONG, LPHANDLE, LPDWORD);
-        using NativeCreateStreamOnHGlobalFunction    = HRESULT(WINAPI*)(HGLOBAL, BOOL, IStream**);
-        using NativeGetHGlobalFromStreamFunction     = HRESULT(WINAPI*)(IStream*, HGLOBAL*);
+        using NativeCreateStreamOnHGlobalFunction    = HRESULT(WINAPI*)(HGLOBAL, BOOL, ::IStream**);
+        using NativeGetHGlobalFromStreamFunction     = HRESULT(WINAPI*)(::IStream*, HGLOBAL*);
         using NativeOleCreateExFunction              = HRESULT(WINAPI*)(REFCLSID, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
         using NativeOleCreateFromDataExFunction      = HRESULT(WINAPI*)(LPDATAOBJECT, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
         using NativeOleCreateLinkExFunction          = HRESULT(WINAPI*)(LPMONIKER, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
@@ -747,14 +772,77 @@ namespace Sora::PAL {
         using NativeOleCreateFromFileExFunction      = HRESULT(WINAPI*)(REFCLSID, LPCOLESTR, REFIID, DWORD, DWORD, ULONG, DWORD*, LPFORMATETC, IAdviseSink*, DWORD*, LPOLECLIENTSITE, LPSTORAGE, LPVOID*);
         using NativeVariantCopyIndFunction           = HRESULT(WINAPI*)(VARIANTARG*, const VARIANTARG*);
         using NativeVariantChangeTypeExFunction      = HRESULT(WINAPI*)(VARIANTARG*, const VARIANTARG*, LCID, USHORT, VARTYPE);
-        using NativeLoadTypeLibExFunction            = HRESULT(WINAPI*)(LPCOLESTR, REGKIND, ITypeLib**);
+        using NativeLoadTypeLibExFunction            = HRESULT(WINAPI*)(LPCOLESTR, REGKIND, ::ITypeLib**);
         using NativeQueryPathOfRegTypeLibFunction    = HRESULT(WINAPI*)(REFGUID, USHORT, USHORT, LCID, LPBSTR);
-        using NativeRegisterActiveObjectFunction     = HRESULT(WINAPI*)(IUnknown*, REFCLSID, DWORD, DWORD*);
+        using NativeRegisterActiveObjectFunction     = HRESULT(WINAPI*)(::IUnknown*, REFCLSID, DWORD, DWORD*);
         using NativeRevokeActiveObjectFunction       = HRESULT(WINAPI*)(DWORD, void*);
+        using NativeSetStorageTimesFunction               = HRESULT(WINAPI*)(LPCWSTR, const FILETIME*, const FILETIME*, const FILETIME*);
+        using NativeCreateStorageExFunction               = HRESULT(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, STGOPTIONS*, PSECURITY_DESCRIPTOR, REFIID, void**);
+        using NativeOpenStorageExFunction                 = HRESULT(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, STGOPTIONS*, PSECURITY_DESCRIPTOR, REFIID, void**);
+        using NativeCreatePropertyStorageFunction         = HRESULT(WINAPI*)(::IUnknown*, REFFMTID, const CLSID*, DWORD, DWORD, ::IPropertyStorage**);
+        using NativeOpenPropertyStorageFunction           = HRESULT(WINAPI*)(::IUnknown*, REFFMTID, DWORD, DWORD, ::IPropertyStorage**);
+        using NativeFormatIdToPropertyStorageNameFunction = HRESULT(WINAPI*)(const FMTID*, LPOLESTR);
+        using NativePropertyStorageNameToFormatIdFunction = HRESULT(WINAPI*)(LPOLESTR, FMTID*);
+        using NativeReadClassStorageFunction              = HRESULT(WINAPI*)(::IStorage*, CLSID*);
+        using NativeWriteClassStorageFunction             = HRESULT(WINAPI*)(::IStorage*, REFCLSID);
+        using NativeReadClassStreamFunction               = HRESULT(WINAPI*)(::IStream*, CLSID*);
+        using NativeWriteClassStreamFunction              = HRESULT(WINAPI*)(::IStream*, REFCLSID);
+        using NativeWriteFormatUserTypeFunction           = HRESULT(WINAPI*)(::IStorage*, CLIPFORMAT, LPOLESTR);
+        using NativeReadFormatUserTypeFunction            = HRESULT(WINAPI*)(::IStorage*, CLIPFORMAT*, LPOLESTR*);
+        using NativePropertyVariantCopyFunction           = HRESULT(WINAPI*)(PROPVARIANT*, const PROPVARIANT*);
+        using NativePropertyVariantClearFunction          = HRESULT(WINAPI*)(PROPVARIANT*);
+        using NativeFreePropertyVariantArrayFunction      = HRESULT(WINAPI*)(ULONG, PROPVARIANT*);
 
-        static_assert(std::is_same_v<NativeCoWaitForMultipleHandlesFunction, decltype(&::CoWaitForMultipleHandles)>);
-        static_assert(std::is_same_v<NativeCreateStreamOnHGlobalFunction,    decltype(&::CreateStreamOnHGlobal)>);
-        static_assert(std::is_same_v<NativeGetHGlobalFromStreamFunction,     decltype(&::GetHGlobalFromStream)>);
+        [[nodiscard]] constexpr bool EqualNativeGuid(const GUID& native, RefGuid projected) noexcept {
+            if (native.Data1 != projected.data1 || native.Data2 != projected.data2 || native.Data3 != projected.data3) {
+                return false;
+            }
+            for (size_t index = 0; index < std::size(native.Data4); ++index) {
+                if (native.Data4[index] != projected.data4[index]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        static_assert(std::is_same_v<NativeCoWaitForMultipleHandlesFunction,                           decltype(&::CoWaitForMultipleHandles)>);
+        static_assert(std::is_same_v<NativeCreateStreamOnHGlobalFunction,                              decltype(&::CreateStreamOnHGlobal)>);
+        static_assert(std::is_same_v<NativeGetHGlobalFromStreamFunction,                               decltype(&::GetHGlobalFromStream)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::CreateDocfileFunction,                decltype(&::StgCreateDocfile)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::CreateDocfileOnLockBytesFunction,     decltype(&::StgCreateDocfileOnILockBytes)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::OpenStorageFunction,                  decltype(&::StgOpenStorage)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::OpenStorageOnLockBytesFunction,       decltype(&::StgOpenStorageOnILockBytes)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::IsStorageFileFunction,                decltype(&::StgIsStorageFile)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::IsStorageLockBytesFunction,           decltype(&::StgIsStorageILockBytes)>);
+        static_assert(std::is_same_v<NativeSetStorageTimesFunction,                                    decltype(&::StgSetTimes)>);
+        static_assert(std::is_same_v<NativeCreateStorageExFunction,                                    decltype(&::StgCreateStorageEx)>);
+        static_assert(std::is_same_v<NativeOpenStorageExFunction,                                      decltype(&::StgOpenStorageEx)>);
+        static_assert(std::is_same_v<NativeCreatePropertyStorageFunction,                              decltype(&::StgCreatePropStg)>);
+        static_assert(std::is_same_v<NativeOpenPropertyStorageFunction,                                decltype(&::StgOpenPropStg)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::CreatePropertySetStorageFunction,     decltype(&::StgCreatePropSetStg)>);
+        static_assert(std::is_same_v<NativeFormatIdToPropertyStorageNameFunction,                      decltype(&::FmtIdToPropStgName)>);
+        static_assert(std::is_same_v<NativePropertyStorageNameToFormatIdFunction,                      decltype(&::PropStgNameToFmtId)>);
+        static_assert(std::is_same_v<NativeReadClassStorageFunction,                                   decltype(&::ReadClassStg)>);
+        static_assert(std::is_same_v<NativeWriteClassStorageFunction,                                  decltype(&::WriteClassStg)>);
+        static_assert(std::is_same_v<NativeReadClassStreamFunction,                                    decltype(&::ReadClassStm)>);
+        static_assert(std::is_same_v<NativeWriteClassStreamFunction,                                   decltype(&::WriteClassStm)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::GetGlobalFromLockBytesFunction,       decltype(&::GetHGlobalFromILockBytes)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::CreateLockBytesOnGlobalFunction,      decltype(&::CreateILockBytesOnHGlobal)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::GetConvertStorageFunction,            decltype(&::GetConvertStg)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::SetConvertStorageFunction,            decltype(&::SetConvertStg)>);
+        static_assert(std::is_same_v<NativeWriteFormatUserTypeFunction,                                decltype(&::WriteFmtUserTypeStg)>);
+        static_assert(std::is_same_v<NativeReadFormatUserTypeFunction,                                 decltype(&::ReadFmtUserTypeStg)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::OpenAsyncDocfileFunction,             decltype(&::StgOpenAsyncDocfileOnIFillLockBytes)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::GetFillLockBytesOnLockBytesFunction,  decltype(&::StgGetIFillLockBytesOnILockBytes)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::GetFillLockBytesOnFileFunction,       decltype(&::StgGetIFillLockBytesOnFile)>);
+        static_assert(std::is_same_v<StructuredStorageSystemAPI::OpenLayoutDocfileFunction,            decltype(&::StgOpenLayoutDocfile)>);
+        static_assert(std::is_same_v<NativePropertyVariantCopyFunction,                                decltype(&::PropVariantCopy)>);
+        static_assert(std::is_same_v<NativePropertyVariantClearFunction,                               decltype(&::PropVariantClear)>);
+        static_assert(std::is_same_v<NativeFreePropertyVariantArrayFunction,                           decltype(&::FreePropVariantArray)>);
+        static_assert(EqualNativeGuid(__uuidof(::IFillLockBytes),    InterfaceIdOf<IFillLockBytes>()));
+        static_assert(EqualNativeGuid(__uuidof(::IProgressNotify),   InterfaceIdOf<IProgressNotify>()));
+        static_assert(EqualNativeGuid(__uuidof(::ILayoutStorage),    InterfaceIdOf<ILayoutStorage>()));
+        static_assert(EqualNativeGuid(__uuidof(::IDirectWriterLock), InterfaceIdOf<IDirectWriterLock>()));
         static_assert(std::is_same_v<NativeOleCreateExFunction,              decltype(&::OleCreateEx)>);
         static_assert(std::is_same_v<NativeOleCreateFromDataExFunction,      decltype(&::OleCreateFromDataEx)>);
         static_assert(std::is_same_v<NativeOleCreateLinkExFunction,          decltype(&::OleCreateLinkEx)>);
@@ -768,6 +856,126 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<NativeRevokeActiveObjectFunction,       decltype(&::RevokeActiveObject)>);
         static_assert(sizeof(WindowsSystem::Guid)  == sizeof(GUID));
         static_assert(alignof(WindowsSystem::Guid) == alignof(GUID));
+        static_assert(sizeof(Guid)                         == sizeof(GUID));
+        static_assert(alignof(Guid)                        == alignof(GUID));
+        static_assert(sizeof(LargeInteger)                 == sizeof(LARGE_INTEGER));
+        static_assert(alignof(LargeInteger)                == alignof(LARGE_INTEGER));
+        static_assert(sizeof(UnsignedLargeInteger)         == sizeof(ULARGE_INTEGER));
+        static_assert(alignof(UnsignedLargeInteger)        == alignof(ULARGE_INTEGER));
+        static_assert(sizeof(PointL)                       == sizeof(POINTL));
+        static_assert(alignof(PointL)                      == alignof(POINTL));
+        static_assert(sizeof(FileTime)                     == sizeof(FILETIME));
+        static_assert(alignof(FileTime)                    == alignof(FILETIME));
+        static_assert(offsetof(FileTime, lowDateTime)      == offsetof(FILETIME, dwLowDateTime));
+        static_assert(offsetof(FileTime, highDateTime)     == offsetof(FILETIME, dwHighDateTime));
+        static_assert(sizeof(WindowsSystem::StorageOptions)                  == sizeof(STGOPTIONS));
+        static_assert(alignof(WindowsSystem::StorageOptions)                 == alignof(STGOPTIONS));
+        static_assert(offsetof(WindowsSystem::StorageOptions, version)       == offsetof(STGOPTIONS, usVersion));
+        static_assert(offsetof(WindowsSystem::StorageOptions, sectorSize)    == offsetof(STGOPTIONS, ulSectorSize));
+        static_assert(offsetof(WindowsSystem::StorageOptions, templateFile)  == offsetof(STGOPTIONS, pwcsTemplateFile));
+        static_assert(sizeof(StatStg)                         == sizeof(STATSTG));
+        static_assert(alignof(StatStg)                        == alignof(STATSTG));
+        static_assert(offsetof(StatStg, name)                 == offsetof(STATSTG, pwcsName));
+        static_assert(offsetof(StatStg, size)                 == offsetof(STATSTG, cbSize));
+        static_assert(offsetof(StatStg, modificationTime)     == offsetof(STATSTG, mtime));
+        static_assert(offsetof(StatStg, creationTime)         == offsetof(STATSTG, ctime));
+        static_assert(offsetof(StatStg, accessTime)           == offsetof(STATSTG, atime));
+        static_assert(offsetof(StatStg, classId)              == offsetof(STATSTG, clsid));
+        static_assert(sizeof(StorageLayout)                     == sizeof(::StorageLayout));
+        static_assert(alignof(StorageLayout)                    == alignof(::StorageLayout));
+        static_assert(offsetof(StorageLayout, layoutType)       == offsetof(::StorageLayout, LayoutType));
+        static_assert(offsetof(StorageLayout, elementName)      == offsetof(::StorageLayout, pwcsElementName));
+        static_assert(offsetof(StorageLayout, offset)           == offsetof(::StorageLayout, cOffset));
+        static_assert(offsetof(StorageLayout, bytes)            == offsetof(::StorageLayout, cBytes));
+        static_assert(sizeof(PropertySpec)                == sizeof(PROPSPEC));
+        static_assert(alignof(PropertySpec)               == alignof(PROPSPEC));
+        static_assert(offsetof(PropertySpec, kind)        == offsetof(PROPSPEC, ulKind));
+        static_assert(offsetof(PropertySpec, value)       == offsetof(PROPSPEC, propid));
+        static_assert(sizeof(PropertyVariant)             == sizeof(PROPVARIANT));
+        static_assert(alignof(PropertyVariant)            == alignof(PROPVARIANT));
+        static_assert(sizeof(StatPropStg)                 == sizeof(STATPROPSTG));
+        static_assert(alignof(StatPropStg)                == alignof(STATPROPSTG));
+        static_assert(offsetof(StatPropStg, name)         == offsetof(STATPROPSTG, lpwstrName));
+        static_assert(offsetof(StatPropStg, propertyId)   == offsetof(STATPROPSTG, propid));
+        static_assert(offsetof(StatPropStg, variantType)  == offsetof(STATPROPSTG, vt));
+        static_assert(sizeof(StatPropSetStg)                             == sizeof(STATPROPSETSTG));
+        static_assert(alignof(StatPropSetStg)                            == alignof(STATPROPSETSTG));
+        static_assert(offsetof(StatPropSetStg, formatId)                 == offsetof(STATPROPSETSTG, fmtid));
+        static_assert(offsetof(StatPropSetStg, classId)                  == offsetof(STATPROPSETSTG, clsid));
+        static_assert(offsetof(StatPropSetStg, flags)                    == offsetof(STATPROPSETSTG, grfFlags));
+        static_assert(offsetof(StatPropSetStg, modificationTime)         == offsetof(STATPROPSETSTG, mtime));
+        static_assert(offsetof(StatPropSetStg, creationTime)             == offsetof(STATPROPSETSTG, ctime));
+        static_assert(offsetof(StatPropSetStg, accessTime)               == offsetof(STATPROPSETSTG, atime));
+        static_assert(offsetof(StatPropSetStg, operatingSystemVersion)   == offsetof(STATPROPSETSTG, dwOSVersion));
+        static_assert(sizeof(IFillLockBytes)    == sizeof(::IFillLockBytes));
+        static_assert(sizeof(IProgressNotify)   == sizeof(::IProgressNotify));
+        static_assert(sizeof(ILayoutStorage)    == sizeof(::ILayoutStorage));
+        static_assert(sizeof(IDirectWriterLock) == sizeof(::IDirectWriterLock));
+        static_assert(EqualNativeGuid(__uuidof(::IOleDocument), InterfaceIdOf<IOleDocument>()));
+        static_assert(EqualNativeGuid(__uuidof(::IOleDocumentView), InterfaceIdOf<IOleDocumentView>()));
+        static_assert(EqualNativeGuid(__uuidof(::IOleDocumentSite), InterfaceIdOf<IOleDocumentSite>()));
+        static_assert(EqualNativeGuid(__uuidof(::IEnumOleDocumentViews), InterfaceIdOf<IEnumOleDocumentViews>()));
+        static_assert(EqualNativeGuid(__uuidof(::IPrint), InterfaceIdOf<IPrint>()));
+        static_assert(EqualNativeGuid(__uuidof(::IContinueCallback), InterfaceIdOf<IContinueCallback>()));
+        static_assert(EqualNativeGuid(__uuidof(::IOleCommandTarget), InterfaceIdOf<IOleCommandTarget>()));
+        static_assert(EqualNativeGuid(__uuidof(::IZoomEvents), InterfaceIdOf<IZoomEvents>()));
+        static_assert(sizeof(Rect)             == sizeof(RECT));
+        static_assert(alignof(Rect)            == alignof(RECT));
+        static_assert(offsetof(Rect, left)     == offsetof(RECT, left));
+        static_assert(offsetof(Rect, bottom)   == offsetof(RECT, bottom));
+        static_assert(sizeof(OleCommand)                       == sizeof(OLECMD));
+        static_assert(alignof(OleCommand)                      == alignof(OLECMD));
+        static_assert(offsetof(OleCommand, commandId)          == offsetof(OLECMD, cmdID));
+        static_assert(offsetof(OleCommand, flags)              == offsetof(OLECMD, cmdf));
+        static_assert(sizeof(OleCommandText)                   == sizeof(OLECMDTEXT));
+        static_assert(alignof(OleCommandText)                  == alignof(OLECMDTEXT));
+        static_assert(offsetof(OleCommandText, text)           == offsetof(OLECMDTEXT, rgwz));
+        static_assert(sizeof(PageRange)                        == sizeof(PAGERANGE));
+        static_assert(alignof(PageRange)                       == alignof(PAGERANGE));
+        static_assert(offsetof(PageRange, firstPage)           == offsetof(PAGERANGE, nFromPage));
+        static_assert(offsetof(PageRange, lastPage)            == offsetof(PAGERANGE, nToPage));
+        static_assert(sizeof(PageSet)                          == sizeof(PAGESET));
+        static_assert(alignof(PageSet)                         == alignof(PAGESET));
+        static_assert(offsetof(PageSet, ranges)                == offsetof(PAGESET, rgPages));
+        static_assert(sizeof(IOleDocument)          == sizeof(::IOleDocument));
+        static_assert(sizeof(IOleDocumentSite)      == sizeof(::IOleDocumentSite));
+        static_assert(sizeof(IOleDocumentView)      == sizeof(::IOleDocumentView));
+        static_assert(sizeof(IEnumOleDocumentViews) == sizeof(::IEnumOleDocumentViews));
+        static_assert(sizeof(IContinueCallback)     == sizeof(::IContinueCallback));
+        static_assert(sizeof(IPrint)                == sizeof(::IPrint));
+        static_assert(sizeof(IOleCommandTarget)     == sizeof(::IOleCommandTarget));
+        static_assert(sizeof(IZoomEvents)           == sizeof(::IZoomEvents));
+        static_assert(std::is_same_v<decltype(&::IOleDocument::CreateView),                  HRESULT (STDMETHODCALLTYPE ::IOleDocument::*)(::IOleInPlaceSite*, ::IStream*, DWORD, ::IOleDocumentView**)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocument::GetDocMiscStatus),            HRESULT (STDMETHODCALLTYPE ::IOleDocument::*)(DWORD*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocument::EnumViews),                   HRESULT (STDMETHODCALLTYPE ::IOleDocument::*)(::IEnumOleDocumentViews**, ::IOleDocumentView**)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentSite::ActivateMe),              HRESULT (STDMETHODCALLTYPE ::IOleDocumentSite::*)(::IOleDocumentView*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::SetInPlaceSite),           HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(::IOleInPlaceSite*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::GetInPlaceSite),           HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(::IOleInPlaceSite**)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::GetDocument),              HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(::IUnknown**)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::SetRect),                  HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(RECT*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::GetRect),                  HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(RECT*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::SetRectComplex),           HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(RECT*, RECT*, RECT*, RECT*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::Show),                     HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(BOOL)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::UIActivate),               HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(BOOL)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::Open),                     HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)()>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::CloseView),                HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(DWORD)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::SaveViewState),            HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(::IStream*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::ApplyViewState),           HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(::IStream*)>);
+        static_assert(std::is_same_v<decltype(&::IOleDocumentView::Clone),                    HRESULT (STDMETHODCALLTYPE ::IOleDocumentView::*)(::IOleInPlaceSite*, ::IOleDocumentView**)>);
+        static_assert(std::is_same_v<decltype(&::IEnumOleDocumentViews::Next),                HRESULT (__stdcall ::IEnumOleDocumentViews::*)(ULONG, ::IOleDocumentView**, ULONG*)>);
+        static_assert(std::is_same_v<decltype(&::IEnumOleDocumentViews::Skip),                HRESULT (STDMETHODCALLTYPE ::IEnumOleDocumentViews::*)(ULONG)>);
+        static_assert(std::is_same_v<decltype(&::IEnumOleDocumentViews::Reset),               HRESULT (STDMETHODCALLTYPE ::IEnumOleDocumentViews::*)()>);
+        static_assert(std::is_same_v<decltype(&::IEnumOleDocumentViews::Clone),               HRESULT (STDMETHODCALLTYPE ::IEnumOleDocumentViews::*)(::IEnumOleDocumentViews**)>);
+        static_assert(std::is_same_v<decltype(&::IContinueCallback::FContinue),               HRESULT (STDMETHODCALLTYPE ::IContinueCallback::*)()>);
+        static_assert(std::is_same_v<decltype(&::IContinueCallback::FContinuePrinting),       HRESULT (STDMETHODCALLTYPE ::IContinueCallback::*)(LONG, LONG, wchar_t*)>);
+        static_assert(std::is_same_v<decltype(&::IPrint::SetInitialPageNum),                  HRESULT (STDMETHODCALLTYPE ::IPrint::*)(LONG)>);
+        static_assert(std::is_same_v<decltype(&::IPrint::GetPageInfo),                        HRESULT (STDMETHODCALLTYPE ::IPrint::*)(LONG*, LONG*)>);
+        static_assert(std::is_same_v<decltype(&::IPrint::Print),                              HRESULT (__stdcall ::IPrint::*)(DWORD, DVTARGETDEVICE**, PAGESET**, STGMEDIUM*, ::IContinueCallback*, LONG, LONG*, LONG*)>);
+        static_assert(std::is_same_v<decltype(&::IOleCommandTarget::QueryStatus),             HRESULT (STDMETHODCALLTYPE ::IOleCommandTarget::*)(const GUID*, ULONG, OLECMD*, OLECMDTEXT*)>);
+        static_assert(std::is_same_v<decltype(&::IOleCommandTarget::Exec),                    HRESULT (STDMETHODCALLTYPE ::IOleCommandTarget::*)(const GUID*, DWORD, DWORD, VARIANT*, VARIANT*)>);
+        static_assert(std::is_same_v<decltype(&::IZoomEvents::OnZoomPercentChanged),          HRESULT (STDMETHODCALLTYPE ::IZoomEvents::*)(ULONG)>);
+        static_assert(sizeof(Variant)  == sizeof(VARIANT));
+        static_assert(alignof(Variant) == alignof(VARIANT));
 
         static_assert(std::is_same_v<SchedulerTraceSystemAPI::StartTraceFunction,                 decltype(&::StartTraceW)>);
         static_assert(std::is_same_v<SchedulerTraceSystemAPI::ControlTraceFunction,               decltype(&::ControlTraceW)>);
@@ -788,11 +996,19 @@ namespace Sora::PAL {
         static_assert(std::is_same_v<LocalMemorySystemAPI::LocalFreeFunction,                     decltype(&::LocalFree)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetProcessTimesFunction,                   decltype(&::GetProcessTimes)>);
         static_assert(std::is_same_v<ProcessSystemAPI::GetProcessMemoryInfoFunction,              decltype(&::K32GetProcessMemoryInfo)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetProcessIdFunction,                     decltype(&::GetProcessId)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::GetProcessHandleCountFunction,             decltype(&::GetProcessHandleCount)>);
+        static_assert(std::is_same_v<ProcessSystemAPI::QueryProcessCycleTimeFunction,             decltype(&::QueryProcessCycleTime)>);
+        static_assert(std::is_same_v<SystemInformationSystemAPI::GetTickCount64Function,          decltype(&::GetTickCount64)>);
         static_assert(std::is_same_v<ThreadSystemAPI::OpenThreadFunction,                         decltype(&::OpenThread)>);
+        static_assert(std::is_same_v<ThreadSystemAPI::GetThreadIdFunction,                       decltype(&::GetThreadId)>);
+        static_assert(std::is_same_v<ThreadSystemAPI::QueryThreadCycleTimeFunction,              decltype(&::QueryThreadCycleTime)>);
         static_assert(std::is_same_v<HandleSystemAPI::DuplicateHandleFunction,                    decltype(&::DuplicateHandle)>);
         static_assert(std::is_same_v<EventSystemAPI::CreateEventWideFunction,                     decltype(&::CreateEventW)>);
         static_assert(std::is_same_v<EventSystemAPI::SetEventFunction,                            decltype(&::SetEvent)>);
         static_assert(std::is_same_v<EventSystemAPI::ResetEventFunction,                          decltype(&::ResetEvent)>);
+        static_assert(std::is_same_v<FileSystemAPI::GetFileTypeFunction,                         decltype(&::GetFileType)>);
+        static_assert(std::is_same_v<FileSystemAPI::SetFilePointerFunction,                      decltype(&::SetFilePointerEx)>);
         static_assert(std::is_same_v<SynchronizationSystemAPI::WaitForSingleObjectFunction,       decltype(&::WaitForSingleObject)>);
         static_assert(std::is_same_v<SynchronizationSystemAPI::WaitForSingleObjectExFunction,     decltype(&::WaitForSingleObjectEx)>);
         static_assert(std::is_same_v<SynchronizationSystemAPI::WaitForMultipleObjectsFunction,    decltype(&::WaitForMultipleObjects)>);
@@ -1166,10 +1382,19 @@ namespace Sora::PAL {
         static_assert(std::is_convertible_v<decltype(&::if_indextoname),          NetworkInterfaceSystemAPI::IfIndexToNameFunction>);
         static_assert(std::is_convertible_v<decltype(&::fork),                    ProcessControlSystemAPI::ForkFunction>);
         static_assert(std::is_convertible_v<decltype(&::execve),                  ProcessControlSystemAPI::ExecFunction>);
+        static_assert(
+            std::is_convertible_v<decltype(&::execv), ProcessControlSystemAPI::ExecPathFunction>);
         static_assert(std::is_convertible_v<decltype(&::waitpid),                 ProcessControlSystemAPI::WaitFunction>);
         static_assert(sizeof(PosixSystem::ProcessId) == sizeof(::pid_t));
         static_assert(sizeof(PosixSystem::WaitId)    == sizeof(::id_t));
         static_assert(std::is_convertible_v<decltype(&::kill),                    ProcessControlSystemAPI::SignalFunction>);
+        static_assert(std::is_convertible_v<decltype(&::dup2),                    FileSystemAPI::DuplicateToFunction>);
+        static_assert(PosixSystem::kStandardErrorDescriptor == STDERR_FILENO);
+        static_assert(PosixSystem::kAbortSignal == SIGABRT);
+        static_assert(PosixSystem::kKillSignal == SIGKILL);
+        static_assert(SocketSystemAPI::kNameInfoNumericHost == NI_NUMERICHOST);
+        static_assert(SocketSystemAPI::kNameInfoNumericService == NI_NUMERICSERV);
+        static_assert(PosixSystem::ProcessExited(0) == static_cast<bool>(WIFEXITED(0)));
         static_assert(std::is_convertible_v<decltype(&::openat),                  ModernFileSystemAPI::OpenAtFunction>);
         static_assert(std::is_convertible_v<decltype(&::mkdirat),                 ModernFileSystemAPI::MakeDirectoryAtFunction>);
         static_assert(std::is_convertible_v<decltype(&::unlinkat),                ModernFileSystemAPI::UnlinkAtFunction>);
@@ -2142,6 +2367,8 @@ namespace Sora::PAL {
                     loaded.getSystemInfo         = module->TryFindFunction<SystemInformationSystemAPI::GetSystemInfoFunction>("GetSystemInfo");
                     loaded.globalMemoryStatus    = module->TryFindFunction<SystemInformationSystemAPI::GlobalMemoryStatusFunction>("GlobalMemoryStatusEx");
                     loaded.isProcessorFeature    = module->TryFindFunction<SystemInformationSystemAPI::IsProcessorFeatureFunction>("IsProcessorFeaturePresent");
+                    loaded.getNativeSystemInfo  = module->TryFindFunction<SystemInformationSystemAPI::GetNativeSystemInfoFunction>("GetNativeSystemInfo");
+                    loaded.getTickCount64       = module->TryFindFunction<SystemInformationSystemAPI::GetTickCount64Function>("GetTickCount64");
                 }
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
                 if (const ModulePtr& module = CurrentProcessModule(); module != nullptr) {
@@ -2354,6 +2581,104 @@ namespace Sora::PAL {
             return api;
         }
 
+        const StructuredStorageSystemAPI& LoadStructuredStorageSystemAPI() noexcept {
+            static const StructuredStorageSystemAPI api = [] {
+                StructuredStorageSystemAPI loaded{};
+#if defined(PLATFORM_WINDOWS)
+                if (const ModulePtr& module = Ole32Module(); module != nullptr) {
+                    loaded.createDocfile = module->TryFindFunction<StructuredStorageSystemAPI::CreateDocfileFunction>(
+                        "StgCreateDocfile");
+                    loaded.createDocfileOnLockBytes
+                        = module->TryFindFunction<StructuredStorageSystemAPI::CreateDocfileOnLockBytesFunction>(
+                            "StgCreateDocfileOnILockBytes");
+                    loaded.openStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::OpenStorageFunction>("StgOpenStorage");
+                    loaded.openStorageOnLockBytes
+                        = module->TryFindFunction<StructuredStorageSystemAPI::OpenStorageOnLockBytesFunction>(
+                            "StgOpenStorageOnILockBytes");
+                    loaded.isStorageFile = module->TryFindFunction<StructuredStorageSystemAPI::IsStorageFileFunction>(
+                        "StgIsStorageFile");
+                    loaded.isStorageLockBytes
+                        = module->TryFindFunction<StructuredStorageSystemAPI::IsStorageLockBytesFunction>(
+                            "StgIsStorageILockBytes");
+                    loaded.setStorageTimes
+                        = module->TryFindFunction<StructuredStorageSystemAPI::SetStorageTimesFunction>("StgSetTimes");
+                    loaded.createStorageEx
+                        = module->TryFindFunction<StructuredStorageSystemAPI::CreateStorageExFunction>(
+                            "StgCreateStorageEx");
+                    loaded.openStorageEx = module->TryFindFunction<StructuredStorageSystemAPI::OpenStorageExFunction>(
+                        "StgOpenStorageEx");
+                    loaded.createPropertyStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::CreatePropertyStorageFunction>(
+                            "StgCreatePropStg");
+                    loaded.openPropertyStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::OpenPropertyStorageFunction>(
+                            "StgOpenPropStg");
+                    loaded.createPropertySetStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::CreatePropertySetStorageFunction>(
+                            "StgCreatePropSetStg");
+                    loaded.formatIdToPropertyStorageName
+                        = module->TryFindFunction<StructuredStorageSystemAPI::FormatIdToPropertyStorageNameFunction>(
+                            "FmtIdToPropStgName");
+                    loaded.propertyStorageNameToFormatId
+                        = module->TryFindFunction<StructuredStorageSystemAPI::PropertyStorageNameToFormatIdFunction>(
+                            "PropStgNameToFmtId");
+                    loaded.readClassStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::ReadClassStorageFunction>("ReadClassStg");
+                    loaded.writeClassStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::WriteClassStorageFunction>(
+                            "WriteClassStg");
+                    loaded.readClassStream
+                        = module->TryFindFunction<StructuredStorageSystemAPI::ReadClassStreamFunction>("ReadClassStm");
+                    loaded.writeClassStream
+                        = module->TryFindFunction<StructuredStorageSystemAPI::WriteClassStreamFunction>(
+                            "WriteClassStm");
+                    loaded.getGlobalFromLockBytes
+                        = module->TryFindFunction<StructuredStorageSystemAPI::GetGlobalFromLockBytesFunction>(
+                            "GetHGlobalFromILockBytes");
+                    loaded.createLockBytesOnGlobal
+                        = module->TryFindFunction<StructuredStorageSystemAPI::CreateLockBytesOnGlobalFunction>(
+                            "CreateILockBytesOnHGlobal");
+                    loaded.getConvertStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::GetConvertStorageFunction>(
+                            "GetConvertStg");
+                    loaded.setConvertStorage
+                        = module->TryFindFunction<StructuredStorageSystemAPI::SetConvertStorageFunction>(
+                            "SetConvertStg");
+                    loaded.writeFormatUserType
+                        = module->TryFindFunction<StructuredStorageSystemAPI::WriteFormatUserTypeFunction>(
+                            "WriteFmtUserTypeStg");
+                    loaded.readFormatUserType
+                        = module->TryFindFunction<StructuredStorageSystemAPI::ReadFormatUserTypeFunction>(
+                            "ReadFmtUserTypeStg");
+                    loaded.openAsyncDocfile
+                        = module->TryFindFunction<StructuredStorageSystemAPI::OpenAsyncDocfileFunction>(
+                            "StgOpenAsyncDocfileOnIFillLockBytes");
+                    loaded.getFillLockBytesOnLockBytes
+                        = module->TryFindFunction<StructuredStorageSystemAPI::GetFillLockBytesOnLockBytesFunction>(
+                            "StgGetIFillLockBytesOnILockBytes");
+                    loaded.getFillLockBytesOnFile
+                        = module->TryFindFunction<StructuredStorageSystemAPI::GetFillLockBytesOnFileFunction>(
+                            "StgGetIFillLockBytesOnFile");
+                    loaded.openLayoutDocfile
+                        = module->TryFindFunction<StructuredStorageSystemAPI::OpenLayoutDocfileFunction>(
+                            "StgOpenLayoutDocfile");
+                    loaded.copyPropertyVariant
+                        = module->TryFindFunction<StructuredStorageSystemAPI::PropertyVariantCopyFunction>(
+                            "PropVariantCopy");
+                    loaded.clearPropertyVariant
+                        = module->TryFindFunction<StructuredStorageSystemAPI::PropertyVariantClearFunction>(
+                            "PropVariantClear");
+                    loaded.freePropertyVariantArray
+                        = module->TryFindFunction<StructuredStorageSystemAPI::FreePropertyVariantArrayFunction>(
+                            "FreePropVariantArray");
+                }
+#endif
+                return loaded;
+            }();
+            return api;
+        }
+
         const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept {
             static const EnvironmentSystemAPI api = [] {
                 using API = EnvironmentSystemAPI;
@@ -2431,6 +2756,9 @@ namespace Sora::PAL {
                 loaded.getCommandLineWide            = module->TryFindFunction<API::GetCommandLineWideFunction>("GetCommandLineW");
                 loaded.getProcessTimes               = module->TryFindFunction<API::GetProcessTimesFunction>("GetProcessTimes");
                 loaded.getProcessMemoryInfo          = module->TryFindFunction<API::GetProcessMemoryInfoFunction>("K32GetProcessMemoryInfo");
+                loaded.getProcessId                  = module->TryFindFunction<API::GetProcessIdFunction>("GetProcessId");
+                loaded.getProcessHandleCount         = module->TryFindFunction<API::GetProcessHandleCountFunction>("GetProcessHandleCount");
+                loaded.queryProcessCycleTime        = module->TryFindFunction<API::QueryProcessCycleTimeFunction>("QueryProcessCycleTime");
                     // clang-format on
                 }
                 if (EnsureSystemAPIs(loaded.getCurrentProcessId, loaded.createProcessSnapshot, loaded.firstProcess,
@@ -2495,6 +2823,8 @@ namespace Sora::PAL {
 #if defined(PLATFORM_WINDOWS)
             loaded.getCurrentThreadId          = module->TryFindFunction<API::GetCurrentThreadIdFunction>("GetCurrentThreadId");
             loaded.getCurrentThread            = module->TryFindFunction<API::GetCurrentThreadFunction>("GetCurrentThread");
+            loaded.getThreadId                 = module->TryFindFunction<API::GetThreadIdFunction>("GetThreadId");
+            loaded.queryThreadCycleTime        = module->TryFindFunction<API::QueryThreadCycleTimeFunction>("QueryThreadCycleTime");
             loaded.openThread                  = module->TryFindFunction<API::OpenThreadFunction>("OpenThread");
             loaded.setThreadDescription        = module->TryFindFunction<API::SetThreadDescriptionFunction>("SetThreadDescription");
             loaded.getThreadDescription        = module->TryFindFunction<API::GetThreadDescriptionFunction>("GetThreadDescription");
@@ -2545,6 +2875,7 @@ namespace Sora::PAL {
                     // clang-format off
                     loaded.fork         = module->TryFindFunction<API::ForkFunction>("fork");
                     loaded.exec         = module->TryFindFunction<API::ExecFunction>("execve");
+                    loaded.execPath     = module->TryFindFunction<API::ExecPathFunction>("execv");
                     gNativeSpawn        = module->TryFindFunction<NativeSpawnFunction>("posix_spawn");
                     loaded.spawn        = gNativeSpawn != nullptr ? &SpawnAdapter : nullptr;
                     loaded.wait         = module->TryFindFunction<API::WaitFunction>("waitpid");
@@ -3213,6 +3544,8 @@ namespace Sora::PAL {
                 loaded.moveFileWide          = module->TryFindFunction<API::MoveFileWideFunction>("MoveFileExW");
                 loaded.deleteFileWide        = module->TryFindFunction<API::DeleteFileWideFunction>("DeleteFileW");
                 loaded.getOverlappedResult   = module->TryFindFunction<API::GetOverlappedResultFunction>("GetOverlappedResult");
+                loaded.getFileType            = module->TryFindFunction<API::GetFileTypeFunction>("GetFileType");
+                loaded.setFilePointer         = module->TryFindFunction<API::SetFilePointerFunction>("SetFilePointerEx");
                 loaded.cancelIo              = module->TryFindFunction<API::CancelIoFunction>("CancelIoEx");
                 loaded.lockFile              = module->TryFindFunction<API::LockFileFunction>("LockFileEx");
                 loaded.readDirectoryChanges  = module->TryFindFunction<API::ReadDirectoryChangesFunction>("ReadDirectoryChangesW");
@@ -3234,6 +3567,7 @@ namespace Sora::PAL {
                 loaded.queryFileBlockSize    = loaded.stat != nullptr ? &QueryPosixFileBlockSize : nullptr;
                 loaded.queryFileSize         = loaded.stat != nullptr ? &QueryPosixFileSize : nullptr;
                 loaded.duplicate             = module->TryFindFunction<API::DuplicateFunction>("dup");
+                loaded.duplicateTo           = module->TryFindFunction<API::DuplicateToFunction>("dup2");
                 loaded.adviseFile            = module->TryFindFunction<API::AdviseFileFunction>("posix_fadvise");
                 loaded.lock                  = module->TryFindFunction<API::LockFunction>("flock");
 #    if defined(PLATFORM_LINUX)

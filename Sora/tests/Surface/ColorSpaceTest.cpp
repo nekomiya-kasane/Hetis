@@ -3,7 +3,7 @@
  * @brief Behavioral tests for Sora surface color-space primitives.
  * @ingroup Color
  */
-#include <Sora/Surface/ColorSpaceUtils.h>
+#include <Sora/Core/ColorSpaceUtils.h>
 #include <Sora/Math/Simd.h>
 
 #include <catch2/catch_approx.hpp>

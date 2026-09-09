@@ -7,6 +7,7 @@ set(SORA_PAL_CPU_SOURCES
 )
 set(SORA_PAL_STORAGE_SOURCES
     src/PAL/AtomicFile.cpp
+    src/PAL/ComAPI.cpp
     src/PAL/D3DAPI.cpp
     src/PAL/Environment.cpp
     src/PAL/File.cpp
@@ -36,20 +37,22 @@ file(GLOB_RECURSE Sora_SOURCES CONFIGURE_DEPENDS
     "src/*.hxx"
 )
 
-file(GLOB_RECURSE SORA_PLATFORM_BOUNDARY_FILES CONFIGURE_DEPENDS
-    "include/*.h"
-    "include/*.hpp"
-    "include/*.hxx"
+file(GLOB_RECURSE SORA_PLATFORM_BOUNDARY_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    "include/*"
+    "src/*"
+    "tests/*"
+    "demos/*"
+    "benchmarks/*"
 )
-list(APPEND SORA_PLATFORM_BOUNDARY_FILES ${Sora_SOURCES})
 
 function(sora_enforce_platform_header_boundary)
     string(CONCAT _sora_platform_header_pattern
         "#[ \t]*include[ \t]*[<\"]((Windows|windows|winsock2|ws2tcpip|bcrypt|iphlpapi|ioringapi|werapi|"
         "DbgHelp|Psapi|Shellapi|TlHelp32|evntrace|evntcons|debugapi|errhandlingapi|handleapi|memoryapi|"
-        "processthreadsapi|synchapi|sysinfoapi|objbase|combaseapi|ole2|oleauto|oleidl|oleacc|"
+        "processthreadsapi|synchapi|sysinfoapi|objbase|combaseapi|ole2|oleauto|oleidl|oleacc|DocObj|docobj|"
         "unknwn|objidl|oaidl|guiddef|propidl|propkey|wtypes|rpc|rpcndr|"
-        "rpcdce)\\.h|(sys|linux|mach|net|arpa|asm)/[^>\"]+|"
+        "rpcdce|d3d[^/\"]*|dxcapi|dxcore|dxgi[^/\"]*)\\.h|"
+        "(sys|linux|mach|net|arpa|asm|GL|EGL)/[^>\"]+|"
         "(unistd|pthread|signal|spawn|dlfcn|execinfo|fcntl|ifaddrs|poll|ucontext|netdb|libproc|process)\\.h|"
         "X11/[^>\"]+|xcb/[^>\"]+|wayland[^>\"]*)[>\"]"
     )

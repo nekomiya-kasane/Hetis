@@ -1,4 +1,4 @@
-#include "Sora/Core/Resources/Resources.h"
+#include "Sora/Core/Resources/ResourceModule.h"
 
 #include <cstdint>
 

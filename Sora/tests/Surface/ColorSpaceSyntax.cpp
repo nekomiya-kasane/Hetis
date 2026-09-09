@@ -1,5 +1,5 @@
-#include <Sora/Surface/ColorSpace.h>
-#include <Sora/Surface/ColorSpaceUtils.h>
+#include <Sora/Core/ColorSpace.h>
+#include <Sora/Core/ColorSpaceUtils.h>
 
 #include <concepts>
 #include <Sora/Math/Simd.h>

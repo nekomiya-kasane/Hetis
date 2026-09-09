@@ -1,6 +1,6 @@
 #include "Common/Classes.h"
 
-#include "Sora/Core/Polymorphism.h"
+#include "Sora/Core/Polymorphism/Polymorphism.h"
 #include "Sora/Core/ToStyledString.h"
 #include "Sora/Kernel/Core/IID.h"
 #include "Sora/Kernel/Core/Query.h"

@@ -42,6 +42,7 @@
  * - @ref Sora::PAL::SystemInformationSystemAPI
  * - @ref Sora::PAL::DebugSystemAPI
  * - @ref Sora::PAL::COMSystemAPI
+ * - @ref Sora::PAL::StructuredStorageSystemAPI
  * - @ref Sora::PAL::OleSystemAPI
  * - @ref Sora::PAL::OleAutomationSystemAPI
  * - @ref Sora::PAL::SchedulerTraceSystemAPI
@@ -178,6 +179,10 @@ struct IStream;
 struct IStorage;
 struct ILockBytes;
 struct IRootStorage;
+struct IFillLockBytes;
+struct IProgressNotify;
+struct ILayoutStorage;
+struct IDirectWriterLock;
 struct IPersist;
 struct IPersistStream;
 struct IPersistFile;
@@ -187,7 +192,6 @@ struct IPropertySetStorage;
 struct IEnumSTATPROPSTG;
 struct IEnumSTATPROPSETSTG;
 struct tagSTATSTG;
-struct tagSTGOPTIONS;
 struct IDataObject;
 struct IDropSource;
 struct IDropTarget;
@@ -515,10 +519,48 @@ namespace Sora::PAL {
             Bool inheritHandle;
         };
 
+        /** @brief Layout-compatible Win32 process-startup record used by @c CreateProcessW. */
+        struct StartupInfo {
+            DWord size = sizeof(StartupInfo);
+            wchar_t* reserved = nullptr;
+            wchar_t* desktop = nullptr;
+            wchar_t* title = nullptr;
+            DWord x = 0;
+            DWord y = 0;
+            DWord xSize = 0;
+            DWord ySize = 0;
+            DWord xCountChars = 0;
+            DWord yCountChars = 0;
+            DWord fillAttribute = 0;
+            DWord flags = 0;
+            uint16_t showWindow = 0;
+            uint16_t reservedByteCount = 0;
+            uint8_t* reservedBytes = nullptr;
+            Handle standardInput = nullptr;
+            Handle standardOutput = nullptr;
+            Handle standardError = nullptr;
+        };
+
+        /** @brief Layout-compatible Win32 process-creation result record. */
+        struct ProcessInformation {
+            Handle process = nullptr;
+            Handle thread = nullptr;
+            DWord processId = 0;
+            DWord threadId = 0;
+        };
+
         /** @brief Layout-compatible Win32 file timestamp. */
         struct FileTime {
             DWord lowDateTime;
             DWord highDateTime;
+        };
+
+        /** @brief Layout-compatible version 2 options for StgCreateStorageEx and StgOpenStorageEx. */
+        struct StorageOptions {
+            UInt16 version = 2;
+            UInt16 reserved = 0;
+            ULong sectorSize = 512;
+            const wchar_t* templateFile = nullptr;
         };
 
         /** @brief ABI-compatible COM root interface. */
@@ -533,6 +575,24 @@ namespace Sora::PAL {
             virtual HResult __stdcall Read(void* destination, ULong bytes, ULong* bytesRead) = 0;
             virtual HResult __stdcall Write(const void* source, ULong bytes, ULong* bytesWritten) = 0;
         };
+
+        using NativeStorage = ::IStorage;
+        using NativeLockBytes = ::ILockBytes;
+        using NativeRootStorage = ::IRootStorage;
+        using NativeFillLockBytes = ::IFillLockBytes;
+        using NativeProgressNotify = ::IProgressNotify;
+        using NativeLayoutStorage = ::ILayoutStorage;
+        using NativeDirectWriterLock = ::IDirectWriterLock;
+        using NativePersist = ::IPersist;
+        using NativePersistStream = ::IPersistStream;
+        using NativePersistFile = ::IPersistFile;
+        using NativePersistStorage = ::IPersistStorage;
+        using NativeStream = ::IStream;
+        using NativePropertyStorage = ::IPropertyStorage;
+        using NativePropertySetStorage = ::IPropertySetStorage;
+        using NativeEnumStatPropStg = ::IEnumSTATPROPSTG;
+        using NativeEnumStatPropSetStg = ::IEnumSTATPROPSETSTG;
+        using NativeStatStg = ::tagSTATSTG;
 
         struct Stream;
         struct PropertyBag;
@@ -599,6 +659,11 @@ namespace Sora::PAL {
             int16_t revents = 0;
         };
         using NativePollDescriptor = PollDescriptor;
+
+        /** @brief ABI-sized storage for the opaque @c WSAData startup result. */
+        struct alignas(void*) SocketRuntimeDataStorage {
+            std::array<std::byte, sizeof(void*) == 8 ? 408 : 400> bytes{};
+        };
 
         /** @brief ABI-compatible Windows I/O ring creation flags. */
         struct IoRingCreateFlags {
@@ -1410,6 +1475,28 @@ namespace Sora::PAL {
 
             } // namespace Thread
 
+            /** @brief Process-creation and lifecycle constants consumed by @c ProcessControlSystemAPI. */
+            inline namespace ProcessControl {
+
+                // clang-format off
+                inline constexpr DWord kCreateNoWindow          = 0x08000000;
+                inline constexpr DWord kStartUseStandardHandles = 0x00000100;
+                // clang-format on
+
+            } // namespace ProcessControl
+
+            /** @brief Structured-exception and process error-mode constants. */
+            inline namespace StructuredException {
+
+                // clang-format off
+                inline constexpr DWord kFailCriticalErrors      = 0x00000001;
+                inline constexpr DWord kNoGeneralProtectionBox  = 0x00000002;
+                inline constexpr DWord kExceptionNoncontinuable = 0x00000001;
+                inline constexpr DWord kAccessViolation         = 0xC0000005;
+                // clang-format on
+
+            } // namespace StructuredException
+
             /** @brief Monitor selection flags and the Windows reference DPI. */
             inline namespace Display {
                 inline constexpr DWord kMonitorDefaultNull = 0;
@@ -1554,6 +1641,9 @@ namespace Sora::PAL {
         inline static constexpr int kAddressInfoPassive        = 0x0001;
         inline static constexpr int kAddressInfoNumericHost    = 0x0004;
         inline static constexpr int kAddressInfoNumericService = 0x0008;
+        inline static constexpr int kNameInfoNumericHost       = 0x0002;
+        inline static constexpr int kNameInfoNumericService    = 0x0008;
+        inline static constexpr int kInvalidArgumentError      = 10022;
         // clang-format on
     };
 
@@ -1891,6 +1981,8 @@ namespace Sora::PAL {
         using GetSystemInfoFunction          = void(__stdcall*)(void*);
         using GlobalMemoryStatusFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::MemoryStatus*);
         using IsProcessorFeatureFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::DWord);
+        using GetNativeSystemInfoFunction    = void(__stdcall*)(void*);
+        using GetTickCount64Function         = WindowsSystem::DWord64(__stdcall*)();
 
         [[= $::Syscall{"GetSystemInfo"}]]
         GetSystemInfoFunction      getSystemInfo      = nullptr;
@@ -1898,6 +1990,10 @@ namespace Sora::PAL {
         GlobalMemoryStatusFunction globalMemoryStatus = nullptr;
         [[= $::Syscall{"IsProcessorFeaturePresent"}]]
         IsProcessorFeatureFunction isProcessorFeature = nullptr;
+        [[= $::Syscall{"GetNativeSystemInfo"}]]
+        GetNativeSystemInfoFunction getNativeSystemInfo = nullptr;
+        [[= $::Syscall{"GetTickCount64"}]]
+        GetTickCount64Function      getTickCount64      = nullptr;
         // clang-format on
     };
 
@@ -2122,6 +2218,150 @@ namespace Sora::PAL {
         FreeUnusedLibrariesFunction                freeUnusedLibraries = nullptr;
         [[= $::Syscall{"CoFreeUnusedLibrariesEx"}]]
         FreeUnusedLibrariesExFunction              freeUnusedLibrariesEx = nullptr;
+        // clang-format on
+    };
+
+    /** @brief Dynamically resolved OLE Structured Storage and property-set operations. */
+    struct StructuredStorageSystemAPI {
+        using CreateDocfileFunction = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::DWord,
+                                                                         WindowsSystem::DWord,
+                                                                         WindowsSystem::NativeStorage**);
+        using CreateDocfileOnLockBytesFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeLockBytes*, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::NativeStorage**);
+        using OpenStorageFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::NativeStorage*, WindowsSystem::DWord,
+                                                 wchar_t**, WindowsSystem::DWord, WindowsSystem::NativeStorage**);
+        using OpenStorageOnLockBytesFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeLockBytes*, WindowsSystem::NativeStorage*,
+                                                 WindowsSystem::DWord, wchar_t**, WindowsSystem::DWord,
+                                                 WindowsSystem::NativeStorage**);
+        using IsStorageFileFunction = WindowsSystem::HResult(__stdcall*)(const wchar_t*);
+        using IsStorageLockBytesFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeLockBytes*);
+        using SetStorageTimesFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, const WindowsSystem::FileTime*,
+                                                 const WindowsSystem::FileTime*, const WindowsSystem::FileTime*);
+        using CreateStorageExFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::StorageOptions*, void*,
+                                                 WindowsSystem::RefInterfaceId, void**);
+        using OpenStorageExFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::StorageOptions*, void*,
+                                                 WindowsSystem::RefInterfaceId, void**);
+        using CreatePropertyStorageFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Unknown*, WindowsSystem::RefGuid,
+                                                 const WindowsSystem::Guid*, WindowsSystem::DWord, WindowsSystem::DWord,
+                                                 WindowsSystem::NativePropertyStorage**);
+        using OpenPropertyStorageFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Unknown*, WindowsSystem::RefGuid,
+                                                 WindowsSystem::DWord, WindowsSystem::DWord,
+                                                 WindowsSystem::NativePropertyStorage**);
+        using CreatePropertySetStorageFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*, WindowsSystem::DWord,
+                                                 WindowsSystem::NativePropertySetStorage**);
+        using FormatIdToPropertyStorageNameFunction = WindowsSystem::HResult(__stdcall*)(const WindowsSystem::Guid*,
+                                                                                         wchar_t*);
+        using PropertyStorageNameToFormatIdFunction = WindowsSystem::HResult(__stdcall*)(wchar_t*,
+                                                                                           WindowsSystem::Guid*);
+        using ReadClassStorageFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*,
+                                                                            WindowsSystem::ClassId*);
+        using WriteClassStorageFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*,
+                                                                             WindowsSystem::RefClassId);
+        using ReadClassStreamFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStream*,
+                                                                           WindowsSystem::ClassId*);
+        using WriteClassStreamFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStream*,
+                                                                            WindowsSystem::RefClassId);
+        using GetGlobalFromLockBytesFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeLockBytes*, WindowsSystem::Handle*);
+        using CreateLockBytesOnGlobalFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Bool,
+                                                 WindowsSystem::NativeLockBytes**);
+        using GetConvertStorageFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*);
+        using OpenAsyncDocfileFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeFillLockBytes*, WindowsSystem::DWord,
+                                                 WindowsSystem::DWord, WindowsSystem::NativeStorage**);
+        using GetFillLockBytesOnLockBytesFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeLockBytes*,
+                                                 WindowsSystem::NativeFillLockBytes**);
+        using GetFillLockBytesOnFileFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::NativeFillLockBytes**);
+        using OpenLayoutDocfileFunction
+            = WindowsSystem::HResult(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord,
+                                                 WindowsSystem::NativeStorage**);
+        using WriteFormatUserTypeFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*, uint16_t, wchar_t*);
+        using ReadFormatUserTypeFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*, uint16_t*, wchar_t**);
+        using SetConvertStorageFunction
+            = WindowsSystem::HResult(__stdcall*)(WindowsSystem::NativeStorage*, WindowsSystem::Bool);
+        using PropertyVariantCopyFunction = WindowsSystem::HResult(__stdcall*)(void*, const void*);
+        using PropertyVariantClearFunction = WindowsSystem::HResult(__stdcall*)(void*);
+        using FreePropertyVariantArrayFunction = WindowsSystem::HResult(__stdcall*)(WindowsSystem::ULong, void*);
+
+        // clang-format off
+        [[= $::Syscall{"StgCreateDocfile"}]]
+        CreateDocfileFunction                    createDocfile = nullptr;
+        [[= $::Syscall{"StgCreateDocfileOnILockBytes"}]]
+        CreateDocfileOnLockBytesFunction         createDocfileOnLockBytes = nullptr;
+        [[= $::Syscall{"StgOpenStorage"}]]
+        OpenStorageFunction                      openStorage = nullptr;
+        [[= $::Syscall{"StgOpenStorageOnILockBytes"}]]
+        OpenStorageOnLockBytesFunction           openStorageOnLockBytes = nullptr;
+        [[= $::Syscall{"StgIsStorageFile"}]]
+        IsStorageFileFunction                    isStorageFile = nullptr;
+        [[= $::Syscall{"StgIsStorageILockBytes"}]]
+        IsStorageLockBytesFunction               isStorageLockBytes = nullptr;
+        [[= $::Syscall{"StgSetTimes"}]]
+        SetStorageTimesFunction                  setStorageTimes = nullptr;
+        [[= $::Syscall{"StgCreateStorageEx"}]]
+        CreateStorageExFunction                  createStorageEx = nullptr;
+        [[= $::Syscall{"StgOpenStorageEx"}]]
+        OpenStorageExFunction                    openStorageEx = nullptr;
+        [[= $::Syscall{"StgCreatePropStg"}]]
+        CreatePropertyStorageFunction            createPropertyStorage = nullptr;
+        [[= $::Syscall{"StgOpenPropStg"}]]
+        OpenPropertyStorageFunction              openPropertyStorage = nullptr;
+        [[= $::Syscall{"StgCreatePropSetStg"}]]
+        CreatePropertySetStorageFunction          createPropertySetStorage = nullptr;
+        [[= $::Syscall{"FmtIdToPropStgName"}]]
+        FormatIdToPropertyStorageNameFunction     formatIdToPropertyStorageName = nullptr;
+        [[= $::Syscall{"PropStgNameToFmtId"}]]
+        PropertyStorageNameToFormatIdFunction     propertyStorageNameToFormatId = nullptr;
+        [[= $::Syscall{"ReadClassStg"}]]
+        ReadClassStorageFunction                 readClassStorage = nullptr;
+        [[= $::Syscall{"WriteClassStg"}]]
+        WriteClassStorageFunction                writeClassStorage = nullptr;
+        [[= $::Syscall{"ReadClassStm"}]]
+        ReadClassStreamFunction                  readClassStream = nullptr;
+        [[= $::Syscall{"WriteClassStm"}]]
+        WriteClassStreamFunction                 writeClassStream = nullptr;
+        [[= $::Syscall{"GetHGlobalFromILockBytes"}]]
+        GetGlobalFromLockBytesFunction           getGlobalFromLockBytes = nullptr;
+        [[= $::Syscall{"CreateILockBytesOnHGlobal"}]]
+        CreateLockBytesOnGlobalFunction          createLockBytesOnGlobal = nullptr;
+        [[= $::Syscall{"GetConvertStg"}]]
+        GetConvertStorageFunction                getConvertStorage = nullptr;
+        [[= $::Syscall{"SetConvertStg"}]]
+        SetConvertStorageFunction                setConvertStorage = nullptr;
+        [[= $::Syscall{"WriteFmtUserTypeStg"}]]
+        WriteFormatUserTypeFunction              writeFormatUserType = nullptr;
+        [[= $::Syscall{"ReadFmtUserTypeStg"}]]
+        ReadFormatUserTypeFunction               readFormatUserType = nullptr;
+        [[= $::Syscall{"StgOpenAsyncDocfileOnIFillLockBytes"}]]
+        OpenAsyncDocfileFunction                 openAsyncDocfile = nullptr;
+        [[= $::Syscall{"StgGetIFillLockBytesOnILockBytes"}]]
+        GetFillLockBytesOnLockBytesFunction      getFillLockBytesOnLockBytes = nullptr;
+        [[= $::Syscall{"StgGetIFillLockBytesOnFile"}]]
+        GetFillLockBytesOnFileFunction           getFillLockBytesOnFile = nullptr;
+        [[= $::Syscall{"StgOpenLayoutDocfile"}]]
+        OpenLayoutDocfileFunction                openLayoutDocfile = nullptr;
+        [[= $::Syscall{"PropVariantCopy"}]]
+        PropertyVariantCopyFunction              copyPropertyVariant = nullptr;
+        [[= $::Syscall{"PropVariantClear"}]]
+        PropertyVariantClearFunction             clearPropertyVariant = nullptr;
+        [[= $::Syscall{"FreePropVariantArray"}]]
+        FreePropertyVariantArrayFunction         freePropertyVariantArray = nullptr;
         // clang-format on
     };
 
@@ -2429,6 +2669,9 @@ namespace Sora::PAL {
         using CommandLineToArgvWideFunction         = wchar_t**(__stdcall*)(const wchar_t*, int*);
         using GetProcessTimesFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*);
         using GetProcessMemoryInfoFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_PROCESS_MEMORY_COUNTERS*, WindowsSystem::DWord);
+        using GetProcessIdFunction                  = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
+        using GetProcessHandleCountFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
+        using QueryProcessCycleTimeFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64*);
         using QueryParentProcessIdFunction          = bool (*)(WindowsSystem::DWord*) noexcept;
         using CaptureUsageFunction                  = bool (*)(ProcessUsageCounters*) noexcept;
 
@@ -2456,6 +2699,12 @@ namespace Sora::PAL {
         GetProcessTimesFunction               getProcessTimes               = nullptr;
         [[= $::Syscall{"K32GetProcessMemoryInfo"}]]
         GetProcessMemoryInfoFunction          getProcessMemoryInfo          = nullptr;
+        [[= $::Syscall{"GetProcessId"}]]
+        GetProcessIdFunction                  getProcessId                  = nullptr;
+        [[= $::Syscall{"GetProcessHandleCount"}]]
+        GetProcessHandleCountFunction         getProcessHandleCount         = nullptr;
+        [[= $::Syscall{"QueryProcessCycleTime"}]]
+        QueryProcessCycleTimeFunction         queryProcessCycleTime         = nullptr;
         QueryParentProcessIdFunction          queryParentProcessId          = nullptr;
         CaptureUsageFunction                  captureUsage                  = nullptr;
         // clang-format on
@@ -2497,6 +2746,8 @@ namespace Sora::PAL {
         // clang-format off
         using GetCurrentThreadIdFunction          = WindowsSystem::DWord(__stdcall*)();
         using GetCurrentThreadFunction            = WindowsSystem::Handle(__stdcall*)();
+        using GetThreadIdFunction                 = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
+        using QueryThreadCycleTimeFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64*);
         using OpenThreadFunction                  = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
         using SetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, const wchar_t*);
         using GetThreadDescriptionFunction        = WindowsSystem::HResult(__stdcall*)(WindowsSystem::Handle, wchar_t**);
@@ -2507,6 +2758,10 @@ namespace Sora::PAL {
         GetCurrentThreadIdFunction          getCurrentThreadId          = nullptr;
         [[= $::Syscall{"GetCurrentThread"}]]
         GetCurrentThreadFunction            getCurrentThread            = nullptr;
+        [[= $::Syscall{"GetThreadId"}]]
+        GetThreadIdFunction                 getThreadId                 = nullptr;
+        [[= $::Syscall{"QueryThreadCycleTime"}]]
+        QueryThreadCycleTimeFunction        queryThreadCycleTime        = nullptr;
         [[= $::Syscall{"OpenThread"}]]
         OpenThreadFunction                  openThread                  = nullptr;
         [[= $::Syscall{"SetThreadDescription"}]]
@@ -2761,6 +3016,8 @@ namespace Sora::PAL {
         using MoveFileWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, WindowsSystem::DWord);
         using DeleteFileWideFunction        = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
         using GetOverlappedResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool);
+        using GetFileTypeFunction            = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
+        using SetFilePointerFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_LARGE_INTEGER, ::_LARGE_INTEGER*, WindowsSystem::DWord);
         using CancelIoFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*);
         using LockFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
         using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
@@ -2790,6 +3047,10 @@ namespace Sora::PAL {
         DeleteFileWideFunction        deleteFileWide        = nullptr;
         [[= $::Syscall{"GetOverlappedResult"}]]
         GetOverlappedResultFunction   getOverlappedResult   = nullptr;
+        [[= $::Syscall{"GetFileType"}]]
+        GetFileTypeFunction            getFileType            = nullptr;
+        [[= $::Syscall{"SetFilePointerEx"}]]
+        SetFilePointerFunction         setFilePointer         = nullptr;
         [[= $::Syscall{"CancelIoEx"}]]
         CancelIoFunction              cancelIo              = nullptr;
         [[= $::Syscall{"LockFileEx"}]]
@@ -3009,6 +3270,30 @@ namespace Sora::PAL {
 
         } // namespace File
 
+        /** @brief POSIX process status, descriptor, and signal constants used by process-control callers. */
+        inline namespace ProcessControl {
+
+            inline constexpr int kStandardErrorDescriptor = 2;
+            inline constexpr int kAbortSignal = 6;
+            inline constexpr int kKillSignal = 9;
+
+            /** @brief Return whether @p status encodes normal child termination. */
+            [[nodiscard]] constexpr bool ProcessExited(int status) noexcept { return (status & 0x7F) == 0; }
+
+            /** @brief Extract the exit code from a normally terminated child status. */
+            [[nodiscard]] constexpr int ProcessExitStatus(int status) noexcept { return (status >> 8) & 0xFF; }
+
+            /** @brief Return whether @p status encodes signal termination. */
+            [[nodiscard]] constexpr bool ProcessSignaled(int status) noexcept {
+                const int signal = status & 0x7F;
+                return signal != 0 && signal != 0x7F;
+            }
+
+            /** @brief Extract the terminating signal from a signal-terminated child status. */
+            [[nodiscard]] constexpr int ProcessTerminationSignal(int status) noexcept { return status & 0x7F; }
+
+        } // namespace ProcessControl
+
         /** @brief Native CPU-discovery selectors and masks consumed by upper-layer capability composition. */
         inline namespace CpuDiscovery {
 
@@ -3215,6 +3500,8 @@ namespace Sora::PAL {
 #    endif
         inline static constexpr int kAddressInfoPassive = 0x0001;
         inline static constexpr int kAddressInfoNumericHost = 0x0004;
+        inline static constexpr int kNameInfoNumericHost = 0x0002;
+        inline static constexpr int kNameInfoNumericService = 0x0008;
     };
 
     /** @brief Dynamically resolved POSIX TCP byte-stream operations. */
@@ -3323,6 +3610,7 @@ namespace Sora::PAL {
         // clang-format off
         using ForkFunction                    = int (*)();
         using ExecFunction                    = int (*)(const char*, char* const[], char* const[]);
+        using ExecPathFunction                = int (*)(const char*, char* const[]);
         using SpawnFunction                   = int (*)(PosixSystem::ProcessId*, const char*, const PosixSystem::SpawnFileActions*, const PosixSystem::SpawnAttributes*, char* const[], char* const[]);
         using WaitFunction                    = int (*)(PosixSystem::ProcessId, int*, int);
         using WaitIdFunction                  = int (*)(PosixSystem::WaitIdType, PosixSystem::WaitId, PosixSystem::SignalInfo*, int);
@@ -3337,6 +3625,8 @@ namespace Sora::PAL {
         ForkFunction fork = nullptr;
         [[= $::Syscall{"execve"}]] 
         ExecFunction exec = nullptr;
+        [[= $::Syscall{"execv"}]]
+        ExecPathFunction execPath = nullptr;
         [[= $::Syscall{"posix_spawn"}]] 
         SpawnFunction spawn = nullptr;
         [[= $::Syscall{"waitpid"}]] 
@@ -3599,7 +3889,7 @@ namespace Sora::PAL {
         using TraceProcessFunction = long (*)(PosixSystem::TraceRequest, ...);
 #    endif
 #    if defined(PLATFORM_LINUX)
-        [[= $::Syscall{"ptrace"}]] 
+        [[= $::Syscall{"ptrace"}]]
         TraceProcessFunction traceProcess = nullptr;
 #    endif
     };
@@ -3612,6 +3902,8 @@ namespace Sora::PAL {
 
     /** @brief Windows OLE Automation entry points are unavailable on POSIX targets. */
     struct OleAutomationSystemAPI {};
+    /** @brief Structured Storage entry points are unavailable outside Windows. */
+    struct StructuredStorageSystemAPI {};
 
     /** @brief Win32 event objects are unavailable on POSIX targets. */
     struct EventSystemAPI {};
@@ -3836,6 +4128,7 @@ namespace Sora::PAL {
         using QueryFileBlockSizeFunction  = bool (*)(int, size_t*) noexcept;
         using QueryFileSizeFunction       = bool (*)(int, uint64_t*) noexcept;
         using DuplicateFunction           = int (*)(int);
+        using DuplicateToFunction         = int (*)(int, int);
         using AdviseFileFunction          = int (*)(int, PosixSystem::FileOffset, PosixSystem::FileOffset, int);
         using LockFunction                = int (*)(int, int);
 
@@ -3869,6 +4162,8 @@ namespace Sora::PAL {
         QueryFileSizeFunction       queryFileSize       = nullptr;
         [[= $::Syscall{"dup"}]]
         DuplicateFunction           duplicate           = nullptr;
+        [[= $::Syscall{"dup2"}]]
+        DuplicateToFunction         duplicateTo         = nullptr;
         [[= $::Syscall{"posix_fadvise"}]]
         AdviseFileFunction          adviseFile          = nullptr;
         [[= $::Syscall{"flock"}]]
@@ -4133,6 +4428,9 @@ namespace Sora::PAL {
 
         /** @brief Load and return the immutable OLE Automation function table. */
         [[nodiscard]] const OleAutomationSystemAPI& LoadOleAutomationSystemAPI() noexcept;
+
+        /** @brief Load and return the immutable Structured Storage function table. */
+        [[nodiscard]] const StructuredStorageSystemAPI& LoadStructuredStorageSystemAPI() noexcept;
 
         /** @brief Load and return the immutable process-environment function table. */
         [[nodiscard]] const EnvironmentSystemAPI& LoadEnvironmentSystemAPI() noexcept;

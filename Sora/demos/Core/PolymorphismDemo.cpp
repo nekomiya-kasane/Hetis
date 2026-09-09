@@ -1,4 +1,4 @@
-#include "Sora/Core/Polymorphism.h"
+#include "Sora/Core/Polymorphism/Polymorphism.h"
 
 #include "Common/Common.h"
 

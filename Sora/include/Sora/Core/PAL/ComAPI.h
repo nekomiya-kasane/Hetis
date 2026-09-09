@@ -3,10 +3,10 @@
  * @brief Platform-neutral COM ABI declarations and ownership helpers.
  * @ingroup PAL
  * @details This header deliberately contains no Windows SDK or ATL include. It separates core COM ABI and lifetime
- * facilities from the OLE data-transfer and Automation interface groups, while all native entry points remain owned
- * by the corresponding @ref COMSystemAPI, @ref OleSystemAPI, and @ref OleAutomationSystemAPI tables. ATL is modeled
- * only as zero-overhead ownership and object-root facilities; windowing, registry, UI, and server-registration
- * frameworks are outside this PAL boundary.
+ * facilities from Structured Storage, Compound Documents, OLE data transfer, and Automation, while all native entry
+ * points remain owned by the corresponding @ref COMSystemAPI, @ref StructuredStorageSystemAPI, @ref OleSystemAPI,
+ * and @ref OleAutomationSystemAPI tables. ATL is modeled only as zero-overhead ownership and object-root facilities;
+ * windowing, registry, UI, and server-registration frameworks are outside this PAL boundary.
  */
 #pragma once
 
@@ -89,6 +89,8 @@ namespace Sora::PAL {
     inline constexpr HResult EInvalidArg = static_cast<HResult>(0x80070057u);
     inline constexpr HResult ENotImpl = static_cast<HResult>(0x80004001u);
     inline constexpr HResult EOutOfMemory = static_cast<HResult>(0x8007000Eu);
+    inline constexpr size_t AutomationValueBytes = sizeof(void*) == 8 ? 24 : 16;
+    inline constexpr size_t AutomationValueAlignment = sizeof(void*) == 8 ? 8 : 4;
 
     /** @brief COM apartment model passed to CoInitializeEx. */
     enum class ApartmentModel : DWord {
@@ -132,6 +134,13 @@ namespace Sora::PAL {
     };
 
     struct IStorage;
+    struct IOleInPlaceSite;
+    struct IOleDocumentView;
+    struct IEnumOleDocumentViews;
+    struct IContinueCallback;
+    struct TargetDevice;
+    struct StorageMedium;
+    class Variant;
 
     /** @brief COM class-factory interface used by in-process and out-of-process activation. */
     struct IClassFactory : IUnknown {
@@ -146,8 +155,6 @@ namespace Sora::PAL {
         virtual HResult SORA_PAL_COM_CALL Reset() = 0;
         virtual HResult SORA_PAL_COM_CALL Clone(IEnumUnknown** enumerator) = 0;
     };
-
-    struct StatStg;
 
     /** @brief COM enumerator for strings. */
     struct IEnumString : IUnknown {
@@ -186,9 +193,9 @@ namespace Sora::PAL {
         wchar_t* name = nullptr;
         DWord type = 0;
         UnsignedLargeInteger size{};
+        FileTime modificationTime{};
         FileTime creationTime{};
         FileTime accessTime{};
-        FileTime modificationTime{};
         DWord mode = 0;
         DWord locksSupported = 0;
         Guid classId{};
@@ -214,6 +221,45 @@ namespace Sora::PAL {
     /** @brief Root-storage operation for switching a compound file to a new backing file. */
     struct IRootStorage : IUnknown {
         virtual HResult SORA_PAL_COM_CALL SwitchToFile(const wchar_t* fileName) = 0;
+    };
+
+    /** @brief Incrementally filled backing store used while an asynchronous compound file is downloaded. */
+    struct IFillLockBytes : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL FillAppend(const void* buffer, ULong bytes, ULong* bytesWritten) = 0;
+        virtual HResult SORA_PAL_COM_CALL FillAt(UnsignedLargeInteger offset, const void* buffer, ULong bytes,
+                                                 ULong* bytesWritten) = 0;
+        virtual HResult SORA_PAL_COM_CALL SetFillSize(UnsignedLargeInteger size) = 0;
+        virtual HResult SORA_PAL_COM_CALL Terminate(int canceled) = 0;
+    };
+
+    /** @brief Progress callback used by asynchronous compound-file operations. */
+    struct IProgressNotify : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL OnProgress(DWord current, DWord maximum, int accurate, int owner) = 0;
+    };
+
+    /** @brief One physical-layout instruction consumed by ILayoutStorage. */
+    struct StorageLayout {
+        DWord layoutType = 0;
+        wchar_t* elementName = nullptr;
+        LargeInteger offset{};
+        LargeInteger bytes{};
+    };
+
+    /** @brief Compound-file physical layout and monitoring protocol. */
+    struct ILayoutStorage : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL LayoutScript(StorageLayout* layout, DWord count,
+                                                        DWord interleavedFlag) = 0;
+        virtual HResult SORA_PAL_COM_CALL BeginMonitor() = 0;
+        virtual HResult SORA_PAL_COM_CALL EndMonitor() = 0;
+        virtual HResult SORA_PAL_COM_CALL ReLayoutDocfile(wchar_t* fileName) = 0;
+        virtual HResult SORA_PAL_COM_CALL ReLayoutDocfileOnILockBytes(ILockBytes* lockBytes) = 0;
+    };
+
+    /** @brief Direct-mode single-writer coordination exposed by compound-file storage implementations. */
+    struct IDirectWriterLock : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL WaitForWriteAccess(DWord timeoutMilliseconds) = 0;
+        virtual HResult SORA_PAL_COM_CALL ReleaseWriteAccess() = 0;
+        virtual HResult SORA_PAL_COM_CALL HaveWriteAccess() = 0;
     };
 
     /** @} ----------------------------------------------------------------------------------------------------- */
@@ -265,9 +311,23 @@ namespace Sora::PAL {
         } value{};
     };
 
-    /** @brief Opaque ABI-compatible PROPVARIANT storage. */
-    struct alignas(8) PropertyVariant {
-        std::byte storage[24]{};
+    /** @brief Owning, opaque PROPVARIANT-compatible value managed through StructuredStorageSystemAPI. */
+    class alignas(AutomationValueAlignment) PropertyVariant {
+    public:
+        PropertyVariant() noexcept = default;
+        PropertyVariant(const PropertyVariant&) = delete;
+        PropertyVariant& operator=(const PropertyVariant&) = delete;
+        PropertyVariant(PropertyVariant&& other) noexcept;
+        PropertyVariant& operator=(PropertyVariant&& other) noexcept;
+        ~PropertyVariant() noexcept;
+
+        [[nodiscard]] void* Data() noexcept { return storage_.data(); }
+        [[nodiscard]] const void* Data() const noexcept { return storage_.data(); }
+        [[nodiscard]] std::expected<PropertyVariant, HResult> Clone() const noexcept;
+        void Clear() noexcept;
+
+    private:
+        std::array<std::byte, AutomationValueBytes> storage_{};
     };
 
     /** @brief Property enumeration statistics record. */
@@ -314,7 +374,7 @@ namespace Sora::PAL {
         virtual HResult SORA_PAL_COM_CALL ReadPropertyNames(ULong count, const DWord* propertyIds,
                                                             wchar_t** names) = 0;
         virtual HResult SORA_PAL_COM_CALL WritePropertyNames(ULong count, const DWord* propertyIds,
-                                                             const wchar_t* const* names) = 0;
+                                                             wchar_t* const* names) = 0;
         virtual HResult SORA_PAL_COM_CALL DeletePropertyNames(ULong count, const DWord* propertyIds) = 0;
         virtual HResult SORA_PAL_COM_CALL Commit(DWord flags) = 0;
         virtual HResult SORA_PAL_COM_CALL Revert() = 0;
@@ -356,8 +416,8 @@ namespace Sora::PAL {
         virtual HResult SORA_PAL_COM_CALL CreateStorage(const wchar_t* name, DWord mode, DWord reserved1,
                                                         DWord reserved2, IStorage** storage) = 0;
         virtual HResult SORA_PAL_COM_CALL OpenStorage(const wchar_t* name, IStorage* priority, DWord mode,
-                                                      void* exclude, DWord reserved, IStorage** storage) = 0;
-        virtual HResult SORA_PAL_COM_CALL CopyTo(DWord count, const Guid* excluded, void* reserved,
+                                                      wchar_t** excludedNames, DWord reserved, IStorage** storage) = 0;
+        virtual HResult SORA_PAL_COM_CALL CopyTo(DWord count, const Guid* excluded, wchar_t** excludedNames,
                                                  IStorage* destination) = 0;
         virtual HResult SORA_PAL_COM_CALL MoveElementTo(const wchar_t* name, IStorage* destination,
                                                         const wchar_t* newName, DWord flags) = 0;
@@ -367,12 +427,122 @@ namespace Sora::PAL {
                                                        IEnumStatStg** enumerator) = 0;
         virtual HResult SORA_PAL_COM_CALL DestroyElement(const wchar_t* name) = 0;
         virtual HResult SORA_PAL_COM_CALL RenameElement(const wchar_t* oldName, const wchar_t* newName) = 0;
-        virtual HResult SORA_PAL_COM_CALL SetElementTimes(const wchar_t* name, const void* creation,
-                                                          const void* access, const void* modified) = 0;
+        virtual HResult SORA_PAL_COM_CALL SetElementTimes(const wchar_t* name, const FileTime* creation,
+                                                          const FileTime* access, const FileTime* modification) = 0;
         virtual HResult SORA_PAL_COM_CALL SetClass(RefClassId classId) = 0;
         virtual HResult SORA_PAL_COM_CALL SetStateBits(DWord stateBits, DWord mask) = 0;
         virtual HResult SORA_PAL_COM_CALL Stat(StatStg* statistics, DWord flags) = 0;
     };
+
+    /** @name Compound Document ABI @{ ------------------------------------------------------------------------ */
+
+    /** @brief ABI-compatible rectangle used to position an in-place compound-document view. */
+    struct Rect {
+        int32_t left = 0;
+        int32_t top = 0;
+        int32_t right = 0;
+        int32_t bottom = 0;
+    };
+
+    /** @brief One command descriptor exchanged with IOleCommandTarget. */
+    struct OleCommand {
+        ULong commandId = 0;
+        DWord flags = 0;
+    };
+
+    /** @brief Variable-sized command text header; allocate trailing storage for more than one character. */
+    struct OleCommandText {
+        DWord flags = 0;
+        ULong actualCharacters = 0;
+        ULong bufferCharacters = 0;
+        wchar_t text[1]{};
+    };
+
+    /** @brief Inclusive page range used by IPrint. */
+    struct PageRange {
+        int32_t firstPage = 0;
+        int32_t lastPage = 0;
+    };
+
+    /** @brief Variable-sized print page selection; allocate trailing storage for additional ranges. */
+    struct PageSet {
+        ULong structureBytes = sizeof(PageSet);
+        int oddPages = 0;
+        int evenPages = 0;
+        ULong rangeCount = 0;
+        PageRange ranges[1]{};
+    };
+
+    /** @brief Compound-document object capable of producing one or more in-place views. */
+    struct IOleDocument : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL CreateView(IOleInPlaceSite* site, IStream* stream, DWord reserved,
+                                                     IOleDocumentView** view) = 0;
+        virtual HResult SORA_PAL_COM_CALL GetDocMiscStatus(DWord* status) = 0;
+        virtual HResult SORA_PAL_COM_CALL EnumViews(IEnumOleDocumentViews** enumerator,
+                                                    IOleDocumentView** activeView) = 0;
+    };
+
+    /** @brief Container-side activation endpoint for a compound document. */
+    struct IOleDocumentSite : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL ActivateMe(IOleDocumentView* view) = 0;
+    };
+
+    /** @brief In-place presentation and persisted view-state protocol for a compound document. */
+    struct IOleDocumentView : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL SetInPlaceSite(IOleInPlaceSite* site) = 0;
+        virtual HResult SORA_PAL_COM_CALL GetInPlaceSite(IOleInPlaceSite** site) = 0;
+        virtual HResult SORA_PAL_COM_CALL GetDocument(IUnknown** document) = 0;
+        virtual HResult SORA_PAL_COM_CALL SetRect(Rect* view) = 0;
+        virtual HResult SORA_PAL_COM_CALL GetRect(Rect* view) = 0;
+        virtual HResult SORA_PAL_COM_CALL SetRectComplex(Rect* view, Rect* horizontalScroll,
+                                                        Rect* verticalScroll, Rect* sizeBox) = 0;
+        virtual HResult SORA_PAL_COM_CALL Show(int show) = 0;
+        virtual HResult SORA_PAL_COM_CALL UIActivate(int activate) = 0;
+        virtual HResult SORA_PAL_COM_CALL Open() = 0;
+        virtual HResult SORA_PAL_COM_CALL CloseView(DWord reserved) = 0;
+        virtual HResult SORA_PAL_COM_CALL SaveViewState(IStream* stream) = 0;
+        virtual HResult SORA_PAL_COM_CALL ApplyViewState(IStream* stream) = 0;
+        virtual HResult SORA_PAL_COM_CALL Clone(IOleInPlaceSite* newSite, IOleDocumentView** newView) = 0;
+    };
+
+    /** @brief Enumerator for a compound document's views. */
+    struct IEnumOleDocumentViews : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL Next(ULong count, IOleDocumentView** views, ULong* fetched) = 0;
+        virtual HResult SORA_PAL_COM_CALL Skip(ULong count) = 0;
+        virtual HResult SORA_PAL_COM_CALL Reset() = 0;
+        virtual HResult SORA_PAL_COM_CALL Clone(IEnumOleDocumentViews** enumerator) = 0;
+    };
+
+    /** @brief Cancellation and progress callback for long compound-document operations. */
+    struct IContinueCallback : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL FContinue() = 0;
+        virtual HResult SORA_PAL_COM_CALL FContinuePrinting(int32_t printed, int32_t currentPage,
+                                                            wchar_t* status) = 0;
+    };
+
+    /** @brief Compound-document page discovery and printing protocol. */
+    struct IPrint : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL SetInitialPageNum(int32_t firstPage) = 0;
+        virtual HResult SORA_PAL_COM_CALL GetPageInfo(int32_t* firstPage, int32_t* pageCount) = 0;
+        virtual HResult SORA_PAL_COM_CALL Print(DWord flags, TargetDevice** targetDevice, PageSet** pages,
+                                                StorageMedium* options, IContinueCallback* callback,
+                                                int32_t firstPage, int32_t* pagesPrinted, int32_t* lastPage) = 0;
+    };
+
+    /** @brief Standard command discovery and execution protocol shared by compound-document containers and servers. */
+    struct IOleCommandTarget : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL QueryStatus(const Guid* commandGroup, ULong count, OleCommand* commands,
+                                                      OleCommandText* commandText) = 0;
+        virtual HResult SORA_PAL_COM_CALL Exec(const Guid* commandGroup, DWord commandId, DWord executionOption,
+                                               Variant* input, Variant* output) = 0;
+    };
+
+    /** @brief Notification sink for compound-document zoom changes. */
+    struct IZoomEvents : IUnknown {
+        virtual HResult SORA_PAL_COM_CALL OnZoomPercentChanged(ULong zoomPercent) = 0;
+    };
+
+    /** @} ----------------------------------------------------------------------------------------------------- */
 
     /** @brief OLE data-transfer interface using caller-owned FORMATETC/STGMEDIUM records. */
     struct IDataObject : IUnknown {
@@ -507,6 +677,18 @@ namespace Sora::PAL {
             return MakeGuid(0x0000000au, 0x0000u, 0x0000u, standardTail);
         } else if constexpr (std::same_as<T, IRootStorage>) {
             return MakeGuid(0x00000012u, 0x0000u, 0x0000u, standardTail);
+        } else if constexpr (std::same_as<T, IFillLockBytes>) {
+            return MakeGuid(0x99caf010u, 0x415eu, 0x11cfu,
+                            {0x88u, 0x14u, 0x00u, 0xaau, 0x00u, 0xb5u, 0x69u, 0xf5u});
+        } else if constexpr (std::same_as<T, IProgressNotify>) {
+            return MakeGuid(0xa9d758a0u, 0x4617u, 0x11cfu,
+                            {0x95u, 0xfcu, 0x00u, 0xaau, 0x00u, 0x68u, 0x0du, 0xb4u});
+        } else if constexpr (std::same_as<T, ILayoutStorage>) {
+            return MakeGuid(0x0e6d4d90u, 0x6738u, 0x11cfu,
+                            {0x96u, 0x08u, 0x00u, 0xaau, 0x00u, 0x68u, 0x0du, 0xb4u});
+        } else if constexpr (std::same_as<T, IDirectWriterLock>) {
+            return MakeGuid(0x0e6d4d92u, 0x6738u, 0x11cfu,
+                            {0x96u, 0x08u, 0x00u, 0xaau, 0x00u, 0x68u, 0x0du, 0xb4u});
         } else if constexpr (std::same_as<T, IPersistStream>) {
             return MakeGuid(0x00000109u, 0x0000u, 0x0000u, standardTail);
         } else if constexpr (std::same_as<T, IPersistStorage>) {
@@ -523,6 +705,30 @@ namespace Sora::PAL {
             return MakeGuid(0x0000013au, 0x0000u, 0x0000u, standardTail);
         } else if constexpr (std::same_as<T, IEnumStatPropSetStg>) {
             return MakeGuid(0x0000013bu, 0x0000u, 0x0000u, standardTail);
+        } else if constexpr (std::same_as<T, IOleDocument>) {
+            return MakeGuid(0xb722bcc5u, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IOleDocumentView>) {
+            return MakeGuid(0xb722bcc6u, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IOleDocumentSite>) {
+            return MakeGuid(0xb722bcc7u, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IEnumOleDocumentViews>) {
+            return MakeGuid(0xb722bcc8u, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IPrint>) {
+            return MakeGuid(0xb722bcc9u, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IContinueCallback>) {
+            return MakeGuid(0xb722bccau, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IOleCommandTarget>) {
+            return MakeGuid(0xb722bccbu, 0x4e68u, 0x101bu,
+                            {0xa2u, 0xbcu, 0x00u, 0xaau, 0x00u, 0x40u, 0x47u, 0x70u});
+        } else if constexpr (std::same_as<T, IZoomEvents>) {
+            return MakeGuid(0x41b68150u, 0x904cu, 0x4e17u,
+                            {0xa0u, 0xbau, 0xa4u, 0x38u, 0x18u, 0x2eu, 0x35u, 0x9du});
         } else if constexpr (std::same_as<T, IRecordInfo>) {
             return MakeGuid(0x0000002fu, 0x0000u, 0x0000u, standardTail);
         } else if constexpr (std::same_as<T, IEnumUnknown>) {
@@ -836,8 +1042,7 @@ namespace Sora::PAL {
         void Clear() noexcept;
 
     private:
-        // VARIANT is 16 bytes on Win32 and 24 bytes on Win64; this keeps the public object ABI-independent.
-        alignas(8) std::array<std::byte, 24> storage_{};
+        alignas(AutomationValueAlignment) std::array<std::byte, AutomationValueBytes> storage_{};
     };
 
     /** @} ----------------------------------------------------------------------------------------------- */
