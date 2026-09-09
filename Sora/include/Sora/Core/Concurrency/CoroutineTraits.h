@@ -1,5 +1,5 @@
 /**
- * @file Traits.h
+ * @file CoroutineTraits.h
  * @brief Compile-time concepts and reflection queries for C++ coroutine protocols.
  * @ingroup Core
  *
@@ -27,6 +27,13 @@
 namespace Sora {
 
     namespace Concept {
+
+        /**
+         * @brief Recognize a type that supports contextual conversion to @c bool.
+         * @tparam T Candidate expression type.
+         */
+        template<typename T>
+        concept ContextuallyBoolean = requires(T&& value) { static_cast<bool>(std::forward<T>(value)); };
 
         /**
          * @brief Recognize any @c std::coroutine_handle specialization after cv/ref removal.
@@ -183,7 +190,8 @@ namespace Sora {
         template<typename T, typename Promise>
         concept AwaiterFor =
             requires(std::remove_reference_t<T>& awaiter, std::coroutine_handle<Promise> continuation) {
-                { awaiter.await_ready() } -> std::convertible_to<bool>;
+                awaiter.await_ready();
+                requires ContextuallyBoolean<decltype(awaiter.await_ready())>;
                 awaiter.await_resume();
                 awaiter.await_suspend(continuation);
             } &&
@@ -200,10 +208,13 @@ namespace Sora {
          * @tparam T Candidate awaiter type, possibly cv/ref-qualified.
          */
         template<typename T>
-        concept Awaiter = requires(std::remove_reference_t<T>& awaiter) {
-            { awaiter.await_ready() } -> std::convertible_to<bool>;
+        concept Awaiter = requires(std::remove_reference_t<T>& awaiter, std::coroutine_handle<> continuation) {
+            awaiter.await_ready();
+            requires ContextuallyBoolean<decltype(awaiter.await_ready())>;
+            awaiter.await_suspend(continuation);
+            requires AwaitSuspendResult<decltype(awaiter.await_suspend(continuation))>;
             awaiter.await_resume();
-        } && !Meta::AwaitSuspendFunctionsOf(^^std::remove_cvref_t<T>).empty();
+        };
 
         /**
          * @brief Recognize an awaiter whose protocol operations cannot throw for @p Promise.
@@ -223,13 +234,11 @@ namespace Sora {
          * @tparam T Candidate awaiter type, possibly cv/ref-qualified.
          */
         template<typename T>
-        concept NothrowAwaiter = Awaiter<T> && requires(std::remove_reference_t<T>& awaiter) {
+        concept NothrowAwaiter = Awaiter<T> && requires(std::remove_reference_t<T>& awaiter,
+                                                        std::coroutine_handle<> continuation) {
             requires noexcept(awaiter.await_ready());
+            requires noexcept(awaiter.await_suspend(continuation));
             requires noexcept(awaiter.await_resume());
-        } && [] consteval {
-            auto func = Meta::AwaitSuspendFunctionsOf(^^std::remove_cvref_t<T>, true);
-            return !func.empty() &&
-                   std::ranges::all_of(func, [](std::meta::info member) { return std::meta::is_noexcept(member); });
         };
 
         /**

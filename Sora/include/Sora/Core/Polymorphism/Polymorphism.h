@@ -39,6 +39,7 @@
  */
 #pragma once
 
+#include "Sora/Core/Polymorphism/Box.h"
 #include "Sora/Core/ABI.h"
 #include "Sora/Core/Hash.h"
 #include "Sora/Core/Traits/TypeTraits.h"
