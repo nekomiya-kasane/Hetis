@@ -4,15 +4,6 @@
  * @ingroup Testing
  */
 
-#if defined(_WIN32)
-#    include <winsock2.h>
-#    include <ws2tcpip.h>
-#else
-#    include <arpa/inet.h>
-#    include <netinet/in.h>
-#    include <sys/socket.h>
-#endif
-
 #include <Sora/Core/PAL/SystemAPI.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -38,12 +29,25 @@ namespace {
     inline constexpr NativeSocket kInvalidSocket = -1;
 #endif
 
+    struct IPv4Address {
+#if defined(PLATFORM_MACOS)
+        uint8_t length = sizeof(IPv4Address);
+        uint8_t family = static_cast<uint8_t>(PAL::SocketSystemAPI::Family::IPv4);
+#else
+        uint16_t family = static_cast<uint16_t>(PAL::SocketSystemAPI::Family::IPv4);
+#endif
+        uint16_t port = 0;
+        uint32_t address = 0;
+        std::array<std::byte, 8> padding{};
+    };
+    static_assert(sizeof(IPv4Address) == 16);
+
     class SocketRuntime {
     public:
         explicit SocketRuntime(const PAL::SocketSystemAPI& api) : api_{api} {
 #if defined(PLATFORM_WINDOWS)
-            WSADATA runtimeData{};
-            initialized_ = api_.startup(0x0202, &runtimeData) == 0;
+            PAL::WindowsSystem::SocketRuntimeDataStorage runtimeData{};
+            initialized_ = api_.startup(0x0202, reinterpret_cast<WSAData*>(&runtimeData)) == 0;
 #else
             initialized_ = true;
 #endif
@@ -91,19 +95,16 @@ namespace {
         AddressInfoOwner& operator=(const AddressInfoOwner&) = delete;
         ~AddressInfoOwner() { api_.freeAddressInfo(head_); }
 
-        [[nodiscard]] const addrinfo& Front() const noexcept { return *head_; }
-
     private:
         const PAL::SocketSystemAPI& api_;
         addrinfo* head_;
     };
 
-    [[nodiscard]] sockaddr_in LoopbackAddress(uint16_t networkPort = 0) noexcept {
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_port = networkPort;
+    [[nodiscard]] IPv4Address LoopbackAddress(uint16_t networkPort = 0) noexcept {
+        IPv4Address address{};
+        address.port = networkPort;
         constexpr uint32_t loopback = 0x7f000001;
-        address.sin_addr.s_addr = std::endian::native == std::endian::little ? std::byteswap(loopback) : loopback;
+        address.address = std::endian::native == std::endian::little ? std::byteswap(loopback) : loopback;
         return address;
     }
 
@@ -115,7 +116,9 @@ TEST_CASE("TCP system API transfers an ordered loopback byte stream", "[Sora.PAL
     SocketRuntime runtime{socket};
     REQUIRE(runtime.Initialized());
 
-    SocketOwner listener{socket, socket.create(AF_INET, SOCK_STREAM, IPPROTO_TCP)};
+    SocketOwner listener{socket, socket.create(static_cast<int>(PAL::SocketSystemAPI::Family::IPv4),
+                                                static_cast<int>(PAL::SocketSystemAPI::Type::Stream),
+                                                static_cast<int>(PAL::SocketSystemAPI::Protocol::Tcp))};
     REQUIRE(listener.Get() != kInvalidSocket);
     int reuseAddress = 1;
     REQUIRE(socket.setOption(listener.Get(), PAL::SocketSystemAPI::kOptionSocket,
@@ -127,20 +130,22 @@ TEST_CASE("TCP system API transfers an ordered loopback byte stream", "[Sora.PAL
                              PAL::SocketSystemAPI::kOptionReuseAddress,
                              reinterpret_cast<char*>(&queriedReuseAddress), &optionSize) == 0);
     REQUIRE(queriedReuseAddress != 0);
-    sockaddr_in endpoint = LoopbackAddress();
+    IPv4Address endpoint = LoopbackAddress();
     REQUIRE(socket.bind(listener.Get(), reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint)) == 0);
     REQUIRE(tcp.listen(listener.Get(), 1) == 0);
     SocketLength endpointSize = sizeof(endpoint);
     REQUIRE(socket.getSocketName(listener.Get(), reinterpret_cast<sockaddr*>(&endpoint), &endpointSize) == 0);
-    REQUIRE(endpoint.sin_port != 0);
+    REQUIRE(endpoint.port != 0);
 
-    SocketOwner client{socket, socket.create(AF_INET, SOCK_STREAM, IPPROTO_TCP)};
+    SocketOwner client{socket, socket.create(static_cast<int>(PAL::SocketSystemAPI::Family::IPv4),
+                                              static_cast<int>(PAL::SocketSystemAPI::Type::Stream),
+                                              static_cast<int>(PAL::SocketSystemAPI::Protocol::Tcp))};
     REQUIRE(client.Get() != kInvalidSocket);
     REQUIRE(tcp.connect(client.Get(), reinterpret_cast<const sockaddr*>(&endpoint), endpointSize) == 0);
-    sockaddr_in peer{};
+    IPv4Address peer{};
     SocketLength peerSize = sizeof(peer);
     REQUIRE(socket.getPeerName(client.Get(), reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0);
-    REQUIRE(peer.sin_port == endpoint.sin_port);
+    REQUIRE(peer.port == endpoint.port);
     SocketOwner server{socket, tcp.accept(listener.Get(), nullptr, nullptr)};
     REQUIRE(server.Get() != kInvalidSocket);
 
@@ -159,28 +164,27 @@ TEST_CASE("Socket system API resolves and formats numeric endpoints", "[Sora.PAL
     SocketRuntime runtime{socket};
     REQUIRE(runtime.Initialized());
 
-    addrinfo hints{};
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = PAL::SocketSystemAPI::kAddressInfoNumericHost |
-                     PAL::SocketSystemAPI::kAddressInfoNumericService;
     addrinfo* resolved = nullptr;
-    REQUIRE(socket.getAddressInfo("127.0.0.1", "443", &hints, &resolved) == 0);
+    REQUIRE(socket.getAddressInfo("127.0.0.1", "443", nullptr, &resolved) == 0);
     REQUIRE(resolved != nullptr);
     const AddressInfoOwner addresses{socket, resolved};
-    const addrinfo& endpoint = addresses.Front();
+    const IPv4Address endpoint = LoopbackAddress(std::endian::native == std::endian::little
+                                                     ? std::byteswap(uint16_t{443})
+                                                     : uint16_t{443});
     std::array<char, 64> host{};
     std::array<char, 16> service{};
-    REQUIRE(socket.getNameInfo(endpoint.ai_addr, static_cast<SocketLength>(endpoint.ai_addrlen), host.data(),
-                               host.size(), service.data(), service.size(), NI_NUMERICHOST | NI_NUMERICSERV) == 0);
+    REQUIRE(socket.getNameInfo(reinterpret_cast<const sockaddr*>(&endpoint),
+                               static_cast<SocketLength>(sizeof(endpoint)), host.data(), host.size(), service.data(),
+                               service.size(),
+                               PAL::SocketSystemAPI::kNameInfoNumericHost |
+                                   PAL::SocketSystemAPI::kNameInfoNumericService) == 0);
     REQUIRE(std::string_view{host.data()} == "127.0.0.1");
     REQUIRE(std::string_view{service.data()} == "443");
 
 #if defined(PLATFORM_WINDOWS)
     const int previousError = socket.getLastError();
-    socket.setLastError(WSAEINVAL);
-    REQUIRE(socket.getLastError() == WSAEINVAL);
+    socket.setLastError(PAL::SocketSystemAPI::kInvalidArgumentError);
+    REQUIRE(socket.getLastError() == PAL::SocketSystemAPI::kInvalidArgumentError);
     socket.setLastError(previousError);
 #endif
 }
@@ -191,11 +195,15 @@ TEST_CASE("UDP system API preserves one loopback datagram boundary", "[Sora.PAL.
     SocketRuntime runtime{socket};
     REQUIRE(runtime.Initialized());
 
-    SocketOwner receiver{socket, socket.create(AF_INET, SOCK_DGRAM, IPPROTO_UDP)};
-    SocketOwner sender{socket, socket.create(AF_INET, SOCK_DGRAM, IPPROTO_UDP)};
+    SocketOwner receiver{socket, socket.create(static_cast<int>(PAL::SocketSystemAPI::Family::IPv4),
+                                                static_cast<int>(PAL::SocketSystemAPI::Type::Datagram),
+                                                static_cast<int>(PAL::SocketSystemAPI::Protocol::Udp))};
+    SocketOwner sender{socket, socket.create(static_cast<int>(PAL::SocketSystemAPI::Family::IPv4),
+                                              static_cast<int>(PAL::SocketSystemAPI::Type::Datagram),
+                                              static_cast<int>(PAL::SocketSystemAPI::Protocol::Udp))};
     REQUIRE(receiver.Get() != kInvalidSocket);
     REQUIRE(sender.Get() != kInvalidSocket);
-    sockaddr_in endpoint = LoopbackAddress();
+    IPv4Address endpoint = LoopbackAddress();
     REQUIRE(socket.bind(receiver.Get(), reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint)) == 0);
     SocketLength endpointSize = sizeof(endpoint);
     REQUIRE(socket.getSocketName(receiver.Get(), reinterpret_cast<sockaddr*>(&endpoint), &endpointSize) == 0);
@@ -208,11 +216,11 @@ TEST_CASE("UDP system API preserves one loopback datagram boundary", "[Sora.PAL.
     REQUIRE((readiness.revents & PAL::SocketSystemAPI::kPollReadable) != 0);
 
     std::array<char, 64> received{};
-    sockaddr_in source{};
+    IPv4Address source{};
     SocketLength sourceSize = sizeof(source);
     const auto bytes = udp.receiveFrom(receiver.Get(), received.data(), received.size(), 0,
                                        reinterpret_cast<sockaddr*>(&source), &sourceSize);
     REQUIRE(bytes == static_cast<decltype(bytes)>(payload.size()));
     REQUIRE(std::string_view{received.data(), static_cast<size_t>(bytes)} == payload);
-    REQUIRE(source.sin_family == AF_INET);
+    REQUIRE(source.family == static_cast<decltype(source.family)>(PAL::SocketSystemAPI::Family::IPv4));
 }

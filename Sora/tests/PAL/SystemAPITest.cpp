@@ -12,6 +12,7 @@
 
 #include <array>
 #include <barrier>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -25,6 +26,36 @@ namespace {
     static_assert(Sora::HasFlag(PAL::SectionFlag::Read | PAL::SectionFlag::Write, PAL::SectionFlag::Read));
 
 #if defined(PLATFORM_WINDOWS)
+    template<typename API>
+    concept HasCurrentProcessEntry = requires(API api) { api.getCurrentProcess; };
+
+    template<typename API>
+    concept HasCOMActivationEntry = requires(API api) { api.createInstance; };
+
+    template<typename API>
+    concept HasCOMStreamEntry = requires(API api) { api.createStreamOnGlobal; };
+
+    template<typename API>
+    concept HasOleDragDropEntry = requires(API api) { api.doDragDrop; };
+
+    template<typename API>
+    concept HasAutomationVariantEntry = requires(API api) { api.variantInit; };
+
+    static_assert(HasCurrentProcessEntry<PAL::ProcessSystemAPI>);
+    static_assert(!HasCurrentProcessEntry<PAL::COMSystemAPI>);
+    static_assert(!HasCurrentProcessEntry<PAL::OleSystemAPI>);
+    static_assert(!HasCurrentProcessEntry<PAL::OleAutomationSystemAPI>);
+    static_assert(HasCOMActivationEntry<PAL::COMSystemAPI>);
+    static_assert(HasCOMStreamEntry<PAL::COMSystemAPI>);
+    static_assert(!HasCOMActivationEntry<PAL::OleSystemAPI>);
+    static_assert(!HasCOMActivationEntry<PAL::OleAutomationSystemAPI>);
+    static_assert(HasOleDragDropEntry<PAL::OleSystemAPI>);
+    static_assert(!HasOleDragDropEntry<PAL::COMSystemAPI>);
+    static_assert(!HasOleDragDropEntry<PAL::OleAutomationSystemAPI>);
+    static_assert(HasAutomationVariantEntry<PAL::OleAutomationSystemAPI>);
+    static_assert(!HasAutomationVariantEntry<PAL::COMSystemAPI>);
+    static_assert(!HasAutomationVariantEntry<PAL::OleSystemAPI>);
+
     struct ScopedTestDirectory {
         std::filesystem::path path;
 
@@ -46,6 +77,10 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadVirtualMemorySystemAPI() == &PAL::LoadVirtualMemorySystemAPI());
     REQUIRE(&PAL::LoadFileMappingSystemAPI() == &PAL::LoadFileMappingSystemAPI());
     REQUIRE(&PAL::LoadSystemInformationSystemAPI() == &PAL::LoadSystemInformationSystemAPI());
+    REQUIRE(&PAL::LoadDebugSystemAPI() == &PAL::LoadDebugSystemAPI());
+    REQUIRE(&PAL::LoadCOMSystemAPI() == &PAL::LoadCOMSystemAPI());
+    REQUIRE(&PAL::LoadOleSystemAPI() == &PAL::LoadOleSystemAPI());
+    REQUIRE(&PAL::LoadOleAutomationSystemAPI() == &PAL::LoadOleAutomationSystemAPI());
     REQUIRE(&PAL::LoadEnvironmentSystemAPI() == &PAL::LoadEnvironmentSystemAPI());
     REQUIRE(&PAL::LoadModuleSystemAPI() == &PAL::LoadModuleSystemAPI());
     REQUIRE(&PAL::LoadProcessSystemAPI() == &PAL::LoadProcessSystemAPI());
@@ -81,6 +116,156 @@ TEST_CASE("System API tables have stable process-lifetime identities", "[Sora.PA
     REQUIRE(&PAL::LoadTimerFdSystemAPI() == &PAL::LoadTimerFdSystemAPI());
     REQUIRE(&PAL::LoadSignalFdSystemAPI() == &PAL::LoadSignalFdSystemAPI());
     REQUIRE(&PAL::LoadLinuxIoUringSystemAPI() == &PAL::LoadLinuxIoUringSystemAPI());
+#endif
+}
+
+TEST_CASE("Debugger and host-information tables expose indivisible native calls", "[Sora.PAL.SystemAPI]") {
+    const PAL::DebugSystemAPI& debug = PAL::LoadDebugSystemAPI();
+#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
+#    if defined(PLATFORM_WINDOWS)
+    REQUIRE(debug.isDebuggerPresent != nullptr);
+    REQUIRE(debug.breakpoint != nullptr);
+    REQUIRE(debug.checkRemoteDebuggerPresent != nullptr);
+    REQUIRE(debug.continueDebugEvent != nullptr);
+    REQUIRE(debug.debugActiveProcess != nullptr);
+    REQUIRE(debug.debugActiveProcessStop != nullptr);
+    REQUIRE(debug.breakpointProcess != nullptr);
+    REQUIRE(debug.setProcessKillOnExit != nullptr);
+    REQUIRE(debug.fatalExit != nullptr);
+    REQUIRE(debug.outputDebugStringAnsi != nullptr);
+    REQUIRE(debug.outputDebugStringWide != nullptr);
+    REQUIRE(debug.waitForDebugEvent != nullptr);
+    REQUIRE(debug.waitForDebugEventExtended != nullptr);
+    [[maybe_unused]] const bool attached = debug.isDebuggerPresent() != 0;
+    const PAL::ProcessSystemAPI& process = PAL::LoadProcessSystemAPI();
+    REQUIRE(process.getCurrentProcess != nullptr);
+    PAL::WindowsSystem::Bool remoteAttached = PAL::WindowsSystem::kFalse;
+    REQUIRE(debug.checkRemoteDebuggerPresent(process.getCurrentProcess(), &remoteAttached) != 0);
+    const PAL::SystemInformationSystemAPI& system = PAL::LoadSystemInformationSystemAPI();
+    REQUIRE(system.globalMemoryStatus != nullptr);
+    REQUIRE(system.getNativeSystemInfo != nullptr);
+    REQUIRE(system.getTickCount64 != nullptr);
+    PAL::WindowsSystem::MemoryStatus memory{};
+    REQUIRE(system.globalMemoryStatus(&memory) != 0);
+    REQUIRE(memory.totalPhysicalBytes > 0);
+    REQUIRE(memory.availablePhysicalBytes <= memory.totalPhysicalBytes);
+    PAL::WindowsSystem::SystemInfo nativeInfo{};
+    system.getNativeSystemInfo(&nativeInfo);
+    REQUIRE(nativeInfo.pageSize > 0);
+    REQUIRE(system.getTickCount64() > 0);
+    REQUIRE(process.getProcessId != nullptr);
+    REQUIRE(process.getProcessHandleCount != nullptr);
+    REQUIRE(process.queryProcessCycleTime != nullptr);
+    REQUIRE(process.getProcessId(process.getCurrentProcess()) == process.getCurrentProcessId());
+    PAL::WindowsSystem::DWord handleCount = 0;
+    REQUIRE(process.getProcessHandleCount(process.getCurrentProcess(), &handleCount) != 0);
+    PAL::WindowsSystem::DWord64 processCycles = 0;
+    REQUIRE(process.queryProcessCycleTime(process.getCurrentProcess(), &processCycles) != 0);
+    const PAL::ThreadSystemAPI& thread = PAL::LoadThreadSystemAPI();
+    REQUIRE(thread.getThreadId != nullptr);
+    REQUIRE(thread.queryThreadCycleTime != nullptr);
+    REQUIRE(thread.getThreadId(thread.getCurrentThread()) == thread.getCurrentThreadId());
+    PAL::WindowsSystem::DWord64 threadCycles = 0;
+    REQUIRE(thread.queryThreadCycleTime(thread.getCurrentThread(), &threadCycles) != 0);
+    const PAL::FileSystemAPI& file = PAL::LoadFileSystemAPI();
+    REQUIRE(file.getFileType != nullptr);
+    REQUIRE(file.setFilePointer != nullptr);
+#    elif defined(PLATFORM_LINUX)
+    REQUIRE(debug.traceProcess != nullptr);
+    REQUIRE(PAL::LoadProcessControlSystemAPI().raiseSignal != nullptr);
+#    else
+    REQUIRE(PAL::LoadProcessControlSystemAPI().raiseSignal != nullptr);
+#    endif
+#endif
+}
+
+TEST_CASE("COM, OLE, and OLE Automation tables preserve subsystem boundaries", "[Sora.PAL.SystemAPI]") {
+#if defined(PLATFORM_WINDOWS)
+    const PAL::COMSystemAPI& com = PAL::LoadCOMSystemAPI();
+    const PAL::OleSystemAPI& ole = PAL::LoadOleSystemAPI();
+    const PAL::OleAutomationSystemAPI& automation = PAL::LoadOleAutomationSystemAPI();
+
+    REQUIRE(com.initializeEx != nullptr);
+    REQUIRE(com.uninitialize != nullptr);
+    REQUIRE(com.initializeSecurity != nullptr);
+    REQUIRE(com.createInstance != nullptr);
+    REQUIRE(com.getClassObject != nullptr);
+    REQUIRE(com.marshalInterface != nullptr);
+    REQUIRE(com.unmarshalInterface != nullptr);
+    REQUIRE(com.taskMemAlloc != nullptr);
+    REQUIRE(com.taskMemFree != nullptr);
+    REQUIRE(com.createGuid != nullptr);
+    REQUIRE(com.stringFromGuid2 != nullptr);
+    REQUIRE(com.waitForMultipleHandles != nullptr);
+    REQUIRE(com.createStreamOnGlobal != nullptr);
+    REQUIRE(com.getGlobalFromStream != nullptr);
+    REQUIRE(ole.initialize != nullptr);
+    REQUIRE(ole.uninitialize != nullptr);
+    REQUIRE(ole.create != nullptr);
+    REQUIRE(ole.load != nullptr);
+    REQUIRE(ole.registerDragDrop != nullptr);
+    REQUIRE(ole.doDragDrop != nullptr);
+    REQUIRE(ole.setClipboard != nullptr);
+    REQUIRE(automation.allocString != nullptr);
+    REQUIRE(automation.freeString != nullptr);
+    REQUIRE(automation.stringLength != nullptr);
+    REQUIRE(automation.safeArrayCreate != nullptr);
+    REQUIRE(automation.variantInit != nullptr);
+    REQUIRE(automation.registerActiveObject != nullptr);
+    REQUIRE(automation.revokeActiveObject != nullptr);
+    REQUIRE(automation.getActiveObject != nullptr);
+    REQUIRE(automation.loadTypeLibrary != nullptr);
+    REQUIRE(automation.loadTypeLibraryEx != nullptr);
+
+    PAL::WindowsSystem::Guid guid{};
+    REQUIRE(com.createGuid(&guid) == 0);
+    wchar_t guidText[40]{};
+    REQUIRE(com.stringFromGuid2(guid, guidText, static_cast<int>(std::size(guidText))) > 0);
+    const auto string = automation.allocString(L"Sora");
+    REQUIRE(string != nullptr);
+    REQUIRE(automation.stringLength(string) == 4);
+    automation.freeString(string);
+#endif
+}
+
+TEST_CASE("Structured Storage keeps storage, property, and persistence entry points in one table",
+          "[Sora.PAL.SystemAPI]") {
+#if defined(PLATFORM_WINDOWS)
+    const PAL::StructuredStorageSystemAPI& storage = PAL::LoadStructuredStorageSystemAPI();
+    REQUIRE(storage.createDocfile != nullptr);
+    REQUIRE(storage.createDocfileOnLockBytes != nullptr);
+    REQUIRE(storage.openStorage != nullptr);
+    REQUIRE(storage.openStorageOnLockBytes != nullptr);
+    REQUIRE(storage.isStorageFile != nullptr);
+    REQUIRE(storage.isStorageLockBytes != nullptr);
+    REQUIRE(storage.setStorageTimes != nullptr);
+    REQUIRE(storage.createStorageEx != nullptr);
+    REQUIRE(storage.openStorageEx != nullptr);
+    REQUIRE(storage.createPropertyStorage != nullptr);
+    REQUIRE(storage.openPropertyStorage != nullptr);
+    REQUIRE(storage.createPropertySetStorage != nullptr);
+    REQUIRE(storage.formatIdToPropertyStorageName != nullptr);
+    REQUIRE(storage.propertyStorageNameToFormatId != nullptr);
+    REQUIRE(storage.readClassStorage != nullptr);
+    REQUIRE(storage.writeClassStorage != nullptr);
+    REQUIRE(storage.readClassStream != nullptr);
+    REQUIRE(storage.writeClassStream != nullptr);
+    REQUIRE(storage.getGlobalFromLockBytes != nullptr);
+    REQUIRE(storage.createLockBytesOnGlobal != nullptr);
+    REQUIRE(storage.getConvertStorage != nullptr);
+    REQUIRE(storage.setConvertStorage != nullptr);
+    REQUIRE(storage.writeFormatUserType != nullptr);
+    REQUIRE(storage.readFormatUserType != nullptr);
+    REQUIRE(storage.openAsyncDocfile != nullptr);
+    REQUIRE(storage.getFillLockBytesOnLockBytes != nullptr);
+    REQUIRE(storage.getFillLockBytesOnFile != nullptr);
+    STATIC_REQUIRE(std::same_as<decltype(storage.openLayoutDocfile),
+                                PAL::StructuredStorageSystemAPI::OpenLayoutDocfileFunction>);
+    REQUIRE(storage.copyPropertyVariant != nullptr);
+    REQUIRE(storage.clearPropertyVariant != nullptr);
+    REQUIRE(storage.freePropertyVariantArray != nullptr);
+#else
+    REQUIRE(std::same_as<decltype(PAL::LoadStructuredStorageSystemAPI()), const PAL::StructuredStorageSystemAPI&>);
 #endif
 }
 
@@ -283,8 +468,9 @@ TEST_CASE("Native window views enforce concrete backend identity", "[Sora.PAL.Sy
 
 TEST_CASE("Window capabilities require the complete requested feature mask", "[Sora.PAL.SystemAPI]") {
     constexpr PAL::WindowSystemCapabilities capabilities{
-        .features = std::to_underlying(PAL::WindowSystemFeature::WindowCreation) |
-                    std::to_underlying(PAL::WindowSystemFeature::EventQueue),
+        .features = static_cast<PAL::WindowSystemFeature>(
+            std::to_underlying(PAL::WindowSystemFeature::WindowCreation) |
+            std::to_underlying(PAL::WindowSystemFeature::EventQueue)),
     };
     constexpr auto complete =
         static_cast<PAL::WindowSystemFeature>(std::to_underlying(PAL::WindowSystemFeature::WindowCreation) |

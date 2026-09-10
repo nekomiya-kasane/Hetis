@@ -7,6 +7,8 @@
 #include <Sora/Core/PAL/InterprocessFileLock.h>
 #include <Sora/Platform.h>
 
+#include "../ProcessTestSupport.h"
+
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -15,21 +17,6 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
-
-#if defined(PLATFORM_WINDOWS)
-#    ifndef WIN32_LEAN_AND_MEAN
-#        define WIN32_LEAN_AND_MEAN
-#    endif
-#    ifndef NOMINMAX
-#        define NOMINMAX
-#    endif
-#    include <Windows.h>
-#    include <process.h>
-#else
-#    include <csignal>
-#    include <sys/wait.h>
-#    include <unistd.h>
-#endif
 
 namespace {
 
@@ -59,44 +46,6 @@ namespace {
         return false;
     }
 
-#if defined(PLATFORM_WINDOWS)
-    [[nodiscard]] HANDLE SpawnChild(const std::filesystem::path& executable, const std::filesystem::path& lockPath,
-                                    const std::filesystem::path& readyPath) {
-        const intptr_t process = ::_wspawnl(_P_NOWAIT, executable.c_str(), executable.c_str(), L"--lock-child",
-                                            lockPath.c_str(), readyPath.c_str(), static_cast<const wchar_t*>(nullptr));
-        return process == -1 ? nullptr : reinterpret_cast<HANDLE>(process);
-    }
-
-    [[nodiscard]] bool TerminateAndWait(HANDLE process) {
-        const bool terminated = ::TerminateProcess(process, 73) != FALSE;
-        const bool waited = ::WaitForSingleObject(process, 5000) == WAIT_OBJECT_0;
-        ::CloseHandle(process);
-        return terminated && waited;
-    }
-#else
-    [[nodiscard]] pid_t SpawnChild(const std::filesystem::path& executable, const std::filesystem::path& lockPath,
-                                   const std::filesystem::path& readyPath) {
-        const pid_t process = ::fork();
-        if (process == 0) {
-            const std::string executableText = executable.string();
-            const std::string lockText = lockPath.string();
-            const std::string readyText = readyPath.string();
-            ::execl(executableText.c_str(), executableText.c_str(), "--lock-child", lockText.c_str(), readyText.c_str(),
-                    nullptr);
-            ::_exit(126);
-        }
-        return process;
-    }
-
-    [[nodiscard]] bool TerminateAndWait(pid_t process) {
-        if (process <= 0 || ::kill(process, SIGKILL) != 0) {
-            return false;
-        }
-        int status = 0;
-        return ::waitpid(process, &status, 0) == process && WIFSIGNALED(status);
-    }
-#endif
-
     int RunParent(const std::filesystem::path& executable) {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         const std::filesystem::path directory =
@@ -109,24 +58,21 @@ namespace {
             return 1;
         }
 
-        const auto child = SpawnChild(std::filesystem::absolute(executable), lockPath, readyPath);
-#if defined(PLATFORM_WINDOWS)
-        if (child == nullptr) {
-#else
-        if (child <= 0) {
-#endif
+        auto child = Sora::Test::SpawnChildProcess(std::filesystem::absolute(executable),
+                                                   {"--lock-child", lockPath, readyPath});
+        if (!child) {
             std::filesystem::remove_all(directory, error);
             return 1;
         }
         if (!WaitForReady(readyPath)) {
-            static_cast<void>(TerminateAndWait(child));
+            static_cast<void>(Sora::Test::TerminateChildProcess(*child));
             std::filesystem::remove_all(directory, error);
             return 1;
         }
 
         auto contended = Sora::PAL::InterprocessFileLock::TryAcquire(lockPath);
         const bool excluded = contended && !*contended;
-        const bool terminated = TerminateAndWait(child);
+        const bool terminated = Sora::Test::TerminateChildProcess(*child);
         auto released = Sora::PAL::InterprocessFileLock::TryAcquire(lockPath);
         const bool reacquired = released && released->has_value();
         released = std::unexpected(Sora::ErrorCode::IoError);
