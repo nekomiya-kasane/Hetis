@@ -4,7 +4,7 @@
  * @ingroup Testing
  */
 
-#include <Sora/Renderer/DeviceFeature.h>
+#include <Sora/Render/DeviceFeature.h>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -19,6 +19,7 @@
 #include <Sora/Core/ADT/IntrusiveForwardList.h>
 #include <Sora/Core/ADT/PagedNodePool.h>
 #include <Sora/Core/Guard.h>
+#include <Sora/Core/Memory/AllocatorTraits.h>
 
 namespace Sora::Concurrency {
 
@@ -60,8 +61,8 @@ namespace Sora::Concurrency {
      * @tparam Allocator Allocator used only when a new page is grown.
      */
     template<typename T, std::size_t NodesPerPage = 64, typename Allocator = std::allocator<T>>
-        requires(std::is_object_v<T> && NodesPerPage > 0 && std::is_nothrow_destructible_v<T> &&
-                 requires { typename std::allocator_traits<Allocator>::template rebind_alloc<T>; })
+        requires(Concept::CompleteObject<T> && NodesPerPage > 0 && std::is_nothrow_destructible_v<T> &&
+                 Concept::RebindableAllocator<Allocator, Detail::BatchQueueEntry<T>>)
     class ConcurrentBatchQueue {
     public:
         using ValueType = T;

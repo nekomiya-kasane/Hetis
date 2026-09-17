@@ -45,6 +45,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <Sora/Core/Memory/AllocatorTraits.h>
+
 namespace Sora {
 
     /** @name Recursive Delegation Tags @{ ————————————————————————————————————— */
@@ -180,11 +182,8 @@ namespace Sora {
             std::common_reference_with<RRefType<ReferenceType<Ref, V>>&&, const ValueType<Ref, V>&>;
 
         template<typename Allocator>
-        concept ValidGeneratorAllocator = std::is_void_v<Allocator> || requires {
-            typename std::allocator_traits<Allocator>::template rebind_alloc<std::byte>;
-            requires std::is_pointer_v<typename std::allocator_traits<
-                typename std::allocator_traits<Allocator>::template rebind_alloc<std::byte>>::pointer>;
-        };
+        concept ValidGeneratorAllocator = std::is_void_v<Allocator> ||
+                                          Sora::Concept::RawPointerRebindableAllocator<Allocator, std::byte>;
 
         template<std::size_t Alignment>
         concept ValidGeneratorFrameAlignment = Alignment >= alignof(std::max_align_t) && std::has_single_bit(Alignment);

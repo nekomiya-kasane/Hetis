@@ -14,6 +14,7 @@
 #include <Sora/Platform.h>
 
 #include <Sora/Core/ADT/IntrusiveForwardList.h>
+#include <Sora/Core/Memory/AllocatorTraits.h>
 
 namespace Sora {
 
@@ -32,7 +33,7 @@ namespace Sora {
     template<typename Node, auto FreeNextMember, std::size_t NodesPerPage = 64,
              typename Allocator = std::allocator<Node>>
         requires IntrusiveForwardLink<Node, FreeNextMember> && std::default_initializable<Node> && (NodesPerPage > 0) &&
-                 requires { typename std::allocator_traits<Allocator>::template rebind_alloc<Node>; }
+                 Concept::RebindableAllocator<Allocator, Node>
     class PagedNodePool {
         using List = IntrusiveForwardList<Node, FreeNextMember>;
         using Segment = typename List::Segment;
@@ -44,6 +45,9 @@ namespace Sora {
 
         using PageAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<Page>;
         using PageTraits = std::allocator_traits<PageAllocator>;
+
+        static_assert(Concept::RebindableAllocator<Allocator, Page>,
+                      "PagedNodePool allocator must rebind to its page type.");
 
     public:
         PagedNodePool() noexcept(std::is_nothrow_default_constructible_v<PageAllocator>) = default;
