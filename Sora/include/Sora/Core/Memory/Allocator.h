@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <Sora/Core/Memory/AllocatorTraits.h>
 #include <Sora/Core/Memory/MemoryLayout.h>
 
 #include <cstddef>
@@ -41,7 +42,7 @@ namespace Sora {
      * @c new or @c delete; containers use it only when selected explicitly.
     */
     template<typename T>
-        requires(std::is_object_v<T> && !std::is_const_v<T> && !std::is_volatile_v<T>)
+        requires Concept::CompleteObject<T>
     class Allocator {
     public:
         using value_type = T;
