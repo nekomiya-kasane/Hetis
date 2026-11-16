@@ -146,7 +146,7 @@ namespace Sora {
         protected:
             RefCountedBase() noexcept = default;
 
-            ~RefCountedBase() noexcept {
+            virtual ~RefCountedBase() noexcept {
                 if constexpr (Platform::kIsDebug) {
                     Assert(!debug_.AdoptionRequired(), "destroyed a counted object that was never adopted");
                     Assert(debug_.DestructionStarted(), "destroyed a counted object outside Release");

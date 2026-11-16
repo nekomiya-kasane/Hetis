@@ -61,8 +61,8 @@ namespace Sora::Concurrency {
      * @tparam Allocator Allocator used only when a new page is grown.
      */
     template<typename T, std::size_t NodesPerPage = 64, typename Allocator = std::allocator<T>>
-        requires(Concept::CompleteObject<T> && NodesPerPage > 0 && std::is_nothrow_destructible_v<T> &&
-                 Concept::RebindableAllocator<Allocator, Detail::BatchQueueEntry<T>>)
+        requires(Sora::Concept::CompleteObject<T> && NodesPerPage > 0 && std::is_nothrow_destructible_v<T> &&
+                 Sora::Concept::RebindableAllocator<Allocator, Detail::BatchQueueEntry<T>>)
     class ConcurrentBatchQueue {
     public:
         using ValueType = T;
