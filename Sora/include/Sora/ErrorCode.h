@@ -157,7 +157,7 @@ namespace Sora {
     /** @brief Void result for operations that succeed with no value. */
     using VoidResult = std::expected<void, ErrorCode>;
 
-    /** @brief Converts an std::optional to a Result, returning ErrorCode::Unknown if the optional is empty. */
+    /** @brief Converts a std::optional to a Result, returning ErrorCode::Unknown if the optional is empty. */
     template<typename T>
     [[nodiscard]] constexpr Result<T> NormalizeResult(std::optional<T>&& result) {
         if (!result) {

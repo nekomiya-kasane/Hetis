@@ -9,8 +9,6 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <new>
-#include <limits>
 #include <string_view>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -59,6 +57,12 @@
 #    define SORA_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #else
 #    define SORA_NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
+
+#if defined(_MSC_VER)
+#    define SORA_WEAK __declspec(selectany)
+#else
+#    define SORA_WEAK __attribute__((weak))
 #endif
 
 namespace Sora {
@@ -130,7 +134,7 @@ namespace Sora {
         /** @brief Native byte order of scalar object representations. */
         enum class ByteOrder : uint8_t {
             Unknown = 0, /**< The byte order is not known. */
-            Little,      /**< Least significant byte first. */
+            Little,      /**< The Least significant byte first. */
             Big,         /**< Most significant byte first. */
             Mixed,       /**< Mixed endian representation. */
         };
@@ -381,6 +385,7 @@ namespace Sora {
     } // namespace Platform
 
     using std::size_t;
+    // ReSharper disable once CppInconsistentNaming
     using ssize_t = std::make_signed_t<size_t>;
 
     using std::int16_t;
