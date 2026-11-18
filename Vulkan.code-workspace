@@ -7,6 +7,10 @@
     {
       "name": "stdexec (ref)",
       "path": "../stdexec"
+    },
+    {
+      "name": "imrefl (ref-2)",
+      "path": "../imrefl"
     }
   ],
   "settings": {
@@ -35,7 +39,6 @@
       "-j=16",
       "--query-driver=T:/toolchains/coca-toolchain-p2996/bin/clang*.exe"
     ],
-
     // ===================================================================
     //  CMake — driven entirely by CMakePresets.json (shared with VS). The
     //  COCA p2996 toolchain pins its own clang++ and bundled ninja, so the
@@ -46,7 +49,6 @@
     "cmake.useVsDeveloperEnvironment": "never",
     "cmake.configureOnOpen": true,
     "cmake.options.statusBarVisibility": "compact",
-
     // ===================================================================
     //  Editor / files
     // ===================================================================

@@ -368,7 +368,7 @@ if (std::optional<CommandError> conflict = Validate(change)) {
 }
 
 AppliedChange applied = document_.Apply(std::move(change));
-const std::size_t undo_record = undo_records_.size() + 1;
+const size_t undo_record = undo_records_.size() + 1;
 undo_records_.push_back(UndoRecord{.id = undo_record,
                                    .label = request.label,
                                    .base_version = request.base_version,

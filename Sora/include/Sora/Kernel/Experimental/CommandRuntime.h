@@ -70,7 +70,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
 
         [[nodiscard]] std::string Join(std::string_view separator = "\n") const {
             std::ostringstream out;
-            for (std::size_t i = 0; i < records.size(); ++i) {
+            for (size_t i = 0; i < records.size(); ++i) {
                 if (i != 0) {
                     out << separator;
                 }
@@ -1117,13 +1117,13 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         std::vector<StateObjectId> updated{};
         std::vector<StateObjectId> erased{};
 
-        [[nodiscard]] std::size_t OperationCount() const noexcept {
+        [[nodiscard]] size_t OperationCount() const noexcept {
             return inserted.size() + updated.size() + erased.size();
         }
     };
 
     struct IndexedStateObject {
-        std::size_t index{};
+        size_t index{};
         StateObject object{};
     };
 
@@ -1133,7 +1133,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         std::vector<StateObject> updated_before{};
         std::vector<IndexedStateObject> erased_before{};
 
-        [[nodiscard]] std::size_t OperationCount() const noexcept { return summary.OperationCount(); }
+        [[nodiscard]] size_t OperationCount() const noexcept { return summary.OperationCount(); }
     };
 
     class DocumentModel {
@@ -1168,7 +1168,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         }
 
         [[nodiscard]] IndexedStateObject IndexedSnapshot(const StateObjectId& id) const {
-            const std::size_t index = feature_index_.at(id.value);
+            const size_t index = feature_index_.at(id.value);
             return IndexedStateObject{.index = index, .object = features_[index]};
         }
 
@@ -1200,13 +1200,13 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         void UndoAppliedChange(std::span<const StateObject> inserted_after,
                                std::span<const StateObject> updated_before,
                                std::span<const IndexedStateObject> erased_before) {
-            for (std::size_t i = inserted_after.size(); i > 0; --i) {
+            for (size_t i = inserted_after.size(); i > 0; --i) {
                 Erase(inserted_after[i - 1].id);
             }
-            for (std::size_t i = updated_before.size(); i > 0; --i) {
+            for (size_t i = updated_before.size(); i > 0; --i) {
                 Replace(updated_before[i - 1]);
             }
-            for (std::size_t i = erased_before.size(); i > 0; --i) {
+            for (size_t i = erased_before.size(); i > 0; --i) {
                 RestoreErased(erased_before[i - 1]);
             }
             ++version_.value;
@@ -1226,7 +1226,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         }
 
         void Erase(const StateObjectId& id) {
-            const std::size_t index = feature_index_.at(id.value);
+            const size_t index = feature_index_.at(id.value);
             features_.erase(features_.begin() + static_cast<std::ptrdiff_t>(index));
             RebuildIndex();
         }
@@ -1236,14 +1236,14 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         }
 
         void RestoreErased(IndexedStateObject erased) {
-            const std::size_t index = std::min(erased.index, features_.size());
+            const size_t index = std::min(erased.index, features_.size());
             features_.insert(features_.begin() + static_cast<std::ptrdiff_t>(index), std::move(erased.object));
             RebuildIndex();
         }
 
         void RebuildIndex() {
             feature_index_.clear();
-            for (std::size_t i = 0; i < features_.size(); ++i) {
+            for (size_t i = 0; i < features_.size(); ++i) {
                 if (!features_[i].id.Empty()) {
                     feature_index_[features_[i].id.value] = i;
                 }
@@ -1252,7 +1252,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
 
         DocumentVersion version_{};
         std::vector<Feature> features_{};
-        std::unordered_map<std::string, std::size_t> feature_index_{};
+        std::unordered_map<std::string, size_t> feature_index_{};
         uint64_t next_object_id_{1};
     };
 
@@ -1262,7 +1262,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
     };
 
     struct UndoRecord {
-        std::size_t id{};
+        size_t id{};
         std::string label{};
         DocumentVersion base_version{};
         DocumentVersion new_version{};
@@ -1272,13 +1272,13 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         std::vector<StateObject> updated_before{};
         std::vector<IndexedStateObject> erased_before{};
 
-        [[nodiscard]] std::size_t OperationCount() const noexcept { return summary.OperationCount(); }
+        [[nodiscard]] size_t OperationCount() const noexcept { return summary.OperationCount(); }
     };
 
     struct TransactionResult {
         DocumentVersion new_version{};
-        std::size_t undo_record{};
-        std::size_t applied_operations{};
+        size_t undo_record{};
+        size_t applied_operations{};
     };
 
     class DocumentTransactionRuntime {
@@ -1290,7 +1290,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
             return std::span<const UndoRecord>{undo_records_};
         }
 
-        [[nodiscard]] const UndoRecord* FindUndoRecord(std::size_t id) const {
+        [[nodiscard]] const UndoRecord* FindUndoRecord(size_t id) const {
             const auto it = std::ranges::find_if(undo_records_, [id](const UndoRecord& record) {
                 return record.id == id;
             });
@@ -1312,7 +1312,7 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
                 }
 
                 AppliedChange applied = document_.Apply(std::move(change));
-                const std::size_t undo_record = undo_records_.size() + 1;
+                const size_t undo_record = undo_records_.size() + 1;
                 undo_records_.push_back(UndoRecord{.id = undo_record,
                                                    .label = request.label,
                                                    .base_version = request.base_version,
@@ -1352,8 +1352,8 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
                     return Completion<TransactionResult>::Error(std::move(*invalid));
                 }
 
-                const std::size_t undo_record = last.id;
-                const std::size_t applied_operations = last.OperationCount();
+                const size_t undo_record = last.id;
+                const size_t applied_operations = last.OperationCount();
                 const std::string label = last.label;
                 document_.UndoAppliedChange(last.inserted_after, last.updated_before, last.erased_before);
                 undo_records_.pop_back();
@@ -1441,11 +1441,11 @@ namespace Sora::Kernel::Experimental::CommandRuntime {
         KeyBindingResolution modal_resolution{};
         EventDisposition selection_event{EventDisposition::Ignored};
         EventDisposition fallback_event{EventDisposition::Ignored};
-        std::size_t stack_depth_during_measure{};
-        std::size_t undo_record{};
-        std::size_t undo_record_operations{};
-        std::size_t undone_record{};
-        std::size_t undo_applied_operations{};
+        size_t stack_depth_during_measure{};
+        size_t undo_record{};
+        size_t undo_record_operations{};
+        size_t undone_record{};
+        size_t undo_applied_operations{};
     };
 
     [[nodiscard]] inline DemoResult RunDemoScenario() {

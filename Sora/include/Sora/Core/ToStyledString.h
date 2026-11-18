@@ -350,7 +350,7 @@ namespace Sora {
             } else if constexpr (std::same_as<U, bool>) {
                 builder.Text($$::StyledRole::Boolean, value ? "true" : "false");
             } else if constexpr (std::same_as<U, char>) {
-                char text[] = {value, '\0'};
+                const char text[] = {value, '\0'};
                 builder.QuotedString(std::string_view{text, 1});
             } else if constexpr (Concept::NarrowStringLike<T> || Concept::Utf8StringLike<T> ||
                                  Concept::Utf16StringLike<T> || Concept::Utf32StringLike<T> ||
@@ -591,6 +591,7 @@ struct std::formatter<T> {
                 case '?':
                     mode = Sora::RenderMode::Placeholder;
                     break;
+                default: break;
             }
             ++it;
         }

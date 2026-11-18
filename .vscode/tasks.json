@@ -1,0 +1,61 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "diag clangd formatter",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"C:\\Users\\nekom\\AppData\\Local\\Temp\\diag-clangd.ps1"
+			],
+			"problemMatcher": [],
+			"group": "none"
+		},
+		{
+			"label": "diag clangd window1",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"C:\\Users\\nekom\\AppData\\Local\\Temp\\diag-clangd2.ps1"
+			],
+			"problemMatcher": [],
+			"group": "none"
+		},
+		{
+			"label": "diag clangd T drive",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"C:\\Users\\nekom\\AppData\\Local\\Temp\\diag-clangd3.ps1"
+			],
+			"problemMatcher": [],
+			"group": "none"
+		},
+		{
+			"label": "diag clangd history",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"C:\\Users\\nekom\\AppData\\Local\\Temp\\diag-clangd4.ps1"
+			],
+			"problemMatcher": [],
+			"group": "none"
+		}
+	]
+}

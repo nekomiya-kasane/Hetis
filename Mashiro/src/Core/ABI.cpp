@@ -31,7 +31,7 @@
 #    include <cxxabi.h>
 #endif
 
-namespace Mashiro::Meta::ABI::Runtime {
+namespace Mashiro::ABI::Runtime {
 
 #ifdef _WIN32
 
@@ -47,21 +47,27 @@ namespace Mashiro::Meta::ABI::Runtime {
         ///        a bare builtin tag like `.H` has no textual demangling and is
         ///        reported as failure (there is no human form to recover).
         std::optional<std::string> Undecorate(std::string_view mangled) noexcept {
-            if (mangled.empty()) return std::nullopt;
+            if (mangled.empty()) {
+                return std::nullopt;
+            }
 
             std::string_view sym = mangled;
-            if (sym.front() == '.') sym.remove_prefix(1);
-            if (sym.empty() || sym.front() != '?') return std::nullopt;
+            if (sym.front() == '.') {
+                sym.remove_prefix(1);
+            }
+            if (sym.empty() || sym.front() != '?') {
+                return std::nullopt;
+            }
 
             // UnDecorateSymbolName needs a NUL-terminated input.
             std::string buf{sym};
 
             char out[1024];
             std::lock_guard lock(g_undecorateMutex);
-            DWORD n = ::UnDecorateSymbolName(buf.c_str(), out,
-                                             static_cast<DWORD>(sizeof(out)),
-                                             UNDNAME_COMPLETE);
-            if (n == 0) return std::nullopt;
+            DWORD n = ::UnDecorateSymbolName(buf.c_str(), out, static_cast<DWORD>(sizeof(out)), UNDNAME_COMPLETE);
+            if (n == 0) {
+                return std::nullopt;
+            }
             return std::string(out, n);
         }
 
@@ -72,13 +78,16 @@ namespace Mashiro::Meta::ABI::Runtime {
     namespace {
 
         std::optional<std::string> Undecorate(std::string_view mangled) noexcept {
-            if (mangled.empty()) return std::nullopt;
+            if (mangled.empty()) {
+                return std::nullopt;
+            }
             std::string buf{mangled};
             int status = 0;
-            char* demangled =
-                abi::__cxa_demangle(buf.c_str(), nullptr, nullptr, &status);
+            char* demangled = abi::__cxa_demangle(buf.c_str(), nullptr, nullptr, &status);
             if (status != 0 || demangled == nullptr) {
-                if (demangled) std::free(demangled);
+                if (demangled) {
+                    std::free(demangled);
+                }
                 return std::nullopt;
             }
             std::string result{demangled};
@@ -95,8 +104,10 @@ namespace Mashiro::Meta::ABI::Runtime {
     }
 
     std::string Demangle(std::string_view mangled) {
-        if (auto r = Undecorate(mangled)) return *r;
+        if (auto r = Undecorate(mangled)) {
+            return *r;
+        }
         return std::string{mangled};
     }
 
-} // namespace Mashiro::Meta::ABI::Runtime
+} // namespace Mashiro::ABI::Runtime

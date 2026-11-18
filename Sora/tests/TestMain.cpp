@@ -6,18 +6,14 @@
  * @ingroup Testing
  */
 
-#ifndef SORA_TEST_INSTALL_CRASH_HANDLER
-#    error "SORA_TEST_INSTALL_CRASH_HANDLER must be defined by the Sora test-runner target."
-#endif
-
-#if SORA_TEST_INSTALL_CRASH_HANDLER
+#if SORA_INSTALL_CRASH_HANDLER
 #    include <Sora/Core/CrashHandler.h>
 #    include <Sora/Core/ToStyledString.h>
 #endif
 
 #include <catch2/catch_session.hpp>
 
-#if SORA_TEST_INSTALL_CRASH_HANDLER
+#if SORA_INSTALL_CRASH_HANDLER
 #    include <cstdio>
 #    include <cstdlib>
 #    include <string>
@@ -25,7 +21,7 @@
 #    include <utility>
 #endif
 
-#if SORA_TEST_INSTALL_CRASH_HANDLER
+#if SORA_INSTALL_CRASH_HANDLER
 namespace {
 
     /** @brief Write one complete runner diagnostic to the native standard-error stream. */
@@ -65,7 +61,7 @@ namespace {
 #endif
 
 int main(int argc, char* argv[]) {
-#if SORA_TEST_INSTALL_CRASH_HANDLER
+#if SORA_INSTALL_CRASH_HANDLER
     auto installed = Sora::CrashHandler::Install({
         .mirrorToStandardError = true,
         .suppressSystemErrorDialogs = true,

@@ -1,6 +1,6 @@
 /**
  * @file NativeCrashStream.h
- * @brief Preopened, allocation-free native output for corrupted-process diagnostics.
+ * @brief Pre-opened, allocation-free native output for corrupted-process diagnostics.
  * @ingroup PAL
  *
  * @details Use @ref OwnedNativeCrashStream only during normal startup to open an emergency file, then pass its
@@ -32,7 +32,7 @@
 
 namespace Sora::PAL {
 
-    /** @brief Non-owning crash-safe writer over a preopened native output handle. */
+    /** @brief Non-owning crash-safe writer over a pre-opened native output handle. */
     class NativeCrashStream {
     public:
         /** @brief Construct an invalid stream. */
@@ -76,10 +76,10 @@ namespace Sora::PAL {
         OwnedNativeCrashStream(const OwnedNativeCrashStream&) = delete;
         OwnedNativeCrashStream& operator=(const OwnedNativeCrashStream&) = delete;
 
-        /** @brief Transfer native-stream ownership from @p other. */
+        /** @brief Transfer native-stream ownership from @p others. */
         OwnedNativeCrashStream(OwnedNativeCrashStream&& other) noexcept;
 
-        /** @brief Close the current stream, then transfer ownership from @p other. */
+        /** @brief Close the current stream, then transfer ownership from @p others. */
         OwnedNativeCrashStream& operator=(OwnedNativeCrashStream&& other) noexcept;
 
         /** @brief Open or replace @p path for native crash output without C++ stream state. */

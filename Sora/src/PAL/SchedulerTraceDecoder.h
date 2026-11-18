@@ -11,6 +11,12 @@
 #include <cstdint>
 #include <optional>
 
+namespace Sora::PAL {
+
+    struct NativeSchedulerTraceRecord;
+
+}
+
 namespace Sora::PAL::Detail {
 
     inline constexpr uint8_t kLifecycleStartOpcode = 1;

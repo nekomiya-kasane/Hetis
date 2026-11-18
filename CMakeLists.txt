@@ -9,6 +9,10 @@ project(Hetis LANGUAGES C CXX)
 
 enable_testing()
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+include(ReflectionFeatureProbes)
+
 if(NOT DEFINED CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()
@@ -28,12 +32,6 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-list(APPEND CMAKE_MODULE_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/catch2/extras"
-)
-include(ReflectionFeatureProbes)
-
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_EXPORT_BUILD_DATABASE ON)
 
@@ -43,19 +41,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-set(HETIS_DEBUGGER_VISUALIZERS
-    "${CMAKE_CURRENT_SOURCE_DIR}/debug/visualizers/libcxx.natvis"
-    "${CMAKE_CURRENT_SOURCE_DIR}/debug/visualizers/sora.natvis"
-    "${CMAKE_CURRENT_SOURCE_DIR}/debug/lldb/init.lldb"
-    "${CMAKE_CURRENT_SOURCE_DIR}/debug/lldb/vulkan_lldb.py"
-)
-set_source_files_properties(${HETIS_DEBUGGER_VISUALIZERS} PROPERTIES HEADER_FILE_ONLY TRUE)
-add_custom_target(Hetis.DebuggerVisualizers SOURCES ${HETIS_DEBUGGER_VISUALIZERS})
-source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/debug" PREFIX "debug" FILES ${HETIS_DEBUGGER_VISUALIZERS})
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/thirdparty thirdparty)
+include(CTest)
+
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/misc" misc)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/thirdparty" thirdparty)
 
 add_subdirectory(Sora)
-add_subdirectory(Nova)
-add_subdirectory(Mashiro)
-
-add_subdirectory(tests)
+add_subdirectory(Kirara)

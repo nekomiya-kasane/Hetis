@@ -35,6 +35,7 @@ Diagnostics:
       - modernize-use-trailing-return-type
       - bugprone-easily-swappable-parameters
       - performance-avoid-endl
+      - bugprone-reserved-identifier
 
 InlayHints:
   Enabled: Yes

@@ -34,10 +34,14 @@ CMakeFiles/
 *.log
 
 # Third-party dependencies — managed externally, not tracked in this repo.
-# Only thirdparty/CMakeLists.txt (the integration wrapper) is committed.
+# Keep the integration wrapper and our Impeller CMake package, not SDK binaries.
 /thirdparty/*/
+!/thirdparty/impeller/
+/thirdparty/impeller/*
+!/thirdparty/impeller/cmake/
 results
 __pycache__
 
 latex
 html
+work

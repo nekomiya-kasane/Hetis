@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file SystemAPI.h
  * @brief Dynamically resolved operating-system entry points used by the platform abstraction layer.
  * @ingroup PAL
@@ -242,13 +242,13 @@ namespace Sora::PAL {
         /** @brief Associate a function-table entry with one native symbol or syscall operation. */
         struct Syscall {
             FixedString<256> name = ""; /**< Case-sensitive export or syscall operation name. */
-            Platform::OperatingSystem os = Platform::kOperatingSystem; /**< Operating system that exports the symbol. */
+            OperatingSystem os = kOperatingSystem; /**< Operating system that exports the symbol. */
         };
 
         /** @brief Associate a function-table entry with one exact native variable that it exposes or delegates to. */
         struct Var {
             FixedString<256> name = ""; /**< Case-sensitive export name passed to the native symbol resolver. */
-            Platform::OperatingSystem os = Platform::kOperatingSystem; /**< Operating system that exports the symbol. */
+            OperatingSystem os = kOperatingSystem; /**< Operating system that exports the symbol. */
         };
 
     } // namespace $
@@ -359,7 +359,7 @@ namespace Sora::PAL {
 
     /** @brief Non-owning native view required by a window backend or Vulkan WSI adapter. */
     struct NativeWindowView {
-        Platform::WindowSystem windowSystem = Platform::WindowSystem::Unknown;
+        WindowSystem windowSystem = WindowSystem::Unknown;
         NativeWindowBackend backend = NativeWindowBackend::Unknown;
         void* displayConnection = nullptr; /**< HWND uses null; X11/XCB/Wayland use their connection object. */
         uintptr_t window = 0;              /**< HWND/X11/XCB identifier, or an opaque native-window pointer. */
@@ -369,12 +369,12 @@ namespace Sora::PAL {
         [[nodiscard]] constexpr bool IsValid() const noexcept {
             switch (backend) {
                 case NativeWindowBackend::Win32:
-                    return windowSystem == Platform::WindowSystem::Win32 && window != 0 && displayConnection == nullptr;
+                    return windowSystem == WindowSystem::Win32 && window != 0 && displayConnection == nullptr;
                 case NativeWindowBackend::Xlib:
                 case NativeWindowBackend::Xcb:
-                    return windowSystem == Platform::WindowSystem::X11 && displayConnection != nullptr && window != 0;
+                    return windowSystem == WindowSystem::X11 && displayConnection != nullptr && window != 0;
                 case NativeWindowBackend::Wayland:
-                    return windowSystem == Platform::WindowSystem::Wayland && displayConnection != nullptr &&
+                    return windowSystem == WindowSystem::Wayland && displayConnection != nullptr &&
                            surface != nullptr;
                 case NativeWindowBackend::Unknown:
                     return false;
@@ -402,7 +402,7 @@ namespace Sora::PAL {
 
     /** @brief Capabilities for one dynamically loaded native window backend. */
     struct WindowSystemCapabilities {
-        Platform::WindowSystem windowSystem = Platform::WindowSystem::Unknown;
+        WindowSystem windowSystem = WindowSystem::Unknown;
         NativeWindowBackend backend = NativeWindowBackend::Unknown;
         WindowSystemFeature features = WindowSystemFeature::None;
 
@@ -576,23 +576,23 @@ namespace Sora::PAL {
             virtual HResult __stdcall Write(const void* source, ULong bytes, ULong* bytesWritten) = 0;
         };
 
-        using NativeStorage = ::IStorage;
-        using NativeLockBytes = ::ILockBytes;
-        using NativeRootStorage = ::IRootStorage;
-        using NativeFillLockBytes = ::IFillLockBytes;
-        using NativeProgressNotify = ::IProgressNotify;
-        using NativeLayoutStorage = ::ILayoutStorage;
-        using NativeDirectWriterLock = ::IDirectWriterLock;
-        using NativePersist = ::IPersist;
-        using NativePersistStream = ::IPersistStream;
-        using NativePersistFile = ::IPersistFile;
-        using NativePersistStorage = ::IPersistStorage;
-        using NativeStream = ::IStream;
-        using NativePropertyStorage = ::IPropertyStorage;
-        using NativePropertySetStorage = ::IPropertySetStorage;
-        using NativeEnumStatPropStg = ::IEnumSTATPROPSTG;
-        using NativeEnumStatPropSetStg = ::IEnumSTATPROPSETSTG;
-        using NativeStatStg = ::tagSTATSTG;
+        using NativeStorage = IStorage;
+        using NativeLockBytes = ILockBytes;
+        using NativeRootStorage = IRootStorage;
+        using NativeFillLockBytes = IFillLockBytes;
+        using NativeProgressNotify = IProgressNotify;
+        using NativeLayoutStorage = ILayoutStorage;
+        using NativeDirectWriterLock = IDirectWriterLock;
+        using NativePersist = IPersist;
+        using NativePersistStream = IPersistStream;
+        using NativePersistFile = IPersistFile;
+        using NativePersistStorage = IPersistStorage;
+        using NativeStream = IStream;
+        using NativePropertyStorage = IPropertyStorage;
+        using NativePropertySetStorage = IPropertySetStorage;
+        using NativeEnumStatPropStg = IEnumSTATPROPSTG;
+        using NativeEnumStatPropSetStg = IEnumSTATPROPSETSTG;
+        using NativeStatStg = tagSTATSTG;
 
         struct Stream;
         struct PropertyBag;
@@ -810,7 +810,7 @@ namespace Sora::PAL {
 
         /** @brief Return the Win32 contract represented by this table, independent of optional symbol availability. */
         [[nodiscard]] static constexpr WindowSystemCapabilities DeclaredCapabilities() noexcept {
-            return {.windowSystem = Platform::WindowSystem::Win32,
+            return {.windowSystem = WindowSystem::Win32,
                     .backend = NativeWindowBackend::Win32,
                     .features = static_cast<WindowSystemFeature>(
                         std::to_underlying(WindowSystemFeature::WindowCreation) |
@@ -1163,8 +1163,8 @@ namespace Sora::PAL {
         using TraceHandle = uint64_t;
         using GlobalMemory = void*;
         /** @brief Opaque native type used by the existing Win32 file API table. */
-        using NativeOverlapped = ::_OVERLAPPED;
-        using NativeLargeInteger = ::_LARGE_INTEGER;
+        using NativeOverlapped = _OVERLAPPED;
+        using NativeLargeInteger = _LARGE_INTEGER;
         using DpiAwarenessContext = void*;
         using LParam = intptr_t;
 
@@ -1287,9 +1287,9 @@ namespace Sora::PAL {
             inline namespace Common {
 
                 // clang-format off
-                [[= PAL::$::Macro{"FALSE"}]]
+                [[= $::Macro{"FALSE"}]]
                 inline constexpr Bool kFalse = 0;
-                [[= PAL::$::Macro{"TRUE"}]]
+                [[= $::Macro{"TRUE"}]]
                 inline constexpr Bool kTrue  = 1;
                 // clang-format on
 
@@ -1302,34 +1302,34 @@ namespace Sora::PAL {
             inline namespace NativeError {
 
                 // clang-format off
-                [[= PAL::$::Macro{"ERROR_SUCCESS"}]]
+                [[= $::Macro{"ERROR_SUCCESS"}]]
                 inline constexpr DWord kErrorSuccess                     = 0;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_ALLOCATE_BUFFER", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_ALLOCATE_BUFFER", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageAllocateBuffer      = 0x00000100;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_IGNORE_INSERTS", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_IGNORE_INSERTS", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageIgnoreInserts       = 0x00000200;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_STRING", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_FROM_STRING", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageFromString          = 0x00000400;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_HMODULE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_FROM_HMODULE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageFromModule          = 0x00000800;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_FROM_SYSTEM", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_FROM_SYSTEM", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageFromSystem          = 0x00001000;
-                [[= PAL::$::Macro{"ERROR_FILE_NOT_FOUND"}]]
+                [[= $::Macro{"ERROR_FILE_NOT_FOUND"}]]
                 inline constexpr DWord kErrorFileNotFound                = 2;
-                [[= PAL::$::Macro{"ERROR_PATH_NOT_FOUND"}]]
+                [[= $::Macro{"ERROR_PATH_NOT_FOUND"}]]
                 inline constexpr DWord kErrorPathNotFound                = 3;
-                [[= PAL::$::Macro{"ERROR_NO_MORE_FILES"}]]
+                [[= $::Macro{"ERROR_NO_MORE_FILES"}]]
                 inline constexpr DWord kErrorNoMoreFiles                 = 18;
-                [[= PAL::$::Macro{"ERROR_HANDLE_EOF"}]]
+                [[= $::Macro{"ERROR_HANDLE_EOF"}]]
                 inline constexpr DWord kErrorHandleEof                   = 38;
-                [[= PAL::$::Macro{"ERROR_FILE_EXISTS"}]]
+                [[= $::Macro{"ERROR_FILE_EXISTS"}]]
                 inline constexpr DWord kErrorFileExists                  = 80;
-                [[= PAL::$::Macro{"ERROR_ALREADY_EXISTS"}]]
+                [[= $::Macro{"ERROR_ALREADY_EXISTS"}]]
                 inline constexpr DWord kErrorAlreadyExists               = 183;
                 inline constexpr int kFileEndOfFileInformation            = 6;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_ARGUMENT_ARRAY", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_ARGUMENT_ARRAY", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageArgumentArray       = 0x00002000;
-                [[= PAL::$::Macro{"FORMAT_MESSAGE_MAX_WIDTH_MASK", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FORMAT_MESSAGE_MAX_WIDTH_MASK", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFormatMessageMaximumWidthMask    = 0x000000FF;
                 // clang-format on
 
@@ -1339,9 +1339,9 @@ namespace Sora::PAL {
             inline namespace Environment {
 
                 // clang-format off
-                [[= PAL::$::Macro{"ERROR_INSUFFICIENT_BUFFER"}]]
+                [[= $::Macro{"ERROR_INSUFFICIENT_BUFFER"}]]
                 inline constexpr DWord kErrorInsufficientBuffer          = 122;
-                [[= PAL::$::Macro{"ERROR_ENVVAR_NOT_FOUND"}]]
+                [[= $::Macro{"ERROR_ENVVAR_NOT_FOUND"}]]
                 inline constexpr DWord kErrorEnvironmentVariableNotFound = 203;
                 // clang-format on
 
@@ -1351,71 +1351,71 @@ namespace Sora::PAL {
             inline namespace File {
 
                 // clang-format off
-                [[= PAL::$::Macro{"GENERIC_READ",      PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GENERIC_READ",      $::Macro::Type::Mask}]]
                 inline constexpr DWord kGenericRead                      = 0x80000000;
-                [[= PAL::$::Macro{"GENERIC_WRITE",     PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GENERIC_WRITE",     $::Macro::Type::Mask}]]
                 inline constexpr DWord kGenericWrite                     = 0x40000000;
-                [[= PAL::$::Macro{"GENERIC_EXECUTE",   PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GENERIC_EXECUTE",   $::Macro::Type::Mask}]]
                 inline constexpr DWord kGenericExecute                   = 0x20000000;
-                [[= PAL::$::Macro{"GENERIC_ALL",       PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GENERIC_ALL",       $::Macro::Type::Mask}]]
                 inline constexpr DWord kGenericAll                       = 0x10000000;
-                [[= PAL::$::Macro{"FILE_SHARE_READ",   PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_SHARE_READ",   $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileShareRead                    = 0x00000001;
-                [[= PAL::$::Macro{"FILE_SHARE_WRITE",  PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_SHARE_WRITE",  $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileShareWrite                   = 0x00000002;
-                [[= PAL::$::Macro{"FILE_SHARE_DELETE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_SHARE_DELETE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileShareDelete                  = 0x00000004;
-                [[= PAL::$::Macro{"CREATE_NEW"}]]
+                [[= $::Macro{"CREATE_NEW"}]]
                 inline constexpr DWord kCreateNew                        = 1;
-                [[= PAL::$::Macro{"CREATE_ALWAYS"}]]
+                [[= $::Macro{"CREATE_ALWAYS"}]]
                 inline constexpr DWord kCreateAlways                     = 2;
-                [[= PAL::$::Macro{"OPEN_EXISTING"}]]
+                [[= $::Macro{"OPEN_EXISTING"}]]
                 inline constexpr DWord kOpenExisting                     = 3;
-                [[= PAL::$::Macro{"OPEN_ALWAYS"}]]
+                [[= $::Macro{"OPEN_ALWAYS"}]]
                 inline constexpr DWord kOpenAlways                       = 4;
-                [[= PAL::$::Macro{"TRUNCATE_EXISTING"}]]
+                [[= $::Macro{"TRUNCATE_EXISTING"}]]
                 inline constexpr DWord kTruncateExisting                 = 5;
-                [[= PAL::$::Macro{"FILE_ATTRIBUTE_NORMAL", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_ATTRIBUTE_NORMAL", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileAttributeNormal              = 0x00000080;
-                [[= PAL::$::Macro{"FILE_FLAG_WRITE_THROUGH", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_WRITE_THROUGH", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagWriteThrough             = 0x80000000;
-                [[= PAL::$::Macro{"FILE_FLAG_OVERLAPPED", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_OVERLAPPED", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagOverlapped               = 0x40000000;
-                [[= PAL::$::Macro{"FILE_FLAG_NO_BUFFERING", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_NO_BUFFERING", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagNoBuffering              = 0x20000000;
-                [[= PAL::$::Macro{"FILE_FLAG_RANDOM_ACCESS", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_RANDOM_ACCESS", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagRandomAccess             = 0x10000000;
-                [[= PAL::$::Macro{"FILE_FLAG_SEQUENTIAL_SCAN", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_SEQUENTIAL_SCAN", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagSequentialScan           = 0x08000000;
-                [[= PAL::$::Macro{"FILE_FLAG_DELETE_ON_CLOSE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_DELETE_ON_CLOSE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagDeleteOnClose            = 0x04000000;
-                [[= PAL::$::Macro{"FILE_FLAG_BACKUP_SEMANTICS", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_BACKUP_SEMANTICS", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagBackupSemantics          = 0x02000000;
-                [[= PAL::$::Macro{"FILE_LIST_DIRECTORY", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_LIST_DIRECTORY", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileListDirectory                = 0x00000001;
-                [[= PAL::$::Macro{"FILE_STORAGE_INFO", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_STORAGE_INFO", $::Macro::Type::Mask}]]
                 inline constexpr int kFileStorageInformation             = 16;
-                [[= PAL::$::Macro{"FILE_FLAG_POSIX_SEMANTICS", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_POSIX_SEMANTICS", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagPosixSemantics           = 0x01000000;
-                [[= PAL::$::Macro{"FILE_FLAG_SESSION_AWARE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_SESSION_AWARE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagSessionAware             = 0x00800000;
-                [[= PAL::$::Macro{"FILE_FLAG_OPEN_REPARSE_POINT", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_OPEN_REPARSE_POINT", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagOpenReparsePoint         = 0x00200000;
-                [[= PAL::$::Macro{"FILE_FLAG_OPEN_NO_RECALL", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_OPEN_NO_RECALL", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagOpenNoRecall             = 0x00100000;
-                [[= PAL::$::Macro{"FILE_FLAG_FIRST_PIPE_INSTANCE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_FLAG_FIRST_PIPE_INSTANCE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kFileFlagFirstPipeInstance        = 0x00080000;
-                [[= PAL::$::Macro{"STD_INPUT_HANDLE"}]]
+                [[= $::Macro{"STD_INPUT_HANDLE"}]]
                 inline constexpr DWord kStandardInputHandle              = static_cast<DWord>(-10);
-                [[= PAL::$::Macro{"STD_OUTPUT_HANDLE"}]]
+                [[= $::Macro{"STD_OUTPUT_HANDLE"}]]
                 inline constexpr DWord kStandardOutputHandle             = static_cast<DWord>(-11);
-                [[= PAL::$::Macro{"STD_ERROR_HANDLE"}]]
+                [[= $::Macro{"STD_ERROR_HANDLE"}]]
                 inline constexpr DWord kStandardErrorHandle              = static_cast<DWord>(-12);
-                [[= PAL::$::Macro{"LOCKFILE_FAIL_IMMEDIATELY", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"LOCKFILE_FAIL_IMMEDIATELY", $::Macro::Type::Mask}]]
                 inline constexpr DWord kLockFileFailImmediately          = 0x00000001;
-                [[= PAL::$::Macro{"LOCKFILE_EXCLUSIVE_LOCK", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"LOCKFILE_EXCLUSIVE_LOCK", $::Macro::Type::Mask}]]
                 inline constexpr DWord kLockFileExclusive                = 0x00000002;
-                [[= PAL::$::Macro{"ERROR_LOCK_VIOLATION"}]]
+                [[= $::Macro{"ERROR_LOCK_VIOLATION"}]]
                 inline constexpr DWord kErrorLockViolation               = 33;
                 // clang-format on
 
@@ -1425,35 +1425,35 @@ namespace Sora::PAL {
             inline namespace FileWatch {
 
                 // clang-format off
-                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_FILE_NAME", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_NOTIFY_CHANGE_FILE_NAME", $::Macro::Type::Mask}]]
                 inline constexpr DWord kNotifyFileName       = 0x00000001;
-                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_DIR_NAME", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_NOTIFY_CHANGE_DIR_NAME", $::Macro::Type::Mask}]]
                 inline constexpr DWord kNotifyDirectoryName  = 0x00000002;
-                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_SIZE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_NOTIFY_CHANGE_SIZE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kNotifySize           = 0x00000008;
-                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_LAST_WRITE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_NOTIFY_CHANGE_LAST_WRITE", $::Macro::Type::Mask}]]
                 inline constexpr DWord kNotifyLastWrite      = 0x00000010;
-                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_CREATION", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_NOTIFY_CHANGE_CREATION", $::Macro::Type::Mask}]]
                 inline constexpr DWord kNotifyCreation       = 0x00000040;
-                [[= PAL::$::Macro{"FILE_NOTIFY_CHANGE_SECURITY", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"FILE_NOTIFY_CHANGE_SECURITY", $::Macro::Type::Mask}]]
                 inline constexpr DWord kNotifySecurity       = 0x00000100;
-                [[= PAL::$::Macro{"FILE_ACTION_ADDED"}]]
+                [[= $::Macro{"FILE_ACTION_ADDED"}]]
                 inline constexpr DWord kActionAdded          = 1;
-                [[= PAL::$::Macro{"FILE_ACTION_REMOVED"}]]
+                [[= $::Macro{"FILE_ACTION_REMOVED"}]]
                 inline constexpr DWord kActionRemoved        = 2;
-                [[= PAL::$::Macro{"FILE_ACTION_MODIFIED"}]]
+                [[= $::Macro{"FILE_ACTION_MODIFIED"}]]
                 inline constexpr DWord kActionModified       = 3;
-                [[= PAL::$::Macro{"FILE_ACTION_RENAMED_OLD_NAME"}]]
+                [[= $::Macro{"FILE_ACTION_RENAMED_OLD_NAME"}]]
                 inline constexpr DWord kActionRenamedOld     = 4;
-                [[= PAL::$::Macro{"FILE_ACTION_RENAMED_NEW_NAME"}]]
+                [[= $::Macro{"FILE_ACTION_RENAMED_NEW_NAME"}]]
                 inline constexpr DWord kActionRenamedNew     = 5;
-                [[= PAL::$::Macro{"ERROR_IO_PENDING"}]]
+                [[= $::Macro{"ERROR_IO_PENDING"}]]
                 inline constexpr DWord kErrorIoPending       = 997;
-                [[= PAL::$::Macro{"INFINITE"}]]
+                [[= $::Macro{"INFINITE"}]]
                 inline constexpr DWord kInfinite             = 0xFFFFFFFFu;
-                [[= PAL::$::Macro{"WAIT_OBJECT_0"}]]
+                [[= $::Macro{"WAIT_OBJECT_0"}]]
                 inline constexpr DWord kWaitObject           = 0;
-                [[= PAL::$::Macro{"WAIT_TIMEOUT"}]]
+                [[= $::Macro{"WAIT_TIMEOUT"}]]
                 inline constexpr DWord kWaitTimeout          = 258;
                 // clang-format on
 
@@ -1518,25 +1518,25 @@ namespace Sora::PAL {
             inline namespace FileMapping {
 
                 // clang-format off
-                [[= PAL::$::Macro{"REPLACEFILE_WRITE_THROUGH", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"REPLACEFILE_WRITE_THROUGH", $::Macro::Type::Mask}]]
                 inline constexpr DWord kReplaceWriteThrough = 0x00000001;
-                [[= PAL::$::Macro{"MOVEFILE_REPLACE_EXISTING", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"MOVEFILE_REPLACE_EXISTING", $::Macro::Type::Mask}]]
                 inline constexpr DWord kMoveReplaceExisting = 0x00000001;
-                [[= PAL::$::Macro{"MOVEFILE_WRITE_THROUGH", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"MOVEFILE_WRITE_THROUGH", $::Macro::Type::Mask}]]
                 inline constexpr DWord kMoveWriteThrough    = 0x00000008;
-                [[= PAL::$::Macro{"PAGE_READONLY"}]]
+                [[= $::Macro{"PAGE_READONLY"}]]
                 inline constexpr DWord kPageReadOnly        = 0x00000002;
-                [[= PAL::$::Macro{"PAGE_READWRITE"}]]
+                [[= $::Macro{"PAGE_READWRITE"}]]
                 inline constexpr DWord kPageReadWrite       = 0x00000004;
-                [[= PAL::$::Macro{"PAGE_WRITECOPY"}]]
+                [[= $::Macro{"PAGE_WRITECOPY"}]]
                 inline constexpr DWord kPageWriteCopy       = 0x00000008;
-                [[= PAL::$::Macro{"FILE_MAP_COPY"}]]
+                [[= $::Macro{"FILE_MAP_COPY"}]]
                 inline constexpr DWord kFileMapCopy         = 0x00000001;
-                [[= PAL::$::Macro{"FILE_MAP_WRITE"}]]
+                [[= $::Macro{"FILE_MAP_WRITE"}]]
                 inline constexpr DWord kFileMapWrite        = 0x00000002;
-                [[= PAL::$::Macro{"FILE_MAP_READ"}]]
+                [[= $::Macro{"FILE_MAP_READ"}]]
                 inline constexpr DWord kFileMapRead         = 0x00000004;
-                [[= PAL::$::Macro{"DUPLICATE_SAME_ACCESS"}]]
+                [[= $::Macro{"DUPLICATE_SAME_ACCESS"}]]
                 inline constexpr DWord kDuplicateSameAccess = 0x00000002;
                 // clang-format on
 
@@ -1546,11 +1546,11 @@ namespace Sora::PAL {
             inline namespace GlobalMemoryBehavior {
 
                 // clang-format off
-                [[= PAL::$::Macro{"GMEM_FIXED",    PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GMEM_FIXED",    $::Macro::Type::Mask}]]
                 inline constexpr UInt kFixedGlobalMemory          = 0x0000;
-                [[= PAL::$::Macro{"GMEM_MOVEABLE", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GMEM_MOVEABLE", $::Macro::Type::Mask}]]
                 inline constexpr UInt kMovableGlobalMemory        = 0x0002;
-                [[= PAL::$::Macro{"GMEM_ZEROINIT", PAL::$::Macro::Type::Mask}]]
+                [[= $::Macro{"GMEM_ZEROINIT", $::Macro::Type::Mask}]]
                 inline constexpr UInt kZeroInitializeGlobalMemory = 0x0040;
                 // clang-format on
 
@@ -1560,11 +1560,11 @@ namespace Sora::PAL {
             inline namespace Clipboard {
 
                 // clang-format off
-                [[= PAL::$::Macro{"CF_TEXT"}]]
+                [[= $::Macro{"CF_TEXT"}]]
                 inline constexpr UInt kTextClipboardFormat        = 1;
-                [[= PAL::$::Macro{"CF_OEMTEXT"}]]
+                [[= $::Macro{"CF_OEMTEXT"}]]
                 inline constexpr UInt kOemTextClipboardFormat     = 7;
-                [[= PAL::$::Macro{"CF_UNICODETEXT"}]]
+                [[= $::Macro{"CF_UNICODETEXT"}]]
                 inline constexpr UInt kUnicodeTextClipboardFormat = 13;
                 // clang-format on
 
@@ -1650,14 +1650,14 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Windows overlapped Winsock operations. */
     struct WinsockOverlappedSystemAPI {
         // clang-format off
-        using CompletionRoutine   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*, WindowsSystem::DWord);
-        using CreateFunction      = WindowsSystem::Socket(__stdcall*)(int, int, int, ::_WSAPROTOCOL_INFOW*, WindowsSystem::UInt, WindowsSystem::DWord);
-        using SendFunction        = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord, ::_OVERLAPPED*, CompletionRoutine);
-        using ReceiveFunction     = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord*, ::_OVERLAPPED*, CompletionRoutine);
-        using SendToFunction      = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord, const sockaddr*, int, ::_OVERLAPPED*, CompletionRoutine);
-        using ReceiveFromFunction = int(__stdcall*)(WindowsSystem::Socket, ::_WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord*, sockaddr*, int*, ::_OVERLAPPED*, CompletionRoutine);
-        using GetResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Socket, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool, WindowsSystem::DWord*);
-        using ControlFunction     = int(__stdcall*)(WindowsSystem::Socket, WindowsSystem::DWord, void*, WindowsSystem::DWord, void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*, CompletionRoutine);
+        using CompletionRoutine   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, _OVERLAPPED*, WindowsSystem::DWord);
+        using CreateFunction      = WindowsSystem::Socket(__stdcall*)(int, int, int, _WSAPROTOCOL_INFOW*, WindowsSystem::UInt, WindowsSystem::DWord);
+        using SendFunction        = int(__stdcall*)(WindowsSystem::Socket, _WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord, _OVERLAPPED*, CompletionRoutine);
+        using ReceiveFunction     = int(__stdcall*)(WindowsSystem::Socket, _WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord*, _OVERLAPPED*, CompletionRoutine);
+        using SendToFunction      = int(__stdcall*)(WindowsSystem::Socket, _WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord, const sockaddr*, int, _OVERLAPPED*, CompletionRoutine);
+        using ReceiveFromFunction = int(__stdcall*)(WindowsSystem::Socket, _WSABUF*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord*, sockaddr*, int*, _OVERLAPPED*, CompletionRoutine);
+        using GetResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Socket, _OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool, WindowsSystem::DWord*);
+        using ControlFunction     = int(__stdcall*)(WindowsSystem::Socket, WindowsSystem::DWord, void*, WindowsSystem::DWord, void*, WindowsSystem::DWord, WindowsSystem::DWord*, _OVERLAPPED*, CompletionRoutine);
 
         [[= $::Syscall{"WSASocketW"}]]             
         CreateFunction      create      = nullptr;
@@ -1681,7 +1681,7 @@ namespace Sora::PAL {
         // clang-format off
         using QueryCounterFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::NativeLargeInteger*);
         using QueryFrequencyFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::NativeLargeInteger*);
-        using GetPreciseSystemTimeFunction = void(__stdcall*)(::_FILETIME*);
+        using GetPreciseSystemTimeFunction = void(__stdcall*)(_FILETIME*);
 
         [[= $::Syscall{"QueryPerformanceCounter"}]]        
         QueryCounterFunction         queryCounter         = nullptr;
@@ -1809,12 +1809,12 @@ namespace Sora::PAL {
         using WaitForMultipleObjectsFunction    = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const WindowsSystem::Handle*, WindowsSystem::Bool, WindowsSystem::DWord);
         using WaitForMultipleObjectsExFunction  = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord, const WindowsSystem::Handle*, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::Bool);
         using SignalObjectAndWaitFunction       = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::Bool);
-        using CreateMutexExWideFunction         = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
+        using CreateMutexExWideFunction         = WindowsSystem::Handle(__stdcall*)(_SECURITY_ATTRIBUTES*, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
         using ReleaseMutexFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using CreateSemaphoreExWideFunction     = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, long, long, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
+        using CreateSemaphoreExWideFunction     = WindowsSystem::Handle(__stdcall*)(_SECURITY_ATTRIBUTES*, long, long, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
         using ReleaseSemaphoreFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, long, long*);
-        using CreateWaitableTimerExWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
-        using SetWaitableTimerExFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const ::_LARGE_INTEGER*, long, WindowsSystem::TimerApcRoutine, void*, ::_REASON_CONTEXT*, WindowsSystem::DWord);
+        using CreateWaitableTimerExWideFunction = WindowsSystem::Handle(__stdcall*)(_SECURITY_ATTRIBUTES*, const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
+        using SetWaitableTimerExFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const _LARGE_INTEGER*, long, WindowsSystem::TimerApcRoutine, void*, _REASON_CONTEXT*, WindowsSystem::DWord);
         using CancelWaitableTimerFunction       = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
 
         [[= $::Syscall{"WaitForSingleObject"}]]
@@ -1850,9 +1850,9 @@ namespace Sora::PAL {
         using AllocateFunction       = void*(__stdcall*)(void*, size_t, WindowsSystem::DWord, WindowsSystem::DWord);
         using FreeFunction           = WindowsSystem::Bool(__stdcall*)(void*, size_t, WindowsSystem::DWord);
         using ProtectFunction        = WindowsSystem::Bool(__stdcall*)(void*, size_t, WindowsSystem::DWord, WindowsSystem::DWord*);
-        using QueryFunction          = size_t(__stdcall*)(const void*, ::_MEMORY_BASIC_INFORMATION*, size_t);
-        using Allocate2Function      = void*(__stdcall*)(WindowsSystem::Handle, void*, uint64_t, WindowsSystem::DWord, WindowsSystem::DWord, ::MEM_EXTENDED_PARAMETER*, WindowsSystem::DWord);
-        using MapViewOfFile3Function = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, void*, uint64_t, size_t, WindowsSystem::DWord, WindowsSystem::DWord, ::MEM_EXTENDED_PARAMETER*, WindowsSystem::DWord);
+        using QueryFunction          = size_t(__stdcall*)(const void*, _MEMORY_BASIC_INFORMATION*, size_t);
+        using Allocate2Function      = void*(__stdcall*)(WindowsSystem::Handle, void*, uint64_t, WindowsSystem::DWord, WindowsSystem::DWord, MEM_EXTENDED_PARAMETER*, WindowsSystem::DWord);
+        using MapViewOfFile3Function = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, void*, uint64_t, size_t, WindowsSystem::DWord, WindowsSystem::DWord, MEM_EXTENDED_PARAMETER*, WindowsSystem::DWord);
 
         [[= $::Syscall{"VirtualAlloc"}]] 
         AllocateFunction allocate = nullptr;
@@ -1872,7 +1872,7 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Win32 event-object operations. */
     struct EventSystemAPI {
         // clang-format off
-        using CreateEventWideFunction = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::Bool, const wchar_t*);
+        using CreateEventWideFunction = WindowsSystem::Handle(__stdcall*)(_SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::Bool, const wchar_t*);
         using SetEventFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
         using ResetEventFunction      = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
 
@@ -1889,9 +1889,9 @@ namespace Sora::PAL {
     struct IOCPSystemAPI {
         // clang-format off
         using CreateIoCompletionPortFunction             = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle, WindowsSystem::Size, WindowsSystem::DWord);
-        using GetQueuedCompletionStatusFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*, WindowsSystem::Size*, ::_OVERLAPPED**, WindowsSystem::DWord);
-        using GetQueuedCompletionStatusExFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED_ENTRY*, WindowsSystem::ULong, WindowsSystem::ULong*, WindowsSystem::DWord, WindowsSystem::Bool);
-        using PostQueuedCompletionStatusFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::Size, ::_OVERLAPPED*);
+        using GetQueuedCompletionStatusFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*, WindowsSystem::Size*, _OVERLAPPED**, WindowsSystem::DWord);
+        using GetQueuedCompletionStatusExFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _OVERLAPPED_ENTRY*, WindowsSystem::ULong, WindowsSystem::ULong*, WindowsSystem::DWord, WindowsSystem::Bool);
+        using PostQueuedCompletionStatusFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::Size, _OVERLAPPED*);
         using SetFileCompletionNotificationModesFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Byte);
 
         [[= $::Syscall{"CreateIoCompletionPort"}]]
@@ -1959,7 +1959,7 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Win32 file-backed virtual-memory mapping operations. */
     struct FileMappingSystemAPI {
         // clang-format off
-        using CreateFileMappingWideFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, const wchar_t*);
+        using CreateFileMappingWideFunction = WindowsSystem::Handle(__stdcall*)(WindowsSystem::Handle, _SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, const wchar_t*);
         using MapViewOfFileFunction         = void*(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, size_t);
         using UnmapViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*);
         using FlushViewOfFileFunction       = WindowsSystem::Bool(__stdcall*)(const void*, size_t);
@@ -2010,7 +2010,7 @@ namespace Sora::PAL {
         using BreakpointFunction                 = void(__stdcall*)();
         using OutputDebugStringAnsiFunction      = void(__stdcall*)(const char*);
         using OutputDebugStringWideFunction      = void(__stdcall*)(const wchar_t*);
-        using WaitForDebugEventFunction          = WindowsSystem::Bool(__stdcall*)(::_DEBUG_EVENT*, WindowsSystem::DWord);
+        using WaitForDebugEventFunction          = WindowsSystem::Bool(__stdcall*)(_DEBUG_EVENT*, WindowsSystem::DWord);
 
         [[= $::Syscall{"CheckRemoteDebuggerPresent"}]]
         CheckRemoteDebuggerPresentFunction checkRemoteDebuggerPresent = nullptr;
@@ -2547,13 +2547,13 @@ namespace Sora::PAL {
         using GetCurrentProcessIdFunction           = WindowsSystem::DWord(__stdcall*)();
         using GetCurrentProcessFunction             = WindowsSystem::Handle(__stdcall*)();
         using CreateProcessSnapshotFunction         = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord);
-        using ReadProcessEntryFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::tagPROCESSENTRY32W*);
+        using ReadProcessEntryFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, tagPROCESSENTRY32W*);
         using ReadThreadEntryFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::ThreadEntry*);
         using QueryFullProcessImageNameWideFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, wchar_t*, WindowsSystem::DWord*);
         using GetCommandLineWideFunction            = wchar_t*(__stdcall*)();
         using CommandLineToArgvWideFunction         = wchar_t**(__stdcall*)(const wchar_t*, int*);
-        using GetProcessTimesFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*, ::_FILETIME*);
-        using GetProcessMemoryInfoFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_PROCESS_MEMORY_COUNTERS*, WindowsSystem::DWord);
+        using GetProcessTimesFunction               = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _FILETIME*, _FILETIME*, _FILETIME*, _FILETIME*);
+        using GetProcessMemoryInfoFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _PROCESS_MEMORY_COUNTERS*, WindowsSystem::DWord);
         using GetProcessIdFunction                  = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
         using GetProcessHandleCountFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
         using QueryProcessCycleTimeFunction         = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64*);
@@ -2599,10 +2599,10 @@ namespace Sora::PAL {
     struct ProcessControlSystemAPI {
         // clang-format off
         using OpenProcessFunction          = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord);
-        using CreateProcessWideFunction    = WindowsSystem::Bool(__stdcall*)(const wchar_t*, wchar_t*, ::_SECURITY_ATTRIBUTES*, ::_SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::DWord, void*, const wchar_t*, ::_STARTUPINFOW*, ::_PROCESS_INFORMATION*);
+        using CreateProcessWideFunction    = WindowsSystem::Bool(__stdcall*)(const wchar_t*, wchar_t*, _SECURITY_ATTRIBUTES*, _SECURITY_ATTRIBUTES*, WindowsSystem::Bool, WindowsSystem::DWord, void*, const wchar_t*, _STARTUPINFOW*, _PROCESS_INFORMATION*);
         using GetExitCodeFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord*);
         using TerminateFunction            = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::UInt);
-        using CreateJobObjectWideFunction  = WindowsSystem::Handle(__stdcall*)(::_SECURITY_ATTRIBUTES*, const wchar_t*);
+        using CreateJobObjectWideFunction  = WindowsSystem::Handle(__stdcall*)(_SECURITY_ATTRIBUTES*, const wchar_t*);
         using AssignJobFunction            = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::Handle);
         using SetPriorityClassFunction     = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
         using SetAffinityMaskFunction      = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, uintptr_t);
@@ -2667,7 +2667,7 @@ namespace Sora::PAL {
         using GetPriorityFunction         = int(__stdcall*)(WindowsSystem::Handle);
         using SetAffinityMaskFunction     = uintptr_t(__stdcall*)(WindowsSystem::Handle, uintptr_t);
         using SetIdealProcessorFunction   = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord);
-        using SetIdealProcessorExFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_PROCESSOR_NUMBER*, ::_PROCESSOR_NUMBER*);
+        using SetIdealProcessorExFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _PROCESSOR_NUMBER*, _PROCESSOR_NUMBER*);
         using SuspendFunction             = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
         using ResumeFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
 
@@ -2701,10 +2701,10 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Windows network-interface enumeration operations. */
     struct NetworkInterfaceSystemAPI {
         // clang-format off
-        using GetAdaptersAddressesFunction = WindowsSystem::ULong(__stdcall*)(WindowsSystem::ULong, WindowsSystem::ULong, void*, ::_IP_ADAPTER_ADDRESSES_LH*, WindowsSystem::ULong*);
-        using GetIfTable2Function          = WindowsSystem::ULong(__stdcall*)(::_MIB_IF_TABLE2**);
+        using GetAdaptersAddressesFunction = WindowsSystem::ULong(__stdcall*)(WindowsSystem::ULong, WindowsSystem::ULong, void*, _IP_ADAPTER_ADDRESSES_LH*, WindowsSystem::ULong*);
+        using GetIfTable2Function          = WindowsSystem::ULong(__stdcall*)(_MIB_IF_TABLE2**);
         using FreeMibTableFunction         = void(__stdcall*)(void*);
-        using NotifyAddressChangeFunction  = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle*, ::_OVERLAPPED*);
+        using NotifyAddressChangeFunction  = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle*, _OVERLAPPED*);
 
         [[= $::Syscall{"GetAdaptersAddresses"}]]
         GetAdaptersAddressesFunction getAdaptersAddresses = nullptr;
@@ -2720,14 +2720,14 @@ namespace Sora::PAL {
     /** @brief Dynamically resolved Win32 directory, metadata, link, and volume operations. */
     struct ModernFileSystemAPI {
         // clang-format off
-        using CreateDirectoryWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*, ::_SECURITY_ATTRIBUTES*);
+        using CreateDirectoryWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*, _SECURITY_ATTRIBUTES*);
         using RemoveDirectoryWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
-        using FindFirstFileWideFunction            = WindowsSystem::Handle(__stdcall*)(const wchar_t*, ::_WIN32_FIND_DATAW*);
-        using FindNextFileWideFunction             = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_WIN32_FIND_DATAW*);
+        using FindFirstFileWideFunction            = WindowsSystem::Handle(__stdcall*)(const wchar_t*, _WIN32_FIND_DATAW*);
+        using FindNextFileWideFunction             = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _WIN32_FIND_DATAW*);
         using FindCloseFunction                    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
         using GetFileAttributesExWideFunction      = WindowsSystem::Bool(__stdcall*)(const wchar_t*, WindowsSystem::GetFileExInfoLevel, void*);
         using GetFinalPathNameByHandleWideFunction = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle, wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord);
-        using CreateHardLinkWideFunction           = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, ::_SECURITY_ATTRIBUTES*);
+        using CreateHardLinkWideFunction           = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, _SECURITY_ATTRIBUTES*);
         using CreateSymbolicLinkWideFunction       = WindowsSystem::Byte(__stdcall*)(const wchar_t*, const wchar_t*, WindowsSystem::DWord);
         using GetVolumeInformationWideFunction     = WindowsSystem::Bool(__stdcall*)(const wchar_t*, wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord*, WindowsSystem::DWord*, WindowsSystem::DWord*, wchar_t*, WindowsSystem::DWord);
 
@@ -2890,23 +2890,23 @@ namespace Sora::PAL {
     struct FileSystemAPI {
         // clang-format off
         using GetStandardHandleFunction     = WindowsSystem::Handle(__stdcall*)(WindowsSystem::DWord);
-        using CreateFileWideFunction        = WindowsSystem::Handle(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord, ::_SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::Handle);
-        using WriteFileFunction             = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*);
+        using CreateFileWideFunction        = WindowsSystem::Handle(__stdcall*)(const wchar_t*, WindowsSystem::DWord, WindowsSystem::DWord, _SECURITY_ATTRIBUTES*, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::Handle);
+        using WriteFileFunction             = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const void*, WindowsSystem::DWord, WindowsSystem::DWord*, _OVERLAPPED*);
         using FlushFileBuffersFunction      = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle);
-        using ReadFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*);
-        using GetFileSizeFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_LARGE_INTEGER*);
+        using ReadFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::DWord*, _OVERLAPPED*);
+        using GetFileSizeFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _LARGE_INTEGER*);
         using SetFileInformationFunction    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*, WindowsSystem::DWord);
         using GetFileInformationFunction    = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, int, void*, WindowsSystem::DWord);
         using ReplaceFileWideFunction       = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, const wchar_t*, WindowsSystem::DWord, void*, void*);
         using MoveFileWideFunction          = WindowsSystem::Bool(__stdcall*)(const wchar_t*, const wchar_t*, WindowsSystem::DWord);
         using DeleteFileWideFunction        = WindowsSystem::Bool(__stdcall*)(const wchar_t*);
-        using GetOverlappedResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool);
+        using GetOverlappedResultFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _OVERLAPPED*, WindowsSystem::DWord*, WindowsSystem::Bool);
         using GetFileTypeFunction           = WindowsSystem::DWord(__stdcall*)(WindowsSystem::Handle);
-        using SetFilePointerFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_LARGE_INTEGER, ::_LARGE_INTEGER*, WindowsSystem::DWord);
-        using CancelIoFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, ::_OVERLAPPED*);
-        using LockFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
-        using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, ::_OVERLAPPED*);
-        using ReadDirectoryChangesFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::DWord*, ::_OVERLAPPED*, DirectoryCompletionFunction);
+        using SetFilePointerFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _LARGE_INTEGER, _LARGE_INTEGER*, WindowsSystem::DWord);
+        using CancelIoFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, _OVERLAPPED*);
+        using LockFileFunction              = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, WindowsSystem::DWord, _OVERLAPPED*);
+        using DirectoryCompletionFunction   = void(__stdcall*)(WindowsSystem::DWord, WindowsSystem::DWord, _OVERLAPPED*);
+        using ReadDirectoryChangesFunction  = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, void*, WindowsSystem::DWord, WindowsSystem::Bool, WindowsSystem::DWord, WindowsSystem::DWord*, _OVERLAPPED*, DirectoryCompletionFunction);
 
         [[= $::Syscall{"GetStdHandle"}]]
         GetStandardHandleFunction     getStandardHandle     = nullptr;
@@ -2950,9 +2950,9 @@ namespace Sora::PAL {
         // clang-format off
         using SymSetOptionsFunction           = WindowsSystem::DWord(__stdcall*)(WindowsSystem::DWord);
         using SymInitializeFunction           = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, const char*, WindowsSystem::Bool);
-        using SymFromAddressFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, WindowsSystem::DWord64*, ::_SYMBOL_INFO*);
-        using SymGetLineFromAddressFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, WindowsSystem::DWord*, ::_IMAGEHLP_LINE64*);
-        using SymGetModuleInfoFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, ::_IMAGEHLP_MODULE64*);
+        using SymFromAddressFunction          = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, WindowsSystem::DWord64*, _SYMBOL_INFO*);
+        using SymGetLineFromAddressFunction   = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, WindowsSystem::DWord*, _IMAGEHLP_LINE64*);
+        using SymGetModuleInfoFunction        = WindowsSystem::Bool(__stdcall*)(WindowsSystem::Handle, WindowsSystem::DWord64, _IMAGEHLP_MODULE64*);
         using UndecorateSymbolNameFunction    = WindowsSystem::DWord(__stdcall*)(const char*, char*, WindowsSystem::DWord, WindowsSystem::DWord);
 
         [[= $::Syscall{"SymSetOptions"}]]
@@ -4210,10 +4210,10 @@ namespace Sora::PAL {
         using CloseFunction   = void (*)(SessionHandle) noexcept;
 
 #if defined(PLATFORM_WINDOWS)
-        using StartTraceFunction                = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle*, const wchar_t*, ::_EVENT_TRACE_PROPERTIES*);
-        using ControlTraceFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle, const wchar_t*, ::_EVENT_TRACE_PROPERTIES*, WindowsSystem::DWord);
-        using OpenTraceFunction                 = WindowsSystem::TraceHandle(__stdcall*)(::_EVENT_TRACE_LOGFILEW*);
-        using ProcessTraceFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle*, WindowsSystem::DWord, ::_FILETIME*, ::_FILETIME*);
+        using StartTraceFunction                = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle*, const wchar_t*, _EVENT_TRACE_PROPERTIES*);
+        using ControlTraceFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle, const wchar_t*, _EVENT_TRACE_PROPERTIES*, WindowsSystem::DWord);
+        using OpenTraceFunction                 = WindowsSystem::TraceHandle(__stdcall*)(_EVENT_TRACE_LOGFILEW*);
+        using ProcessTraceFunction              = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle*, WindowsSystem::DWord, _FILETIME*, _FILETIME*);
         using CloseTraceFunction                = WindowsSystem::DWord(__stdcall*)(WindowsSystem::TraceHandle);
         using QueryPerformanceFrequencyFunction = WindowsSystem::Bool(__stdcall*)(WindowsSystem::NativeLargeInteger*);
 

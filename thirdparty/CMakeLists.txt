@@ -8,7 +8,7 @@
 #       add_subdirectory(thirdparty)
 #       target_link_libraries(my_app PRIVATE
 #           Vulkan::Vulkan vma volk vk-bootstrap glfw glm stb imgui
-#           spirv-reflect spirv-cross-core spdlog::spdlog ...)
+#           spirv-reflect spirv-cross-core spdlog::spdlog Impeller::Impeller ...)
 # =============================================================================
 cmake_minimum_required(VERSION 3.25)
 
@@ -524,6 +524,10 @@ if(VK_TP_BUILD_CATCH2)
     set(CATCH_INSTALL_EXTRAS  OFF CACHE BOOL "" FORCE)
     set(CATCH_DEVELOPMENT_BUILD OFF CACHE BOOL "" FORCE)
     add_subdirectory(catch2)
+
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/catch2/extras")
+
+    include(Catch)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -821,6 +825,35 @@ if(VK_TP_BUILD_METIS)
 endif()
 
 # -----------------------------------------------------------------------------
+# 37. Impeller — Flutter's GPU-backed 2D renderer, vendored prebuilt SDK
+#     (windows-x64, API 1.4.0). Consumed through its own CMake package so
+#     downstream projects find it exactly the same way:
+#       find_package(Impeller CONFIG REQUIRED NO_CMAKE_FIND_ROOT_PATH
+#                    PATHS <repo>/thirdparty/impeller)
+#     Targets: Impeller::Impeller (default; Impeller_LINKAGE=shared|static),
+#              Impeller::ImpellerShared, Impeller::ImpellerStatic.
+#     impeller.dll rides the standard runtime deployment flow: the imported
+#     SHARED target supplies TARGET_RUNTIME_DLLS, so consumers calling
+#     vk_tp_deploy_runtime() get the DLL copied next to their executable.
+#     Offline shader tool: Impeller::impellerc or ${Impeller_IMPELLERC_EXECUTABLE}.
+# -----------------------------------------------------------------------------
+option(VK_TP_ENABLE_IMPELLER "Expose the vendored Impeller SDK (2D renderer)" ON)
+if(VK_TP_ENABLE_IMPELLER)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/impeller/cmake/ImpellerConfig.cmake")
+        message(FATAL_ERROR "[vulkan/thirdparty] Impeller SDK missing. Expected "
+                            "thirdparty/impeller/{bin,include,lib,cmake} "
+                            "(flutter impeller_sdk layout).")
+    endif()
+    # Pin the package directory so a cached/system package cannot replace the
+    # vendored SDK. It lives outside the toolchain sysroot.
+    set(Impeller_DIR "${CMAKE_CURRENT_SOURCE_DIR}/impeller/cmake")
+    find_package(Impeller CONFIG REQUIRED NO_CMAKE_FIND_ROOT_PATH
+        PATHS "${Impeller_DIR}" NO_DEFAULT_PATH)
+    message(STATUS "[vulkan/thirdparty] Impeller SDK:    ${Impeller_VERSION} @ "
+                   "${Impeller_ROOT_DIR} (linkage=${Impeller_LINKAGE})")
+endif()
+
+# -----------------------------------------------------------------------------
 # Convenience: shaderc / glslang from SDK (NOT vendored, comes from find_package)
 # -----------------------------------------------------------------------------
 # Parent projects can use:
@@ -834,6 +867,7 @@ message(STATUS "[vulkan/thirdparty] Targets exposed:")
 message(STATUS "  Vulkan        : Vulkan::Vulkan vma volk volk_headers")
 message(STATUS "  Bootstrap     : vk-bootstrap")
 message(STATUS "  Shading       : $<$<BOOL:${VK_TP_BUILD_SLANG}>:slang (runtime compiler, vk_tp_deploy_slang())>")
+message(STATUS "  Rendering     : $<$<BOOL:${VK_TP_ENABLE_IMPELLER}>:Impeller::Impeller (impeller.dll; vk_tp_deploy_runtime())>")
 message(STATUS "  Reflection    : spirv-cross-core/-glsl/-hlsl/-msl/-cpp/-reflect/-util  spirv-reflect")
 message(STATUS "  Textures      : $<$<BOOL:${VK_TP_BUILD_KTX}>:ktx> stb tinyexr")
 message(STATUS "  Window/UI     : glfw glad imgui")

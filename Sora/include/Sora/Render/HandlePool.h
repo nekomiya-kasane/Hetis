@@ -123,7 +123,7 @@ namespace Sora::Render {
             std::atomic<uint64_t> publishedHandle{0};
             std::atomic<uint16_t> generation{1};
             std::atomic<SlotState> state{SlotState::Free};
-            uint32_t nextFree = HandleType::kInvlidIndex;
+            uint32_t nextFree = HandleType::kInvalidIndex;
             alignas(T) std::byte storage[sizeof(T)];
 
             Slot() = default;
@@ -188,7 +188,7 @@ namespace Sora::Render {
             requires std::constructible_from<T, Args...>
         [[nodiscard]] Result<Allocation> Emplace(Backend backend, Args&&... args) {
             std::unique_lock lock{mutex_};
-            if (freeHead_ == HandleType::kInvlidIndex && !GrowUnlocked()) {
+            if (freeHead_ == HandleType::kInvalidIndex && !GrowUnlocked()) {
                 return std::unexpected{ErrorCode::ResourceExhausted};
             }
 
@@ -508,9 +508,9 @@ namespace Sora::Render {
             }
             for (uint32_t index = begin; index < end; ++index) {
                 Slot& slot = SlotAt(index);
-                slot.nextFree = index + 1 < end ? index + 1 : HandleType::kInvlidIndex;
+                slot.nextFree = index + 1 < end ? index + 1 : HandleType::kInvalidIndex;
             }
-            if (freeTail_ == HandleType::kInvlidIndex) {
+            if (freeTail_ == HandleType::kInvalidIndex) {
                 freeHead_ = begin;
             } else {
                 SlotAt(freeTail_).nextFree = begin;
@@ -523,17 +523,17 @@ namespace Sora::Render {
             const uint32_t index = freeHead_;
             Slot& slot = SlotAt(index);
             freeHead_ = slot.nextFree;
-            slot.nextFree = HandleType::kInvlidIndex;
-            if (freeHead_ == HandleType::kInvlidIndex) {
-                freeTail_ = HandleType::kInvlidIndex;
+            slot.nextFree = HandleType::kInvalidIndex;
+            if (freeHead_ == HandleType::kInvalidIndex) {
+                freeTail_ = HandleType::kInvalidIndex;
             }
             freeCount_.fetch_sub(1, std::memory_order_relaxed);
             return index;
         }
 
         void PushFreeUnlocked(uint32_t index) noexcept {
-            SlotAt(index).nextFree = HandleType::kInvlidIndex;
-            if (freeTail_ == HandleType::kInvlidIndex) {
+            SlotAt(index).nextFree = HandleType::kInvalidIndex;
+            if (freeTail_ == HandleType::kInvalidIndex) {
                 freeHead_ = index;
             } else {
                 SlotAt(freeTail_).nextFree = index;
@@ -558,8 +558,8 @@ namespace Sora::Render {
         }
 
         mutable std::mutex mutex_;
-        uint32_t freeHead_ = HandleType::kInvlidIndex;
-        uint32_t freeTail_ = HandleType::kInvlidIndex;
+        uint32_t freeHead_ = HandleType::kInvalidIndex;
+        uint32_t freeTail_ = HandleType::kInvalidIndex;
         std::atomic<uint32_t> capacity_{0};
         std::atomic<uint32_t> freeCount_{0};
         std::atomic<uint32_t> liveCount_{0};
